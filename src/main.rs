@@ -16,10 +16,23 @@ async fn main() -> io::Result<()> {
     let mut virtual_input = false;
     let mut replay = None;
     let mut commands_sandbox = false;
+    let mut tts = None;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--virtual-input" if !virtual_input => virtual_input = true,
             "--commands-sandbox" if !commands_sandbox => commands_sandbox = true,
+            "--tts-virtual" if tts.is_none() => {
+                let python =
+                    PathBuf::from(args.next().ok_or_else(|| io::Error::other("TTS python"))?);
+                let manifest = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| io::Error::other("TTS manifest"))?,
+                );
+                if !python.is_absolute() || !manifest.is_absolute() {
+                    return Err(io::Error::other("absolute TTS paths required"));
+                }
+                tts = Some(gideon_base::tts::Config { python, manifest });
+            }
             "--wake-replay" if replay.is_none() => {
                 let python = PathBuf::from(
                     args.next()
@@ -47,11 +60,15 @@ async fn main() -> io::Result<()> {
             _ => return Err(io::Error::other("unknown or duplicate option")),
         }
     }
+    if tts.is_some() && !commands_sandbox {
+        return Err(io::Error::other("TTS requires command profile"));
+    }
     transport::serve(
         Storage::open(&root)?,
         virtual_input,
         replay,
         commands_sandbox,
+        tts,
     )
     .await
 }

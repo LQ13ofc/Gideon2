@@ -18,6 +18,7 @@ struct Session {
     audio_deadline: Option<Instant>,
     stage: State,
     revision: u32,
+    overall_deadline: Instant,
 }
 
 /// Single owner for sessions, events and authority; no detached action tasks.
@@ -41,6 +42,11 @@ pub struct Core {
     command_job: Option<Job>,
     expected_command: Option<Job>,
     command_outcome: Option<Outcome>,
+    tts_enabled: bool,
+    speech_job: Option<crate::tts::Job>,
+    speech_status: &'static str,
+    speech_summary: Option<crate::tts::Summary>,
+    speech_samples: usize,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -64,6 +70,11 @@ impl Core {
             command_job: None,
             expected_command: None,
             command_outcome: None,
+            tts_enabled: false,
+            speech_job: None,
+            speech_status: "unavailable",
+            speech_summary: None,
+            speech_samples: 0,
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -74,6 +85,11 @@ impl Core {
         self.capture_summary = None;
         self.transcript = None;
         self.command_outcome = None;
+        self.speech_summary = None;
+        self.speech_samples = 0;
+        if self.tts_enabled {
+            self.speech_status = "idle";
+        }
         let id = self.next_session;
         self.next_session += 1;
         self.session = Some(Session {
@@ -84,6 +100,7 @@ impl Core {
             audio_deadline: None,
             stage: State::Capturing,
             revision: 0,
+            overall_deadline: now + self.timeout,
         });
         self.emit(request_id, Some(id), "session_started");
     }
@@ -225,7 +242,7 @@ impl Core {
         if s.id != id
             || self.stt_status != "ready"
             || self.stt_engine.as_ref() != Some(&engine)
-            || s.stage == State::Executing
+            || matches!(s.stage, State::Executing | State::Speaking)
             || revision <= s.revision
             || revision > 256
             || raw.len() > 4096
@@ -282,7 +299,7 @@ impl Core {
                     code: "unsupported",
                     receipt: None,
                 });
-                self.finish("command_rejected");
+                self.command_terminal("command_rejected", now);
                 return;
             }
         };
@@ -292,7 +309,7 @@ impl Core {
                 code,
                 receipt: None,
             });
-            self.finish("command_denied");
+            self.command_terminal("command_denied", now);
             return;
         }
         let s = self.session.as_mut().expect("live final session");
@@ -322,6 +339,74 @@ impl Core {
             code: kind,
             receipt,
         });
+        self.command_terminal(kind, now);
+    }
+    pub fn enable_tts(&mut self) {
+        self.tts_enabled = true;
+        self.speech_status = "idle";
+    }
+    pub fn take_speech_job(&mut self) -> Option<crate::tts::Job> {
+        self.speech_job.take()
+    }
+    pub fn speech_is_active(&self, id: u64) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|s| s.id == id && s.stage == State::Speaking)
+    }
+    fn command_terminal(&mut self, kind: &'static str, now: Instant) {
+        if !self.tts_enabled {
+            self.finish(kind);
+            return;
+        }
+        let outcome = self
+            .command_outcome
+            .as_ref()
+            .expect("determined command result");
+        let text = crate::tts::feedback(outcome);
+        let s = self.session.as_mut().expect("live command session");
+        s.stage = State::Speaking;
+        s.deadline = s.overall_deadline.min(now + Duration::from_secs(20));
+        self.speech_status = "speaking";
+        self.speech_job = Some(crate::tts::Job {
+            session_id: s.id,
+            text,
+        });
+        let (id, request_id) = (s.id, s.request_id.clone());
+        self.emit(request_id.clone(), Some(id), kind);
+        self.emit(request_id, Some(id), "speech_started");
+    }
+    pub fn speech_progress(&mut self, id: u64, samples: usize) {
+        if self.speech_is_active(id) && samples <= 240000 && samples > self.speech_samples {
+            self.speech_samples = samples;
+        }
+    }
+    pub fn speech_reply(&mut self, id: u64, summary: Option<crate::tts::Summary>, now: Instant) {
+        self.expire(now);
+        if !self.speech_is_active(id) {
+            return;
+        }
+        self.speech_summary = summary.filter(|s| {
+            s.session_id == id
+                && s.sink == "virtual"
+                && s.sample_rate == 24000
+                && s.samples > 0
+                && s.samples <= 240000
+                && s.chunks > 0
+                && s.peak.is_finite()
+                && s.peak > 0.
+                && s.peak <= 1.
+                && s.rms.is_finite()
+                && s.rms > 0.
+                && s.pcm_sha256.len() == 64
+                && s.pcm_sha256.bytes().all(|b| b.is_ascii_hexdigit())
+        });
+        let kind = if self.speech_summary.is_some() {
+            self.speech_status = "completed";
+            "speech_completed"
+        } else {
+            self.speech_status = "failed";
+            "tts_failed"
+        };
         self.finish(kind);
     }
     pub fn audio_eof(&mut self) {
@@ -382,6 +467,10 @@ impl Core {
                     self.completed_audio = Some(capture);
                 }
             }
+            self.speech_job = None;
+            if s.stage == State::Speaking && self.speech_status == "speaking" {
+                self.speech_status = kind;
+            }
             self.command_job = None;
             self.expected_command = None;
             if s.stage == State::Executing && self.command_outcome.is_none() {
@@ -391,7 +480,10 @@ impl Core {
                     receipt: None,
                 });
             }
-            if kind != "transcript_final" && !kind.starts_with("command_") {
+            if kind != "transcript_final"
+                && !kind.starts_with("command_")
+                && !matches!(kind, "speech_completed" | "tts_failed")
+            {
                 self.transcript = None;
             }
             if self.stt_engine.is_some() && kind != "transcript_final" {
@@ -416,6 +508,9 @@ impl Core {
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
             command: self.command_outcome.clone(),
+            speech_status: self.speech_status,
+            speech_samples: self.speech_samples,
+            speech: self.speech_summary.clone(),
             version: VERSION,
             stt_status: self.stt_status,
             transcript: self.transcript.clone(),
@@ -895,5 +990,49 @@ mod tests {
         let (mut c, _) = command_session("cancel");
         assert!(c.take_command_job().is_none());
         assert!(c.session.is_none());
+    }
+    #[test]
+    fn speech_preserves_effect_and_fences_cancel_failure_late_and_timeout() {
+        let (mut c, now) = command_session("open brave");
+        c.enable_tts();
+        let job = c.take_command_job().unwrap();
+        let receipt = Receipt {
+            job: job.clone(),
+            verified: true,
+            scope: "sandbox".into(),
+            result: "verified".into(),
+        };
+        c.command_reply(job.clone(), Some(receipt.clone()), now);
+        assert!(c.speech_is_active(1));
+        c.speech_progress(2, 1920);
+        assert_eq!(c.speech_samples, 0);
+        c.speech_progress(1, 1920);
+        c.speech_progress(1, 1);
+        assert_eq!(c.speech_samples, 1920);
+        assert_eq!(
+            c.take_speech_job().unwrap().text,
+            "Sandbox application completed."
+        );
+        c.speech_reply(2, None, now);
+        assert!(c.speech_is_active(1));
+        c.handle(
+            request("speech_cancel", Operation::Cancel { session_id: 1 }),
+            now,
+        );
+        c.speech_reply(1, None, now);
+        assert_eq!(c.speech_status, "cancelled");
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "command_success");
+        let (mut c, now) = command_session("open brave");
+        c.enable_tts();
+        c.command_reply(job.clone(), Some(receipt.clone()), now);
+        c.speech_reply(1, None, now);
+        assert_eq!(c.speech_status, "failed");
+        assert!(c.session.is_none());
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "command_success");
+        let (mut c, now) = command_session("open brave");
+        c.enable_tts();
+        c.command_reply(job, Some(receipt), now);
+        c.speech_reply(1, None, now + Duration::from_secs(21));
+        assert_eq!(c.speech_status, "timed_out");
     }
 }

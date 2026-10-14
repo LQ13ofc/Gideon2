@@ -1,0 +1,65 @@
+{
+  "gate": "A5_BOUNDED_SOAK",
+  "passed": 8,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "two sessions completed through PCM sink",
+    "one effect and speech per session",
+    "source EOF, no failed or timed-out cycle",
+    "session IDs distinct and PCM identity bounded",
+    "post EOF idle CPU below one percent",
+    "loaded STT after speech unload below one GiB",
+    "no runtime speech artifacts",
+    "continuous pipeline shuts down"
+  ],
+  "fixture": {
+    "id": "a5-two-cycles-emma",
+    "path": "/home/lucas/Documentos/Gideon/base/target/a5-assets/soak.wav",
+    "sha256": "b1c6164181a0bacba7dc5c2782b32c966c80dc5f964f42c59a9d0ae7d96586b3",
+    "positive": true,
+    "expected_wake_phrase": "hey_gideon"
+  },
+  "source_fixture_sha256": "28dcdb0c8884cbba2cc30bfd5529ac201791fbfc7e2822391087c6323278fa0a",
+  "transformation": "two authorized PCM clips, 20s inter-cycle and 14s trailing silence; DEV interpolation from pcm_fixture helper",
+  "source_samples": 624000,
+  "cycles": [
+    {
+      "session_id": 3906896376474438923,
+      "sample_rate": 24000,
+      "samples": 51840,
+      "chunks": 27,
+      "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+      "peak": 0.77404326,
+      "rms": 0.08952731957833777,
+      "first_pcm_ms": 8023,
+      "elapsed_ms": 10523,
+      "sink": "virtual"
+    },
+    {
+      "session_id": 3906896376474438924,
+      "sample_rate": 24000,
+      "samples": 51840,
+      "chunks": 27,
+      "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+      "peak": 0.77404326,
+      "rms": 0.08952731957833777,
+      "first_pcm_ms": 8036,
+      "elapsed_ms": 10526,
+      "sink": "virtual"
+    }
+  ],
+  "idle_cpu_percent_one_core": 0.0,
+  "idle_sum_rss_bytes": 434434048,
+  "resource_scope": "recursive owned process RSS sums shared pages, post fixture EOF, STT loaded and TTS workers exited",
+  "binary_sha256": "5f42c0fcc737fbab8169a8fb7a85bcb8ff30936762ad20315c46a0abd1b85528",
+  "physical_validation": "NOT_PERFORMED",
+  "source_sha256": {
+    "src/core.rs": "3c4b24a5d29800913a4604cb4dcbbdd532f7801b66c8c6030c2a78ad03be40ad",
+    "src/tts.rs": "270099c0e1070d7be761344fabc71ecb7988f43efa94cf5a5506f4b3da7102b9",
+    "src/transport.rs": "479eba5c8fdde4e8acbf27687819aed874a8aa0f0d9ee7543c27685d7fa8c2d5",
+    "scripts/tts_worker.py": "9d0e4208a2a89448ace4c4a1e2501dd83eecd37dbc722ed70701c07231b2cc07",
+    "scripts/verify_a5.py": "6d445b3958705c73a6a2b387cc8eebe016fa58c722c64ad7c50dda022efd2c55",
+    "scripts/verify_a5_soak.py": "a658afb690db0b8ff1d6a0d6e22bc03d32dfed3fcc5322fc2009c2489c19851c"
+  }
+}

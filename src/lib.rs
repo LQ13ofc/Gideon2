@@ -6,4 +6,5 @@ pub mod protocol;
 pub mod storage;
 pub mod stt;
 pub mod transport;
+pub mod tts;
 pub mod wake;

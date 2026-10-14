@@ -1,0 +1,28 @@
+{
+  "gate": "A5_INTEGRATION",
+  "passed": 2,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "shutdown during actual PCM",
+    "owned speech descendants stopped"
+  ],
+  "rows": [
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "shutdown",
+      "speech_samples_before_shutdown": 1920,
+      "peak_recursive_owned_rss_bytes": 1512493056
+    }
+  ],
+  "binary_sha256": "5f42c0fcc737fbab8169a8fb7a85bcb8ff30936762ad20315c46a0abd1b85528",
+  "physical_validation": "NOT_PERFORMED",
+  "source_sha256": {
+    "src/core.rs": "3c4b24a5d29800913a4604cb4dcbbdd532f7801b66c8c6030c2a78ad03be40ad",
+    "src/tts.rs": "270099c0e1070d7be761344fabc71ecb7988f43efa94cf5a5506f4b3da7102b9",
+    "src/transport.rs": "479eba5c8fdde4e8acbf27687819aed874a8aa0f0d9ee7543c27685d7fa8c2d5",
+    "scripts/tts_worker.py": "9d0e4208a2a89448ace4c4a1e2501dd83eecd37dbc722ed70701c07231b2cc07",
+    "scripts/verify_a5.py": "6d445b3958705c73a6a2b387cc8eebe016fa58c722c64ad7c50dda022efd2c55",
+    "scripts/verify_a5_soak.py": "a658afb690db0b8ff1d6a0d6e22bc03d32dfed3fcc5322fc2009c2489c19851c"
+  }
+}

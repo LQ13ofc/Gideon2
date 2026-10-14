@@ -1,0 +1,364 @@
+{
+  "gate": "A5_INTEGRATION",
+  "passed": 93,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "Pocket PCM completed",
+    "bounded nonzero virtual PCM with identity",
+    "virtual playback paced",
+    "speech follows verified effect",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "Pocket PCM completed",
+    "bounded nonzero virtual PCM with identity",
+    "virtual playback paced",
+    "speech follows verified effect",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "Pocket PCM completed",
+    "bounded nonzero virtual PCM with identity",
+    "virtual playback paced",
+    "speech follows verified effect",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "Pocket PCM completed",
+    "bounded nonzero virtual PCM with identity",
+    "virtual playback paced",
+    "speech follows verified effect",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "Pocket PCM completed",
+    "bounded nonzero virtual PCM with identity",
+    "virtual playback paced",
+    "Failed feedback without false receipt",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "Pocket PCM completed",
+    "bounded nonzero virtual PCM with identity",
+    "virtual playback paced",
+    "NotUnderstood has no effect",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "cancel active speech",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "live speech interruption exercised",
+    "failed/cancelled speech has no completed output",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "live speech interruption exercised",
+    "failed/cancelled speech has no completed output",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown",
+    "session finished and EOF observable",
+    "entered integrated speech stage",
+    "no detached speech process after endpoint",
+    "failed/cancelled speech has no completed output",
+    "effect result remains truthful if speech fails",
+    "no voice or command artifacts persisted",
+    "Core remains alive after terminal speech",
+    "workers supervised on shutdown"
+  ],
+  "rows": [
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 5737260753368409683,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 5737260753368409683,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 5737260753368409683,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 7992,
+        "elapsed_ms": 10483,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1522274304
+    },
+    {
+      "fixture_id": "wake-hey-brave__bm_george__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 1603866090136546435,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 1603866090136546435,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 1603866090136546435,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 7993,
+        "elapsed_ms": 10518,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1513332736
+    },
+    {
+      "fixture_id": "wake-hey-brave__af_bella__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 923067111078735687,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 923067111078735687,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 923067111078735687,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 8110,
+        "elapsed_ms": 10654,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1520766976
+    },
+    {
+      "fixture_id": "wake-hey-brave__am_michael__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 8305447559917542363,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 8305447559917542363,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 8305447559917542363,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 8249,
+        "elapsed_ms": 10744,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1525506048
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "executor_failure",
+      "command": {
+        "session_id": 1574209144589868050,
+        "code": "command_failed",
+        "receipt": null
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 1574209144589868050,
+        "sample_rate": 24000,
+        "samples": 30720,
+        "chunks": 16,
+        "pcm_sha256": "e53a5a5e973bd1a6a219028804481b1bf4d7614d46e84602f7fe84730c49fc78",
+        "peak": 0.7335931,
+        "rms": 0.0967655010113182,
+        "first_pcm_ms": 8333,
+        "elapsed_ms": 9948,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1523437568
+    },
+    {
+      "fixture_id": "wake-hey-yapyap__bf_emma__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 7820863100013921274,
+        "code": "unsupported",
+        "receipt": null
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 7820863100013921274,
+        "sample_rate": 24000,
+        "samples": 44160,
+        "chunks": 23,
+        "pcm_sha256": "458316d02601595859fa5454b982a8ef1397973f8932557fc25b85bb77982a34",
+        "peak": 0.9582958,
+        "rms": 0.10402539362440637,
+        "first_pcm_ms": 8420,
+        "elapsed_ms": 10599,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1527832576
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "cancel",
+      "command": {
+        "session_id": 8967496878592003853,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 8967496878592003853,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "cancelled",
+      "speech": null,
+      "peak_recursive_owned_rss_bytes": 1522614272
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "kill",
+      "command": {
+        "session_id": 3207892402984005302,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 3207892402984005302,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "failed",
+      "speech": null,
+      "peak_recursive_owned_rss_bytes": 1517936640
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "bad_hash",
+      "command": {
+        "session_id": 5086962396975818779,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 5086962396975818779,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "failed",
+      "speech": null,
+      "peak_recursive_owned_rss_bytes": 778706944
+    }
+  ],
+  "binary_sha256": "5f42c0fcc737fbab8169a8fb7a85bcb8ff30936762ad20315c46a0abd1b85528",
+  "physical_validation": "NOT_PERFORMED",
+  "source_sha256": {
+    "src/core.rs": "3c4b24a5d29800913a4604cb4dcbbdd532f7801b66c8c6030c2a78ad03be40ad",
+    "src/tts.rs": "270099c0e1070d7be761344fabc71ecb7988f43efa94cf5a5506f4b3da7102b9",
+    "src/transport.rs": "479eba5c8fdde4e8acbf27687819aed874a8aa0f0d9ee7543c27685d7fa8c2d5",
+    "scripts/tts_worker.py": "9d0e4208a2a89448ace4c4a1e2501dd83eecd37dbc722ed70701c07231b2cc07",
+    "scripts/verify_a5.py": "6d445b3958705c73a6a2b387cc8eebe016fa58c722c64ad7c50dda022efd2c55",
+    "scripts/verify_a5_soak.py": "a658afb690db0b8ff1d6a0d6e22bc03d32dfed3fcc5322fc2009c2489c19851c"
+  }
+}

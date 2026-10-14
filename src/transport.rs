@@ -231,6 +231,7 @@ pub async fn serve(
     virtual_input: bool,
     mut replay: Option<WakeReplay>,
     commands_sandbox: bool,
+    tts: Option<crate::tts::Config>,
 ) -> io::Result<()> {
     storage.clear_stale_socket()?;
     let path = storage.socket_path();
@@ -298,6 +299,14 @@ pub async fn serve(
         crate::commands::Job,
         tokio::task::JoinHandle<io::Result<crate::commands::Receipt>>,
     )> = None;
+    if tts.is_some() {
+        core.enable_tts();
+    }
+    let mut speech_task: Option<(
+        u64,
+        tokio::task::JoinHandle<io::Result<crate::tts::Summary>>,
+    )> = None;
+    let (speech_progress, mut speech_progress_rx) = mpsc::channel(2);
     let mut pending_replay = if stt_task.is_some() {
         replay.take()
     } else {
@@ -331,6 +340,12 @@ pub async fn serve(
                 core.command_reply(job,result.ok().and_then(Result::ok),std::time::Instant::now());
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
+            result = async { (&mut speech_task.as_mut().expect("active speech task").1).await }, if speech_task.is_some() => {
+                let (id,_) = speech_task.take().expect("active speech task");
+                core.speech_reply(id,result.ok().and_then(Result::ok),std::time::Instant::now());
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
+            Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
             Some(call) = rx.recv() => {
                 let response = core.handle(call.request, std::time::Instant::now()); storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
@@ -401,6 +416,22 @@ pub async fn serve(
             let pending = job.clone();
             command_task = Some((job, tokio::spawn(crate::commands::execute(pending))));
         }
+        if speech_task
+            .as_ref()
+            .is_some_and(|(id, _)| !core.speech_is_active(*id))
+        {
+            if let Some((_, task)) = speech_task.take() {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        if let Some(job) = core.take_speech_job() {
+            let config = tts.as_ref().expect("configured TTS").clone();
+            speech_task = Some((
+                job.session_id,
+                tokio::spawn(crate::tts::speak(config, job, speech_progress.clone())),
+            ));
+        }
         for request in core.take_stt_requests() {
             if stt_tx.try_send(request).is_err() {
                 core.stt_failed();
@@ -411,6 +442,10 @@ pub async fn serve(
                 break;
             }
         }
+    }
+    if let Some((_, task)) = speech_task.take() {
+        task.abort();
+        let _ = task.await;
     }
     if let Some((_, task)) = command_task.take() {
         task.abort();
