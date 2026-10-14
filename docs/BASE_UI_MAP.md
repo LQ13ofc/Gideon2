@@ -1,7 +1,7 @@
 # Mapa da Base para S2
 
-Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a e pack interno B2.2b.
-Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-preferences.json.
+Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b e feedback/ganho B2.3.
+Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
 
@@ -19,7 +19,7 @@ flowchart LR
   EX --> R[Receipt / verificação de efeito]
   R --> C
   C --> T[Pocket worker / template curto]
-  T --> V[PCM validado / VirtualSpeaker]
+  T --> V[PCM validado / ganho digital / VirtualSpeaker]
   V --> C
   UI[Qt QML / Bridge] <-->|IPC v1 privado| C
   UI -->|Cancel / preferências / Text de teste| C
@@ -31,7 +31,7 @@ flowchart LR
 | Arquivo | Responsabilidade | Limite relevante para a UI |
 |---|---|---|
 | src/main.rs | Flags/perfil e entrada do daemon | App não inicia/desliga Core por fechar janela |
-| src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1: feedback/prazo em idle, CAS/rollback; conteúdo inválido→safe mode; recuperação→restart |
+| src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1: feedback/visual/ganho/prazo em idle, CAS/rollback; conteúdo inválido→safe mode; recuperação→restart |
 | src/pack.rs | Pack v1, hashes/proveniência/modelos e catálogo | DEV qualificado não é freeze/certificação física; sem Model Manager |
 | src/protocol.rs | Request/Response/Event e esquema estrito | v1, IDs e erros são contratos; não enviar grants |
 | src/transport.rs | SO_PEERCRED, peers, filas, tarefas, namespace, sinais | Processos internos supervisionados; sem dispositivo pessoal |
@@ -41,7 +41,7 @@ flowchart LR
 | src/capture.rs | PCM efêmero, endpoint/silêncio/duração | Máx 30s incluindo pre-roll; sem WAV de voz persistido |
 | src/stt.rs + scripts/stt_worker.py | Streaming e lifecycle do SDK | Partial jamais autoriza; raw/normalized distintos |
 | src/commands.rs + scripts/command_worker.py | Gramática/policy/grant/executor/receipt | App fixture realmente executa; navegador pessoal não |
-| src/tts.rs + scripts/tts_worker.py | Template/engine CPU/PCM e sink virtual | Verificado em bytes; sem playback físico comprovado |
+| src/tts.rs + scripts/tts_worker.py | Template/engine CPU/PCM e sink virtual | Ganho/hash/pico/RMS verificados nos bytes consumidos; sem playback físico comprovado |
 | app/bridge.py | Transporte Qt, validação, delta/reconnect e projeção | Session u64 é string em QML; estado velho é apagado |
 | app/main.py / Main.qml | Janela/HUD, legenda, resultado e Cancel | Qt thin; leitura mínima e acessibilidade offscreen testadas |
 | scripts/provision_tts.py | Provisionamento de assets por revisões fixas | Ferramenta de engenharia, não Model Manager de produto |
@@ -107,6 +107,8 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
 | STT | Moonshine Small EN streaming | Não oferecer idioma pt-BR como comprovado |
 | TTS/voz | Pocket EN 2026-09 + Alba, primeiro candidato | Uma voz local pinada; comparações Piper/Kokoro pendentes |
 | Dispositivos | Fixture/virtual source/sink | CPAL/PipeWire/hotplug/AEC/barge-in precisam implementação/validação |
+| Ganho da resposta TTS | 0–100% no sink virtual; 0 não cria job TTS | Não altera mixer nem volume do dispositivo do host |
+| Indicador visual | Config bool, oculta só o círculo decorativo | Estado textual/Cancel/erros/resultados continuam visíveis |
 | Volume/mute command | Estado simulado por invocação em tmpfs | Não usar receipt como volume atual do host |
 | Open app | Desktop ID allowlist → app fixture | Não afirmar que Brave real ou janela Wayland abriu |
 | Hora/data | UTC no executor sandbox | Não prometer timezone configurável antes de suporte |
@@ -123,9 +125,11 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
    ou comandos; recuperação privada só ativa recursos depois do reinício real.
    Arquivos inseguros ainda recusam boot. B2.2b salva wake qualificado e rollback
    no mesmo JSON; seleção/troca exige reinício. Incompatível com pack→safe mode.
-3. B2.1: feedback audível altera o fluxo real e prazo se aplica à próxima sessão.
-   Preferências adicionais de visual/voz continuam dependentes de suporte;
-   separar língua da UI (PT) da língua do ASR/TTS (EN no pack testado).
+3. B2.3: feedback audível/visual, ganho e prazo alteram o fluxo real. Ganho é
+   aplicado no PCM validado antes de hash/pico/RMS; mute evita worker. Revision,
+   idle-only e rollback/restart compartilhados; visual não oculta estado/Cancel.
+   Voz/idioma/sensibilidade/performance são fixos no perfil suportado e rotulados,
+   sem controles falsos; língua da UI (PT) distinta de ASR/TTS (EN).
 4. B2: recuperação de conexão já existe; recuperação de worker exige restart do
    Core atualmente. Não anunciar auto-recovery de engine nem deixar UI ser daemon.
 5. B3: catálogo/install/permission approval simulado em namespace com hashes,
@@ -142,6 +146,7 @@ apenas um teste humano pendente. Frase alternativa, WER amplo/holdout e pt-BR ta
 não estão fechados. Primeiro PCM frio do Pocket ~8s e pico de RSS ~1.5GB continuam
 questões de desempenho. Modelo vencedor não foi congelado.
 
-Pode-se prosseguir com B2 no escopo virtual/certificado DEV, após esta auditoria
-PASS, mantendo esses limites explícitos. Produto para uso real não está declarado
+O fechamento B2 considera somente as preferências disponíveis no perfil
+virtual/qualificado DEV; devices/performance/freeze físicos continuam pendentes.
+B3 deverá conservar esse mesmo fluxo e testar somente extensões benignas isoladas. Produto para uso real não está declarado
 pronto. Validação humana consolidada somente após S5; nenhum teste pessoal solicitado.
