@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """This test executes only inside a private offscreen bwrap namespace."""
-import argparse,json,sys,time
+import argparse,json,os,sys,time
 from pathlib import Path
 BASE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(BASE/'app'))
 from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine'],required=True);args=parser.parse_args()
-app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[]
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design'],required=True);args=parser.parse_args()
+app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
     if not value:raise AssertionError(name)
@@ -25,7 +25,66 @@ button=window.findChild(QObject,'cancelButton');subtitle=window.findChild(QObjec
 check('accessible cancel name',QAccessible.queryAccessibleInterface(button).text(QAccessible.Text.Name)=='Cancelar sessão')
 window.setProperty('width',640);window.setProperty('height',520);QTest.qWait(100)
 check('minimum layout size respected',window.property('width')>=480 and window.property('height')>=420)
-if args.phase in ('hub','hub_quarantine'):
+def visual_item(name):
+    stack=[window.contentItem()]
+    while stack:
+        current=stack.pop()
+        if current.objectName()==name:return current
+        stack.extend(current.childItems())
+    raise AssertionError('missing visual item '+name)
+if args.phase=='design':
+    window.setProperty('width',1380);window.setProperty('height',904)
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('new dashboard preserves native voice command and PCM',bridge.resultVerified and bridge.snapshot['transcript']['source']=='voice' and bridge.snapshot['speech']['samples']>0)
+    def capture(name):
+        QTest.qWait(120);image=window.grabWindow();check(name+' renders at HiDPI',not image.isNull() and image.width()==window.width()*2)
+        image.save(str(Path(args.artifacts)/(name+'.png')))
+    def navigate(index):
+        nav=visual_item('nav'+str(index));nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        wait(lambda:window.property('page')==index,3);check('keyboard navigation '+str(index),True)
+    capture('home')
+    navigate(1);capture('voice')
+    poc=visual_item('wakeCard_okay_gideon');check('unqualified wake stays blocked in redesigned page',poc is not None and not poc.property('enabled'))
+    navigate(2);capture('audio')
+    slider=visual_item('gainSlider');slider.forceActiveFocus()
+    for _ in range(10):QTest.keyClick(window,Qt.Key.Key_Left)
+    check('audio gain slider responds to keyboard',round(slider.property('value'))==50)
+    apply=visual_item('applyGainButton');apply.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.outputVolume==50,5);check('new audio page saves through real Core',True)
+    bridge.submitText('open brave');wait(lambda:bridge.state=='speaking' and bridge.snapshot['speech_samples']>0,25)
+    navigate(3)
+    check('live speech keeps cancel on settings page',button.property('enabled'))
+    check('live subtitle stays available on settings page',window.findChild(QObject,'transcriptViewport').property('visible') and bool(bridge.subtitle))
+    navigate(2)
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed' and bridge.snapshot['speech']['output_volume_percent']==50,35)
+    check('new audio gain applies to native Pocket PCM',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
+    settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'preferencesDialog');wait(lambda:dialog.property('visible'),3)
+    rollback=window.findChild(QObject,'rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.outputVolume==100,5);check('existing rollback restores new audio page change',True);dialog.close()
+    navigate(3);capture('appearance')
+    theme=visual_item('theme2');theme.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    check('theme selection changes actual window',window.property('themeIndex')==2)
+    accent=visual_item('accentVioleta');accent.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    check('accent selection changes actual window',window.property('accentColor').name()=='#b386ff')
+    window.setProperty('themeIndex',0);window.setProperty('accentColor','#7693ff')
+    for index,name in ((4,'permissions'),(5,'diagnostics'),(6,'hub_page')):navigate(index);capture(name)
+    for index in (0,1,3,6):
+        navigate(index);window.setProperty('width',480);window.setProperty('height',520);QTest.qWait(120)
+        check('persistent cancel fits small window '+str(index),button.isVisible() and button.mapToItem(window.contentItem(),QPointF(0,0)).y()+button.height()<=window.height()+.5)
+        capture('small_'+str(index))
+        window.setProperty('width',1380);window.setProperty('height',904)
+    navigate(0)
+    changes=len(deltas)
+    def ticks():
+        row=Path('/proc/self/stat').read_text().split();return int(row[13])+int(row[14])
+    before=ticks();started=time.monotonic();QTest.qWait(3000)
+    cpu=(ticks()-before)/os.sysconf('SC_CLK_TCK')/(time.monotonic()-started)*100
+    metrics['idle_ui_cpu_percent']=cpu;metrics['idle_ui_rss_bytes']=int(Path('/proc/self/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
+    check('new static dashboard emits no idle UI deltas',len(deltas)==changes)
+    check('software UI idle CPU bounded',cpu<=4.0)
+    capture('home_final')
+elif args.phase in ('hub','hub_quarantine'):
     hubButton=window.findChild(QObject,'hubButton');hubButton.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     dialog=window.findChild(QObject,'hubDialog');wait(lambda:dialog.property('visible'),3)
     label=window.findChild(QObject,'hubDescription')
@@ -162,7 +221,7 @@ else:
     wait(lambda:bool(bridge.result),5)
     check('text uses actual shared sandbox executor',bridge.snapshot['transcript']['source']=='user_text' and 'process verified' in bridge.result)
     check('new server sequence resets safely',bridge.snapshot['sequence']>0)
-print(json.dumps({'phase':args.phase,'passed':len(checks),'failed':0,'ignored':0,'checks':checks,'state_trace':trace}),flush=True)
+print(json.dumps({'phase':args.phase,'passed':len(checks),'failed':0,'ignored':0,'checks':checks,'state_trace':trace,'metrics':metrics}),flush=True)
 bridge.poll.stop();bridge.retry.stop();bridge.timeout.stop();bridge.socket.close()
 
 window.close();window.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)

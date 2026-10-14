@@ -232,6 +232,14 @@ class Bridge(QObject):
     def preferencesResult(self):return self.preferences_result
     @Property(bool,notify=changed)
     def textAvailable(self):return self.online and bool(self.snapshot.get('text_input_available')) and not self.sessionId and self.text_request is None
+    @Property('QVariantMap',notify=changed)
+    def snapshotPack(self):return self.snapshot.get('base_pack') or {}
+    @Property(str,notify=changed)
+    def wakeStatus(self):return self.snapshot.get('wake_status','unavailable')
+    @Property(str,notify=changed)
+    def sttStatus(self):return self.snapshot.get('stt_status','unavailable')
+    @Property(str,notify=changed)
+    def speechStatus(self):return self.snapshot.get('speech_status','unavailable')
     @Property('QVariantList',notify=changed)
     def hubEntries(self):return (self.snapshot.get('hub') or {}).get('entries',[])
     @Property(str,notify=changed)

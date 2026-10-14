@@ -5,9 +5,11 @@ from pathlib import Path
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtCore import QCoreApplication,QEvent
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine,qmlRegisterType
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from bridge import Bridge
+from visual import RoundedImage
+qmlRegisterType(RoundedImage,"Gideon.Visual",1,0,"RoundedImage")
 
 def create(app,root):
     bridge=Bridge(root);engine=QQmlApplicationEngine();engine.rootContext().setContextProperty('core',bridge);engine.load(str(Path(__file__).with_name('Main.qml')))
