@@ -51,7 +51,7 @@ foram corrigidos e os testes finais passaram; os limites abaixo continuam aberto
 
 [Mapa da Base para S2](BASE_UI_MAP.md) contém fluxo Mermaid, ownership por arquivo,
 FSM/erros ortogonais, dicionário de IPC, perfis/capabilities reais, privacidade,
-catálogo/wake e dependências B2/B3/B4. Graphify AST atualizado: 545 nós/1104 arestas.
+catálogo/wake e dependências B2/B3/B4. Graphify AST atualizado: 551 nós/1110 arestas.
 QML não é indexado por Graphify: foi revisado por fonte e runtime offscreen.
 A UI não deve criar autoridade, inventar features nem confundir efeito concluído
 com TTS concluído. Não há Model Manager geral ou página LLM na Base.

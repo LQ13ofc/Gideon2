@@ -139,8 +139,8 @@
   },
   "graphify": {
     "version": "0.9.90",
-    "nodes": 545,
-    "edges": 1104,
+    "nodes": 551,
+    "edges": 1110,
     "qml_indexed": false
   },
   "legacy_readonly": {
