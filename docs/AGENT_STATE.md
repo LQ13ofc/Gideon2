@@ -1,11 +1,10 @@
 # Agent state — 2026-10-14
 
-- Gate atual A1 INTEGRATED / FAILED (qualidade do candidato); A0 AUTO_VERIFIED confirmado por regressão. A2 NÃO INICIADO.
-- Branch main; HEAD de código 2ae148ce81a19598051395a2ed3774991d210f5c; A0 f737824; checkpoint de evidência é commit posterior, identificar por `git log -1`. Sem remoto/push/deploy.
-- PASS: fmt/check/clippy/release/diff-check; 11 testes Rust, 3 nativos, 32 checks de processo A0 e 25 A1. Zero testes ignorados. A1 candidato FAILED: 73/76 positivos e 29/320 negativos ativados. DEV threshold 0.5: 35/76 positivos, 16 falsos wakes; rejeitado.
-- Build release SHA-256 198f17a7613c65a04dc3334967f9f11bb9838071bfb32983068b8f7fc3d8151d; worker SHA-256 139b0644ecd4e6865c4041bf2a203300d96eb9a29bfb456207fa752460e56990; fontes/modelos/corpus e resultados em docs/evidence/a1-*.json. PCM privado fora do Git.
-- Recursos: Core sem engine idle 0.0%, RSS 3207168 bytes; avaliador KWS VmHWM 92393472 bytes, RTF 0.0250; replay 3600s de silêncio sem wake. Não prova FAR ambiental, qualidade física ou listener de produção. ru_maxrss discrepante excluído da medição.
-- Correções: timestamp native após reset, validação de hashes/frase/PCM, falha fechada/cleanup de worker, namespaces privados e stream em janelas com sobreposição. Teste real na fronteira de 10s PASS. Nenhum microfone/speaker/bus pessoal usado.
-- Legado só leitura, 12 worktrees/alterações preservados; nenhuma importação de código. Modelos/datasets antigos não certificados nem redistribuídos.
-- Bloqueio técnico A1: discriminar Hey/Okay/Hi Gideon; fonte DEV sintética insuficiente para certificação; direitos dos pesos ainda não fechados. Não mascarar falha técnica como pendência física.
-- Próximo slice: permanecer A1, desenvolver/avaliar KWS específico com proveniência e corpus independente autorizado; repetir gates atuais antes de A2. AWAITING_HUMAN_VALIDATION apenas para física, rodada consolidada após S5; nenhuma participação humana solicitada agora.
+- Gate A1 AUTO_VERIFIED/PHYSICAL_PENDING para Hey; A0 regressão PASS; próximo A2 PLANNED. Okay POC_REQUIRED, não certificado (38/52).
+- Branch main; source HEAD 545c75181b868853fbae2693e44ebea0276c841a; commits novos 8db34cf (Graphify), 545c751 (catálogo/competição). Checkpoint de evidência posterior identificável no Git.
+- PASS: fmt/check/test/clippy/release/diff-check; 12 Rust, 5 nativos, 32 checks A0 + 44 A1, zero ignored. Hey 73/76, 0/320 falsos wakes, 3600s silêncio zero wake. Evidências docs/evidence/a1-selectable-*.json.
+- Core release SHA-256 7962ce036363076282790ea87f822a1f0603d2e08796014dc77a4e7dd9944313; worker f484d916f798d6563152c0ac08699ae551a66df5e332028ae489aebeda32c34e. Pico KWS 92532736 bytes, RTF ~0.025; Core sem engine idle 0%, ~3MiB.
+- Frase não fixa no Core: catálogo backend + config wake_phrase, seleção validada. Hey padrão; Okay funcional experimental; frases arbitrárias requerem backend/validação. Modelos finais não congelados.
+- Graphify 0.9.90 instalado target/graphify-venv, índice local AST; scripts/graph.py; pins scripts/requirements-graphify.txt. Sem LLM, hook, remoto ou alteração de configurações pessoais.
+- Autor confirmou Apache-2.0 dos pesos; fonte/hash model card registrados. Distribuição/atribuições pendentes; PCM/corpus sintético DEV fora do Git, sem holdout independente e sem validação física.
+- Legado, dispositivos e sessão pessoais preservados; somente commits locais. Próximo slice A2: pre-roll/captura limitada, Silero VAD, endpoint/cancel/EOF/falhas; integrar ao mesmo processo e repetir A0/A1.
