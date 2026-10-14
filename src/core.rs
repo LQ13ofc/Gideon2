@@ -2,6 +2,7 @@ use crate::{
     audio::AudioFrame,
     capture::{Capture, CaptureSummary},
     protocol::*,
+    stt::{SttReply, SttRequest, Transcript},
 };
 use std::{
     collections::VecDeque,
@@ -14,6 +15,8 @@ struct Session {
     deadline: Instant,
     capture: Option<Capture>,
     audio_deadline: Option<Instant>,
+    stage: State,
+    revision: u32,
 }
 
 /// Single owner for sessions, events and authority; no detached action tasks.
@@ -29,6 +32,10 @@ pub struct Core {
     capture_enabled: bool,
     completed_audio: Option<Capture>,
     capture_summary: Option<CaptureSummary>,
+    stt_engine: Option<String>,
+    stt_status: &'static str,
+    stt_requests: VecDeque<SttRequest>,
+    transcript: Option<Transcript>,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -44,6 +51,10 @@ impl Core {
             capture_enabled: false,
             completed_audio: None,
             capture_summary: None,
+            stt_engine: None,
+            stt_status: "unavailable",
+            stt_requests: VecDeque::new(),
+            transcript: None,
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -52,6 +63,7 @@ impl Core {
     fn start_session(&mut self, request_id: String, now: Instant) {
         self.completed_audio = None;
         self.capture_summary = None;
+        self.transcript = None;
         let id = self.next_session;
         self.next_session += 1;
         self.session = Some(Session {
@@ -60,6 +72,8 @@ impl Core {
             deadline: now + self.timeout,
             capture: None,
             audio_deadline: None,
+            stage: State::Capturing,
+            revision: 0,
         });
         self.emit(request_id, Some(id), "session_started");
     }
@@ -91,6 +105,18 @@ impl Core {
             return;
         }
         self.expire(now);
+        if self.stt_requests.len() >= 32 {
+            self.stt_requests.clear();
+            self.stt_failed();
+            return;
+        }
+        if self.stt_engine.is_some() && self.stt_status != "ready" {
+            if detected {
+                self.audio_wake(now);
+                self.finish("stt_unavailable");
+            }
+            return;
+        }
         let Some(speech) = speech else {
             self.wake_health("failed");
             return;
@@ -100,6 +126,20 @@ impl Core {
                 self.audio_wake(now);
                 match Capture::new(pre_roll, frame.end_us()) {
                     Ok(c) => {
+                        if self.stt_status == "ready" {
+                            let sid = self.session.as_ref().unwrap().id;
+                            self.stt_requests
+                                .push_back(SttRequest::Start { session_id: sid });
+                            let begin = frame.end_us() - c.samples.len() as u64 * 1_000_000 / 16000;
+                            for (i, chunk) in c.samples.chunks(1280).enumerate() {
+                                self.stt_requests.push_back(SttRequest::Frame {
+                                    session_id: sid,
+                                    end_us: begin
+                                        + (i * 1280 + chunk.len()) as u64 * 1_000_000 / 16000,
+                                    samples: chunk.to_vec(),
+                                });
+                            }
+                        }
                         if let Some(s) = self.session.as_mut() {
                             s.capture = Some(c);
                             s.audio_deadline = Some(now + Duration::from_secs(1));
@@ -113,12 +153,90 @@ impl Core {
         if let Some(s) = self.session.as_mut() {
             if let Some(c) = s.capture.as_mut() {
                 s.audio_deadline = Some(now + Duration::from_secs(1));
+                if self.stt_status == "ready" {
+                    self.stt_requests.push_back(SttRequest::Frame {
+                        session_id: s.id,
+                        end_us: frame.end_us(),
+                        samples: frame.samples.clone(),
+                    });
+                }
                 match c.push(frame, speech) {
                     Ok(Some(reason)) => self.finish(reason),
                     Err(_) => self.finish("audio_error"),
                     Ok(None) => {}
                 }
             }
+        }
+    }
+    pub fn configure_stt(&mut self, engine: String) {
+        self.stt_engine = Some(engine);
+        self.stt_status = "starting";
+    }
+    pub fn take_stt_requests(&mut self) -> VecDeque<SttRequest> {
+        std::mem::take(&mut self.stt_requests)
+    }
+    pub fn stt_failed(&mut self) {
+        self.stt_status = "failed";
+        self.transcript = None;
+        self.finish("stt_failed");
+    }
+    pub fn stt_reply(&mut self, reply: SttReply, now: Instant) {
+        self.expire(now);
+        let (engine, id, revision, end, raw, final_result) = match reply {
+            SttReply::Ready { engine } => {
+                if self.stt_status != "starting" {
+                    return;
+                }
+                if self.stt_engine.as_ref() == Some(&engine) {
+                    self.stt_status = "ready";
+                } else {
+                    self.stt_failed();
+                }
+                return;
+            }
+            SttReply::Partial {
+                engine,
+                session_id,
+                revision,
+                audio_end_us,
+                raw,
+            } => (engine, session_id, revision, audio_end_us, raw, false),
+            SttReply::Final {
+                engine,
+                session_id,
+                revision,
+                audio_end_us,
+                raw,
+            } => (engine, session_id, revision, audio_end_us, raw, true),
+        };
+        let Some(s) = self.session.as_mut() else {
+            return;
+        };
+        if s.id != id
+            || self.stt_status != "ready"
+            || self.stt_engine.as_ref() != Some(&engine)
+            || revision <= s.revision
+            || revision > 256
+            || raw.len() > 4096
+            || (final_result && s.stage != State::Transcribing)
+        {
+            return;
+        }
+        s.revision = revision;
+        self.transcript = Some(Transcript {
+            session_id: id,
+            revision,
+            audio_end_us: end,
+            normalized: raw.split_whitespace().collect::<Vec<_>>().join(" "),
+            raw,
+            is_final: final_result,
+            confidence: None,
+        });
+        let request_id = s.request_id.clone();
+        if final_result {
+            self.finish("transcript_final");
+        } else {
+            self.emit(request_id, Some(id), "transcript_partial");
         }
     }
     pub fn audio_eof(&mut self) {
@@ -163,9 +281,28 @@ impl Core {
         if let Some(mut s) = self.session.take() {
             if let Some(capture) = s.capture.take() {
                 self.capture_summary = Some(capture.summary(s.id, kind));
+                if kind == "capture_completed" && self.stt_status == "ready" {
+                    self.stt_requests
+                        .push_back(SttRequest::Finish { session_id: s.id });
+                    s.stage = State::Transcribing;
+                    s.deadline = s.deadline.min(
+                        s.audio_deadline.unwrap_or_else(Instant::now) + Duration::from_secs(4),
+                    );
+                    s.audio_deadline = None;
+                    self.emit(s.request_id.clone(), Some(s.id), kind);
+                    self.session = Some(s);
+                    return;
+                }
                 if kind == "capture_completed" {
                     self.completed_audio = Some(capture);
                 }
+            }
+            if kind != "transcript_final" {
+                self.transcript = None;
+            }
+            if self.stt_engine.is_some() && kind != "transcript_final" {
+                self.stt_requests
+                    .push_back(SttRequest::Cancel { session_id: s.id });
             }
             self.emit(s.request_id, Some(s.id), kind);
         }
@@ -185,15 +322,17 @@ impl Core {
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
             version: VERSION,
+            stt_status: self.stt_status,
+            transcript: self.transcript.clone(),
             capture: self.capture_summary.clone(),
             wake_status: self.wake_status,
             request_id,
             code,
-            state: if self.session.is_some() {
-                State::Capturing
-            } else {
-                State::Idle
-            },
+            state: self
+                .session
+                .as_ref()
+                .map(|s| s.stage.clone())
+                .unwrap_or(State::Idle),
             session_id: self.session.as_ref().map(|s| s.id),
             sequence: self.sequence,
             events: self.events.iter().cloned().collect(),
@@ -319,6 +458,105 @@ mod tests {
         assert_eq!(c.session.as_ref().unwrap().id, 2);
         c.shutdown();
         assert!(c.session.is_none());
+    }
+    #[test]
+    fn streaming_fences_revision_identity_and_premature_final() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.enable_capture();
+        c.configure_stt("test".into());
+        c.stt_reply(
+            SttReply::Ready {
+                engine: "test".into(),
+            },
+            now,
+        );
+        c.capture_packet(
+            AudioFrame {
+                timestamp_us: 0,
+                sample_rate: 16000,
+                channels: 1,
+                samples: vec![0.; 1600],
+            },
+            Some(true),
+            vec![0.; 1600],
+            true,
+            now,
+        );
+        let partial = |id, revision| SttReply::Partial {
+            engine: "test".into(),
+            session_id: id,
+            revision,
+            audio_end_us: 100000,
+            raw: " open   Brave ".into(),
+        };
+        c.stt_reply(partial(2, 1), now);
+        assert!(c.transcript.is_none());
+        c.stt_reply(partial(1, 1), now);
+        assert_eq!(c.transcript.as_ref().unwrap().normalized, "open Brave");
+        let sequence = c.sequence;
+        c.stt_reply(partial(1, 1), now);
+        assert_eq!(c.sequence, sequence);
+        let final_reply = || SttReply::Final {
+            engine: "test".into(),
+            session_id: 1,
+            revision: 2,
+            audio_end_us: 100000,
+            raw: "open Brave".into(),
+        };
+        c.stt_reply(final_reply(), now);
+        assert!(!c.transcript.as_ref().unwrap().is_final);
+        assert_eq!(
+            c.handle(
+                request(
+                    "partial_action",
+                    Operation::Action {
+                        session_id: 1,
+                        capability: Capability::OpenApp
+                    }
+                ),
+                now
+            )
+            .code,
+            "denied"
+        );
+        c.audio_eof();
+        assert_eq!(c.session.as_ref().unwrap().stage, State::Transcribing);
+        c.stt_reply(final_reply(), now);
+        assert!(c.transcript.as_ref().unwrap().is_final && c.session.is_none());
+        let sequence = c.sequence;
+        c.stt_reply(final_reply(), now);
+        assert_eq!(c.sequence, sequence);
+    }
+    #[test]
+    fn streaming_backpressure_is_terminal_and_drops_pending_audio() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.enable_capture();
+        c.configure_stt("test".into());
+        c.stt_reply(
+            SttReply::Ready {
+                engine: "test".into(),
+            },
+            now,
+        );
+        for i in 0..50 {
+            c.capture_packet(
+                AudioFrame {
+                    timestamp_us: i * 100000,
+                    sample_rate: 16000,
+                    channels: 1,
+                    samples: vec![0.1; 1600],
+                },
+                Some(true),
+                if i == 0 { vec![0.1; 1600] } else { vec![] },
+                i == 0,
+                now + Duration::from_millis(i * 100),
+            );
+        }
+        assert_eq!(c.stt_status, "failed");
+        assert!(c.session.is_none() && c.completed_audio.is_none());
+        assert!(c.stt_requests.len() <= 1);
     }
     #[test]
     fn capture_no_speech_cancel_and_stalled_producer_release_pcm() {

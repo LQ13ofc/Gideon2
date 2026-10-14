@@ -1,0 +1,21 @@
+{
+  "engine": "moonshine-voice-0.1.5/small-streaming-en-quantized-26_08_21",
+  "hashes": {
+    "adapter.ort": "c665f742364febad597cc9ac1e0b341ffbee0e24a1466e2f3bde95e6e4771762",
+    "cross_kv.ort": "e2d3417144e9514055ebfefe8dcc4c0a55a55adcb8530435844c75c53e352bf6",
+    "decoder_kv.ort": "1a05465b1dd955858dfcbee039c0020fb5dd982b0f5094c34e61735d518d771b",
+    "encoder.ort": "2d4d973e91e8aca08c51e7e7efa28a46ab265b63d809d5294d18b86bcd85b993",
+    "frontend.model.ort": "09b1210ae30dc5f0f3e45f0ebab914c254741323114f53fbbe5ae62cca35058f",
+    "frontend.weights.ort": "7ef97521bd4bad3928f5bb6808586f4fcc6e92bd5990394112eed7d4052ec338",
+    "streaming_config.json": "26f02b6afb22d60871a5efd85c3d38e569cc0ddb6c5eb6e93d3260152ae8a47a",
+    "tokenizer.bin": "6884b35fd6377d4c4d32336a0bc152f36b64d1e45b6503683cdc238250a8472d"
+  },
+  "model_arch": 4,
+  "provider": "CPU",
+  "update_interval": 0.25,
+  "language": "en",
+  "reuse_justification": "Copied only model assets; each required file matched size and CRC32C of official SDK 0.1.5 native dependency manifest. Local SHA-256 pins recorded; no legacy code or manager imported.",
+  "license_source": "https://github.com/moonshine-ai/moonshine/blob/main/LICENSE",
+  "license": "MIT for streaming models",
+  "scope": "English synthetic DEV, no final model freeze or physical qualification"
+}

@@ -7,14 +7,12 @@ import sys
 import time
 import numpy as np
 import sherpa_onnx
-import soundfile as sf
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pcm_fixture import check_hash, read_fixture
 
 ENGINE = 'sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8/competitive-v2'
 
 
-def check_hash(path, expected):
-    if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
-        raise ValueError('artifact hash mismatch')
 
 
 class WakeEngine:
@@ -97,15 +95,6 @@ class WakeEngine:
 
 
 
-def read_fixture(row):
-    path = Path(row['path']); check_hash(path, row['sha256'])
-    info = sf.info(path)
-    if info.channels!=1 or info.frames>16000*60 or info.samplerate not in (16000,24000): raise ValueError('unsupported fixture')
-    samples, sr = sf.read(path, dtype='float32')
-    if sr==24000:
-        # Explicit DEV-only interpolation; retain source WAV identity and transformation.
-        samples = np.interp(np.arange(0,len(samples),sr/16000), np.arange(len(samples)), samples).astype(np.float32)
-    return samples
 
 
 def replay(manifest, row, emit=None):

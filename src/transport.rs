@@ -3,6 +3,7 @@ use crate::{
     core::Core,
     protocol::{Request, MAX_MESSAGE},
     storage::Storage,
+    stt::{SttConfig, SttReply, SttRequest},
     wake::{Packet, WakeDescriptor, WakeInput},
 };
 use std::{
@@ -48,7 +49,7 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
 async fn frame<R: tokio::io::AsyncBufRead + Unpin>(read: &mut R) -> io::Result<Option<Vec<u8>>> {
     bounded_frame(read, MAX_MESSAGE).await
 }
-async fn bounded_frame<R: tokio::io::AsyncBufRead + Unpin>(
+pub(crate) async fn bounded_frame<R: tokio::io::AsyncBufRead + Unpin>(
     read: &mut R,
     limit: usize,
 ) -> io::Result<Option<Vec<u8>>> {
@@ -90,6 +91,65 @@ pub struct WakeReplay {
     pub fixture: usize,
     pub active_phrase: Option<String>,
 }
+pub(crate) fn namespace_command(
+    python: &std::path::Path,
+    script: &str,
+    args: &[String],
+    mounts: &[PathBuf],
+) -> io::Result<Command> {
+    let interpreter = fs::read_link(python).unwrap_or_else(|_| python.to_path_buf());
+    let runtime = interpreter
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| io::Error::other("python runtime missing"))?;
+    let canonical = fs::canonicalize(runtime)?;
+    let mut cmd = Command::new("/usr/bin/bwrap");
+    cmd.args([
+        "--unshare-all",
+        "--die-with-parent",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--symlink",
+        "usr/lib",
+        "/lib",
+        "--symlink",
+        "usr/lib",
+        "/lib64",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+    ])
+    .arg("--ro-bind")
+    .arg(&canonical)
+    .arg(&canonical)
+    .arg("--ro-bind")
+    .arg(&canonical)
+    .arg(runtime)
+    .arg("--ro-bind")
+    .arg(env!("CARGO_MANIFEST_DIR"))
+    .arg(env!("CARGO_MANIFEST_DIR"));
+    for path in mounts {
+        if !path.is_absolute() {
+            return Err(io::Error::other("absolute mount required"));
+        }
+        cmd.arg("--ro-bind").arg(path).arg(path);
+    }
+    cmd.args(["--setenv", "HOME", "/tmp", "--chdir", "/tmp", "--"])
+        .arg(python)
+        .arg("-I")
+        .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(script))
+        .args(args)
+        .env_remove("DBUS_SESSION_BUS_ADDRESS")
+        .env_remove("PULSE_SERVER")
+        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true);
+    Ok(cmd)
+}
 async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>) {
     let outcome = async {
         let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&replay.manifest)?)?;
@@ -106,65 +166,23 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>)
         if !fixture_root.is_absolute() || !std::path::Path::new(asset_root).is_absolute() {
             return Err(io::Error::other("absolute assets required"));
         }
-        let interpreter = fs::read_link(&replay.python).unwrap_or_else(|_| replay.python.clone());
-        let runtime = interpreter
-            .parent()
-            .and_then(|p| p.parent())
-            .ok_or_else(|| io::Error::other("python runtime missing"))?;
-        let canonical_runtime = fs::canonicalize(runtime)?;
-        // Explicit read-only mounts; no personal audio socket, bus, home or network.
-        // A missing namespace facility is an observable failure, never an unsandboxed fallback.
-        let mut command = Command::new("/usr/bin/bwrap");
-        command
-            .args([
-                "--unshare-all",
-                "--die-with-parent",
-                "--ro-bind",
-                "/usr",
-                "/usr",
-                "--symlink",
-                "usr/lib",
-                "/lib",
-                "--symlink",
-                "usr/lib",
-                "/lib64",
-                "--proc",
-                "/proc",
-                "--dev",
-                "/dev",
-                "--tmpfs",
-                "/tmp",
-            ])
-            .arg("--ro-bind")
-            .arg(&canonical_runtime)
-            .arg(&canonical_runtime)
-            .arg("--ro-bind")
-            .arg(&canonical_runtime)
-            .arg(runtime)
-            .arg("--ro-bind")
-            .arg(env!("CARGO_MANIFEST_DIR"))
-            .arg(env!("CARGO_MANIFEST_DIR"))
-            .arg("--ro-bind")
-            .arg(fixture_root)
-            .arg(fixture_root)
-            .arg("--ro-bind")
-            .arg(asset_root)
-            .arg(asset_root)
-            .arg("--ro-bind")
-            .arg(&replay.manifest)
-            .arg(&replay.manifest)
-            .args(["--setenv", "HOME", "/tmp", "--chdir", "/tmp", "--"])
-            .arg(replay.python)
-            .arg("-I")
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/scripts/wake_worker.py"
-            ))
-            .arg(replay.manifest)
-            .arg(replay.fixture.to_string());
+        let mut args = vec![
+            replay.manifest.to_string_lossy().into_owned(),
+            replay.fixture.to_string(),
+        ];
         if let Some(phrase) = replay.active_phrase {
-            command.arg("--active-phrase").arg(phrase);
+            args.extend(["--active-phrase".into(), phrase]);
         }
+        let mut command = namespace_command(
+            &replay.python,
+            "scripts/wake_worker.py",
+            &args,
+            &[
+                fixture_root.to_path_buf(),
+                asset_root.into(),
+                replay.manifest.clone(),
+            ],
+        )?;
         let mut child = command
             .env_remove("DBUS_SESSION_BUS_ADDRESS")
             .env_remove("PULSE_SERVER")
@@ -220,7 +238,27 @@ pub async fn serve(
         return Err(io::Error::last_os_error());
     }
     core.set_boot_seed(u64::from_ne_bytes(seed) & (u64::MAX / 2));
-    let (wake_tx, mut wake_rx) = mpsc::channel(2);
+    let (stt_tx, stt_requests) = mpsc::channel::<SttRequest>(16);
+    let (stt_replies, mut stt_rx) = mpsc::channel::<Result<SttReply, ()>>(2);
+    let mut stt_task = None;
+    if let Some(r) = replay.as_ref() {
+        let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&r.manifest)?)?;
+        if !manifest["stt"].is_null() {
+            let config: SttConfig = serde_json::from_value(manifest["stt"].clone())?;
+            let profile: serde_json::Value = serde_json::from_slice(&fs::read(&config.manifest)?)?;
+            let engine = profile["engine"]
+                .as_str()
+                .ok_or_else(|| io::Error::other("STT engine missing"))?;
+            core.configure_stt(engine.into());
+            stt_task = Some(tokio::spawn(crate::stt::worker(
+                config,
+                stt_requests,
+                stt_replies,
+            )));
+        }
+    }
+    let (wake_sender, mut wake_rx) = mpsc::channel(2);
+    let mut wake_tx = Some(wake_sender);
     let mut wake_input = match replay.as_mut() {
         Some(r) => {
             let bytes = fs::read(&r.manifest)?;
@@ -239,8 +277,22 @@ pub async fn serve(
         }
         None => None,
     };
-    let mut wake_task = replay.map(|r| tokio::spawn(replay_worker(r, wake_tx)));
-    if wake_task.is_some() {
+    let mut pending_replay = if stt_task.is_some() {
+        replay.take()
+    } else {
+        None
+    };
+    let mut wake_task = if pending_replay.is_some() {
+        None
+    } else {
+        replay.map(|r| {
+            tokio::spawn(replay_worker(
+                r,
+                wake_tx.take().expect("single audio producer"),
+            ))
+        })
+    };
+    if wake_task.is_some() || pending_replay.is_some() {
         core.wake_health("starting");
     }
     let (tx, mut rx) = mpsc::channel::<Call>(16);
@@ -256,6 +308,22 @@ pub async fn serve(
             Some(call) = rx.recv() => {
                 let response = core.handle(call.request, std::time::Instant::now()); storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
+            },
+            reply=stt_rx.recv(), if stt_task.is_some() => {
+                match reply {
+                    Some(Ok(r)) => {
+                        let ready=matches!(r,SttReply::Ready{..});
+                        core.stt_reply(r,std::time::Instant::now());
+                        if ready && core.response(String::new(),"ok").stt_status=="ready" {
+                            if let Some(replay)=pending_replay.take() { wake_task=Some(tokio::spawn(replay_worker(replay,wake_tx.take().expect("single audio producer")))); }
+                        }
+                    },
+                    Some(Err(())) | None => {
+                        core.stt_failed();
+                        if pending_replay.take().is_some() { core.wake_health("unavailable");wake_tx.take(); }
+                        if let Some(task)=stt_task.take() { task.abort(); let _=task.await; }
+                    }
+                }
             },
             packet = wake_rx.recv(), if wake_task.is_some() => {
                 match packet {
@@ -294,8 +362,22 @@ pub async fn serve(
             },
             Some(_) = peers.join_next(), if !peers.is_empty() => {},
         }
+        for request in core.take_stt_requests() {
+            if stt_tx.try_send(request).is_err() {
+                core.stt_failed();
+                if let Some(task) = stt_task.take() {
+                    task.abort();
+                    let _ = task.await;
+                }
+                break;
+            }
+        }
     }
     if let Some(task) = wake_task.take() {
+        task.abort();
+        let _ = task.await;
+    }
+    if let Some(task) = stt_task.take() {
         task.abort();
         let _ = task.await;
     }
