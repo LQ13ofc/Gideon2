@@ -37,9 +37,10 @@
   "passed": 32,
   "failed": 0,
   "ignored": 0,
-  "binary_sha256": "9d9fe3ce9a6c07bbb357039cbb2f233df02abaf5f26f9ab942fd1f2b946cdf6d",
+  "binary_sha256": "198f17a7613c65a04dc3334967f9f11bb9838071bfb32983068b8f7fc3d8151d",
   "idle_cpu_percent": 0.0,
-  "idle_rss_bytes": 3055616,
+  "idle_rss_bytes": 3207168,
   "physical_validation": "NOT_PERFORMED",
-  "runtime": "isolated HOME/XDG; Unix IPC; no device or personal bus adapters"
+  "runtime": "isolated HOME/XDG; Unix IPC; no device or personal bus adapters",
+  "source_commit": "2ae148ce81a19598051395a2ed3774991d210f5c"
 }

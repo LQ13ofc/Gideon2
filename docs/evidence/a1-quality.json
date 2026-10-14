@@ -1,0 +1,4017 @@
+{
+  "gate": "A1",
+  "quality": "FAILED",
+  "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8",
+  "threshold": 0.25,
+  "score": 1.0,
+  "threads": 1,
+  "provider": "cpu",
+  "manifest_sha256": "55618e2d5943d4d808aaba6c7808b92086cb31cd758869322b8903da0da93763",
+  "worker_sha256": "139b0644ecd4e6865c4041bf2a203300d96eb9a29bfb456207fa752460e56990",
+  "positive_count": 76,
+  "detected_positive": 73,
+  "recall": 0.9605263157894737,
+  "negative_count": 320,
+  "false_wakes": 29,
+  "speech_negative_audio_s": 700.991,
+  "corpus_rtf": 0.02500097632447496,
+  "max_rss_bytes": 92393472,
+  "memory_source": "Linux /proc/self/status VmHWM; ru_maxrss discrepancy excluded",
+  "procedural_silence": {
+    "seconds": 3600,
+    "false_wakes": 0,
+    "wall_s": 110.17692743199996,
+    "independent_environment_evidence": false
+  },
+  "rows": [
+    {
+      "id": "cmd-open-brave__bf_emma__clean",
+      "sha256": "8af7d656f3f51ca845aff46d12d74b03c416527646d50472372441659abec2da",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07090680500004964,
+      "audio_s": 2.8
+    },
+    {
+      "id": "cmd-open-brave__bf_emma__noise-snr20db",
+      "sha256": "0a2ac4dbeb431e703a2161facb742f7683a31ae4fc7b9d848dd2fef3412628ba",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07076426100002209,
+      "audio_s": 2.8
+    },
+    {
+      "id": "cmd-open-brave__bf_emma__noise-snr10db",
+      "sha256": "581b0d617cd46528de5e7329976ece8c7cd8e67ef8c4c59a5135460102b02300",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07151489500029129,
+      "audio_s": 2.8
+    },
+    {
+      "id": "cmd-open-brave__bf_emma__room-fir-synthetic",
+      "sha256": "6161be00dd56ba4568eb742d813b30c90822f268044df79b94736e2e2d243b87",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07635387700020146,
+      "audio_s": 2.913
+    },
+    {
+      "id": "cmd-open-brave__bf_emma__attenuation-minus12db",
+      "sha256": "d2a551090546da54656268104cd9ba3c70e625fce30bd98e8d4b40acd84e7bc1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0702201240001159,
+      "audio_s": 2.8
+    },
+    {
+      "id": "cmd-open-brave__bf_emma__speech-overlap-synthetic",
+      "sha256": "01f14c147f917cbce96df8da267915115fae4683dfee1a446803c86f2ceaed7b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10332551300007253,
+      "audio_s": 4.1
+    },
+    {
+      "id": "cmd-open-brave__bm_george__clean",
+      "sha256": "b5f03b5e4d5125f4e0726c7239874f282462c402fd42a4635be0342624f996dd",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06887651299985009,
+      "audio_s": 2.75
+    },
+    {
+      "id": "cmd-open-brave__bm_george__noise-snr20db",
+      "sha256": "d564704e70ba4d889f6ea4c12586d0ced308838ce25bd4d7e4a800db1d0c606c",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06882666599994991,
+      "audio_s": 2.75
+    },
+    {
+      "id": "cmd-open-brave__bm_george__noise-snr10db",
+      "sha256": "9b4e8d36f64e2b885a1a8b2c7551ffd99361d021ed639c2509595a76348829ab",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06949838799982899,
+      "audio_s": 2.75
+    },
+    {
+      "id": "cmd-open-brave__bm_george__room-fir-synthetic",
+      "sha256": "90e45dfb5ef2abffd52ed1764a27f49abf7366243e68498fc3c736962928c3e4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06942106599990439,
+      "audio_s": 2.863
+    },
+    {
+      "id": "cmd-open-brave__bm_george__attenuation-minus12db",
+      "sha256": "443e4c79484ed801e6a24fc4b9fa362df73bc85d29a5fe0f7d1151d711813a32",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06909607599982337,
+      "audio_s": 2.75
+    },
+    {
+      "id": "cmd-open-brave__bm_george__speech-overlap-synthetic",
+      "sha256": "c03afe32179aed659e54de535610e4a776913c0f9c90b8d244b2cce0cce3feee",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.1158847080000669,
+      "audio_s": 4.575
+    },
+    {
+      "id": "cmd-open-brave__af_bella__clean",
+      "sha256": "5bd544f9b2e0fa96417a4d048f8fd78304eb4396220ad2086f25aee8692b8c9d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06921592800017606,
+      "audio_s": 2.725
+    },
+    {
+      "id": "cmd-open-brave__af_bella__noise-snr20db",
+      "sha256": "a39964cdd630fa86c14cd6e186301122e7bdf9f0435f518e091efa1da6921358",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06817091699986122,
+      "audio_s": 2.725
+    },
+    {
+      "id": "cmd-open-brave__af_bella__noise-snr10db",
+      "sha256": "0418eaf548db406d9dda78247d1cbec146ad4279e315c6c45038f025ec96685b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06853164900030606,
+      "audio_s": 2.725
+    },
+    {
+      "id": "cmd-open-brave__af_bella__room-fir-synthetic",
+      "sha256": "72f8f80c78e3b0d89f350a83490c82bd277caee87d765fba46fce1188b5915ec",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06811607000008735,
+      "audio_s": 2.838
+    },
+    {
+      "id": "cmd-open-brave__af_bella__attenuation-minus12db",
+      "sha256": "21f3a1b155e1e3c60a8b8d75d1e5fcc767fc3ad4465970070af547e36d19afa1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06772228099998756,
+      "audio_s": 2.725
+    },
+    {
+      "id": "cmd-open-brave__af_bella__speech-overlap-synthetic",
+      "sha256": "8a68bcb2f27630ef7289ecde864ad12179d7c1a27569bd1bca188dfd1891c517",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10054857900013303,
+      "audio_s": 4.025
+    },
+    {
+      "id": "cmd-open-brave__am_michael__clean",
+      "sha256": "82a771db56d1c77f26c71002086d191aa584e8e14b6b9d414cfe8ad36d8448a3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06774997699994856,
+      "audio_s": 2.775
+    },
+    {
+      "id": "cmd-open-brave__am_michael__noise-snr20db",
+      "sha256": "5a00fa51caf0a31cf799156dd1f6308acd45eccade6b35fab10832633e039e57",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06832136899993202,
+      "audio_s": 2.775
+    },
+    {
+      "id": "cmd-open-brave__am_michael__noise-snr10db",
+      "sha256": "28866d513bad5c3b690a8ba7b7c9bc793e73abefb4b1be50bd9c3d9374c776c4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06815007000022888,
+      "audio_s": 2.775
+    },
+    {
+      "id": "cmd-open-brave__am_michael__room-fir-synthetic",
+      "sha256": "3193dbbeb6808c623dc578b6931e2993f52e1f3f85d7e587d25b96d582632bfb",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07233939400020972,
+      "audio_s": 2.888
+    },
+    {
+      "id": "cmd-open-brave__am_michael__attenuation-minus12db",
+      "sha256": "ca3b39a6537f3e809e88c8a2b2d94125edf8d9eb097a2dcf649f689ba31e27d1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0677630949999184,
+      "audio_s": 2.775
+    },
+    {
+      "id": "cmd-open-brave__am_michael__speech-overlap-synthetic",
+      "sha256": "714bc2548269a0be0d95ff43654a31378e79d83f95243114103eefb5458149fe",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10590141300008327,
+      "audio_s": 4.25
+    },
+    {
+      "id": "cmd-open-steam__bf_emma__clean",
+      "sha256": "fc84347b63e9475b310d7d5ee6e9e6e24d9db77b74b311a0822d59abc35a2e95",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06769715500013262,
+      "audio_s": 2.8
+    },
+    {
+      "id": "cmd-open-steam__bm_george__clean",
+      "sha256": "fcc71e0ff6c84a075ad0ce2b337d8bd1534fd106427ffa1091a829958da56aa4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06875318299989885,
+      "audio_s": 2.8
+    },
+    {
+      "id": "cmd-open-steam__af_bella__clean",
+      "sha256": "2e769281dc7923de807751375c5fb4a9f63e62d88f6dadc3e0bb712f0e8384c0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06379846300023928,
+      "audio_s": 2.7
+    },
+    {
+      "id": "cmd-open-steam__am_michael__clean",
+      "sha256": "8b45dfeff87f04d41b634ab47ae2bcc57fe27e82b2f526c5dbd2805437c377b5",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06799157200021,
+      "audio_s": 2.8
+    },
+    {
+      "id": "cmd-mute__bf_emma__clean",
+      "sha256": "1ff102241613d4e867e26a7096e22ac2c951610e9cab5b9636f1eaaf010102dc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.050903434999781894,
+      "audio_s": 2.1
+    },
+    {
+      "id": "cmd-mute__bm_george__clean",
+      "sha256": "672c3ad82c3a7dd07b3fd22b181b6aa1ff8f01dc48117e4ecf25f8be492e42dc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05095242800007327,
+      "audio_s": 2.1
+    },
+    {
+      "id": "cmd-mute__af_bella__clean",
+      "sha256": "742f745e88d18760a0ef372f5645f16b45f261f2ce0cffcf7653950b9ac443cc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.059399986999778775,
+      "audio_s": 2.4
+    },
+    {
+      "id": "cmd-mute__am_michael__clean",
+      "sha256": "f091e59d695291c74eb70c54be1fcacc2e1469927c7995d31ee7f31ad9353bd0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.055737528999998176,
+      "audio_s": 2.35
+    },
+    {
+      "id": "cmd-volume-up__bf_emma__clean",
+      "sha256": "90dd9422feb192da8ceb6d47c3e229a6107775d343b489f974fa38cef6050bd9",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07220628999994005,
+      "audio_s": 2.95
+    },
+    {
+      "id": "cmd-volume-up__bm_george__clean",
+      "sha256": "9a7f11bafa58812fa91cb88307fc9a31f03214c31a16b9c520bef9da6afbe0f5",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07349011199994493,
+      "audio_s": 3.0
+    },
+    {
+      "id": "cmd-volume-up__af_bella__clean",
+      "sha256": "b71b93576551f16882fd0254ab842bb9b25c65a923d04de9907a0c342e2c85a9",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06835143199987215,
+      "audio_s": 2.85
+    },
+    {
+      "id": "cmd-volume-up__am_michael__clean",
+      "sha256": "06a40ff703b8eb96e8b5c2a9fb50136289d7bb51eff069e4d3e39131c1105bcc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07640691500000685,
+      "audio_s": 3.125
+    },
+    {
+      "id": "cmd-time__bf_emma__clean",
+      "sha256": "06e1fa4eefff6f27c0edd9abd19e0ed2f06b9a677f285193f0a8c7b05f215a49",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07190259800017884,
+      "audio_s": 2.875
+    },
+    {
+      "id": "cmd-time__bm_george__clean",
+      "sha256": "80fab623d493b02417e3337a27ef04a84e43474d264d44c976ed770ac37ee0c4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06793146100017111,
+      "audio_s": 2.825
+    },
+    {
+      "id": "cmd-time__af_bella__clean",
+      "sha256": "ad721b4487482568c66dae1ff96e181f63adbe7d3f25e90e14b423e1516fd748",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06415692700011277,
+      "audio_s": 2.675
+    },
+    {
+      "id": "cmd-time__am_michael__clean",
+      "sha256": "de9afd40a92feadaa91c767ca74486292892d31aeef18c16afd68735058fb0f8",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07197599600021931,
+      "audio_s": 2.875
+    },
+    {
+      "id": "cmd-close-firefox__bf_emma__clean",
+      "sha256": "2e6f5dbd08730e68ef60c31b6b22f71de7d0ada78d7a59b4a26f49de2c078b78",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07239100800006781,
+      "audio_s": 3.0
+    },
+    {
+      "id": "cmd-close-firefox__bm_george__clean",
+      "sha256": "ce2303a955122ad142e6169f50d194d272b85cf604cd6169bb3a06acc0a808f2",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07180362799999784,
+      "audio_s": 2.9
+    },
+    {
+      "id": "cmd-close-firefox__af_bella__clean",
+      "sha256": "ed6f266973f07e4e428401af8cafb5b030ae3e640b5f05177a3c948b769354ce",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06791696800019054,
+      "audio_s": 2.85
+    },
+    {
+      "id": "cmd-close-firefox__am_michael__clean",
+      "sha256": "a28d6a41a96a490804d2d60faec995a956a9d5ca704c0989a808b36565d93959",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07189809200008312,
+      "audio_s": 2.925
+    },
+    {
+      "id": "entity-brave__bf_emma__clean",
+      "sha256": "db2fec1ae7004ed35e0e1624e674080b783f28f6adcd4abcf0e39619f98c59dc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.046688585999618226,
+      "audio_s": 1.95
+    },
+    {
+      "id": "entity-brave__bf_emma__noise-snr20db",
+      "sha256": "b7a4d5ea68df78cc08957ae16368c4ff0b9f6ea2995e0ddd454b4896843594f2",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.046424157000274135,
+      "audio_s": 1.95
+    },
+    {
+      "id": "entity-brave__bf_emma__noise-snr10db",
+      "sha256": "dc838d36a2ce96b8c2009f2e2368ca01184bee4fa8af6755a20e8b3a18a5a42b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.04717075100006696,
+      "audio_s": 1.95
+    },
+    {
+      "id": "entity-brave__bf_emma__room-fir-synthetic",
+      "sha256": "fe4ec8c81d6c589d01eb3e5728dc7a279375c7b94b7af54e748502c675945eab",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.04628163500001392,
+      "audio_s": 2.063
+    },
+    {
+      "id": "entity-brave__bf_emma__attenuation-minus12db",
+      "sha256": "89e0327caad8e19d9081848ada441e35f170d83a385035b543bb72083e33f0bf",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.04653967000012926,
+      "audio_s": 1.95
+    },
+    {
+      "id": "entity-brave__bf_emma__speech-overlap-synthetic",
+      "sha256": "7f172c13a7973a68fa4b229d71ba3124fb74eb9e0bcddfb2abdd5a429e853073",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10491694399979679,
+      "audio_s": 4.1
+    },
+    {
+      "id": "entity-brave__bm_george__clean",
+      "sha256": "5ff7133e0692376cbadf3eb62294d89ac80ee55c2e457aced2c38daf2d0bdd4e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05590223299986974,
+      "audio_s": 2.325
+    },
+    {
+      "id": "entity-brave__bm_george__noise-snr20db",
+      "sha256": "774afe1dffc70b0c9929ecc4260be1623ab6aa40e4c4eb48cc00e1acc3ac685b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05551177100005589,
+      "audio_s": 2.325
+    },
+    {
+      "id": "entity-brave__bm_george__noise-snr10db",
+      "sha256": "825d225416c1f122e5003454a8d2c158bb2fed524c03a8c6f9ec7df0ab6e9faa",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.055606215999887354,
+      "audio_s": 2.325
+    },
+    {
+      "id": "entity-brave__bm_george__room-fir-synthetic",
+      "sha256": "2f3c3aeb1d785c92b70717c5b60f6b0413649e550f5b79156bddc85caa5e2ce3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05957467700000052,
+      "audio_s": 2.438
+    },
+    {
+      "id": "entity-brave__bm_george__attenuation-minus12db",
+      "sha256": "e0204447f21507f18126b4f7f9fef63cfae7b578246b27ed5fe9c1a26353807a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05588979499998459,
+      "audio_s": 2.325
+    },
+    {
+      "id": "entity-brave__bm_george__speech-overlap-synthetic",
+      "sha256": "06885e8adb2343451a473647b4d4cafcc4cfda98d2c681208c4556ef8c2dbe0c",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.11492510200014294,
+      "audio_s": 4.575
+    },
+    {
+      "id": "entity-brave__af_bella__clean",
+      "sha256": "bf5ccc3b2a4b7ef1dbf71996166fac5e2fbe66d78aa919e28033e87de045bdbd",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05669650100026047,
+      "audio_s": 2.375
+    },
+    {
+      "id": "entity-brave__af_bella__noise-snr20db",
+      "sha256": "8419176442b587c4dc66d039949d2f81674e54570fdef45cbf7630f198f028ef",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.056049994000204606,
+      "audio_s": 2.375
+    },
+    {
+      "id": "entity-brave__af_bella__noise-snr10db",
+      "sha256": "ed6cd63aa1b3517d41fcb06adae090c043dfe66d444fd2c285b2122e0082b386",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05654185799994593,
+      "audio_s": 2.375
+    },
+    {
+      "id": "entity-brave__af_bella__room-fir-synthetic",
+      "sha256": "8fd5f65ceda01af10fb59c454a3ed7018a1b270f2431abfe202ef887232a490e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06064942399962092,
+      "audio_s": 2.488
+    },
+    {
+      "id": "entity-brave__af_bella__attenuation-minus12db",
+      "sha256": "4f7856cb8ac0f0f62e46898f69de15f955257c36c841de74a071ad7fd30e55d1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.056311528000151156,
+      "audio_s": 2.375
+    },
+    {
+      "id": "entity-brave__af_bella__speech-overlap-synthetic",
+      "sha256": "9cea45fc9d62802c3c704ecc3277c6b204915b4b3eb72ec0dfeaa03105f4d281",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10309065499995995,
+      "audio_s": 4.025
+    },
+    {
+      "id": "entity-brave__am_michael__clean",
+      "sha256": "930b94766a6cbda95bf4883c45152f609a860c259b8646613a0d5fea92bdd90a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.060764949999793316,
+      "audio_s": 2.4
+    },
+    {
+      "id": "entity-brave__am_michael__noise-snr20db",
+      "sha256": "39a49c3101ff5697a4e8d9668f66e7884b13fece7c91fffbe7ab4e5c6aab8b03",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06122132500013322,
+      "audio_s": 2.4
+    },
+    {
+      "id": "entity-brave__am_michael__noise-snr10db",
+      "sha256": "08269cb464ce9c8e860f496473b2cea629dfd6606eaf24d343eb899a08edf3e9",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.060585238999919966,
+      "audio_s": 2.4
+    },
+    {
+      "id": "entity-brave__am_michael__room-fir-synthetic",
+      "sha256": "8744e6bee3b4927ee87d08ea7f43ff79dc9f585bbcee49b8eed27baebc50682a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06031360600036351,
+      "audio_s": 2.513
+    },
+    {
+      "id": "entity-brave__am_michael__attenuation-minus12db",
+      "sha256": "803eb613794e9705d93d4cbf4c6e1f755c957b467e7a086ec06e7fca9fc759b1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.060144136999952025,
+      "audio_s": 2.4
+    },
+    {
+      "id": "entity-brave__am_michael__speech-overlap-synthetic",
+      "sha256": "1b06a95ec8e0999d579d0f5644169cd0223604e607cbd781e3fa3893c27f57e4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10754917000031128,
+      "audio_s": 4.25
+    },
+    {
+      "id": "entity-steam__bf_emma__clean",
+      "sha256": "a692bbc18399fa6a73d0f379ac435a842b4dd41039f57a40ff11588ef191df45",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07244265700001051,
+      "audio_s": 2.15
+    },
+    {
+      "id": "entity-steam__bm_george__clean",
+      "sha256": "507e0bcc5238defbd07c524581ad78ea53748f12d3bb9bc95258c6dfb49c8b05",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08241012200005571,
+      "audio_s": 2.35
+    },
+    {
+      "id": "entity-steam__af_bella__clean",
+      "sha256": "38838eb6095ecadf3eff9d7aeb6c84813d2df2e6ac2176ac980f9488814db62b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06162603299981129,
+      "audio_s": 2.425
+    },
+    {
+      "id": "entity-steam__am_michael__clean",
+      "sha256": "ee2dabbddf1b0e3205aade20fd2f11a987e3e5d7f476053486911dc7c814bd71",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.056062904999635066,
+      "audio_s": 2.375
+    },
+    {
+      "id": "entity-discord__bf_emma__clean",
+      "sha256": "6127942562b80f9143c74b4bd914a55b85391b3f71d0b7a512a9085a352f6743",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05490369800008921,
+      "audio_s": 2.3
+    },
+    {
+      "id": "entity-discord__bm_george__clean",
+      "sha256": "01a7f5c6570634dce6b7b5769c88f01bd1664586dbe567c7c420d9870fc1e8b0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05950352100035161,
+      "audio_s": 2.475
+    },
+    {
+      "id": "entity-discord__af_bella__clean",
+      "sha256": "400f49dc431260dcf91d361058621befa397c357bf13e0118fd73fd76fa2755f",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.059445790000154375,
+      "audio_s": 2.5
+    },
+    {
+      "id": "entity-discord__am_michael__clean",
+      "sha256": "0cdf188008c18c2aa0313e2390408e358b928f64ebeb7bebb011259cc65e6676",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05934841399994184,
+      "audio_s": 2.525
+    },
+    {
+      "id": "entity-home-assistant__bf_emma__clean",
+      "sha256": "759b7ab3299a0a032ed62fc7e84ca89d9415179283f1cf9d9148420f8554804e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07310950200007937,
+      "audio_s": 2.9
+    },
+    {
+      "id": "entity-home-assistant__bm_george__clean",
+      "sha256": "63bdcba1c7724c0114d83c3859fe6fc551cf33581f4c4e5c0d55edd0f50b6714",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07165942400024505,
+      "audio_s": 2.925
+    },
+    {
+      "id": "entity-home-assistant__af_bella__clean",
+      "sha256": "757d1c4a0b9e9ac924f2f8312c5c068b2bf22887efcfde6d5cc9752561462b03",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06747294100023282,
+      "audio_s": 2.75
+    },
+    {
+      "id": "entity-home-assistant__am_michael__clean",
+      "sha256": "a34252c91602d1f81b4592b68266196ccb470bdb3bb1f283ce745d7dc87e3108",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07162328300000809,
+      "audio_s": 2.9
+    },
+    {
+      "id": "entity-sunshine__bf_emma__clean",
+      "sha256": "c39bb280fd6c80ce0504b4b686ba78106a464a1ba6485a293494fd86bbe5357e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06275610400007281,
+      "audio_s": 2.4
+    },
+    {
+      "id": "entity-sunshine__bm_george__clean",
+      "sha256": "7ea99f0c19e9ba2c249c71998ccd6fe9002e1ec0cee9c773e7f19fb8545d14cf",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05936123499986934,
+      "audio_s": 2.4
+    },
+    {
+      "id": "entity-sunshine__af_bella__clean",
+      "sha256": "62daffc9b7372def0e7d6ba056c9c0b012416e055ab4eb60b13651fe1f5f953a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06348804700019173,
+      "audio_s": 2.575
+    },
+    {
+      "id": "entity-sunshine__am_michael__clean",
+      "sha256": "4922f5b0fb2e47cae8e320b01293e55702343371dcc8c591475dcb0d0f4f56d6",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06451832399989144,
+      "audio_s": 2.625
+    },
+    {
+      "id": "entity-waydroid__bf_emma__clean",
+      "sha256": "72273657e7e65c88bb202df3da5bfcfc777afb406fe69f66fe63853cdd83842f",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05475954499979707,
+      "audio_s": 2.25
+    },
+    {
+      "id": "entity-waydroid__bm_george__clean",
+      "sha256": "e78fbd631631f627f4e1aaba0ad9df86f7a2a1646acf1b678f98f2f1724cd773",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.059142083000097045,
+      "audio_s": 2.475
+    },
+    {
+      "id": "entity-waydroid__af_bella__clean",
+      "sha256": "03830776226a15d3a73591765157f7ce817abd8ca29dd9c35608436835b43684",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05962088500018581,
+      "audio_s": 2.525
+    },
+    {
+      "id": "entity-waydroid__am_michael__clean",
+      "sha256": "7f2d3badd6565a398a01170cf3a07a636f9f912dc6215459d96e79be8dd49a1e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06378207599982488,
+      "audio_s": 2.6
+    },
+    {
+      "id": "entity-minecraft__bf_emma__clean",
+      "sha256": "25e7bfa0407e01732f5531524c1049fa015589375a18a03af786e78ff14dd652",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05560620500000368,
+      "audio_s": 2.375
+    },
+    {
+      "id": "entity-minecraft__bm_george__clean",
+      "sha256": "c1049c16adaa5027d7da9a22977a684c6395d3a8658ecbc5d2fda83a8d7da4a4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06410606300005384,
+      "audio_s": 2.6
+    },
+    {
+      "id": "entity-minecraft__af_bella__clean",
+      "sha256": "40e1d8608baf304f65492d3889bfb0d7c462a8547315355cc1bb46c851b4455b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06394879999970726,
+      "audio_s": 2.625
+    },
+    {
+      "id": "entity-minecraft__am_michael__clean",
+      "sha256": "9531a45908db62ca00f524e983b75331d94b0da432ab7c7a46cb8f3cc678220b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06335350500012282,
+      "audio_s": 2.675
+    },
+    {
+      "id": "entity-gideon__bf_emma__clean",
+      "sha256": "e1a4f6ee7a875f4836416631cb535daaf9aee4aaa47b4ff9b6eb3f00a261b574",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05573982400028399,
+      "audio_s": 2.375
+    },
+    {
+      "id": "entity-gideon__bm_george__clean",
+      "sha256": "e0aa9d898d8a45c28331b4fe05c224aa0214a259fc644b15fe07ec8a2a279d39",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05981296600020869,
+      "audio_s": 2.425
+    },
+    {
+      "id": "entity-gideon__af_bella__clean",
+      "sha256": "639e5d92e39d965aa68f8d2bbc57a89e24334c7d1f3e8f7ab5dce4622667f1dd",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.060218608000013774,
+      "audio_s": 2.475
+    },
+    {
+      "id": "entity-gideon__am_michael__clean",
+      "sha256": "96a29d98374ebe0b09162b1a471e43ac8ddf691be0c928b75affe5205d26b9c0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.060666009999749804,
+      "audio_s": 2.45
+    },
+    {
+      "id": "ambiguity-brave-choice__bf_emma__clean",
+      "sha256": "2829141a9a52faeca477519b826e0433106773e727863f0bc0b66ab1e01cd42a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08075819400028195,
+      "audio_s": 3.2
+    },
+    {
+      "id": "ambiguity-brave-choice__bm_george__clean",
+      "sha256": "d7e81da36f0f826373c6228ec6d01d5ef03736e677be3636ed1af98f30a7463b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08101069999975152,
+      "audio_s": 3.3
+    },
+    {
+      "id": "ambiguity-brave-choice__af_bella__clean",
+      "sha256": "74da6e5034426fc813432012f7ba38b584d0a2a9f001af3c6229989f90d33937",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07635662200027582,
+      "audio_s": 3.075
+    },
+    {
+      "id": "ambiguity-brave-choice__am_michael__clean",
+      "sha256": "f87fedb307c33cdb2c6a62d180b06a188c0e1933e10ab9586ded45e5827d7a88",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08095615599995654,
+      "audio_s": 3.25
+    },
+    {
+      "id": "ambiguity-team__bf_emma__clean",
+      "sha256": "9304c47cc41ab51b8e483514706c77c26792c9558c053bc3178a6ce0dc12e642",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08511620399985986,
+      "audio_s": 3.425
+    },
+    {
+      "id": "ambiguity-team__bm_george__clean",
+      "sha256": "0528933e7b5c626be19556c649a1458e9c19d6d1977eb60574d84342973a2e3d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09366101100022206,
+      "audio_s": 3.775
+    },
+    {
+      "id": "ambiguity-team__af_bella__clean",
+      "sha256": "4e3e685dc1c45ed4304d0edfa257943dd9c5de2e3559c593646c2bc412a44050",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0809133429997928,
+      "audio_s": 3.225
+    },
+    {
+      "id": "ambiguity-team__am_michael__clean",
+      "sha256": "f5d0ec40809ea7fe73f92f5b8a8cd9445b4a956bc4d2b7dfb142cc925d477bc7",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08499163700025747,
+      "audio_s": 3.45
+    },
+    {
+      "id": "ambiguity-home-assistant__bf_emma__clean",
+      "sha256": "f6700d6c9c4720cb4d6d783158e2fbf8bf16bb648e6d638aa51254196858242e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09764587000017855,
+      "audio_s": 3.9
+    },
+    {
+      "id": "ambiguity-home-assistant__bm_george__clean",
+      "sha256": "6c392a19f53bf9440865da4416e2411c0432116caec012ec140dceb7cb9c9b0f",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.1064993790000699,
+      "audio_s": 4.25
+    },
+    {
+      "id": "ambiguity-home-assistant__af_bella__clean",
+      "sha256": "87411773090d5f06e6a9575f9b5e5cce30cee5d1d735c763771b3f9ac0b89476",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09765880500026469,
+      "audio_s": 3.925
+    },
+    {
+      "id": "ambiguity-home-assistant__am_michael__clean",
+      "sha256": "05566b19a1e4592e16f6dbb7a3b5883dcc7142b1bd5a3953eb6a9c9cce1d0bb3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09803220499998133,
+      "audio_s": 3.9
+    },
+    {
+      "id": "ordinary-settings__bf_emma__clean",
+      "sha256": "605f071f85d266f4bf75195211a0576ee861515ce767ee0e1f90011d0674c570",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09379307599965614,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__bf_emma__noise-snr20db",
+      "sha256": "e3343f57901725091736e194529dbe12eff5d089eb460b2b9e97f8da0a498c7a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0948576369996772,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__bf_emma__noise-snr10db",
+      "sha256": "9662887d82de4f1d82e3f8723edfaccc6364b88389299862c785aa3413030164",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09405131000039546,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__bf_emma__room-fir-synthetic",
+      "sha256": "a26acc5cc097dfc059c12232056eea9bf4ac5d60c0e0269ebc9767e4aeaf5eb5",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10030688500000906,
+      "audio_s": 3.938
+    },
+    {
+      "id": "ordinary-settings__bf_emma__attenuation-minus12db",
+      "sha256": "89c6a41ab0874687719de7544c0a764721cdc8a8c5294fb700907940f9317e01",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09498789200006286,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__bf_emma__speech-overlap-synthetic",
+      "sha256": "b4b087cde2eb47a87b0dc7ddd78fb8938e11ba3671aa67d5cf920e5c5a80c7a0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10374024099974122,
+      "audio_s": 4.1
+    },
+    {
+      "id": "ordinary-settings__bm_george__clean",
+      "sha256": "f2d4d54d5a97d00f912e2f306ec3300e717b95dacb673074186329aa72c13c9f",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10613717299975178,
+      "audio_s": 4.125
+    },
+    {
+      "id": "ordinary-settings__bm_george__noise-snr20db",
+      "sha256": "11f6491f0f86b7f753daf00676be45938fac07343dd8c6bf0c2fb6eec18cc4ca",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10324156299975584,
+      "audio_s": 4.125
+    },
+    {
+      "id": "ordinary-settings__bm_george__noise-snr10db",
+      "sha256": "217a90cb93a5f24fbf0fe565b0f7ce5a9a0eb0ca73fbc429cda0183929651606",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10398165399965364,
+      "audio_s": 4.125
+    },
+    {
+      "id": "ordinary-settings__bm_george__room-fir-synthetic",
+      "sha256": "e80e1a63eb014ebc5e1c50344831ffb9557e45c36714dd4d38a5b07e2320e25a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10816512400015199,
+      "audio_s": 4.238
+    },
+    {
+      "id": "ordinary-settings__bm_george__attenuation-minus12db",
+      "sha256": "5d898a8a6974812b21aa99341cf57875c42e96e4d458b42eb9dcc35db4c93428",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10425088000010874,
+      "audio_s": 4.125
+    },
+    {
+      "id": "ordinary-settings__bm_george__speech-overlap-synthetic",
+      "sha256": "802f174cb4ca16fc420e369b49c541a4c8c757b3eb96222949cc6e2ac5018845",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.11719535399970482,
+      "audio_s": 4.575
+    },
+    {
+      "id": "ordinary-settings__af_bella__clean",
+      "sha256": "7710723d4324d72a7be0f0ebca301ed3f714ac461c86bf1b430926b9267666df",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09612022399960551,
+      "audio_s": 3.75
+    },
+    {
+      "id": "ordinary-settings__af_bella__noise-snr20db",
+      "sha256": "b6b76559b4523bdd2fd925f3c1dedc228fd8fd22d89460561559ba722a4a786d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09405909699989934,
+      "audio_s": 3.75
+    },
+    {
+      "id": "ordinary-settings__af_bella__noise-snr10db",
+      "sha256": "417ab134abe43b78c0882f800a0b34082279b163931877487d7c689f87ed7d4e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09398391400009132,
+      "audio_s": 3.75
+    },
+    {
+      "id": "ordinary-settings__af_bella__room-fir-synthetic",
+      "sha256": "ae5d1ff59f6b97cd2ec4db182af2a99e40ef8e25b18656b52b7527a5a58182a6",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09823974399978397,
+      "audio_s": 3.863
+    },
+    {
+      "id": "ordinary-settings__af_bella__attenuation-minus12db",
+      "sha256": "ef0e86984372c1a2a4efc13d44fe1d601ac23fd05a35abd6fb74f64ed8418993",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09336121800015462,
+      "audio_s": 3.75
+    },
+    {
+      "id": "ordinary-settings__af_bella__speech-overlap-synthetic",
+      "sha256": "6dfa0e15dbe7be9af3c2dec6e1c0840fae6381412a68f53e3d92b6e5bfa0d717",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10175097599994842,
+      "audio_s": 4.025
+    },
+    {
+      "id": "ordinary-settings__am_michael__clean",
+      "sha256": "b2dba82e8cc98fda26fe7f5d96b691ba818eb8cb3a3dbbb427c04bdd91fa1270",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09338697500015769,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__am_michael__noise-snr20db",
+      "sha256": "c5499fe8209a064d9f97d29d88864af1d52deab78a4b305bd9f84dedf009fd41",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09381488700000773,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__am_michael__noise-snr10db",
+      "sha256": "1ef41e28ea6417bbc6ae81920e039356a0424e8f7525ac0e923171d3e83517ed",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09392798999988372,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__am_michael__room-fir-synthetic",
+      "sha256": "27a5a22ca8e9ca7496eb92a91c9fc05d273839713145ae3d821af3cc9c23fa95",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09860372999992251,
+      "audio_s": 3.938
+    },
+    {
+      "id": "ordinary-settings__am_michael__attenuation-minus12db",
+      "sha256": "fd4c6d24aeb9514b8461fc7942acdbe0f390698535c16a0042b8d7f8a2f45b69",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09332364200008669,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-settings__am_michael__speech-overlap-synthetic",
+      "sha256": "c90991c96df6d9281431f7a6db10e9f097da4b350dc02b31fc105c63ee8105c4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10615867299975434,
+      "audio_s": 4.25
+    },
+    {
+      "id": "ordinary-meeting__bf_emma__clean",
+      "sha256": "fd7caba99e60419c9178c4caa0ab0f1b95544abfea31c337b129860dffb9b434",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08895883200011667,
+      "audio_s": 3.575
+    },
+    {
+      "id": "ordinary-meeting__bm_george__clean",
+      "sha256": "30c11174e0ad32302c85fd97fd9bfa777c585a4847e35e4fc468c4d569bc888e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09753782300003877,
+      "audio_s": 3.95
+    },
+    {
+      "id": "ordinary-meeting__af_bella__clean",
+      "sha256": "a633f43972d3637f93e7cc773eb5c66c3d0d9aaf0855a96a50d50a957a48a53e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08094507999976486,
+      "audio_s": 3.3
+    },
+    {
+      "id": "ordinary-meeting__am_michael__clean",
+      "sha256": "542baec87589803786610c12c2ae1b41e34c9966929f4eb39a8a47f6831b0ffe",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.089339869000014,
+      "audio_s": 3.525
+    },
+    {
+      "id": "ordinary-train__bf_emma__clean",
+      "sha256": "8fafe73ce5b8797d4f00f46ccc9cca4082f44faa1d8e16224ee9ad5a5d802447",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09370626400004767,
+      "audio_s": 3.75
+    },
+    {
+      "id": "ordinary-train__bm_george__clean",
+      "sha256": "000242ed6610a0cb82e01202d62a3cc21fd6277e823d6a1e99f43018e08aaf20",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.1056764300001305,
+      "audio_s": 4.175
+    },
+    {
+      "id": "ordinary-train__af_bella__clean",
+      "sha256": "c5fb3741de865f877841413dae876236b8f5076f1aecf103ccd414806affb9bc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0898777750003319,
+      "audio_s": 3.6
+    },
+    {
+      "id": "ordinary-train__am_michael__clean",
+      "sha256": "fdd19d80037312db94d3722ffad1f9c6b833fb246a7cca8d6737af11df76e2d1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0980116249997991,
+      "audio_s": 3.925
+    },
+    {
+      "id": "ordinary-repeat__bf_emma__clean",
+      "sha256": "09030352735360a0ba16cca65240e8c65f603c362ca4ed800edf22f033e2c708",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09359565900012967,
+      "audio_s": 3.825
+    },
+    {
+      "id": "ordinary-repeat__bm_george__clean",
+      "sha256": "f98b3b91fe9877b4dee80043a504c4392e99658b2dda64741fd676bc597dd83e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10634905899996738,
+      "audio_s": 4.15
+    },
+    {
+      "id": "ordinary-repeat__af_bella__clean",
+      "sha256": "52f1130e995c6dfdfd3e6baad16f19856fb65a4f926e6fb2af897ad32d790273",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08936227599997437,
+      "audio_s": 3.6
+    },
+    {
+      "id": "ordinary-repeat__am_michael__clean",
+      "sha256": "2d379489aa458e93e739c0ff783626e808c9e9a092af59d1a7bfb62c78cad7b3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09806369499983703,
+      "audio_s": 3.9
+    },
+    {
+      "id": "ordinary-music__bf_emma__clean",
+      "sha256": "b44984a660a77e1eba1c35a4b0507c60ca694b3acec87e313c7faf189901d1bb",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09829442699992796,
+      "audio_s": 3.9
+    },
+    {
+      "id": "ordinary-music__bm_george__clean",
+      "sha256": "baaacb3482a01d0df5961c647a686843f5561861569761696463436045c337b7",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.11044358400022247,
+      "audio_s": 4.375
+    },
+    {
+      "id": "ordinary-music__af_bella__clean",
+      "sha256": "53ef114299b50711eed351fb2b4863104b11bd08c8802daa7acafa5ec0149a63",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09725995600001625,
+      "audio_s": 3.925
+    },
+    {
+      "id": "ordinary-music__am_michael__clean",
+      "sha256": "3245e89046b916dbfa04cb4b9d5b9ffba86db84f2880a44a41990a25648a3fed",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10175166400040325,
+      "audio_s": 4.05
+    },
+    {
+      "id": "wake-hey__bf_emma__clean",
+      "sha256": "c074896ce902820c7dd79ca93da82480e619495ed721e05a658b6e73184630e7",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06424111000023913,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__bf_emma__noise-snr20db",
+      "sha256": "3d8a64d23b7e7ea1aacb4c0cd07663e9b698b5482b8b6c3e2b61fdc2bf3a71f3",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06405276899977252,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__bf_emma__noise-snr10db",
+      "sha256": "6701ba542c36c911b45becb8a46a6cb3a1ec1428f0601f42fe27a555b4a7a33b",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06494790600027045,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__bf_emma__room-fir-synthetic",
+      "sha256": "84f8f817f8e252de90035414f9c0c1e5de85a2abe82b9f6d22428d27ac389cb3",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0686268059998838,
+      "audio_s": 2.763
+    },
+    {
+      "id": "wake-hey__bf_emma__attenuation-minus12db",
+      "sha256": "951f6c0d55d33e493a9fab593726185030f4f30d5d6a40c28d8e942ea6a90144",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06414186199981486,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__bf_emma__speech-overlap-synthetic",
+      "sha256": "1b150aba2629273410ac1bc468678f4cc5c7f179864a38c1af8844e4f6636277",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10364444400011052,
+      "audio_s": 4.1
+    },
+    {
+      "id": "wake-hey__bm_george__clean",
+      "sha256": "1507235d22b0aec222716f0ddd39af2cfe7f3c9280d2096418ce0c41474c15d9",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0650920960001713,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__bm_george__noise-snr20db",
+      "sha256": "288e6c6bae9926c6c1e5196130426b46c0ae2d1ecaf965621a32051c868c0e36",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06569493100005275,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__bm_george__noise-snr10db",
+      "sha256": "3a5ef81be01c886b30abe7a4b96f8f8ba666f1dfe1f8a7613b0987d7a73011b0",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0662439610000547,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__bm_george__room-fir-synthetic",
+      "sha256": "70bd27821a52c70870f1d9c50c6189936c1b23694deb4d1d697fd2390d5a5db7",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06940468399989186,
+      "audio_s": 2.813
+    },
+    {
+      "id": "wake-hey__bm_george__attenuation-minus12db",
+      "sha256": "d0b1ab6c0d0fe6f726ca4b340ae8bbe63246801b4a3747fed4073e70183e6a49",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06632648699996935,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__bm_george__speech-overlap-synthetic",
+      "sha256": "d135a2aeaed77da47f96b00b569801e1145724306009a95e9d52ac1c0440c767",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.11813716400001795,
+      "audio_s": 4.575
+    },
+    {
+      "id": "wake-hey__af_bella__clean",
+      "sha256": "8e3721bb82e5e151e91ff5fd41b63abad1c420ac378f0e8e8a2186c9a97d7cb4",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06540504399981728,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__af_bella__noise-snr20db",
+      "sha256": "5c21df2efdf70e0694de2d25e473321c57b607beb2c3e00d3b3cfb7e530b6859",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0670415250001497,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__af_bella__noise-snr10db",
+      "sha256": "326aabe028a2b44605185362e922f2c8df10f3a54a0544a720799f78ac456aaf",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0652110780001749,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__af_bella__room-fir-synthetic",
+      "sha256": "a309ddb098f7f2156eb5a5d240a4f21ef95c4bddeb054269fe26132d2db69dc9",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06922270599989133,
+      "audio_s": 2.763
+    },
+    {
+      "id": "wake-hey__af_bella__attenuation-minus12db",
+      "sha256": "6d0d3ffd6ff2bda40b4f5894210a7035177d42ac2cd64c520bb3958c21fedc69",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06605693900019105,
+      "audio_s": 2.65
+    },
+    {
+      "id": "wake-hey__af_bella__speech-overlap-synthetic",
+      "sha256": "0eb28e22bc7eb97aa52f6339a10963013d472ed39082b0e60fa07d27521d2267",
+      "positive": true,
+      "detections": [],
+      "wall_s": 0.10235754799987262,
+      "audio_s": 4.025
+    },
+    {
+      "id": "wake-hey__am_michael__clean",
+      "sha256": "2d7643259b5042c048928d72a279243590332df8e08310a0cd3c854d22f6efe8",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06512197599977299,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__am_michael__noise-snr20db",
+      "sha256": "c0bb7499363a5566b96ad837b64fda7e7e96eea9b35ebb2421b9f5909558a3f5",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06426661100022102,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__am_michael__noise-snr10db",
+      "sha256": "9e6954334bec50cdd9ae9532c675f568d69d400ca76e9a5245e9118e8c17f41e",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06426224799997726,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__am_michael__room-fir-synthetic",
+      "sha256": "7fed7e9d40e42d39715b9943f70980f464961262de613f734c80695f180d0d14",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06822289799993086,
+      "audio_s": 2.813
+    },
+    {
+      "id": "wake-hey__am_michael__attenuation-minus12db",
+      "sha256": "ad0411d0287aecd82f44d7b7fb30320a804f9f7776e14a8cf14b0b55e3d04f15",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.06443697099985002,
+      "audio_s": 2.7
+    },
+    {
+      "id": "wake-hey__am_michael__speech-overlap-synthetic",
+      "sha256": "25362dd8587be9b6246db4ebeb0452a7690b4b17c9cb5be0f61a5b6c531213ca",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.106333383999754,
+      "audio_s": 4.25
+    },
+    {
+      "id": "wake-okay__bf_emma__clean",
+      "sha256": "20a865570a9e6027d6d042cc398ce14393b2733e983892ff672a72f001efa828",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0723034140000891,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__bf_emma__noise-snr20db",
+      "sha256": "9887fa1be1a2ad9409131e59b15ac53224eca4d459844cc07ff682840daaf56b",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07246454100004485,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__bf_emma__noise-snr10db",
+      "sha256": "d528f259082f88f3fd137dd2d166a9c9882c5aeec38b1047bbc70d9f1a55f1b3",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07201482200025566,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__bf_emma__room-fir-synthetic",
+      "sha256": "bcc5a6a5987b30aac4dd6f2ace6c89db730dda996e260e38b5a1d1b5aaa754c4",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07240727200041874,
+      "audio_s": 2.988
+    },
+    {
+      "id": "wake-okay__bf_emma__attenuation-minus12db",
+      "sha256": "abf699904db8cd01a54e24dc7351099531808c33c4a731ca34ce6a9669c3b67a",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07215439699984927,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__bf_emma__speech-overlap-synthetic",
+      "sha256": "a1ddd2923345791e8bb06c6b689057923bcd6f7b09f0cb15973e1567f9cb3008",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10263975899988509,
+      "audio_s": 4.1
+    },
+    {
+      "id": "wake-okay__bm_george__clean",
+      "sha256": "fadd327503e853ad75e1e9d953bc557d933d2b25a45a87752b7818e0d1a77738",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07304580100026214,
+      "audio_s": 2.95
+    },
+    {
+      "id": "wake-okay__bm_george__noise-snr20db",
+      "sha256": "dc451aba7437db133ce86053648890060935e94758b8b526be3d2a04928737ab",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07322207600009278,
+      "audio_s": 2.95
+    },
+    {
+      "id": "wake-okay__bm_george__noise-snr10db",
+      "sha256": "e9e591264342939c971c406b7aa25a731833290de6f083db0c2734959c4cbc36",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07242640999993455,
+      "audio_s": 2.95
+    },
+    {
+      "id": "wake-okay__bm_george__room-fir-synthetic",
+      "sha256": "9413cd210327a67f55cc84366d9bf6506b557c1c980a0c1682524824ce220111",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07675185200014312,
+      "audio_s": 3.063
+    },
+    {
+      "id": "wake-okay__bm_george__attenuation-minus12db",
+      "sha256": "18ad1e8942bd979b92b463958638cccebaf2e6a24a1c993ec6f32a0d3f096069",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07286347400031445,
+      "audio_s": 2.95
+    },
+    {
+      "id": "wake-okay__bm_george__speech-overlap-synthetic",
+      "sha256": "03c372108d8309f08e9dbcf4d2e988cc3ebe4eb519049a68b692a76bd858d8f0",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.11532278300001053,
+      "audio_s": 4.575
+    },
+    {
+      "id": "wake-okay__af_bella__clean",
+      "sha256": "59578e14b2b6701ff120e04ba77bd28534db5d6a0c7d82c9e11a90f854375519",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06927173800022501,
+      "audio_s": 2.8
+    },
+    {
+      "id": "wake-okay__af_bella__noise-snr20db",
+      "sha256": "588b07460e889fd738500c6ae7943316c74c6abab437ed2f482524cf7bfaeb8f",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0699328499999865,
+      "audio_s": 2.8
+    },
+    {
+      "id": "wake-okay__af_bella__noise-snr10db",
+      "sha256": "c9f2b893b56bae86c34092ee337a184254d0007cda2fe60ebe455176ce48af78",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07212669499995172,
+      "audio_s": 2.8
+    },
+    {
+      "id": "wake-okay__af_bella__room-fir-synthetic",
+      "sha256": "26f1b0479d160af9d692cf2fb2f9030279f42794855ddf3f8c80be665364108f",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07559750400014309,
+      "audio_s": 2.913
+    },
+    {
+      "id": "wake-okay__af_bella__attenuation-minus12db",
+      "sha256": "a6c090a885dd62321a0d4c594e758914849dbb4957cbafe366357317a51e4d40",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07162245700010317,
+      "audio_s": 2.8
+    },
+    {
+      "id": "wake-okay__af_bella__speech-overlap-synthetic",
+      "sha256": "84bf9d2b78e46879157e31a1ef55fe5b0ebf2e2aa2ae3f113271b3d266c299c1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.1066369059999488,
+      "audio_s": 4.025
+    },
+    {
+      "id": "wake-okay__am_michael__clean",
+      "sha256": "b6ebcc04a6ba8d66e4bf636c17d8b2c1f9b7566a102dbb3cc44acbae3e0c8370",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0768271580000146,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__am_michael__noise-snr20db",
+      "sha256": "7e71477f96485c6328c27652d79f2918184470cb71eea1cb848d7f8cdaad6a77",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08184357999971326,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__am_michael__noise-snr10db",
+      "sha256": "f5bea71fd76f1642d5458cdb3136a8068279bb6327d2b1cc8689283e3d6ba2e6",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07535674799964909,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__am_michael__room-fir-synthetic",
+      "sha256": "9a726eef29c64a67081f196ea16ad0df39a1260a1e43cebf82164701ae2cb427",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.07601521000015055,
+      "audio_s": 2.988
+    },
+    {
+      "id": "wake-okay__am_michael__attenuation-minus12db",
+      "sha256": "fd1bf2bf4d798a47b5e8958523089d2e0b317971594795e3888a347871537c01",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07574747900025613,
+      "audio_s": 2.875
+    },
+    {
+      "id": "wake-okay__am_michael__speech-overlap-synthetic",
+      "sha256": "8915635710f8577d728839b4123829e6d7f6093991beff0930ce917e8c0778ff",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1680000,
+          "end_us": 1760000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.11092010799984564,
+      "audio_s": 4.25
+    },
+    {
+      "id": "wake-hey-time__bf_emma__clean",
+      "sha256": "5578befcf7d7ed8dfa0b16f10ca7657c4d7c566c919fa8f4ff03ea10fdc9759a",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08920095500025127,
+      "audio_s": 3.425
+    },
+    {
+      "id": "wake-hey-time__bf_emma__noise-snr20db",
+      "sha256": "0f9dc794856360bcea2a8338567ab36ee3c38420293cf299819ff7ab74eb4b9b",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08888778499976979,
+      "audio_s": 3.425
+    },
+    {
+      "id": "wake-hey-time__bf_emma__noise-snr10db",
+      "sha256": "e536b199efe2b8787d590cffa3a73d829f23f2313f17d9b09af949568aadc3a3",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08863697700007833,
+      "audio_s": 3.425
+    },
+    {
+      "id": "wake-hey-time__bf_emma__room-fir-synthetic",
+      "sha256": "ac52f56a25cc8e96ca5e16ef4a92067eac759663765357f454edb067134f859a",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09268722400020124,
+      "audio_s": 3.538
+    },
+    {
+      "id": "wake-hey-time__bf_emma__attenuation-minus12db",
+      "sha256": "5e1c70b9c1a264bbc31afadc7fee734973bfb2ec7ce235623c4a759f74da32c9",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08889061000036236,
+      "audio_s": 3.425
+    },
+    {
+      "id": "wake-hey-time__bf_emma__speech-overlap-synthetic",
+      "sha256": "105187d8054cbf70ef46d9cb634a067c0b73dbedf499167892f52c341f19663c",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10685794800019721,
+      "audio_s": 4.1
+    },
+    {
+      "id": "wake-hey-time__bm_george__clean",
+      "sha256": "5195ac8337b85d65d828fc7fd532483b72fb97972f4c6490a0115444b2ffd968",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09504242900038662,
+      "audio_s": 3.65
+    },
+    {
+      "id": "wake-hey-time__bm_george__noise-snr20db",
+      "sha256": "801a52aa810fa1efed09ac68a842d23f9053133e0be34a7ed1cda5a1376d5225",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09493774400016264,
+      "audio_s": 3.65
+    },
+    {
+      "id": "wake-hey-time__bm_george__noise-snr10db",
+      "sha256": "3cc20674295ac19a877d4d31005dd3a5f40859b9933cd0deeb0e8250871f781a",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0942412049998893,
+      "audio_s": 3.65
+    },
+    {
+      "id": "wake-hey-time__bm_george__room-fir-synthetic",
+      "sha256": "63f64c141d8d8ff83e15215077a934e9933825f5508f6e40c44b24acfa145aca",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09460850999994364,
+      "audio_s": 3.763
+    },
+    {
+      "id": "wake-hey-time__bm_george__attenuation-minus12db",
+      "sha256": "7385284e764415d1189843572ac1a57a3567561491059981f738ceeffa69b3c0",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09126154299974587,
+      "audio_s": 3.65
+    },
+    {
+      "id": "wake-hey-time__bm_george__speech-overlap-synthetic",
+      "sha256": "bb69552294656b24830b41099a9246f4cba206f1e413fe3eb0a1828ba9ab7377",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.11595017200033908,
+      "audio_s": 4.575
+    },
+    {
+      "id": "wake-hey-time__af_bella__clean",
+      "sha256": "e94d3866cdfdb46051facb6c9d515e84decd74754ed7edbed3cd35d100868ad9",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08965513700013616,
+      "audio_s": 3.575
+    },
+    {
+      "id": "wake-hey-time__af_bella__noise-snr20db",
+      "sha256": "2ab70345f0c6ce2a7a69fbb742513686bbef6b141d7c35a1919f64751bb14bea",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08924539500003448,
+      "audio_s": 3.575
+    },
+    {
+      "id": "wake-hey-time__af_bella__noise-snr10db",
+      "sha256": "8a52784c0024bbe1bb35f8b001f324fb0f5f117867bc7cb0ef3f9f808ea0ed0b",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08994192199997997,
+      "audio_s": 3.575
+    },
+    {
+      "id": "wake-hey-time__af_bella__room-fir-synthetic",
+      "sha256": "ab847d553d7e885c3f496456b8c70ead929fe50985f1c0eabb9503693829dcb9",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09524223299968071,
+      "audio_s": 3.688
+    },
+    {
+      "id": "wake-hey-time__af_bella__attenuation-minus12db",
+      "sha256": "2fc44b26049c6a0b0ec27fdb2895e8d04eb335316194cbdb32eb05198f983a0d",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08912974600025336,
+      "audio_s": 3.575
+    },
+    {
+      "id": "wake-hey-time__af_bella__speech-overlap-synthetic",
+      "sha256": "befa5a786f4ffbdace7e39996072f5008449cc62219d53de54926bf273a91da9",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10168098199983433,
+      "audio_s": 4.025
+    },
+    {
+      "id": "wake-hey-time__am_michael__clean",
+      "sha256": "a686216a34a918de87cb2b91cd736658f72942a85007f06162922abc488f9759",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08459928299998865,
+      "audio_s": 3.4
+    },
+    {
+      "id": "wake-hey-time__am_michael__noise-snr20db",
+      "sha256": "9693b53502e0e176561015f23fa4c917ce51f325b056a073101cc942d0b40214",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08491111900002579,
+      "audio_s": 3.4
+    },
+    {
+      "id": "wake-hey-time__am_michael__noise-snr10db",
+      "sha256": "fc30c0cda5d92aa83189f8b5b067e9f99268342970a54cee1f5f4885731147db",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08549056299989388,
+      "audio_s": 3.4
+    },
+    {
+      "id": "wake-hey-time__am_michael__room-fir-synthetic",
+      "sha256": "4cbaaff58fc1ac4424436112c73652279a67a8a00dd66a0db3072126ba258456",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08933990599962272,
+      "audio_s": 3.513
+    },
+    {
+      "id": "wake-hey-time__am_michael__attenuation-minus12db",
+      "sha256": "f9ec78c03c5ef70bad5c71b5bf959ac51a210eecb552e30dcf7c16bc8e0ac0bd",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08542741699966427,
+      "audio_s": 3.4
+    },
+    {
+      "id": "wake-hey-time__am_michael__speech-overlap-synthetic",
+      "sha256": "1aff9a5cf6478af565c0c26cac8b74057e561d81b16546acefebdeb14b6361cf",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10718448700026784,
+      "audio_s": 4.25
+    },
+    {
+      "id": "wake-okay-steam__bf_emma__clean",
+      "sha256": "4dd5b50244579e9559fe472390581b27f94f21780b7cb205eeda8c2abde5604c",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09271478099981323,
+      "audio_s": 3.675
+    },
+    {
+      "id": "wake-okay-steam__bf_emma__noise-snr20db",
+      "sha256": "660f4aa60866ce2c255bd34bc596f897c567d6230a23707731736570b2298fde",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09608234100005575,
+      "audio_s": 3.675
+    },
+    {
+      "id": "wake-okay-steam__bf_emma__noise-snr10db",
+      "sha256": "1561578d92b8260a36e1a22164b53524ff2f6c42b4afeaa862fc34da5c449a36",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09594041199989078,
+      "audio_s": 3.675
+    },
+    {
+      "id": "wake-okay-steam__bf_emma__room-fir-synthetic",
+      "sha256": "c8b18eebc6021079fbe7493b24bb6bba0031d31348cff72b1a3433353754a36c",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09478548399965803,
+      "audio_s": 3.788
+    },
+    {
+      "id": "wake-okay-steam__bf_emma__attenuation-minus12db",
+      "sha256": "40cc9380aeb3dfea49b72d68d30f1d319d499fbdb2281350e29bbebde5f055de",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09435051099990233,
+      "audio_s": 3.675
+    },
+    {
+      "id": "wake-okay-steam__bf_emma__speech-overlap-synthetic",
+      "sha256": "44f48a65bd490e92cc27f2e21b3d689e69f10fa51e2cee961bc8456449776b17",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10437824900009218,
+      "audio_s": 4.1
+    },
+    {
+      "id": "wake-okay-steam__bm_george__clean",
+      "sha256": "c649b1dd98751ad327b12b687cf679810c925c1fdef397c6bd0b85bb564cc217",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09906894499999908,
+      "audio_s": 3.95
+    },
+    {
+      "id": "wake-okay-steam__bm_george__noise-snr20db",
+      "sha256": "aa03f615be28e69430d26b79242dbc115b4549649d046d6a2fe2c0bc4ca25932",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0978503549999914,
+      "audio_s": 3.95
+    },
+    {
+      "id": "wake-okay-steam__bm_george__noise-snr10db",
+      "sha256": "cd01d58650d70654ea4c7e22c7c56bad1bbf52062835903fbbfc4e05457545b3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09897255899977608,
+      "audio_s": 3.95
+    },
+    {
+      "id": "wake-okay-steam__bm_george__room-fir-synthetic",
+      "sha256": "c2c5640fd273a7ded5166ee76bc4b1e83070809dd01f6fa7fde1ae37375bad3c",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10301103799974953,
+      "audio_s": 4.063
+    },
+    {
+      "id": "wake-okay-steam__bm_george__attenuation-minus12db",
+      "sha256": "5bef0b3a9ba9f06d054d2a4b50fb6f0f41917baabbb326ef1aae5443c20dbc5d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09762885999998616,
+      "audio_s": 3.95
+    },
+    {
+      "id": "wake-okay-steam__bm_george__speech-overlap-synthetic",
+      "sha256": "6d0fde7c312c77eb7669ae245ea677db8937f03e16e700fcd095370a2a0a696f",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.11530042799995499,
+      "audio_s": 4.575
+    },
+    {
+      "id": "wake-okay-steam__af_bella__clean",
+      "sha256": "b41910958c1816a90360516913eff64de98d967863b363d35294ac1259cf4ca4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09032061700008853,
+      "audio_s": 3.6
+    },
+    {
+      "id": "wake-okay-steam__af_bella__noise-snr20db",
+      "sha256": "4d2f0fd7dfade046925e94e30175175e1f0ab8d9044b2ef3a44a5387511f1389",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09060522099980517,
+      "audio_s": 3.6
+    },
+    {
+      "id": "wake-okay-steam__af_bella__noise-snr10db",
+      "sha256": "b6fe3b2f6aca985d46c0ffb025af8c53e4487bfd62598c421ee28b7f8aa20293",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08967954299987468,
+      "audio_s": 3.6
+    },
+    {
+      "id": "wake-okay-steam__af_bella__room-fir-synthetic",
+      "sha256": "9a6448ea25eb25c8431713277d043fa68cff1ed0f1068f3fa505f2739fe461fa",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09411847599994871,
+      "audio_s": 3.713
+    },
+    {
+      "id": "wake-okay-steam__af_bella__attenuation-minus12db",
+      "sha256": "a7bce0fe0751b1ff35fb3615752c5c8b3b07582dd9a8de1fc0738bbbce843bdb",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09080444700020962,
+      "audio_s": 3.6
+    },
+    {
+      "id": "wake-okay-steam__af_bella__speech-overlap-synthetic",
+      "sha256": "189b92d61fb83b0f4c21a077b5b74ca07ee93a42de0801c33a0fdffea062cb35",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10232012999995277,
+      "audio_s": 4.025
+    },
+    {
+      "id": "wake-okay-steam__am_michael__clean",
+      "sha256": "5eac7355a0fad45b022a3e7aa24d9b44bea78a43d2e5a9640910dd7abc5e2601",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09019534499975634,
+      "audio_s": 3.625
+    },
+    {
+      "id": "wake-okay-steam__am_michael__noise-snr20db",
+      "sha256": "d2ae8cb36da0027e7fe3168d6caef6455f7c2ff6d812d4ac5fea43363ad52dd3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08968853499982288,
+      "audio_s": 3.625
+    },
+    {
+      "id": "wake-okay-steam__am_michael__noise-snr10db",
+      "sha256": "1fabafeb3da3a5c6567fa4582e94583127ba60ae95e1efd8c0f524ea40d36c05",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09079711199956364,
+      "audio_s": 3.625
+    },
+    {
+      "id": "wake-okay-steam__am_michael__room-fir-synthetic",
+      "sha256": "f6da2154c0b3a911218266505a68e79d3f12383706904cee7ab39ad30d372453",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09266949199991359,
+      "audio_s": 3.738
+    },
+    {
+      "id": "wake-okay-steam__am_michael__attenuation-minus12db",
+      "sha256": "bc6cb31a60926b780fbde8c054358eba9be9b2cf42bad49f5825a203a8d0beaa",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08921341999985088,
+      "audio_s": 3.625
+    },
+    {
+      "id": "wake-okay-steam__am_michael__speech-overlap-synthetic",
+      "sha256": "2498a8d846443577bc31241373820e15daf2960a30918470727a64b9170e9c7f",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10868086600021343,
+      "audio_s": 4.25
+    },
+    {
+      "id": "wake-hey-brave__bf_emma__clean",
+      "sha256": "28dcdb0c8884cbba2cc30bfd5529ac201791fbfc7e2822391087c6323278fa0a",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08651200799977232,
+      "audio_s": 3.5
+    },
+    {
+      "id": "wake-hey-brave__bf_emma__noise-snr20db",
+      "sha256": "3ec1b26350704518d63a20ba4ed67557e4e7376e8cf04ecf0716c51b1d366ca0",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08556316399972275,
+      "audio_s": 3.5
+    },
+    {
+      "id": "wake-hey-brave__bf_emma__noise-snr10db",
+      "sha256": "15cd1676cba3d8a9b7105f1c7c5668a1291943f21dd5ffd22ae0bc73b1f89393",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08950175700010732,
+      "audio_s": 3.5
+    },
+    {
+      "id": "wake-hey-brave__bf_emma__room-fir-synthetic",
+      "sha256": "f33dd01e5f31910007726dff4095dd0f72bfc2e06df7d9b13c321077759283d7",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09213594399989233,
+      "audio_s": 3.613
+    },
+    {
+      "id": "wake-hey-brave__bf_emma__attenuation-minus12db",
+      "sha256": "466adceeba1219b6ca4af2361c110a6070664c0f7f4800914ebac1f496f05e48",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08659647000013138,
+      "audio_s": 3.5
+    },
+    {
+      "id": "wake-hey-brave__bf_emma__speech-overlap-synthetic",
+      "sha256": "55af1706ae8248ca7249fece77f3a23daddc57b7cf3e9b915b1ce736d088dbea",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10441670599993813,
+      "audio_s": 4.1
+    },
+    {
+      "id": "wake-hey-brave__bm_george__clean",
+      "sha256": "6fccb253e671e87481b70f5b04874b77d62030b7cae15699808209af71d999e5",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09514575000002878,
+      "audio_s": 3.725
+    },
+    {
+      "id": "wake-hey-brave__bm_george__noise-snr20db",
+      "sha256": "d623c959ed09018a650c2734cf2603733d8c695db2bf94e0d65a12f0b5aef0e7",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09484619299973929,
+      "audio_s": 3.725
+    },
+    {
+      "id": "wake-hey-brave__bm_george__noise-snr10db",
+      "sha256": "1d4361b3b5ba8699347dbe921a15c58d79913996bc22dc3d41827dea5f03c66a",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.0952106529998673,
+      "audio_s": 3.725
+    },
+    {
+      "id": "wake-hey-brave__bm_george__room-fir-synthetic",
+      "sha256": "2578a8152217cd566bb5926fa8399adca615e80d2d173f1a1c8befff7327623d",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09981289999996079,
+      "audio_s": 3.838
+    },
+    {
+      "id": "wake-hey-brave__bm_george__attenuation-minus12db",
+      "sha256": "baba23ad6bd2638c2e7b47b163a2bf71d651ae0df9aeef43b5dcb0823d77df49",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09630591599989202,
+      "audio_s": 3.725
+    },
+    {
+      "id": "wake-hey-brave__bm_george__speech-overlap-synthetic",
+      "sha256": "198716c1711585a3cdbab6c8cb384144e3abdc4dbb2fd75d3711d5cdf2523343",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.11591698599977462,
+      "audio_s": 4.575
+    },
+    {
+      "id": "wake-hey-brave__af_bella__clean",
+      "sha256": "0d8332ac02ead8ba18844cbb23252bc0d01e07098719b2553a131e184755e034",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08899354999994102,
+      "audio_s": 3.525
+    },
+    {
+      "id": "wake-hey-brave__af_bella__noise-snr20db",
+      "sha256": "3b77c174d7e78e1809c2fe3ba9488d1e5d1885e8343c7dc6c7e27c8f2e1737a4",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08937369999966904,
+      "audio_s": 3.525
+    },
+    {
+      "id": "wake-hey-brave__af_bella__noise-snr10db",
+      "sha256": "5c5cb8c581c0e1b195905823fd963630d41d542e670b4fe4182e8d49923baa3b",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08984451400010585,
+      "audio_s": 3.525
+    },
+    {
+      "id": "wake-hey-brave__af_bella__room-fir-synthetic",
+      "sha256": "135faef8f0d23f669dd65a095aaa5e3dfb746e6b15596a5fdfc5b1eada1dc5cb",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08943562800004656,
+      "audio_s": 3.638
+    },
+    {
+      "id": "wake-hey-brave__af_bella__attenuation-minus12db",
+      "sha256": "3ec1966f538fd7662adf12691142c42892bf1cc04ca2c2c2176d65edce66c685",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08965166899997712,
+      "audio_s": 3.525
+    },
+    {
+      "id": "wake-hey-brave__af_bella__speech-overlap-synthetic",
+      "sha256": "868992342febf540eeac805f4ed45fb7acd4aa132fdf06abb542ec874f4f9d70",
+      "positive": true,
+      "detections": [],
+      "wall_s": 0.10210855400009677,
+      "audio_s": 4.025
+    },
+    {
+      "id": "wake-hey-brave__am_michael__clean",
+      "sha256": "ffa3b2ba22225d1f6f5cf16f30778686a1d151843dc19b48f89a463adfc5ef65",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08574520899992422,
+      "audio_s": 3.375
+    },
+    {
+      "id": "wake-hey-brave__am_michael__noise-snr20db",
+      "sha256": "e2351dec9976a1a6b8e80118dd8b044fd4e169a51c8bff806e23f3270d7d9469",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08662789600020915,
+      "audio_s": 3.375
+    },
+    {
+      "id": "wake-hey-brave__am_michael__noise-snr10db",
+      "sha256": "e04581efccd0778bf7ee3a5db35ac188eed883319be938760977194b5e8dcda7",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08565449800016722,
+      "audio_s": 3.375
+    },
+    {
+      "id": "wake-hey-brave__am_michael__room-fir-synthetic",
+      "sha256": "f1b2e263f518088181672a01ea2c4aa6baaf614a057edc61ca74c84b0cc805b4",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08673922900015896,
+      "audio_s": 3.488
+    },
+    {
+      "id": "wake-hey-brave__am_michael__attenuation-minus12db",
+      "sha256": "82cdc30bcd98c1d46183d3d36e5ead1dd6db595fe126f9b2095bca84b4873087",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08633324599986736,
+      "audio_s": 3.375
+    },
+    {
+      "id": "wake-hey-brave__am_michael__speech-overlap-synthetic",
+      "sha256": "3a7873683dde35de058a491720bc7d886a0b9153c46e742d219669068460e032",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10735719600006632,
+      "audio_s": 4.25
+    },
+    {
+      "id": "wake-okay-whatsapp__bf_emma__clean",
+      "sha256": "696a9cbd31bb5245b98b0b9e2f042652427ee16816900ab36e4bf17de8e362d8",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09441848300002675,
+      "audio_s": 3.825
+    },
+    {
+      "id": "wake-okay-whatsapp__bm_george__clean",
+      "sha256": "27c4799e07e862079525e77a4309d4ff19cf03587e83319ab0ef7cad405609e2",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1520000,
+          "end_us": 1600000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09830404800004544,
+      "audio_s": 3.95
+    },
+    {
+      "id": "wake-okay-whatsapp__af_bella__clean",
+      "sha256": "e5a0ae17883e5ef4aabfd3316fe528225ad15e48138faf7ec97d23779a1b6bca",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.09466278199988665,
+      "audio_s": 3.725
+    },
+    {
+      "id": "wake-okay-whatsapp__am_michael__clean",
+      "sha256": "71cc45af9651878dfc46d115716bc0e8f06c6b4d00743a18fe033e1efd6df772",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09433977699973184,
+      "audio_s": 3.675
+    },
+    {
+      "id": "wake-hey-yapyap__bf_emma__clean",
+      "sha256": "cb422004c6c1705ddcab44b536d769c719bc8ab2e4fa7e1395548bb5258f3c23",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10718532400005643,
+      "audio_s": 4.15
+    },
+    {
+      "id": "wake-hey-yapyap__bm_george__clean",
+      "sha256": "0076b8af7e59d474a9dfc1bc1aa4ba894a2276f8802545a9fc1de9890e62a28c",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.11197092499969585,
+      "audio_s": 4.45
+    },
+    {
+      "id": "wake-hey-yapyap__af_bella__clean",
+      "sha256": "e0ec0135253f5e6935244afa603a4141638dec26e2c3c5da411a20be9f4ccf12",
+      "positive": true,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.10331839900027262,
+      "audio_s": 4.025
+    },
+    {
+      "id": "wake-hey-yapyap__am_michael__clean",
+      "sha256": "b454faad7b8c470a223055dce2d9268beadbfdc4dc0cf32f3880e9296f911f9d",
+      "positive": true,
+      "detections": [],
+      "wall_s": 0.10322179799959486,
+      "audio_s": 4.125
+    },
+    {
+      "id": "negative-brightness__bf_emma__clean",
+      "sha256": "4c65291b7540ea2127b8eefdf833236c753e5a00705be1072db7266ec29a06a4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07237581900017176,
+      "audio_s": 2.95
+    },
+    {
+      "id": "negative-brightness__bf_emma__noise-snr20db",
+      "sha256": "217243318af32b01c6639238d3ce02a303a00f437279cbce6e4e078917f26bb4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07215246200030379,
+      "audio_s": 2.95
+    },
+    {
+      "id": "negative-brightness__bf_emma__noise-snr10db",
+      "sha256": "65f318b0cd16899a3291d2b1f8aff75dc98f88000d5faa1f3be9ccfc726272fc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07239352099986718,
+      "audio_s": 2.95
+    },
+    {
+      "id": "negative-brightness__bf_emma__room-fir-synthetic",
+      "sha256": "065741d3ad59f77e6b944bb286cc32f82d15bf7cddad39f1239e42231067518a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07628753700009838,
+      "audio_s": 3.063
+    },
+    {
+      "id": "negative-brightness__bf_emma__attenuation-minus12db",
+      "sha256": "711838b2006b57d93504ba139d0476afbb648f55e6bd173521e5e20d7ac68844",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07189842300022065,
+      "audio_s": 2.95
+    },
+    {
+      "id": "negative-brightness__bf_emma__speech-overlap-synthetic",
+      "sha256": "b0ab6a466e664135cb6505776f29937edfb14f7b652f4a3699bf9cd07c28a082",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10122796699988612,
+      "audio_s": 4.1
+    },
+    {
+      "id": "negative-brightness__bm_george__clean",
+      "sha256": "43f65bdd1ba528f6545bdd5b75d07f27d09252b5578ac992259154dd62458ec3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07204153500015309,
+      "audio_s": 2.975
+    },
+    {
+      "id": "negative-brightness__bm_george__noise-snr20db",
+      "sha256": "fa1fae210ca2d0349becf0c824bb65f4de2e8ad779d68fed473d5f44a87bf65a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07189794500027347,
+      "audio_s": 2.975
+    },
+    {
+      "id": "negative-brightness__bm_george__noise-snr10db",
+      "sha256": "a7c718a95071579958d8c98e155d2d0266dbcf22688ad6d87132d4494a11e278",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07207521800000904,
+      "audio_s": 2.975
+    },
+    {
+      "id": "negative-brightness__bm_george__room-fir-synthetic",
+      "sha256": "a79014fe502b6b7f06e6da36ec0f5f42020f8e2219bc4ff0a44f4acdf8b650eb",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07656591900013154,
+      "audio_s": 3.088
+    },
+    {
+      "id": "negative-brightness__bm_george__attenuation-minus12db",
+      "sha256": "ce1f25190a966daeafc3b2131dfc391672433127c86e062abf9aa8ef73bb7a48",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07202116500002376,
+      "audio_s": 2.975
+    },
+    {
+      "id": "negative-brightness__bm_george__speech-overlap-synthetic",
+      "sha256": "b135576beb1807fc0d42c054a6eb058e9f19b2c5bb08ac9f60732cda9fe96d52",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.11565987399990263,
+      "audio_s": 4.575
+    },
+    {
+      "id": "negative-brightness__af_bella__clean",
+      "sha256": "ff73a507a3668083eec15bd7d1d8a85b577bc4b6421750756e282446aabab06d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06815310799993313,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-brightness__af_bella__noise-snr20db",
+      "sha256": "87bf3ffd2c9e98834c367d091896dcb1db9cee3eb450ecac622251daeb0af04a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06871004300001005,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-brightness__af_bella__noise-snr10db",
+      "sha256": "72cc48735ba38c1dcbe0b8da12b908c27d4d26830684fd41d7c15cf3e05ffd80",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06895371200016598,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-brightness__af_bella__room-fir-synthetic",
+      "sha256": "98067b1697df61144149124f9a32afc78c75d11e3e5b20635d25086600684f80",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07328965100032292,
+      "audio_s": 2.963
+    },
+    {
+      "id": "negative-brightness__af_bella__attenuation-minus12db",
+      "sha256": "982f4a83c92c99f1b36d342ad2174e0a83dfd17bf8aeda8ecffbf1bf02e6fed0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06937808500015308,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-brightness__af_bella__speech-overlap-synthetic",
+      "sha256": "2f4a36a5b9bc44d6c47ce2ce2bfad9e6c4fbf8d8545644ae78dd1bcb2e658a67",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10310093799989772,
+      "audio_s": 4.025
+    },
+    {
+      "id": "negative-brightness__am_michael__clean",
+      "sha256": "1afc87ebd1363fe16905b1493d4d173a288f228d9c789fe6c1839c30477286eb",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07264793500007727,
+      "audio_s": 2.9
+    },
+    {
+      "id": "negative-brightness__am_michael__noise-snr20db",
+      "sha256": "76ae38a93b441db5e47700c047430c8a86e3a47c453d409585c9917f42848977",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07252727600007347,
+      "audio_s": 2.9
+    },
+    {
+      "id": "negative-brightness__am_michael__noise-snr10db",
+      "sha256": "b80a3169d5dcad7d723243fb40fa61dd5db5bb66a9f5cdad86396907e399c2ca",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07279467199987266,
+      "audio_s": 2.9
+    },
+    {
+      "id": "negative-brightness__am_michael__room-fir-synthetic",
+      "sha256": "2e4eb8d1e355aa607c43b0f765b3022f4202e0bf1875b2e4ebd05044cfa2c717",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07263152299992726,
+      "audio_s": 3.013
+    },
+    {
+      "id": "negative-brightness__am_michael__attenuation-minus12db",
+      "sha256": "a4fe798c27fd9c052a5c6f48b101f5cc5f238c0f01337d3f895366ccde9a9c72",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07354293400021561,
+      "audio_s": 2.9
+    },
+    {
+      "id": "negative-brightness__am_michael__speech-overlap-synthetic",
+      "sha256": "dc977a5e9934113e6708e4e2a926b2cd6172749e229dc8e51d4cf19ea0985a89",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10585460499987676,
+      "audio_s": 4.25
+    },
+    {
+      "id": "negative-breathe__bf_emma__clean",
+      "sha256": "f1c6df117974d8069931ad717889c568050bbdadbbade7963debce8ee11e27e1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07000593299972024,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-breathe__bf_emma__noise-snr20db",
+      "sha256": "64052683a459369c8079597056216cb16e924aae651bd944818cf0d91d298730",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06882053800018184,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-breathe__bf_emma__noise-snr10db",
+      "sha256": "c1bd77a965c6b0c9e1615601d41405a2e0902d2fd516b54b92b70a6d8a57a5f5",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06906299399997806,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-breathe__bf_emma__room-fir-synthetic",
+      "sha256": "1046e88df28527e5f4a03b2285e23f9b6b791363c9d0613dcca017bf9452b856",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07306612100001075,
+      "audio_s": 2.963
+    },
+    {
+      "id": "negative-breathe__bf_emma__attenuation-minus12db",
+      "sha256": "3337cd6f0ccc0bec775202534e13f689df35abb394b9fba1e2528bd89c261ad4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06912919099977444,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-breathe__bf_emma__speech-overlap-synthetic",
+      "sha256": "5eda16b37aaaeae0bc8788185a902575c02101d5651af76f473679923c03db72",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10274028999992879,
+      "audio_s": 4.1
+    },
+    {
+      "id": "negative-breathe__bm_george__clean",
+      "sha256": "55e2773f299e797275823ec585d6d3c40772236cc664cab2f573dde564676847",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06877287600036652,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__bm_george__noise-snr20db",
+      "sha256": "d5fb463022b9fb095521465f849a2d67ce75d81a57439e170d72bd92dd9d82c4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06876267699999516,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__bm_george__noise-snr10db",
+      "sha256": "7de34bc3ae6bd79df0c2c5e3dd8cdcb76ef12d40c7be04aa32c2853f25ece7cb",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06812990299977173,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__bm_george__room-fir-synthetic",
+      "sha256": "758e0d609184b8d6a6deab5f67911b110897d62cb4e0a410a72adcdbbd607be5",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07264445900000283,
+      "audio_s": 2.938
+    },
+    {
+      "id": "negative-breathe__bm_george__attenuation-minus12db",
+      "sha256": "41f0c319ed6bd92e0dddf442c5b60074db3c40cc1381d3463f71df5a19ece2ac",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06862158200010526,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__bm_george__speech-overlap-synthetic",
+      "sha256": "40ca7f05182f51bf9a536ba366deb70c13845235c91711e86c0d4519283d80e4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.11493538500008071,
+      "audio_s": 4.575
+    },
+    {
+      "id": "negative-breathe__af_bella__clean",
+      "sha256": "29f07f7021203071574f70ea577736785b298ffa039214ef082fad25ccfa058e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06801307200021256,
+      "audio_s": 2.725
+    },
+    {
+      "id": "negative-breathe__af_bella__noise-snr20db",
+      "sha256": "eaa7e6105488158fb014026a905a277e80fddbab9e34330312e0c7e8275677d3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06826688499995726,
+      "audio_s": 2.725
+    },
+    {
+      "id": "negative-breathe__af_bella__noise-snr10db",
+      "sha256": "606e37f24368bee51e02bcba1d49050b642e704ebb8dd37cdd97d43a440f2cd2",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06808978600020055,
+      "audio_s": 2.725
+    },
+    {
+      "id": "negative-breathe__af_bella__room-fir-synthetic",
+      "sha256": "7294f8636c1c0ed9e0e69aa339491c966f42e2a877031f808cba1f8acca74c25",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06822129900001528,
+      "audio_s": 2.838
+    },
+    {
+      "id": "negative-breathe__af_bella__attenuation-minus12db",
+      "sha256": "580e381f9e2563cfdcbd589ad8d153d6a534d1b67b548f6ff2ae72060e5dee72",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06816820699987147,
+      "audio_s": 2.725
+    },
+    {
+      "id": "negative-breathe__af_bella__speech-overlap-synthetic",
+      "sha256": "1e9ea1a4fd781f1cf4b25ab160572fc72626d49b11e5a2b280d3b98db9b9b022",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10165551499994763,
+      "audio_s": 4.025
+    },
+    {
+      "id": "negative-breathe__am_michael__clean",
+      "sha256": "b4680a377e92e16181377f076695035df40e0141cbee47071a51369881e89ea6",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06786094499966566,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__am_michael__noise-snr20db",
+      "sha256": "1132fec9009775f8a63c415c874178fa5c59b0ed2f9a66370e885d9971b69bc7",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06875517599974046,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__am_michael__noise-snr10db",
+      "sha256": "dc431a5e307b08c94788cb219f5335a42b042574f4db4987d3a446e7af9ec928",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06945756699997219,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__am_michael__room-fir-synthetic",
+      "sha256": "fcbec71455c21d414c8a099f2df9be03478978d26340a0e9c6122bc39eecbfc8",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07381435600018449,
+      "audio_s": 2.938
+    },
+    {
+      "id": "negative-breathe__am_michael__attenuation-minus12db",
+      "sha256": "4557e1930a306414482ee3e3367905e4773ab0645d306bcce2714cba6b1b3123",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06849407299978338,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-breathe__am_michael__speech-overlap-synthetic",
+      "sha256": "2b7a040a269eefc0a09097cd26afa05b99821cfa278905eff88691200914b95d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.1069338880001851,
+      "audio_s": 4.25
+    },
+    {
+      "id": "negative-browser__bf_emma__clean",
+      "sha256": "9d707d7f7acab14a753160961b8f21758d73f5711890e0193b5709944cd95cda",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07297041199990417,
+      "audio_s": 2.875
+    },
+    {
+      "id": "negative-browser__bf_emma__noise-snr20db",
+      "sha256": "acf3896ef80a9e4206277d34ad09e0cdf78006071fac27683466f3b337aa1452",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07419030199980625,
+      "audio_s": 2.875
+    },
+    {
+      "id": "negative-browser__bf_emma__noise-snr10db",
+      "sha256": "8386c3bf4bfdce367e0b95769dd60394b3c09dddf331de08bab5315502f2a13b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0755971970002065,
+      "audio_s": 2.875
+    },
+    {
+      "id": "negative-browser__bf_emma__room-fir-synthetic",
+      "sha256": "941ae955e05c100f0e3df9325f84065f7feb9066163c5499c6f5ff72e93f1ace",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07532018599977164,
+      "audio_s": 2.988
+    },
+    {
+      "id": "negative-browser__bf_emma__attenuation-minus12db",
+      "sha256": "a9849aea12a9e84133caecf17fe4a59f9089d7bb7d033120fe82a73c8a5998b0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07529436999993777,
+      "audio_s": 2.875
+    },
+    {
+      "id": "negative-browser__bf_emma__speech-overlap-synthetic",
+      "sha256": "556ee635c461506c27f522396dcc736f7b17eb2c928ee9345b5f865c0477e2c7",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10566135399994891,
+      "audio_s": 4.1
+    },
+    {
+      "id": "negative-browser__bm_george__clean",
+      "sha256": "be329196a53a2e7d7b8f411f72d6d6d406be67a5b4d732fed43519158f04db9d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07051363800019317,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-browser__bm_george__noise-snr20db",
+      "sha256": "cc7b0116947be85bde1eb78c633d5a61838cdf85513e23cf1c3a51bb63bee4a2",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06806885000014518,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-browser__bm_george__noise-snr10db",
+      "sha256": "4140c9ad8159801afb099cd6e20665da2e0c39b6500f63ec0362e4d2d10e8ab2",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06823001199973078,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-browser__bm_george__room-fir-synthetic",
+      "sha256": "c8cbcb371c19e6c7d869a7ccaa47ac2ade57222c75bcc62bbbc7b218cf6bebbf",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0724565660002554,
+      "audio_s": 2.938
+    },
+    {
+      "id": "negative-browser__bm_george__attenuation-minus12db",
+      "sha256": "0c1d853c6e6a51473d8f398813061c8cc0dd9835f95df41e4fb27a7c1d205188",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06808526800023174,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-browser__bm_george__speech-overlap-synthetic",
+      "sha256": "a9dc244497ebf9c19d7f955ccaa26feafe55b145e8d151df1ff60780e4945a95",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.11482368800034237,
+      "audio_s": 4.575
+    },
+    {
+      "id": "negative-browser__af_bella__clean",
+      "sha256": "551b28ba70fdece03017341500ecfd1fd4adb3e5561667f80d65ec46301aa1b1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06880968300038148,
+      "audio_s": 2.8
+    },
+    {
+      "id": "negative-browser__af_bella__noise-snr20db",
+      "sha256": "d49a1f1e23505e9987d8b9257e07c9b6ad529af572bd303209a9884b4869ca0e",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06823442799986879,
+      "audio_s": 2.8
+    },
+    {
+      "id": "negative-browser__af_bella__noise-snr10db",
+      "sha256": "71ce26e5c6a1c1af2a59cc78af77e3b6c95a348ae1c5ed32c15f455de79d5f05",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06844711700023254,
+      "audio_s": 2.8
+    },
+    {
+      "id": "negative-browser__af_bella__room-fir-synthetic",
+      "sha256": "cf1f3abb78228feb3236604106dd94be2af24bde4eca6b9427eb3ea24910dd53",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.074086958999942,
+      "audio_s": 2.913
+    },
+    {
+      "id": "negative-browser__af_bella__attenuation-minus12db",
+      "sha256": "420c7a05fb9a7ab5c90511eb4782f0ca6e2c1a93d9e879b0f6efe723e68e1973",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06913531800000783,
+      "audio_s": 2.8
+    },
+    {
+      "id": "negative-browser__af_bella__speech-overlap-synthetic",
+      "sha256": "e198e94f13852b05ba6d8dce9aebcfa9a39ab36290cb4764ca755bedaca3bba9",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10502637599984155,
+      "audio_s": 4.025
+    },
+    {
+      "id": "negative-browser__am_michael__clean",
+      "sha256": "3cba3b64a6d1036a3ca0f9e66134b8686e0150c68a957bb014fdbce2a74ef1ac",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06898563799995827,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-browser__am_michael__noise-snr20db",
+      "sha256": "e4751cdb26ab8771d7dbbde2703a09a678031eca1c36dc6f865f9097fdb21fc5",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06860236800002895,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-browser__am_michael__noise-snr10db",
+      "sha256": "8e8f5a24737f235312fb6a63d7f467cc05770acf9cdb992cc8527e954a4d16ca",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06937223600016296,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-browser__am_michael__room-fir-synthetic",
+      "sha256": "00a04333b62ccfe257ac5f8d0befa223c3677bdae0120b7343e6d3287d98e1b0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07317370100008702,
+      "audio_s": 2.963
+    },
+    {
+      "id": "negative-browser__am_michael__attenuation-minus12db",
+      "sha256": "f52e2eaaf4ebc1071984d66b90e16131a8e7181be00f8d31b5ce370bdb325dc5",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06901248900021528,
+      "audio_s": 2.85
+    },
+    {
+      "id": "negative-browser__am_michael__speech-overlap-synthetic",
+      "sha256": "7a692c61154f222764ea8cd33cd61ccf2aef3402ab3eae4c3f5ce0be74b7f5e0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.1071888280002895,
+      "audio_s": 4.25
+    },
+    {
+      "id": "negative-chrome__bf_emma__clean",
+      "sha256": "aefcc1578baf1c262ad18491d31c6a511703ab7807a5216663c5f90c564d89b0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06899788900000203,
+      "audio_s": 2.75
+    },
+    {
+      "id": "negative-chrome__bm_george__clean",
+      "sha256": "50e15d40bf7762b53c82d326312b701250b59f2b9ce7756dcf714582b4a689d3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06930125600001702,
+      "audio_s": 2.775
+    },
+    {
+      "id": "negative-chrome__af_bella__clean",
+      "sha256": "8e7718927187affb997172e50e920c6f525c087a87c283a0803210afd3d5fbdc",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06547942499992132,
+      "audio_s": 2.65
+    },
+    {
+      "id": "negative-chrome__am_michael__clean",
+      "sha256": "5b9cb7630e3c7b2b12ae805f6979476fd5f6c7d51ed29d382cf50be11e7ffb02",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.06824296800004959,
+      "audio_s": 2.825
+    },
+    {
+      "id": "negative-seem__bf_emma__clean",
+      "sha256": "4de48d44ce93ff05d6af6eab2dcc7c3b98403a6de02414ed725b0d4aee1378b1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08289650500000789,
+      "audio_s": 3.225
+    },
+    {
+      "id": "negative-seem__bm_george__clean",
+      "sha256": "6d785dd2fbfd9ecee9001c0e36fd701f38884aade7df327be633c60cde2ece18",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0857943470000464,
+      "audio_s": 3.475
+    },
+    {
+      "id": "negative-seem__af_bella__clean",
+      "sha256": "1ddef7f9c816d7008d0321b651fdf2179fa67756225c0a9fd0602a8874e8f40b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07722265499978676,
+      "audio_s": 3.05
+    },
+    {
+      "id": "negative-seem__am_michael__clean",
+      "sha256": "22bdd8355fb286e80fa3f48e8589d06c7c16942f7736067ba084f5e56d7bd77b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0805311540002549,
+      "audio_s": 3.2
+    },
+    {
+      "id": "negative-team__bf_emma__clean",
+      "sha256": "b0e6d168c0d934673b2cb1855a4fee67ad735ad6a2e9825cfd49d0d224da6ff8",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0802411919999031,
+      "audio_s": 3.2
+    },
+    {
+      "id": "negative-team__bm_george__clean",
+      "sha256": "97d03bebbd9dd21b9f72b4f3325be52b1e94aaceb60f1756bb695c0e46e85492",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08460854199984169,
+      "audio_s": 3.35
+    },
+    {
+      "id": "negative-team__af_bella__clean",
+      "sha256": "04fa9849df72199a67982ca64a0e467e664c6fe4b8befe4e5d6922380a812d11",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07197076800002833,
+      "audio_s": 2.95
+    },
+    {
+      "id": "negative-team__am_michael__clean",
+      "sha256": "fcc00b1864d706d8474e1a1052088d0cef246aef29657ac664eb3368c92877c1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07980266300000949,
+      "audio_s": 3.2
+    },
+    {
+      "id": "negative-stream__bf_emma__clean",
+      "sha256": "0de95dffaa7c09ceed6647d7dd2877f974a62167469b35246354159e6742ba3c",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0846164280001176,
+      "audio_s": 3.45
+    },
+    {
+      "id": "negative-stream__bm_george__clean",
+      "sha256": "a398389290073a2adcfdf44130adea475f4fd2a54c6f851f138d963c24cd5ca7",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09269082799983153,
+      "audio_s": 3.725
+    },
+    {
+      "id": "negative-stream__af_bella__clean",
+      "sha256": "64d2e2a5d5cb78441104e97643ae37f0d756220d41fee1883f291c7fd3dd3a1b",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08049175199994352,
+      "audio_s": 3.275
+    },
+    {
+      "id": "negative-stream__am_michael__clean",
+      "sha256": "88bac86a5b556a6349ee82a40cb3258643e7120ad736aa4259c5d1ffe79c73ab",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08435910899970622,
+      "audio_s": 3.4
+    },
+    {
+      "id": "negative-whats-up__bf_emma__clean",
+      "sha256": "9c21fab7e3630bc85647ec7f5d35fd7f3445df5e611f6f6141cd8e4a3b5bdf20",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05515094099973794,
+      "audio_s": 2.3
+    },
+    {
+      "id": "negative-whats-up__bm_george__clean",
+      "sha256": "7fda4c7ba8b1d25fc95f6c0e4ee6f729a8c324742fd6fa6971723f9aa45889f7",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.054656846999932895,
+      "audio_s": 2.325
+    },
+    {
+      "id": "negative-whats-up__af_bella__clean",
+      "sha256": "c651381fc33cc41e663d772a1bdd2f039fd3d7376088d0f797f10f942fe4fd34",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.05918122800039782,
+      "audio_s": 2.45
+    },
+    {
+      "id": "negative-whats-up__am_michael__clean",
+      "sha256": "adaa264cddbfe25ea99839438260405a5389a21db59b866fad5fc1b194616d91",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.058555634999720496,
+      "audio_s": 2.45
+    },
+    {
+      "id": "negative-what-app__bf_emma__clean",
+      "sha256": "7319d79371bb16c29dfb25b1e73546f199913b11f4b11d50f514c53490b41ec1",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07608515099991564,
+      "audio_s": 3.075
+    },
+    {
+      "id": "negative-what-app__bm_george__clean",
+      "sha256": "1d89c2907bd7cdb7bf8394edb5c89a06f11dbd0faf97b009428ca69f34976133",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07610394399989673,
+      "audio_s": 3.1
+    },
+    {
+      "id": "negative-what-app__af_bella__clean",
+      "sha256": "5b07735820547e6e05cc4bcd88b87b78abda29b747058ff78045a57800283af4",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07280356699993717,
+      "audio_s": 2.9
+    },
+    {
+      "id": "negative-what-app__am_michael__clean",
+      "sha256": "24b2db00e7ef862969db1ecaaa4018787899729b38d54bb9a380fe97237d5bc2",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07749650599998859,
+      "audio_s": 3.075
+    },
+    {
+      "id": "negative-yeah-yeah__bf_emma__clean",
+      "sha256": "88413318dce516852810771cae1d93a9363c2be54bfbb7a8206efcc07b3c6a37",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07803153599979851,
+      "audio_s": 3.1
+    },
+    {
+      "id": "negative-yeah-yeah__bm_george__clean",
+      "sha256": "33a1c99f1131c4ed0e9ef4e12dda3aa38e5631c7f7b2baaaa4471b427aa99cf3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08071621900035097,
+      "audio_s": 3.225
+    },
+    {
+      "id": "negative-yeah-yeah__af_bella__clean",
+      "sha256": "446f96191505b746593a3f0cd580698093a6258a1a220c25ca901e4f0d50bb2c",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08027644200001305,
+      "audio_s": 3.225
+    },
+    {
+      "id": "negative-yeah-yeah__am_michael__clean",
+      "sha256": "f0d5ff72d1da23f3f0f66f3e34779aeb09af6646f9b4e301042860c624013d87",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07619638500000292,
+      "audio_s": 3.125
+    },
+    {
+      "id": "negative-yup-yup__bf_emma__clean",
+      "sha256": "2c972fe03772f84239f9518eea64fc0b6bdb9b4613b10af3c0815c772f64a0f9",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08484357799989084,
+      "audio_s": 3.375
+    },
+    {
+      "id": "negative-yup-yup__bm_george__clean",
+      "sha256": "79420fab2cca7c38946513eaae5ee8a6581aa05d12d0d6db138f84c4e8bd2d06",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08852506600032939,
+      "audio_s": 3.575
+    },
+    {
+      "id": "negative-yup-yup__af_bella__clean",
+      "sha256": "ee651801d99a9f0ff02c73b6bb8ae487a6dce93f44656d5972454219058290a0",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08458013800009212,
+      "audio_s": 3.35
+    },
+    {
+      "id": "negative-yup-yup__am_michael__clean",
+      "sha256": "52ee857861c264d1194f3fdf8397603b9f412689cd902c10405d931c75a5501a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0807908460001272,
+      "audio_s": 3.275
+    },
+    {
+      "id": "negative-hey-julian__bf_emma__clean",
+      "sha256": "43d3183ae76aa10a6e09f6cda463feddbab73e4d88b22376feebe4587c795805",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08583115600004021,
+      "audio_s": 3.375
+    },
+    {
+      "id": "negative-hey-julian__bm_george__clean",
+      "sha256": "8df29537ecab81282f59c692c6a5435097ed09a02c39d24d3dbd324c451e5e41",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09350558199957959,
+      "audio_s": 3.6
+    },
+    {
+      "id": "negative-hey-julian__af_bella__clean",
+      "sha256": "6f9fbd2428d7ae0fa008262ba690edfd716926b38770c9e5c8bef95575324477",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08285445299998173,
+      "audio_s": 3.325
+    },
+    {
+      "id": "negative-hey-julian__am_michael__clean",
+      "sha256": "9163a1135d35be3ebfe04ff4ff753ba83503673a91ba7a2cd36bb0ec0e7bc39d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.0849950980000358,
+      "audio_s": 3.425
+    },
+    {
+      "id": "negative-hey-giddy__bf_emma__clean",
+      "sha256": "6305d20809c78f5c3cb252fe6e6ded0d7b3cd2171f1ffdf1b49b3a260aa71f9d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08569165500011877,
+      "audio_s": 3.35
+    },
+    {
+      "id": "negative-hey-giddy__bm_george__clean",
+      "sha256": "3eaef4117e056f30096a711dd933b1eb47e9c0c254e438eee35c528550d409af",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.09057976099984444,
+      "audio_s": 3.575
+    },
+    {
+      "id": "negative-hey-giddy__af_bella__clean",
+      "sha256": "922e360c95f56c519c818adb6a9d9c97e5881ec533aba6b088d5f7da0d27a76a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08589859699986846,
+      "audio_s": 3.35
+    },
+    {
+      "id": "negative-hey-giddy__am_michael__clean",
+      "sha256": "84080fbbaee2cf9cede87898131eff2b942ea2db8d06d03afcd86faf6d22d9e3",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08631101499986471,
+      "audio_s": 3.4
+    },
+    {
+      "id": "negative-hi-gideon__bf_emma__clean",
+      "sha256": "269f883a99df2740cc2091f561db618a1b39032d998dfd4fa948f72d0cfe0762",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1200000,
+          "end_us": 1280000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.08101480200002698,
+      "audio_s": 3.275
+    },
+    {
+      "id": "negative-hi-gideon__bm_george__clean",
+      "sha256": "d930b2cb338512c127de3a5fa73dc10675b2afc7a8fd8c343c6566cfb574372a",
+      "positive": false,
+      "detections": [
+        {
+          "phrase_id": "hey_gideon",
+          "confidence": null,
+          "start_us": 1360000,
+          "end_us": 1440000,
+          "engine": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8"
+        }
+      ],
+      "wall_s": 0.090812435999851,
+      "audio_s": 3.55
+    },
+    {
+      "id": "negative-hi-gideon__af_bella__clean",
+      "sha256": "d0759c34d725849d6d9c0a146f73c10d7ae7703f59a5a75a44b47d182c8d6cbb",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.07971154400001979,
+      "audio_s": 3.175
+    },
+    {
+      "id": "negative-hi-gideon__am_michael__clean",
+      "sha256": "f6e3ded608f01ca04b274cb9c3981355a670e068b990b1602309f3972660c76d",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.08157246800010398,
+      "audio_s": 3.175
+    },
+    {
+      "id": "ordinary-unrelated__bf_emma__clean",
+      "sha256": "dd60d00213b0afd8c3785b0fff326aaa10873b54830f6c316945ef68539eda51",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10763643600012074,
+      "audio_s": 4.1
+    },
+    {
+      "id": "ordinary-unrelated__bm_george__clean",
+      "sha256": "21faad31dd65821e1a68cac3f114e495c7a84033746b1ac0c74a3e39da956f9c",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.11705539800004772,
+      "audio_s": 4.575
+    },
+    {
+      "id": "ordinary-unrelated__af_bella__clean",
+      "sha256": "eab97b1fd82cf317d60b25ac9bbf50b2c6bec477f10929a9472684efcdcde74a",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.1039299399999436,
+      "audio_s": 4.025
+    },
+    {
+      "id": "ordinary-unrelated__am_michael__clean",
+      "sha256": "9c9e8dd6385bc46a9d99946bb7175b8ec6ad750347cd59e14802bf64a54b42ab",
+      "positive": false,
+      "detections": [],
+      "wall_s": 0.10834567199981393,
+      "audio_s": 4.25
+    }
+  ],
+  "physical_validation": "NOT_PERFORMED",
+  "distribution_certified": false,
+  "scope": "synthetic private DEV; four Kokoro voices; no independent holdout; no model training; source fixtures only read",
+  "source_commit": "2ae148ce81a19598051395a2ed3774991d210f5c",
+  "core_binary_sha256": "198f17a7613c65a04dc3334967f9f11bb9838071bfb32983068b8f7fc3d8151d"
+}
