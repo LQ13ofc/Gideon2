@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='gideon-b2-') as td:
     def update(rev,audible=False,timeout=20000,**kw):return request('preferences',revision=rev,audible_feedback=audible,session_timeout_ms=timeout,**kw)
     try:
         core=start()
-        check('default backwards compatible',request('snapshot')['preferences']=={'version':1,'wake_phrase':None,'revision':0,'audible_feedback':True,'session_timeout_ms':30000})
+        check('default backwards compatible',request('snapshot')['preferences']=={'version':1,'wake_phrase':None,'revision':0,'audible_feedback':True,'visual_feedback':True,'output_volume_percent':100,'session_timeout_ms':30000})
         check('invalid timeout rejected',update(0,timeout=0)['code']=='invalid_preferences')
         check('invalid request does not create rollback state','previous_preferences' not in request('snapshot')['preferences'])
         check('rollback absent fails safely',request('rollback_preferences',revision=0)['code']=='preferences_storage_error')

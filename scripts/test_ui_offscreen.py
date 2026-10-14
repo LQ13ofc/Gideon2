@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[]
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -97,6 +97,24 @@ elif args.phase=='safe_mode':
     wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
     check('native voice flow resumes after real restart',bridge.snapshot['transcript']['source']=='voice' and bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
     check('physical capability remains virtual only',bridge.snapshot['speech']['sink']=='virtual')
+elif args.phase=='feedback':
+    settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'preferencesDialog');wait(lambda:dialog.property('visible'),3)
+    visual=window.findChild(QObject,'visualPreference');visual.setProperty('checked',False)
+    volume=window.findChild(QObject,'volumePreference');volume.setProperty('value',50)
+    save=window.findChild(QObject,'saveFeedbackButton');save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.outputVolume==50 and not bridge.visualFeedback,5)
+    check('Qt feedback save acknowledged by actual Core',bridge.preferencesResult=='Preferências salvas pelo Core')
+    dialog.close();QTest.qWait(50)
+    check('decorative activity indicator hidden',not window.findChild(QObject,'activityIndicator').property('visible'))
+    check('essential state and cancel remain present',window.findChild(QObject,'aura').property('visible') and button.property('visible'))
+    bridge.submitText('open brave');wait(lambda:bridge.snapshot.get('speech_status')=='completed',35)
+    check('Qt observes real attenuated native speech',bridge.resultVerified and bridge.snapshot['speech']['output_volume_percent']==50 and bridge.snapshot['speech']['samples']>0)
+    dialog.open();QTest.qWait(100);image=window.grabWindow();image.save(str(Path(args.artifacts)/'ui.png'))
+    check('feedback dialog stays within minimum window',dialog.property('height')<=window.height() and not image.isNull())
+    rollback=window.findChild(QObject,'rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.outputVolume==100 and bridge.visualFeedback,5)
+    check('Qt rollback restores both preferences',bridge.preferencesRevision=='2')
 elif args.phase=='preferences':
     settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     dialog=window.findChild(QObject,'preferencesDialog');wait(lambda:dialog.property('visible'),3)

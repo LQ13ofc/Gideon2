@@ -34,8 +34,13 @@ def validate_snapshot(data,request_id,min_sequence):
         require(isinstance(prefs,dict) and type(prefs.get('version')) is int and prefs['version']==1)
         require(integer(prefs.get('revision')) and integer(prefs.get('session_timeout_ms'),50,60000))
         require(type(prefs.get('audible_feedback')) is bool)
+        if 'visual_feedback' in prefs:require(type(prefs['visual_feedback']) is bool)
+        if 'output_volume_percent' in prefs:require(integer(prefs['output_volume_percent'],0,100))
         previous=prefs.get('previous_preferences')
-        if previous is not None:require(isinstance(previous,dict) and type(previous.get('audible_feedback')) is bool and integer(previous.get('session_timeout_ms'),50,60000))
+        if previous is not None:
+            require(isinstance(previous,dict) and type(previous.get('audible_feedback')) is bool and integer(previous.get('session_timeout_ms'),50,60000))
+            if 'visual_feedback' in previous:require(type(previous['visual_feedback']) is bool)
+            if 'output_volume_percent' in previous:require(integer(previous['output_volume_percent'],0,100))
         wake=prefs.get('wake_phrase')
         require(wake is None or (short(wake) and len(wake)>0 and all(c.isascii() and (c.isalnum() or c in '_-') for c in wake)))
     pack=data.get('base_pack')
@@ -125,7 +130,7 @@ class Bridge(QObject):
             data['session_id']=str(sid) if sid is not None else ''
             if pending_op=='recover_configuration':
                 self.preferences_result=('Configuração recuperada; reinício necessário' if data.get('code')=='ok' else data.get('code','invalid_message'))
-            elif pending_op in ('preferences','rollback_preferences','select_wake'):
+            elif pending_op in ('preferences','rollback_preferences','select_wake','feedback_preferences'):
                 self.preferences_result=('Preferências salvas pelo Core' if data.get('code')=='ok' else data.get('code','invalid_message'))
             data.pop('request_id',None)
             if data!=self.snapshot:self.snapshot=data;self.changed.emit()
@@ -160,6 +165,13 @@ class Bridge(QObject):
     @Slot(str)
     def selectWake(self,ident):
         if self.preferencesAvailable:self._preferences('select_wake',revision=int(self.preferencesRevision),phrase_id=ident)
+    @Property(bool,notify=changed)
+    def visualFeedback(self):return self.snapshot.get('preferences',{}).get('visual_feedback',True)
+    @Property(int,notify=changed)
+    def outputVolume(self):return self.snapshot.get('preferences',{}).get('output_volume_percent',100)
+    @Slot(bool,int)
+    def saveFeedback(self,visual,volume):
+        if self.preferencesAvailable:self._preferences('feedback_preferences',revision=int(self.preferencesRevision),visual_feedback=visual,output_volume_percent=volume)
     @Slot()
     def recoverConfiguration(self):
         if self.recoveryAvailable:self._preferences('recover_configuration',revision=int(self.preferencesRevision))

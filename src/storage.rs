@@ -15,6 +15,10 @@ pub struct PreviousPreferences {
     #[serde(default)]
     pub wake_phrase: Option<String>,
     pub audible_feedback: bool,
+    #[serde(default = "enabled")]
+    pub visual_feedback: bool,
+    #[serde(default = "full_volume")]
+    pub output_volume_percent: u8,
     pub session_timeout_ms: u64,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -28,8 +32,15 @@ pub struct Config {
     pub revision: u64,
     #[serde(default = "enabled")]
     pub audible_feedback: bool,
+    #[serde(default = "enabled")]
+    pub visual_feedback: bool,
+    #[serde(default = "full_volume")]
+    pub output_volume_percent: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_preferences: Option<PreviousPreferences>,
+}
+fn full_volume() -> u8 {
+    100
 }
 fn enabled() -> bool {
     true
@@ -42,6 +53,8 @@ impl Default for Config {
             wake_phrase: None,
             revision: 0,
             audible_feedback: true,
+            visual_feedback: true,
+            output_volume_percent: 100,
             previous_preferences: None,
         }
     }
@@ -49,9 +62,11 @@ impl Default for Config {
 impl Config {
     pub fn validate(&self) -> io::Result<()> {
         if self.version != 1
+            || self.output_volume_percent > 100
             || !(50..=60000).contains(&self.session_timeout_ms)
             || self.previous_preferences.as_ref().is_some_and(|p| {
-                !(50..=60000).contains(&p.session_timeout_ms)
+                p.output_volume_percent > 100
+                    || !(50..=60000).contains(&p.session_timeout_ms)
                     || p.wake_phrase
                         .as_deref()
                         .is_some_and(|id| !crate::protocol::valid_id(id))
@@ -276,6 +291,8 @@ impl Storage {
         next.previous_preferences = Some(PreviousPreferences {
             wake_phrase: self.config.wake_phrase.clone(),
             audible_feedback: self.config.audible_feedback,
+            visual_feedback: self.config.visual_feedback,
+            output_volume_percent: self.config.output_volume_percent,
             session_timeout_ms: self.config.session_timeout_ms,
         });
         let changed_wake = next.wake_phrase != self.config.wake_phrase;
@@ -285,6 +302,20 @@ impl Storage {
             self.configuration_status = ConfigurationStatus::RestartRequired;
         }
         File::open(&self.root)?.sync_all()
+    }
+    pub fn update_feedback(&mut self, revision: u64, visual: bool, volume: u8) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+        {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.visual_feedback = visual;
+        next.output_volume_percent = volume;
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
     }
     pub fn select_wake(&mut self, revision: u64, phrase_id: String) -> io::Result<()> {
         if self.configuration_status != ConfigurationStatus::Ready
@@ -316,6 +347,8 @@ impl Storage {
                 .ok_or_else(|| io::Error::other("revision exhausted"))?,
             wake_phrase: previous.wake_phrase,
             audible_feedback: previous.audible_feedback,
+            visual_feedback: previous.visual_feedback,
+            output_volume_percent: previous.output_volume_percent,
             session_timeout_ms: previous.session_timeout_ms,
             ..self.config.clone()
         };

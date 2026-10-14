@@ -384,7 +384,17 @@ impl Core {
             .is_some_and(|s| s.id == id && s.stage == State::Speaking)
     }
     fn command_terminal(&mut self, kind: &'static str, now: Instant) {
-        if !self.tts_enabled || !self.preferences.audible_feedback {
+        if !self.tts_enabled
+            || !self.preferences.audible_feedback
+            || self.preferences.output_volume_percent == 0
+        {
+            if self.tts_enabled {
+                self.speech_status = if self.preferences.output_volume_percent == 0 {
+                    "muted"
+                } else {
+                    "disabled"
+                };
+            }
             self.finish(kind);
             return;
         }
@@ -398,6 +408,7 @@ impl Core {
         s.deadline = s.overall_deadline.min(now + Duration::from_secs(20));
         self.speech_status = "speaking";
         self.speech_job = Some(crate::tts::Job {
+            output_volume_percent: self.preferences.output_volume_percent,
             session_id: s.id,
             text,
         });
@@ -416,7 +427,8 @@ impl Core {
             return;
         }
         self.speech_summary = summary.filter(|s| {
-            s.session_id == id
+            s.output_volume_percent == self.preferences.output_volume_percent
+                && s.session_id == id
                 && s.sink == "virtual"
                 && s.sample_rate == 24000
                 && s.samples > 0
@@ -649,6 +661,35 @@ impl Core {
                 "configuration_not_ready"
             }
 
+            Operation::FeedbackPreferences { revision, .. }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::FeedbackPreferences { .. } if self.session.is_some() => "busy",
+            Operation::FeedbackPreferences {
+                output_volume_percent,
+                ..
+            } if output_volume_percent > 100 => "invalid_preferences",
+            Operation::FeedbackPreferences {
+                revision,
+                visual_feedback,
+                output_volume_percent,
+            } => {
+                if let Some(storage) = storage {
+                    let result =
+                        storage.update_feedback(revision, visual_feedback, output_volume_percent);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        self.emit(req.request_id.clone(), None, "preferences_updated");
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
             Operation::SelectWake { revision, .. } if revision != self.preferences.revision => {
                 "stale_preferences"
             }

@@ -15,6 +15,11 @@ pub struct Request {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Snapshot,
+    FeedbackPreferences {
+        revision: u64,
+        visual_feedback: bool,
+        output_volume_percent: u8,
+    },
     SelectWake {
         revision: u64,
         phrase_id: String,
@@ -105,6 +110,13 @@ pub fn valid_id(id: &str) -> bool {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum WireRequest {
+    FeedbackPreferences {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        visual_feedback: bool,
+        output_volume_percent: u8,
+    },
     SelectWake {
         version: u16,
         request_id: String,
@@ -156,6 +168,21 @@ enum WireRequest {
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let (version, request_id, operation) = match WireRequest::deserialize(d)? {
+            WireRequest::FeedbackPreferences {
+                version,
+                request_id,
+                revision,
+                visual_feedback,
+                output_volume_percent,
+            } => (
+                version,
+                request_id,
+                Operation::FeedbackPreferences {
+                    revision,
+                    visual_feedback,
+                    output_volume_percent,
+                },
+            ),
             WireRequest::SelectWake {
                 version,
                 request_id,

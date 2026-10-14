@@ -170,3 +170,20 @@ fn safe_mode_never_weakens_file_guards_or_recovers_oversized_content() {
     assert!(Storage::open_for_runtime(&root).is_err());
     assert_eq!(fs::read_to_string(sentinel).unwrap(), "unchanged");
 }
+
+#[test]
+fn feedback_preferences_are_bounded_atomic_and_survive_restart_rollback() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let mut store = Storage::open(&root).unwrap();
+    assert!(store.update_feedback(0, false, 101).is_err());
+    store.update_feedback(0, false, 50).unwrap();
+    drop(store);
+    let mut store = Storage::open(&root).unwrap();
+    assert!(!store.config.visual_feedback);
+    assert_eq!(store.config.output_volume_percent, 50);
+    store.rollback_preferences(1).unwrap();
+    assert!(store.config.visual_feedback);
+    assert_eq!(store.config.output_volume_percent, 100);
+    assert_eq!(store.config.revision, 2);
+}

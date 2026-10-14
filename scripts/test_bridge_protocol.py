@@ -25,7 +25,7 @@ class Tests(unittest.TestCase):
         valid={'version':1,'revision':2**64-1,'audible_feedback':False,'session_timeout_ms':60000,'wake_phrase':None}
         cfg=copy.deepcopy(BASE);cfg['preferences']=valid
         validate_snapshot(cfg,'r',0)
-        for key,value in [('version',True),('revision',True),('revision',-1),('revision',2**64),('audible_feedback','yes'),('session_timeout_ms',0),('session_timeout_ms',60001),('wake_phrase','../private'),('previous_preferences',[]),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':0})]:
+        for key,value in [('version',True),('revision',True),('revision',-1),('revision',2**64),('audible_feedback','yes'),('visual_feedback','yes'),('output_volume_percent',True),('output_volume_percent',101),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':30000,'output_volume_percent':-1}),('session_timeout_ms',0),('session_timeout_ms',60001),('wake_phrase','../private'),('previous_preferences',[]),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':0})]:
             cfg=copy.deepcopy(BASE);cfg['preferences']={**valid,key:value}
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
     def test_configuration_health_cannot_present_active_sessions(self):

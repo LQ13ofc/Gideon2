@@ -15,11 +15,14 @@ pub struct Config {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Job {
+    #[serde(skip_serializing)]
+    pub output_volume_percent: u8,
     pub session_id: u64,
     pub text: String,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Summary {
+    pub output_volume_percent: u8,
     pub session_id: u64,
     pub sample_rate: u32,
     pub samples: usize,
@@ -39,6 +42,7 @@ enum Packet {
     Done { session_id: u64 },
 }
 pub struct VirtualSpeaker {
+    volume: u8,
     hash: Sha256,
     samples: usize,
     chunks: usize,
@@ -48,6 +52,7 @@ pub struct VirtualSpeaker {
 impl Default for VirtualSpeaker {
     fn default() -> Self {
         Self {
+            volume: 100,
             hash: Sha256::new(),
             samples: 0,
             chunks: 0,
@@ -57,6 +62,15 @@ impl Default for VirtualSpeaker {
     }
 }
 impl VirtualSpeaker {
+    pub fn with_volume(volume: u8) -> io::Result<Self> {
+        if !(1..=100).contains(&volume) {
+            return Err(io::Error::other("invalid output gain"));
+        }
+        Ok(Self {
+            volume,
+            ..Self::default()
+        })
+    }
     pub fn accept(&mut self, samples: &[f32]) -> io::Result<()> {
         if samples.is_empty()
             || samples.len() > 1920
@@ -65,10 +79,11 @@ impl VirtualSpeaker {
         {
             return Err(io::Error::other("invalid/bounded PCM"));
         }
-        for s in samples {
+        for source in samples {
+            let s = *source * (f32::from(self.volume) / 100.);
             self.hash.update(s.to_le_bytes());
             self.peak = self.peak.max(s.abs());
-            self.power += f64::from(*s).powi(2);
+            self.power += f64::from(s).powi(2);
         }
         self.samples += samples.len();
         self.chunks += 1;
@@ -79,6 +94,7 @@ impl VirtualSpeaker {
             return Err(io::Error::other("empty/silent speech"));
         }
         Ok(Summary {
+            output_volume_percent: self.volume,
             session_id: id,
             sample_rate: 24000,
             samples: self.samples,
@@ -119,7 +135,10 @@ pub async fn speak(
     job: Job,
     progress: tokio::sync::mpsc::Sender<(u64, usize)>,
 ) -> io::Result<Summary> {
-    if job.text.is_empty() || job.text.len() > 256 {
+    if job.text.is_empty()
+        || job.text.len() > 256
+        || !(1..=100).contains(&job.output_volume_percent)
+    {
         return Err(io::Error::other("invalid speech job"));
     }
     let started = Instant::now();
@@ -158,7 +177,7 @@ pub async fn speak(
                 .take()
                 .ok_or_else(|| io::Error::other("stdout"))?,
         );
-        let mut sink = VirtualSpeaker::default();
+        let mut sink = VirtualSpeaker::with_volume(job.output_volume_percent)?;
         let mut ready = false;
         let mut done = false;
         let mut first = 0;
@@ -213,6 +232,28 @@ pub async fn speak(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gain_scales_consumed_pcm_and_checks_source_before_attenuation() {
+        let samples = [0.5, -0.25, 0.125];
+        let mut full = VirtualSpeaker::with_volume(100).unwrap();
+        let mut half = VirtualSpeaker::with_volume(50).unwrap();
+        assert!(half.accept(&[2.0]).is_err());
+        full.accept(&samples).unwrap();
+        half.accept(&samples).unwrap();
+        let full = full.finish(1, 1, 1).unwrap();
+        let half = half.finish(1, 1, 1).unwrap();
+        assert_eq!(half.samples, full.samples);
+        assert_eq!(half.peak, full.peak * 0.5);
+        assert_eq!(half.rms, full.rms * 0.5);
+        assert_ne!(half.pcm_sha256, full.pcm_sha256);
+        let mut expected = Sha256::new();
+        for s in samples {
+            expected.update((s * 0.5).to_le_bytes());
+        }
+        assert_eq!(half.pcm_sha256, format!("{:x}", expected.finalize()));
+        assert!(VirtualSpeaker::with_volume(0).is_err());
+        assert!(VirtualSpeaker::with_volume(101).is_err());
+    }
     #[test]
     fn sink_validates_before_accepting_and_bounds_without_retaining_pcm() {
         let mut sink = VirtualSpeaker::default();

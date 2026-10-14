@@ -15,7 +15,7 @@ ApplicationWindow {
         title: "Preferências da Base"; modal: true
         anchors.centerIn: parent; width: Math.min(420, window.width - 32)
         standardButtons: Dialog.Close
-        onOpened: { audible.checked = core.audibleFeedback; timeout.value = core.sessionTimeout }
+        onOpened: { audible.checked = core.audibleFeedback; timeout.value = core.sessionTimeout; visual.checked = core.visualFeedback; volume.value = core.outputVolume }
         contentItem: ScrollView {
             implicitHeight: Math.min(settingsColumn.implicitHeight, window.height - 120)
             clip: true
@@ -33,6 +33,11 @@ ApplicationWindow {
             }
             Label { objectName: "wakeQualification"; visible: core.wakeChoices.length > 0; text: wakeChoice.currentIndex >= 0 ? (core.wakeChoices[wakeChoice.currentIndex].qualification === "dev_qualified" ? "Qualificada em DEV; validação física pendente" : "POC_REQUIRED: frase sem qualidade aprovada") : ""; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             CheckBox { id: audible; objectName: "audiblePreference"; text: core.voiceAvailable ? "Resposta por voz (saída virtual)" : "Resposta por voz indisponível"; enabled: core.preferencesAvailable && core.voiceAvailable }
+            CheckBox { id: visual; objectName: "visualPreference"; text: "Indicador visual de atividade"; enabled: core.preferencesAvailable }
+            Label { text: "Ganho da saída virtual: " + core.outputVolume + "% (0% = mudo)"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            SpinBox { id: volume; objectName: "volumePreference"; from: 0; to: 100; stepSize: 5; editable: true; enabled: core.preferencesAvailable && core.voiceAvailable }
+            Button { objectName: "saveFeedbackButton"; text: "Salvar indicador e ganho"; enabled: core.preferencesAvailable; onClicked: core.saveFeedback(visual.checked, volume.value) }
+            Label { text: "Privacidade: capturas e legendas em memória; sem histórico persistente. Entrada/saída virtuais. CPU e sensibilidade fixas. Dispositivos físicos, outras vozes/idiomas e login automático indisponíveis."; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Label { text: "Prazo da sessão em milissegundos"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             SpinBox { id: timeout; objectName: "timeoutPreference"; from: 50; to: 60000; stepSize: 1000; editable: true; enabled: core.preferencesAvailable }
             RowLayout {
@@ -57,7 +62,7 @@ ApplicationWindow {
         }
         RowLayout {
             spacing: 16
-            Rectangle { width: 18; height: 18; radius: 9; color: core.connected ? (core.state === "idle" ? "#70d6b0" : "#73b7ff") : "#ffc674"; Accessible.name: "Estado do Gideon" }
+            Rectangle { objectName: "activityIndicator"; visible: core.visualFeedback; width: 18; height: 18; radius: 9; color: core.connected ? (core.state === "idle" ? "#70d6b0" : "#73b7ff") : "#ffc674"; Accessible.name: "Estado do Gideon" }
             Label { objectName: "aura"; text: ({idle:"Em espera",capturing:"Ouvindo",transcribing:"Transcrevendo",executing:"Executando",speaking:"Respondendo",offline:"Core indisponível",safe_mode:"Modo seguro",restart_required:"Reinício necessário"})[core.state] || "Erro"; color: "#e6edf4"; font.pixelSize: 24; Accessible.name: text }
         }
         Label { text: "Conversa atual"; color: "#9bb0c5"; font.pixelSize: 16 }
