@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bounded continuous PCM replay: two voice cycles and idle CPU in one owner process."""
+from process_fixture import resident_bytes
 import hashlib,json,os,socket,subprocess,tempfile,time
 from pathlib import Path
 import numpy as np,soundfile as sf
@@ -43,14 +44,14 @@ with tempfile.TemporaryDirectory(prefix='gideon-a5-soak-') as td:
             while pending:
                 current=pending.pop()
                 try:children=Path(f'/proc/{current}/task/{current}/children').read_text().split()
-                except FileNotFoundError:continue
+                except (FileNotFoundError,ProcessLookupError):continue
                 for x in children:
                     child=int(x)
                     if child not in owned:owned.add(child);pending.append(child)
             for pid in owned:
                 try:
-                    fields=Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split();ticks+=int(fields[11])+int(fields[12]);rss+=int(Path(f'/proc/{pid}/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
-                except FileNotFoundError:pass
+                    fields=Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split();ticks+=int(fields[11])+int(fields[12]);rss+=resident_bytes(pid)
+                except (FileNotFoundError,ProcessLookupError):pass
             return ticks,rss
         ticks0,rss0=stats();start=time.monotonic();time.sleep(2);ticks1,rss1=stats();cpu=100*(ticks1-ticks0)/os.sysconf('SC_CLK_TCK')/(time.monotonic()-start)
         check('post EOF idle CPU below one percent',cpu<1.)

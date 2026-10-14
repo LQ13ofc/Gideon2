@@ -2,7 +2,7 @@
 """Offline native wake→STT→verified sandbox action→Pocket PCM→paced virtual sink."""
 import hashlib,json,os,socket,subprocess,tempfile,time
 from pathlib import Path
-from process_fixture import command_line
+from process_fixture import command_line,resident_bytes
 BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';WAKE=BASE/'target/a1-venv/bin/python';TTS=BASE/'target/tts-venv/bin/python';MANIFEST=BASE/'target/a3-assets/replay-manifest.json';PROFILE=BASE/'target/a5-assets/manifest.json'
 BINARY_ID=hashlib.sha256(BIN.read_bytes()).hexdigest()
 def run():
@@ -36,13 +36,12 @@ def run():
                     while pending:
                         current=pending.pop()
                         try:descendants=Path(f'/proc/{current}/task/{current}/children').read_text().split()
-                        except FileNotFoundError:continue
+                        except (FileNotFoundError,ProcessLookupError):continue
                         for item in descendants:
                             pid=int(item)
                             if pid not in owned:owned.add(pid);pending.append(pid)
                     for pid in owned:
-                        try:rss+=int(Path(f'/proc/{pid}/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
-                        except FileNotFoundError:pass
+                        rss+=resident_bytes(pid)
                     peak_rss=max(peak_rss,rss)
                     if mode=='executor_failure' and snap['state']=='executing' and not interrupted:
                         targets=[int(x) for x in children if b'command_worker.py' in command_line(x)]

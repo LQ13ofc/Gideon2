@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real wake→capture→Moonshine streaming into Core; no partial effects."""
+from process_fixture import resident_bytes
 import hashlib,json,os,socket,subprocess,tempfile,time
 from pathlib import Path
 BASE=Path(__file__).resolve().parents[1]
@@ -74,7 +75,7 @@ def run():
                         while pending:
                             current=pending.pop()
                             try:children=Path(f'/proc/{current}/task/{current}/children').read_text().split()
-                            except FileNotFoundError:continue
+                            except (FileNotFoundError,ProcessLookupError):continue
                             for child in children:
                                 child=int(child)
                                 if child not in found:found.add(child);pending.append(child)
@@ -84,8 +85,8 @@ def run():
                         for pid in pids:
                             try:
                                 stat=Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split();ticks+=int(stat[11])+int(stat[12])
-                                rss+=int(Path(f'/proc/{pid}/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
-                            except FileNotFoundError:continue
+                                rss+=resident_bytes(pid)
+                            except (FileNotFoundError,ProcessLookupError):continue
                         return ticks,rss
                     pids=owned_pids();ticks0,rss0=stats(pids);start=time.monotonic();time.sleep(2);ticks1,rss1=stats(pids)
                     idle=100*(ticks1-ticks0)/os.sysconf('SC_CLK_TCK')/(time.monotonic()-start)
