@@ -19,6 +19,7 @@ pub struct Core {
     recent_requests: VecDeque<String>,
     timeout: Duration,
     virtual_input: bool,
+    wake_status: &'static str,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -30,10 +31,34 @@ impl Core {
             recent_requests: VecDeque::new(),
             timeout,
             virtual_input,
+            wake_status: "unavailable",
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
         self.next_session = seed;
+    }
+    fn start_session(&mut self, request_id: String, now: Instant) {
+        let id = self.next_session;
+        self.next_session += 1;
+        self.session = Some(Session {
+            id,
+            request_id: request_id.clone(),
+            deadline: now + self.timeout,
+        });
+        self.emit(request_id, Some(id), "session_started");
+    }
+    pub fn audio_wake(&mut self, now: Instant) {
+        self.expire(now);
+        if self.session.is_none() {
+            self.start_session(format!("wake_{}", self.sequence + 1), now);
+        }
+    }
+    pub fn wake_health(&mut self, status: &'static str) {
+        self.wake_status = status;
+        if status == "failed" {
+            self.finish("cancelled");
+            self.emit("wake_worker".into(), None, "wake_failed");
+        }
     }
     pub fn deadline(&self) -> Option<Instant> {
         self.session.as_ref().map(|s| s.deadline)
@@ -68,6 +93,7 @@ impl Core {
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
             version: VERSION,
+            wake_status: self.wake_status,
             request_id,
             code,
             state: if self.session.is_some() {
@@ -102,14 +128,7 @@ impl Core {
             Operation::VirtualWake if !self.virtual_input => "virtual_input_disabled",
             Operation::VirtualWake if self.session.is_some() => "busy",
             Operation::VirtualWake => {
-                let id = self.next_session;
-                self.next_session += 1;
-                self.session = Some(Session {
-                    id,
-                    request_id: req.request_id.clone(),
-                    deadline: now + self.timeout,
-                });
-                self.emit(req.request_id.clone(), Some(id), "session_started");
+                self.start_session(req.request_id.clone(), now);
                 "ok"
             }
             Operation::Cancel { session_id }
@@ -207,6 +226,39 @@ mod tests {
         assert_eq!(c.session.as_ref().unwrap().id, 2);
         c.shutdown();
         assert!(c.session.is_none());
+    }
+    #[test]
+    fn native_wake_reuses_session_authority_and_failure_cancels() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(1), false);
+        c.wake_health("replaying");
+        c.audio_wake(now);
+        c.audio_wake(now);
+        assert_eq!(c.events.len(), 1);
+        assert_eq!(c.session.as_ref().unwrap().id, 1);
+        assert_eq!(c.response("s".into(), "ok").wake_status, "replaying");
+        assert_eq!(
+            c.handle(
+                request(
+                    "a",
+                    Operation::Action {
+                        session_id: 1,
+                        capability: Capability::OpenApp
+                    }
+                ),
+                now
+            )
+            .code,
+            "denied"
+        );
+        c.wake_health("failed");
+        assert!(c.session.is_none());
+        assert_eq!(c.events.back().unwrap().kind, "wake_failed");
+        assert_eq!(
+            c.handle(request("late", Operation::Cancel { session_id: 1 }), now)
+                .code,
+            "stale_session"
+        );
     }
     #[test]
     fn bounds_and_production_denial() {

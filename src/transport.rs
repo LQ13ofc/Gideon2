@@ -2,11 +2,15 @@ use crate::{
     core::Core,
     protocol::{Request, MAX_MESSAGE},
     storage::Storage,
+    wake::{Packet, WakeInput},
 };
-use std::{fs, io, os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
+use std::{
+    fs, io, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::Arc, time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
+    process::Command,
     sync::{mpsc, oneshot, Semaphore},
     task::JoinSet,
 };
@@ -41,6 +45,12 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
     }
 }
 async fn frame<R: tokio::io::AsyncBufRead + Unpin>(read: &mut R) -> io::Result<Option<Vec<u8>>> {
+    bounded_frame(read, MAX_MESSAGE).await
+}
+async fn bounded_frame<R: tokio::io::AsyncBufRead + Unpin>(
+    read: &mut R,
+    limit: usize,
+) -> io::Result<Option<Vec<u8>>> {
     let mut bytes = Vec::new();
     loop {
         let chunk = read.fill_buf().await?;
@@ -59,7 +69,7 @@ async fn frame<R: tokio::io::AsyncBufRead + Unpin>(read: &mut R) -> io::Result<O
             .position(|c| *c == b'\n')
             .map(|i| i + 1)
             .unwrap_or(chunk.len());
-        if bytes.len() + size > MAX_MESSAGE {
+        if bytes.len() + size > limit {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "message too large",
@@ -73,7 +83,122 @@ async fn frame<R: tokio::io::AsyncBufRead + Unpin>(read: &mut R) -> io::Result<O
         }
     }
 }
-pub async fn serve(storage: Storage, virtual_input: bool) -> io::Result<()> {
+pub struct WakeReplay {
+    pub python: PathBuf,
+    pub manifest: PathBuf,
+    pub fixture: usize,
+}
+async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>) {
+    let outcome = async {
+        let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&replay.manifest)?)?;
+        let fixture = manifest["fixtures"]
+            .get(replay.fixture)
+            .and_then(|r| r["path"].as_str())
+            .ok_or_else(|| io::Error::other("fixture missing"))?;
+        let fixture_root = std::path::Path::new(fixture)
+            .parent()
+            .ok_or_else(|| io::Error::other("fixture root missing"))?;
+        let asset_root = manifest["asset_root"]
+            .as_str()
+            .ok_or_else(|| io::Error::other("assets missing"))?;
+        if !fixture_root.is_absolute() || !std::path::Path::new(asset_root).is_absolute() {
+            return Err(io::Error::other("absolute assets required"));
+        }
+        let interpreter = fs::read_link(&replay.python).unwrap_or_else(|_| replay.python.clone());
+        let runtime = interpreter
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| io::Error::other("python runtime missing"))?;
+        let canonical_runtime = fs::canonicalize(runtime)?;
+        // Explicit read-only mounts; no personal audio socket, bus, home or network.
+        // A missing namespace facility is an observable failure, never an unsandboxed fallback.
+        let mut child = Command::new("/usr/bin/bwrap")
+            .args([
+                "--unshare-all",
+                "--die-with-parent",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--symlink",
+                "usr/lib",
+                "/lib",
+                "--symlink",
+                "usr/lib",
+                "/lib64",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+            ])
+            .arg("--ro-bind")
+            .arg(&canonical_runtime)
+            .arg(&canonical_runtime)
+            .arg("--ro-bind")
+            .arg(&canonical_runtime)
+            .arg(runtime)
+            .arg("--ro-bind")
+            .arg(env!("CARGO_MANIFEST_DIR"))
+            .arg(env!("CARGO_MANIFEST_DIR"))
+            .arg("--ro-bind")
+            .arg(fixture_root)
+            .arg(fixture_root)
+            .arg("--ro-bind")
+            .arg(asset_root)
+            .arg(asset_root)
+            .arg("--ro-bind")
+            .arg(&replay.manifest)
+            .arg(&replay.manifest)
+            .args(["--setenv", "HOME", "/tmp", "--chdir", "/tmp", "--"])
+            .arg(replay.python)
+            .arg("-I")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/wake_worker.py"
+            ))
+            .arg(replay.manifest)
+            .arg(replay.fixture.to_string())
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove("PULSE_SERVER")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut output = BufReader::new(
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("worker stdout"))?,
+        );
+        loop {
+            let line =
+                tokio::time::timeout(Duration::from_secs(10), bounded_frame(&mut output, 65536))
+                    .await??;
+            let Some(line) = line else {
+                break;
+            };
+            let packet: Packet = serde_json::from_slice(&line)?;
+            tx.send(Ok(packet))
+                .await
+                .map_err(|_| io::Error::other("owner stopped"))?;
+        }
+        if !child.wait().await?.success() {
+            return Err(io::Error::other("worker failed"));
+        }
+        Ok::<_, io::Error>(())
+    }
+    .await;
+    if outcome.is_err() {
+        let _ = tx.send(Err(())).await;
+    }
+}
+pub async fn serve(
+    storage: Storage,
+    virtual_input: bool,
+    replay: Option<WakeReplay>,
+) -> io::Result<()> {
     storage.clear_stale_socket()?;
     let path = storage.socket_path();
     let listener = UnixListener::bind(&path)?;
@@ -88,6 +213,12 @@ pub async fn serve(storage: Storage, virtual_input: bool) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     core.set_boot_seed(u64::from_ne_bytes(seed) & (u64::MAX / 2));
+    let (wake_tx, mut wake_rx) = mpsc::channel(2);
+    let mut wake_task = replay.map(|r| tokio::spawn(replay_worker(r, wake_tx)));
+    let mut wake_input = WakeInput::default();
+    if wake_task.is_some() {
+        core.wake_health("starting");
+    }
     let (tx, mut rx) = mpsc::channel::<Call>(16);
     let slots = Arc::new(Semaphore::new(8));
     let mut peers = JoinSet::new();
@@ -102,6 +233,29 @@ pub async fn serve(storage: Storage, virtual_input: bool) -> io::Result<()> {
                 let response = core.handle(call.request, std::time::Instant::now()); storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
             },
+            packet = wake_rx.recv(), if wake_task.is_some() => {
+                match packet {
+                    Some(Ok(p)) => match wake_input.accept(p) {
+                        Ok(detection) => {
+                            core.wake_health("replaying");
+                            if detection.is_some() { core.audio_wake(std::time::Instant::now()); }
+                        },
+                        Err(_) => {
+                            core.wake_health("failed");
+                            if let Some(task) = wake_task.take() { task.abort(); let _ = task.await; }
+                        }
+                    },
+                    Some(Err(())) => {
+                        core.wake_health("failed");
+                        if let Some(task) = wake_task.take() { task.abort(); let _ = task.await; }
+                    },
+                    None => {
+                        core.wake_health("replay_finished");
+                        if let Some(task) = wake_task.take() { let _ = task.await; }
+                    }
+                }
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 if let Ok(permit) = slots.clone().try_acquire_owned() {
@@ -110,6 +264,10 @@ pub async fn serve(storage: Storage, virtual_input: bool) -> io::Result<()> {
             },
             Some(_) = peers.join_next(), if !peers.is_empty() => {},
         }
+    }
+    if let Some(task) = wake_task.take() {
+        task.abort();
+        let _ = task.await;
     }
     core.shutdown();
     storage.audit(core.response(String::new(), "ok").sequence)?;

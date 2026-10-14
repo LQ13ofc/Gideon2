@@ -1,0 +1,7 @@
+# Development-only native replay worker; never installed into the host environment.
+sherpa-onnx==1.13.8
+sherpa-onnx-core==1.13.8
+numpy==2.3.3
+soundfile==0.13.1
+cffi==2.1.1
+pycparser==3.11

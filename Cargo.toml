@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.85"
 
 [dependencies]
-tokio = { version = "=1.53.1", features = ["rt", "macros", "net", "io-util", "sync", "time", "signal"] }
+tokio = { version = "=1.53.1", features = ["rt", "macros", "net", "io-util", "sync", "time", "signal", "process"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 libc = "=0.2.189"

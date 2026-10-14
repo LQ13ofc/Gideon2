@@ -50,6 +50,7 @@ pub struct Event {
 
 #[derive(Debug, Serialize)]
 pub struct Response {
+    pub wake_status: &'static str,
     pub version: u16,
     pub request_id: String,
     pub code: &'static str,
