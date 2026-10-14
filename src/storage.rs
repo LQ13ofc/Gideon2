@@ -12,6 +12,8 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreviousPreferences {
+    #[serde(default)]
+    pub wake_phrase: Option<String>,
     pub audible_feedback: bool,
     pub session_timeout_ms: u64,
 }
@@ -48,10 +50,12 @@ impl Config {
     pub fn validate(&self) -> io::Result<()> {
         if self.version != 1
             || !(50..=60000).contains(&self.session_timeout_ms)
-            || self
-                .previous_preferences
-                .as_ref()
-                .is_some_and(|p| !(50..=60000).contains(&p.session_timeout_ms))
+            || self.previous_preferences.as_ref().is_some_and(|p| {
+                !(50..=60000).contains(&p.session_timeout_ms)
+                    || p.wake_phrase
+                        .as_deref()
+                        .is_some_and(|id| !crate::protocol::valid_id(id))
+            })
             || self
                 .wake_phrase
                 .as_deref()
@@ -265,30 +269,63 @@ impl Storage {
             .ok_or_else(|| io::Error::other("revision exhausted"))?;
         next.audible_feedback = audible;
         next.session_timeout_ms = timeout_ms;
+        self.commit_preferences(next)
+    }
+    fn commit_preferences(&mut self, mut next: Config) -> io::Result<()> {
         next.validate()?;
         next.previous_preferences = Some(PreviousPreferences {
+            wake_phrase: self.config.wake_phrase.clone(),
             audible_feedback: self.config.audible_feedback,
             session_timeout_ms: self.config.session_timeout_ms,
         });
+        let changed_wake = next.wake_phrase != self.config.wake_phrase;
         self.replace("config.json", &next)?;
-        // Reflect the committed rename even if directory durability reporting fails.
         self.config = next;
+        if changed_wake {
+            self.configuration_status = ConfigurationStatus::RestartRequired;
+        }
         File::open(&self.root)?.sync_all()
     }
+    pub fn select_wake(&mut self, revision: u64, phrase_id: String) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+        {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.wake_phrase = Some(phrase_id);
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
     pub fn rollback_preferences(&mut self, revision: u64) -> io::Result<()> {
-        if revision != self.config.revision {
-            return Err(io::Error::other("stale revision"));
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+        {
+            return Err(io::Error::other("configuration not ready"));
         }
         let previous = self
             .config
             .previous_preferences
             .clone()
             .ok_or_else(|| io::Error::other("no previous preferences"))?;
-        self.update_preferences(
-            revision,
-            previous.audible_feedback,
-            previous.session_timeout_ms,
-        )
+        let next = Config {
+            revision: revision
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("revision exhausted"))?,
+            wake_phrase: previous.wake_phrase,
+            audible_feedback: previous.audible_feedback,
+            session_timeout_ms: previous.session_timeout_ms,
+            ..self.config.clone()
+        };
+        self.commit_preferences(next)
+    }
+    pub fn incompatible_configuration(&mut self) -> io::Result<()> {
+        self.invalid_config = Some(read_config_bytes(&self.root.join("config.json"))?);
+        self.config = Config::default();
+        self.configuration_status = ConfigurationStatus::SafeMode;
+        Ok(())
     }
     pub fn recovery_available(&self) -> bool {
         self.configuration_status == ConfigurationStatus::SafeMode && self.invalid_config.is_some()

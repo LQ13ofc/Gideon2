@@ -38,6 +38,19 @@ def validate_snapshot(data,request_id,min_sequence):
         if previous is not None:require(isinstance(previous,dict) and type(previous.get('audible_feedback')) is bool and integer(previous.get('session_timeout_ms'),50,60000))
         wake=prefs.get('wake_phrase')
         require(wake is None or (short(wake) and len(wake)>0 and all(c.isascii() and (c.isalnum() or c in '_-') for c in wake)))
+    pack=data.get('base_pack')
+    if pack is not None:
+        require(isinstance(pack,dict) and type(pack.get('version')) is int and pack['version']==1)
+        require(short(pack.get('id')) and pack.get('scope')=='dev_virtual_en' and pack.get('preflight')=='verified')
+        require(isinstance(pack.get('engines'),dict) and set(pack['engines'])=={'wake','stt','tts'} and all(short(v,160) for v in pack['engines'].values()))
+        choices=pack.get('wake_phrases');require(isinstance(choices,list) and 1<=len(choices)<=8)
+        ids=set()
+        for choice in choices:
+            require(isinstance(choice,dict) and short(choice.get('id')) and short(choice.get('text'),128) and choice.get('qualification') in ('dev_qualified','poc_required'))
+            require(choice['id'] not in ids);ids.add(choice['id'])
+        require(pack.get('active_phrase') is None or (isinstance(pack['active_phrase'],str) and pack['active_phrase'] in ids))
+        require(isinstance(pack.get('default_phrase'),str) and pack['default_phrase'] in ids and short(pack.get('voice')) and pack.get('language')=='en')
+        require(pack.get('audio_input')=='virtual_pcm' and pack.get('audio_output')=='virtual')
     t=data.get('transcript')
     if t is not None:
         require(isinstance(t,dict))
@@ -112,7 +125,7 @@ class Bridge(QObject):
             data['session_id']=str(sid) if sid is not None else ''
             if pending_op=='recover_configuration':
                 self.preferences_result=('Configuração recuperada; reinício necessário' if data.get('code')=='ok' else data.get('code','invalid_message'))
-            elif pending_op in ('preferences','rollback_preferences'):
+            elif pending_op in ('preferences','rollback_preferences','select_wake'):
                 self.preferences_result=('Preferências salvas pelo Core' if data.get('code')=='ok' else data.get('code','invalid_message'))
             data.pop('request_id',None)
             if data!=self.snapshot:self.snapshot=data;self.changed.emit()
@@ -134,6 +147,19 @@ class Bridge(QObject):
         if self.textAvailable:
             if self.pending:self.text_request=text;self.changed.emit()
             else:self._request('text',raw=text)
+    @Property('QVariantList',notify=changed)
+    def wakeChoices(self):return self.snapshot.get('base_pack',{}).get('wake_phrases',[]) if self.snapshot.get('base_pack') else []
+    @Property(str,notify=changed)
+    def packDescription(self):
+        pack=self.snapshot.get('base_pack')
+        if not pack:return ''
+        active=next((p['text'] for p in pack['wake_phrases'] if p['id']==pack['active_phrase']),'inativo')
+        configured=self.snapshot.get('preferences',{}).get('wake_phrase') or pack['default_phrase']
+        saved=next((p['text'] for p in pack['wake_phrases'] if p['id']==configured),'incompatível')
+        return f"{pack['id']} · DEV virtual\nPerfil no processo: {active}\nConfiguração salva: {saved}\nVoz: {pack['voice']} · EN · candidata"
+    @Slot(str)
+    def selectWake(self,ident):
+        if self.preferencesAvailable:self._preferences('select_wake',revision=int(self.preferencesRevision),phrase_id=ident)
     @Slot()
     def recoverConfiguration(self):
         if self.recoveryAvailable:self._preferences('recover_configuration',revision=int(self.preferencesRevision))
@@ -144,7 +170,7 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def configurationMessage(self):
         if self.configurationStatus=='safe_mode':return ('Modo seguro: configuração inválida preservada; áudio e comandos bloqueados' if self.snapshot.get('configuration_recovery_available') else 'Modo seguro: arquivo excede o limite de recuperação automática; conteúdo preservado')
-        if self.configurationStatus=='restart_required':return 'Configuração recuperada; reinicie o Core para ativar os recursos'
+        if self.configurationStatus=='restart_required':return 'Configuração salva; reinicie o Core para ativar os recursos'
         return ''
     @Slot(bool,int)
     def savePreferences(self,audible,timeout):

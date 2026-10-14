@@ -16,10 +16,22 @@ ApplicationWindow {
         anchors.centerIn: parent; width: Math.min(420, window.width - 32)
         standardButtons: Dialog.Close
         onOpened: { audible.checked = core.audibleFeedback; timeout.value = core.sessionTimeout }
+        contentItem: ScrollView {
+            implicitHeight: Math.min(settingsColumn.implicitHeight, window.height - 120)
+            clip: true
         ColumnLayout {
-            anchors.fill: parent
+            id: settingsColumn
+            width: preferences.availableWidth
             Label { objectName: "configurationMessage"; visible: core.configurationMessage.length > 0; text: core.configurationMessage; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Button { objectName: "recoverConfigurationButton"; visible: core.configurationStatus === "safe_mode"; text: "Preservar arquivo e restaurar padrões"; enabled: core.recoveryAvailable; onClicked: core.recoverConfiguration(); Accessible.name: text }
+            Label { objectName: "packDescription"; visible: core.packDescription.length > 0; text: core.packDescription; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            RowLayout {
+                visible: core.wakeChoices.length > 0
+                Layout.fillWidth: true
+                ComboBox { id: wakeChoice; objectName: "wakeChoice"; Layout.fillWidth: true; model: core.wakeChoices; textRole: "text"; valueRole: "id"; enabled: core.preferencesAvailable; Accessible.name: "Frase de wake do pack" }
+                Button { objectName: "selectWakeButton"; text: "Selecionar"; enabled: core.preferencesAvailable && wakeChoice.currentIndex >= 0 && core.wakeChoices[wakeChoice.currentIndex].qualification === "dev_qualified"; onClicked: core.selectWake(wakeChoice.currentValue) }
+            }
+            Label { objectName: "wakeQualification"; visible: core.wakeChoices.length > 0; text: wakeChoice.currentIndex >= 0 ? (core.wakeChoices[wakeChoice.currentIndex].qualification === "dev_qualified" ? "Qualificada em DEV; validação física pendente" : "POC_REQUIRED: frase sem qualidade aprovada") : ""; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             CheckBox { id: audible; objectName: "audiblePreference"; text: core.voiceAvailable ? "Resposta por voz (saída virtual)" : "Resposta por voz indisponível"; enabled: core.preferencesAvailable && core.voiceAvailable }
             Label { text: "Prazo da sessão em milissegundos"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             SpinBox { id: timeout; objectName: "timeoutPreference"; from: 50; to: 60000; stepSize: 1000; editable: true; enabled: core.preferencesAvailable }
@@ -30,6 +42,7 @@ ApplicationWindow {
             Label { text: (core.configurationStatus === "safe_mode" ? "Padrões de recuperação: " : "Atual no Core: ") + (core.audibleFeedback ? "voz ligada" : "voz desligada") + " · " + core.sessionTimeout + " ms"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Label { objectName: "preferencesResult"; text: core.preferencesResult; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Label { text: "Alterações se aplicam à próxima sessão. Voz, frases e dispositivos dependem do pack e dos adaptadores disponíveis."; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        }
         }
     }
     ColumnLayout {
@@ -73,7 +86,7 @@ ApplicationWindow {
             TextField { id: input; objectName: "textInput"; Layout.fillWidth: true; enabled: core.textAvailable; placeholderText: "Comando de texto no perfil de teste"; maximumLength: 512; Accessible.name: "Comando de texto"; onAccepted: if (core.textAvailable) { core.submitText(text); text = ""; } }
             Button { objectName: "sendButton"; text: "Enviar"; enabled: core.textAvailable && input.text.trim().length > 0; onClicked: { core.submitText(input.text); input.text = ""; } }
         }
-        Label { text: "Voz e dispositivos / Plugins: indisponíveis nesta etapa"; color: "#9bb0c5"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        Label { text: "Dispositivos físicos / Plugins: indisponíveis nesta etapa"; color: "#9bb0c5"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         Label { objectName: "diagnostics"; text: core.diagnostic; color: "#9bb0c5"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Diagnóstico: " + text }
     }
 }

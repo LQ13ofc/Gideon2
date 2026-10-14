@@ -17,8 +17,19 @@ async fn main() -> io::Result<()> {
     let mut replay = None;
     let mut commands_sandbox = false;
     let mut tts = None;
+    let mut base_pack = None;
     while let Some(option) = args.next() {
         match option.as_str() {
+            "--base-pack" if base_pack.is_none() => {
+                let path = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| io::Error::other("Base pack required"))?,
+                );
+                if !path.is_absolute() {
+                    return Err(io::Error::other("absolute pack path required"));
+                }
+                base_pack = Some(path);
+            }
             "--virtual-input" if !virtual_input => virtual_input = true,
             "--commands-sandbox" if !commands_sandbox => commands_sandbox = true,
             "--tts-virtual" if tts.is_none() => {
@@ -69,6 +80,7 @@ async fn main() -> io::Result<()> {
         replay,
         commands_sandbox,
         tts,
+        base_pack,
     )
     .await
 }

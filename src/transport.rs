@@ -248,7 +248,33 @@ pub async fn serve(
     mut replay: Option<WakeReplay>,
     mut commands_sandbox: bool,
     mut tts: Option<crate::tts::Config>,
+    base_pack_path: Option<std::path::PathBuf>,
 ) -> io::Result<()> {
+    let mut base_pack =
+        if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
+            if let Some(path) = base_pack_path.as_ref() {
+                let replay = replay
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("Base pack requires wake profile"))?;
+                let tts = tts
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("Base pack requires TTS profile"))?;
+                let pack = crate::pack::load(path, &replay.manifest, &tts.manifest)?;
+                if storage
+                    .config
+                    .wake_phrase
+                    .as_ref()
+                    .is_some_and(|id| !pack.selectable(id))
+                {
+                    storage.incompatible_configuration()?;
+                }
+                Some(pack)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
     storage.clear_stale_socket()?;
     let path = storage.socket_path();
     let listener = UnixListener::bind(&path)?;
@@ -270,6 +296,9 @@ pub async fn serve(
         replay = None;
         tts = None;
         commands_sandbox = false;
+        if let Some(pack) = base_pack.as_mut() {
+            pack.active_phrase = None;
+        }
     }
 
     let (stt_tx, stt_requests) = mpsc::channel::<SttRequest>(16);
@@ -307,16 +336,27 @@ pub async fn serve(
             if let Some(phrase) = storage.config.wake_phrase.as_ref() {
                 descriptor.active_phrase = phrase.clone();
             }
-            command_wake_text = descriptor
-                .supported_phrases
-                .get(&descriptor.active_phrase)
-                .map(|label| label.replace('_', " "))
-                .unwrap_or_default();
+            if let Some(pack) = base_pack.as_mut() {
+                pack.active_phrase = Some(descriptor.active_phrase.clone());
+                command_wake_text = pack
+                    .text(&descriptor.active_phrase)
+                    .ok_or_else(|| io::Error::other("wake phrase missing"))?
+                    .into();
+            } else {
+                command_wake_text = descriptor
+                    .supported_phrases
+                    .get(&descriptor.active_phrase)
+                    .map(|label| label.replace('_', " "))
+                    .unwrap_or_default();
+            }
             r.active_phrase = Some(descriptor.active_phrase.clone());
             Some(WakeInput::new(descriptor).map_err(|_| io::Error::other("invalid wake catalog"))?)
         }
         None => None,
     };
+    if let Some(pack) = base_pack {
+        core.configure_pack(pack);
+    }
     if commands_sandbox {
         core.configure_commands(command_wake_text);
     }

@@ -35,6 +35,11 @@ class Tests(unittest.TestCase):
             for key,value in [('state','capturing'),('session_id',1),('text_input_available',True),('configuration_recovery_available','yes')]:
                 with self.subTest(status=status,key=key),self.assertRaises(ValueError):validate_snapshot({**valid,key:value},'r',0)
         with self.assertRaises(ValueError):validate_snapshot({**BASE,'configuration_status':'ready','configuration_recovery_available':True},'r',0)
+    def test_pack_presentation_is_bounded_and_has_no_fake_phrases(self):
+        pack={'version':1,'id':'pack','scope':'dev_virtual_en','preflight':'verified','engines':{'wake':'kws','stt':'stt','tts':'tts'},'wake_phrases':[{'id':'opaque','text':'Explicit words','qualification':'dev_qualified'}],'active_phrase':'opaque','default_phrase':'opaque','voice':'Alba','language':'en','audio_input':'virtual_pcm','audio_output':'virtual'}
+        validate_snapshot({**BASE,'base_pack':pack},'r',0)
+        for key,value in [('version',True),('wake_phrases',[]),('wake_phrases',[{'id':'x','text':'no grant','qualification':'certified'}]),('active_phrase',[]),('default_phrase','missing'),('audio_input','microphone')]:
+            with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'base_pack':{**pack,key:value}},'r',0)
     def test_real_socket_malformed_nested_data_and_deep_json_clear_stale_state(self):
         for deep in (False,True,"preferences"):
             with self.subTest(deep=deep),tempfile.TemporaryDirectory(prefix='gideon-ipc-audit-') as td:

@@ -15,6 +15,10 @@ pub struct Request {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Snapshot,
+    SelectWake {
+        revision: u64,
+        phrase_id: String,
+    },
     RecoverConfiguration {
         revision: u64,
     },
@@ -67,6 +71,7 @@ pub struct Event {
 
 #[derive(Debug, Serialize)]
 pub struct Response {
+    pub base_pack: Option<crate::pack::Snapshot>,
     pub configuration_status: crate::storage::ConfigurationStatus,
     pub configuration_recovery_available: bool,
     pub preferences: crate::storage::Config,
@@ -100,6 +105,12 @@ pub fn valid_id(id: &str) -> bool {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum WireRequest {
+    SelectWake {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        phrase_id: String,
+    },
     RecoverConfiguration {
         version: u16,
         request_id: String,
@@ -145,6 +156,19 @@ enum WireRequest {
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let (version, request_id, operation) = match WireRequest::deserialize(d)? {
+            WireRequest::SelectWake {
+                version,
+                request_id,
+                revision,
+                phrase_id,
+            } => (
+                version,
+                request_id,
+                Operation::SelectWake {
+                    revision,
+                    phrase_id,
+                },
+            ),
             WireRequest::RecoverConfiguration {
                 version,
                 request_id,

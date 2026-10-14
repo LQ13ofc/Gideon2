@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[]
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -52,6 +52,28 @@ elif args.phase=='cancel':
     wait(lambda:bridge.state=='idle',5)
     check('keyboard cancel reaches actual Core',any(e['kind']=='cancelled' and str(e['session_id'])==original for e in bridge.snapshot['events']))
     check('cancel revokes subtitle and result',not bridge.subtitle and not bridge.result)
+elif args.phase=='pack':
+    check('pack metadata comes from actual Core',len(bridge.wakeChoices)==2 and 'base-en-dev-v1' in bridge.packDescription)
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('initial native S1 uses preflighted pack',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
+    window.setProperty('width',window.property('minimumWidth'));window.setProperty('height',window.property('minimumHeight'))
+    settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'preferencesDialog');wait(lambda:dialog.property('visible'),3)
+    combo=window.findChild(QObject,'wakeChoice');select=window.findChild(QObject,'selectWakeButton')
+    check('explicit phrase text presented',combo.property('currentText')=='Hey Gideon')
+    combo.setProperty('currentIndex',1);QTest.qWait(50)
+    check('POC phrase cannot be selected',combo.property('currentText')=='Okay Gideon' and not select.property('enabled'))
+    combo.setProperty('currentIndex',0);QTest.qWait(50);select.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.configurationStatus=='restart_required',5)
+    check('Qt selection persisted by actor',bridge.snapshot['preferences']['wake_phrase']=='hey_gideon')
+    check('selection requires actual restart',not bridge.preferencesAvailable and not bridge.textAvailable)
+    image=window.grabWindow();image.save(str(Path(args.artifacts)/'pack.png'));dialog.close();Path(args.artifacts,'selected').touch()
+    wait(lambda:not bridge.connected,10);Path(args.artifacts,'offline').touch();wait(lambda:bridge.connected,10)
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('selected wake runs native integrated flow after restart',bridge.snapshot['base_pack']['active_phrase']=='hey_gideon' and bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
+    bridge.rollbackPreferences();wait(lambda:bridge.configurationStatus=='restart_required',5)
+    check('rollback restores default selection with new revision',bridge.snapshot['preferences']['wake_phrase'] is None and bridge.preferencesRevision=='2')
+    Path(args.artifacts,'rolled_back').touch()
 elif args.phase=='safe_mode':
     check('connected Core reports safe mode',bridge.configurationStatus=='safe_mode' and bridge.state=='safe_mode')
     check('safe mode disables ordinary controls',not bridge.preferencesAvailable and not bridge.textAvailable and not button.property('enabled'))

@@ -1,6 +1,6 @@
 # Mapa da Base para S2
 
-Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1 e modo seguro B2.2a.
+Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a e pack interno B2.2b.
 Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-preferences.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
@@ -32,6 +32,7 @@ flowchart LR
 |---|---|---|
 | src/main.rs | Flags/perfil e entrada do daemon | App não inicia/desliga Core por fechar janela |
 | src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1: feedback/prazo em idle, CAS/rollback; conteúdo inválido→safe mode; recuperação→restart |
+| src/pack.rs | Pack v1, hashes/proveniência/modelos e catálogo | DEV qualificado não é freeze/certificação física; sem Model Manager |
 | src/protocol.rs | Request/Response/Event e esquema estrito | v1, IDs e erros são contratos; não enviar grants |
 | src/transport.rs | SO_PEERCRED, peers, filas, tarefas, namespace, sinais | Processos internos supervisionados; sem dispositivo pessoal |
 | src/core.rs | Único owner de sessão/deadline/autoridade/resultado | UI representa fatos, não replica decisões |
@@ -81,14 +82,17 @@ idle e session_id=null nesses modos, sem alegar atividade de áudio.
 | speech_status / speech_samples / speech | Progresso/conclusão; cancel/failed não produzem summary concluído |
 | wake_status / stt_status | Saúde/disponibilidade; replay_finished não significa listener armado |
 | text_input_available | Test-only, exige --virtual-input + --commands-sandbox |
-| preferences | Config efetiva, revisão u64 e preferências anteriores para rollback; em safe mode são padrões de recuperação |
+| preferences | Config efetiva, revisão u64 e anteriores incluindo wake para rollback; em safe mode são padrões de recuperação |
+| base_pack | Catálogo do pack, engine IDs, qualificação, texto explícito, perfil no processo/default, voz/idioma/áudio virtual; sem paths |
 | configuration_status / configuration_recovery_available | ready/safe_mode/restart_required; somente conteúdo privado inválido pode ser recuperado |
 | code | Resultado do request; distinto de resultado da ação e resultado de fala |
 
 Snapshot, Cancel, Text de teste, VirtualWake de teste, Action negada, Preferences
-e RollbackPreferences; RecoverConfiguration só em safe mode com revisão do boot.
+e RollbackPreferences; SelectWake exige ID DEV qualificado e idle/revisão.
+RecoverConfiguration só em safe mode com revisão do boot.
 Config exige idle e revisão atual; App não escreve disco.
-Discovery de packs, Install e VoiceDevices ainda não têm endpoints.
+Discovery está em base_pack do Snapshot quando --base-pack é fornecido;
+Install e VoiceDevices físicos ainda não têm endpoints.
 Incoming frame 4096B, UI response até 65536B; 8 peers/16 calls. Um request Qt em
 voo, active poll 150ms, idle 1s; watchdog 2s; reconnect 0.5–5s. Delta ignora
 request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga controles.
@@ -110,14 +114,15 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
 
 ## Dependências antes de B2/B3/B4
 
-1. B2: discovery de recursos pelo Core/pack suportado (sem UI lendo/inventando
-   capabilities); catalogar IDs, texto de frase, qualificação, voz/idioma/devices.
-   Hoje texto de wake deriva do label com underscores; packs futuros com labels
-   opacos precisam texto explícito, não convenção implícita na interface.
+1. B2.2b: pack interno faz discovery/preflight de perfis/assets e liga relatórios
+   por hash/engine/frase/config do KWS. UI recebe IDs/texto explícito/qualificação,
+   Alba/EN candidato e áudio virtual. Sem pack, perfis de engenharia conservam
+   compatibilidade e inferem prefixo pelo label; App não oferece seletor certificado.
 2. B2.1: feedback/prazo têm API actor-owned, revisão, idle-only, persistência e
    rollback atômicos. B2.2a preserva conteúdo inválido em safe mode: sem engines
    ou comandos; recuperação privada só ativa recursos depois do reinício real.
-   Arquivos inseguros ainda recusam boot. Discovery/troca de wake seguem pendentes.
+   Arquivos inseguros ainda recusam boot. B2.2b salva wake qualificado e rollback
+   no mesmo JSON; seleção/troca exige reinício. Incompatível com pack→safe mode.
 3. B2.1: feedback audível altera o fluxo real e prazo se aplica à próxima sessão.
    Preferências adicionais de visual/voz continuam dependentes de suporte;
    separar língua da UI (PT) da língua do ASR/TTS (EN no pack testado).

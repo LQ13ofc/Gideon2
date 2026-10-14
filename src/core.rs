@@ -24,6 +24,7 @@ struct Session {
 
 /// Single owner for sessions, events and authority; no detached action tasks.
 pub struct Core {
+    base_pack: Option<crate::pack::Snapshot>,
     configuration_status: crate::storage::ConfigurationStatus,
     configuration_recovery_available: bool,
     preferences: crate::storage::Config,
@@ -55,6 +56,7 @@ pub struct Core {
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
         Self {
+            base_pack: None,
             configuration_status: crate::storage::ConfigurationStatus::Ready,
             configuration_recovery_available: false,
             preferences: crate::storage::Config {
@@ -551,6 +553,7 @@ impl Core {
     }
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
+            base_pack: self.base_pack.clone(),
             configuration_status: self.configuration_status,
             configuration_recovery_available: self.configuration_recovery_available,
             preferences: self.preferences.clone(),
@@ -582,6 +585,9 @@ impl Core {
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
         self.preferences = config.clone();
         self.timeout = Duration::from_millis(config.session_timeout_ms);
+    }
+    pub fn configure_pack(&mut self, pack: crate::pack::Snapshot) {
+        self.base_pack = Some(pack);
     }
     pub fn configure_storage(&mut self, storage: &crate::storage::Storage) {
         self.configure_preferences(&storage.config);
@@ -643,6 +649,33 @@ impl Core {
                 "configuration_not_ready"
             }
 
+            Operation::SelectWake { revision, .. } if revision != self.preferences.revision => {
+                "stale_preferences"
+            }
+            Operation::SelectWake { .. } if self.session.is_some() => "busy",
+            Operation::SelectWake {
+                revision,
+                phrase_id,
+            } => {
+                if !self
+                    .base_pack
+                    .as_ref()
+                    .is_some_and(|p| p.selectable(&phrase_id))
+                {
+                    "wake_not_qualified"
+                } else if let Some(storage) = storage {
+                    let result = storage.select_wake(revision, phrase_id);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        self.emit(req.request_id.clone(), None, "preferences_updated");
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
             Operation::Preferences { revision, .. }
             | Operation::RollbackPreferences { revision }
                 if revision != self.preferences.revision =>
@@ -653,6 +686,17 @@ impl Core {
                 if self.session.is_some() =>
             {
                 "busy"
+            }
+            Operation::RollbackPreferences { .. }
+                if self.base_pack.as_ref().is_some_and(|p| {
+                    self.preferences
+                        .previous_preferences
+                        .as_ref()
+                        .and_then(|prev| prev.wake_phrase.as_deref())
+                        .is_some_and(|id| !p.selectable(id))
+                }) =>
+            {
+                "wake_not_qualified"
             }
             Operation::Preferences {
                 session_timeout_ms, ..
@@ -674,7 +718,7 @@ impl Core {
                         }
                         _ => unreachable!(),
                     };
-                    self.configure_preferences(&storage.config);
+                    self.configure_storage(storage);
                     if result.is_ok() {
                         self.emit(req.request_id.clone(), None, "preferences_updated");
                         "ok"
@@ -791,6 +835,93 @@ mod tests {
         );
         core.audio_wake(now);
         assert!(core.response("next".into(), "ok").session_id.is_none());
+    }
+    #[test]
+    fn pack_text_and_selection_are_independent_of_phrase_ids_and_native_labels() {
+        let pack = crate::pack::Snapshot {
+            version: 1,
+            id: "test-pack".into(),
+            scope: "dev_virtual_en",
+            preflight: "verified",
+            engines: Default::default(),
+            wake_phrases: vec![
+                crate::pack::WakeChoice {
+                    id: "opaque_7".into(),
+                    text: "Activate Atlas".into(),
+                    qualification: "dev_qualified",
+                },
+                crate::pack::WakeChoice {
+                    id: "opaque_8".into(),
+                    text: "Other phrase".into(),
+                    qualification: "poc_required",
+                },
+            ],
+            active_phrase: Some("opaque_7".into()),
+            default_phrase: "opaque_7".into(),
+            voice: "Alba",
+            language: "en".into(),
+            audio_input: "virtual_pcm",
+            audio_output: "virtual",
+        };
+        let mut core = Core::new(Duration::from_secs(30), true);
+        core.configure_commands(pack.text("opaque_7").unwrap().into());
+        core.configure_pack(pack);
+        let now = Instant::now();
+        core.handle(
+            request(
+                "command",
+                Operation::Text {
+                    raw: "Activate Atlas, open Brave.".into(),
+                },
+            ),
+            now,
+        );
+        assert!(matches!(
+            core.take_command_job().unwrap().command,
+            Command::OpenApp { .. }
+        ));
+        core.shutdown();
+        let temp = tempfile::tempdir().unwrap();
+        let mut storage = crate::storage::Storage::open(&temp.path().join("root")).unwrap();
+        core.configure_storage(&storage);
+        assert_eq!(
+            core.handle_with_storage(
+                request(
+                    "poc",
+                    Operation::SelectWake {
+                        revision: 0,
+                        phrase_id: "opaque_8".into()
+                    }
+                ),
+                now,
+                Some(&mut storage)
+            )
+            .code,
+            "wake_not_qualified"
+        );
+        let selected = core.handle_with_storage(
+            request(
+                "select",
+                Operation::SelectWake {
+                    revision: 0,
+                    phrase_id: "opaque_7".into(),
+                },
+            ),
+            now,
+            Some(&mut storage),
+        );
+        assert_eq!(
+            selected.configuration_status,
+            crate::storage::ConfigurationStatus::RestartRequired
+        );
+        assert_eq!(
+            selected.preferences.wake_phrase.as_deref(),
+            Some("opaque_7")
+        );
+        assert!(core
+            .handle(request("blocked", Operation::VirtualWake), now)
+            .session_id
+            .is_none());
     }
     #[test]
     fn lifecycle_and_deadline_fence() {
