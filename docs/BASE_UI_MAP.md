@@ -1,6 +1,6 @@
 # Mapa da Base para S2
 
-Escopo: implementação nova em `base`, S1, cliente B1 e preferências B2.1.
+Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1 e modo seguro B2.2a.
 Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-preferences.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
@@ -31,7 +31,7 @@ flowchart LR
 | Arquivo | Responsabilidade | Limite relevante para a UI |
 |---|---|---|
 | src/main.rs | Flags/perfil e entrada do daemon | App não inicia/desliga Core por fechar janela |
-| src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1: feedback/prazo live em idle, CAS e rollback atômicos; wake ainda no boot |
+| src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1: feedback/prazo em idle, CAS/rollback; conteúdo inválido→safe mode; recuperação→restart |
 | src/protocol.rs | Request/Response/Event e esquema estrito | v1, IDs e erros são contratos; não enviar grants |
 | src/transport.rs | SO_PEERCRED, peers, filas, tarefas, namespace, sinais | Processos internos supervisionados; sem dispositivo pessoal |
 | src/core.rs | Único owner de sessão/deadline/autoridade/resultado | UI representa fatos, não replica decisões |
@@ -61,7 +61,9 @@ WakeDetected existe como ocorrência interna de ativação, não como State sepa
 no protocolo. session_started também ocorre por texto/VirtualWake: a UI não deve
 inferir wake físico apenas pelo nome do evento. Confirm não tem backend ativo;
 não oferecer diálogo de confirmação com autoridade fictícia. Error de motor é
-ortogonal a state: Core pode estar idle e stt_status=failed.
+ortogonal a state: Core pode estar idle e stt_status=failed. Na UI, health de
+configuração projeta safe_mode/restart_required na Aura; wire state permanece
+idle e session_id=null nesses modos, sem alegar atividade de áudio.
 
 ## Dicionário de IPC usado pelo App
 
@@ -79,11 +81,13 @@ ortogonal a state: Core pode estar idle e stt_status=failed.
 | speech_status / speech_samples / speech | Progresso/conclusão; cancel/failed não produzem summary concluído |
 | wake_status / stt_status | Saúde/disponibilidade; replay_finished não significa listener armado |
 | text_input_available | Test-only, exige --virtual-input + --commands-sandbox |
-| preferences | Config efetiva, revisão u64 e preferências anteriores para rollback |
+| preferences | Config efetiva, revisão u64 e preferências anteriores para rollback; em safe mode são padrões de recuperação |
+| configuration_status / configuration_recovery_available | ready/safe_mode/restart_required; somente conteúdo privado inválido pode ser recuperado |
 | code | Resultado do request; distinto de resultado da ação e resultado de fala |
 
 Snapshot, Cancel, Text de teste, VirtualWake de teste, Action negada, Preferences
-e RollbackPreferences. Config exige idle e revisão atual; App não escreve disco.
+e RollbackPreferences; RecoverConfiguration só em safe mode com revisão do boot.
+Config exige idle e revisão atual; App não escreve disco.
 Discovery de packs, Install e VoiceDevices ainda não têm endpoints.
 Incoming frame 4096B, UI response até 65536B; 8 peers/16 calls. Um request Qt em
 voo, active poll 150ms, idle 1s; watchdog 2s; reconnect 0.5–5s. Delta ignora
@@ -111,8 +115,9 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
    Hoje texto de wake deriva do label com underscores; packs futuros com labels
    opacos precisam texto explícito, não convenção implícita na interface.
 2. B2.1: feedback/prazo têm API actor-owned, revisão, idle-only, persistência e
-   rollback atômicos. Ainda faltam discovery/troca de wake e modo seguro para
-   config inválida; dados corrompidos continuam preservados e boot recusado.
+   rollback atômicos. B2.2a preserva conteúdo inválido em safe mode: sem engines
+   ou comandos; recuperação privada só ativa recursos depois do reinício real.
+   Arquivos inseguros ainda recusam boot. Discovery/troca de wake seguem pendentes.
 3. B2.1: feedback audível altera o fluxo real e prazo se aplica à próxima sessão.
    Preferências adicionais de visual/voz continuam dependentes de suporte;
    separar língua da UI (PT) da língua do ASR/TTS (EN no pack testado).

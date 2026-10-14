@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     os::unix::{
         fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt},
         io::AsRawFd,
@@ -62,9 +62,18 @@ impl Config {
         Ok(())
     }
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigurationStatus {
+    Ready,
+    SafeMode,
+    RestartRequired,
+}
 pub struct Storage {
     pub root: PathBuf,
     pub config: Config,
+    pub configuration_status: ConfigurationStatus,
+    invalid_config: Option<Vec<u8>>,
     _lock: File,
 }
 fn private_metadata(path: &Path, directory: bool) -> io::Result<()> {
@@ -93,6 +102,10 @@ fn open_private(path: &Path) -> io::Result<File> {
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
         .open(path)?;
+    validate_opened_private(&file)?;
+    Ok(file)
+}
+fn validate_opened_private(file: &File) -> io::Result<()> {
     let m = file.metadata()?;
     // Validate the opened inode, not just a potentially replaced directory entry.
     // SAFETY: getuid is a read-only process identity query.
@@ -106,10 +119,38 @@ fn open_private(path: &Path) -> io::Result<File> {
             "unsafe opened private file",
         ));
     }
-    Ok(file)
+    Ok(())
+}
+fn read_config_bytes(path: &Path) -> io::Result<Vec<u8>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    validate_opened_private(&file)?;
+    if file.metadata()?.len() > 4096 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "config too large",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(4097).read_to_end(&mut bytes)?;
+    if bytes.len() > 4096 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "config too large",
+        ));
+    }
+    Ok(bytes)
 }
 impl Storage {
     pub fn open(root: &Path) -> io::Result<Self> {
+        Self::open_mode(root, false)
+    }
+    pub fn open_for_runtime(root: &Path) -> io::Result<Self> {
+        Self::open_mode(root, true)
+    }
+    fn open_mode(root: &Path, allow_safe: bool) -> io::Result<Self> {
         if !root.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -132,30 +173,53 @@ impl Storage {
             ));
         }
         let path = root.join("config.json");
-        let config = if path.exists() {
-            private_metadata(&path, false)?;
-            if fs::metadata(&path)?.len() > 4096 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "config too large",
-                ));
+        let mut invalid_config = None;
+        let mut configuration_status = ConfigurationStatus::Ready;
+        let config = match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                private_metadata(&path, false)?;
+                // Unsafe files and I/O errors never become content recovery.
+                let bytes = match read_config_bytes(&path) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if allow_safe && error.kind() == io::ErrorKind::InvalidData => None,
+                    Err(error) => return Err(error),
+                };
+                let parsed = bytes
+                    .as_ref()
+                    .and_then(|bytes| serde_json::from_slice::<Config>(bytes).ok())
+                    .filter(|config| config.validate().is_ok());
+                match parsed {
+                    Some(config) => config,
+                    None if allow_safe => {
+                        configuration_status = ConfigurationStatus::SafeMode;
+                        invalid_config = bytes;
+                        Config::default()
+                    }
+                    None => {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid config"))
+                    }
+                }
             }
-            serde_json::from_slice::<Config>(&fs::read(path)?)?
-        } else {
-            let cfg = Config::default();
-            let mut f = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)?;
-            f.write_all(&serde_json::to_vec(&cfg)?)?;
-            f.sync_all()?;
-            cfg
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let config = Config::default();
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(path)?;
+                file.write_all(&serde_json::to_vec(&config)?)?;
+                file.sync_all()?;
+                File::open(&root)?.sync_all()?;
+                config
+            }
+            Err(error) => return Err(error),
         };
-        config.validate()?;
         Ok(Self {
             root,
             config,
+            configuration_status,
+            invalid_config,
             _lock: lock,
         })
     }
@@ -189,6 +253,9 @@ impl Storage {
         audible: bool,
         timeout_ms: u64,
     ) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready {
+            return Err(io::Error::other("configuration not ready"));
+        }
         if revision != self.config.revision {
             return Err(io::Error::other("stale revision"));
         }
@@ -222,6 +289,63 @@ impl Storage {
             previous.audible_feedback,
             previous.session_timeout_ms,
         )
+    }
+    pub fn recovery_available(&self) -> bool {
+        self.configuration_status == ConfigurationStatus::SafeMode && self.invalid_config.is_some()
+    }
+    pub fn set_safe_epoch(&mut self, epoch: u64) {
+        if self.configuration_status == ConfigurationStatus::SafeMode {
+            self.config.revision = epoch;
+        }
+    }
+    pub fn recover_configuration(&mut self, revision: u64) -> io::Result<()> {
+        if revision != self.config.revision || !self.recovery_available() {
+            return Err(io::Error::other("recovery unavailable"));
+        }
+        let invalid = self
+            .invalid_config
+            .as_ref()
+            .expect("bounded invalid configuration");
+        if read_config_bytes(&self.root.join("config.json"))? != *invalid {
+            return Err(io::Error::other("configuration changed"));
+        }
+        let next = Config {
+            revision: revision
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("revision exhausted"))?,
+            ..Config::default()
+        };
+        // Do not overwrite an existing recovery artifact or a hostile link.
+        let preserved = self.root.join("config.invalid.json");
+        match fs::symlink_metadata(&preserved) {
+            Ok(_) => {
+                if read_config_bytes(&preserved)? != *invalid {
+                    return Err(io::Error::other("recovery artifact conflict"));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(&preserved)?;
+                let result = file.write_all(invalid).and_then(|()| file.sync_all());
+                if let Err(error) = result {
+                    // This create_new succeeded here; leave the original config untouched.
+                    let _ = fs::remove_file(&preserved);
+                    return Err(error);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+        // Make preservation durable before replacing the invalid config.
+        File::open(&self.root)?.sync_all()?;
+        self.replace("config.json", &next)?;
+        self.config = next;
+        self.configuration_status = ConfigurationStatus::RestartRequired;
+        self.invalid_config = None;
+        File::open(&self.root)?.sync_all()
     }
     pub fn socket_path(&self) -> PathBuf {
         self.root.join("core.sock")

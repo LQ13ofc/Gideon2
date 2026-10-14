@@ -64,7 +64,7 @@ async fn main() -> io::Result<()> {
         return Err(io::Error::other("TTS requires command profile"));
     }
     transport::serve(
-        Storage::open(&root)?,
+        Storage::open_for_runtime(&root)?,
         virtual_input,
         replay,
         commands_sandbox,

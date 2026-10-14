@@ -2,7 +2,8 @@
 """Core outside / Qt offscreen inside private namespace; no display or personal endpoints."""
 import hashlib,json,os,signal,subprocess,tempfile,time
 from pathlib import Path
-BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';PY=BASE/'target/ui-venv/bin/python';runtime=PY.resolve().parents[1];runtime_alias=PY.readlink().parents[1]
+from ui_fixture import offscreen_command
+BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base'
 manifest=BASE/'target/a3-assets/replay-manifest.json';m=json.loads(manifest.read_text());index=next(i for i,r in enumerate(m['fixtures']) if r['id']=='wake-hey-brave__bf_emma__clean');rows=[]
 for phase in ('voice','cancel','reconnect','timeout'):
     with tempfile.TemporaryDirectory(prefix='gideon-b1-') as td:
@@ -18,7 +19,7 @@ for phase in ('voice','cancel','reconnect','timeout'):
                 if core.poll() is not None:raise RuntimeError(core.stderr.read().decode())
                 if time.monotonic()>until:raise TimeoutError('Core start')
                 time.sleep(.01)
-            cmd=['/usr/bin/bwrap','--unshare-all','--die-with-parent','--ro-bind','/usr','/usr','--symlink','usr/lib','/lib','--symlink','usr/lib','/lib64','--ro-bind','/etc/fonts','/etc/fonts','--proc','/proc','--dev','/dev','--tmpfs','/tmp','--ro-bind',str(runtime),str(runtime),'--ro-bind',str(runtime),str(runtime_alias),'--ro-bind',str(BASE),str(BASE),'--bind',td,td,'--setenv','HOME','/tmp','--setenv','XDG_CACHE_HOME','/tmp/cache','--setenv','XDG_CONFIG_HOME','/tmp/config','--setenv','XDG_RUNTIME_DIR','/tmp/runtime','--setenv','QT_QPA_PLATFORM','offscreen','--setenv','QT_QUICK_BACKEND','software','--setenv','QT_SCALE_FACTOR','2','--chdir','/tmp','--',str(PY),'-I',str(BASE/'scripts/test_ui_offscreen.py'),'--root',str(root),'--artifacts',str(artifacts),'--phase',phase]
+            cmd=offscreen_command(root,artifacts,phase)
             ui=subprocess.Popen(cmd,env={'PATH':'/usr/bin:/bin'},stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             if phase in ('reconnect','timeout'):
                 for marker in ('connected','offline'):

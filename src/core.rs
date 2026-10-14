@@ -24,6 +24,8 @@ struct Session {
 
 /// Single owner for sessions, events and authority; no detached action tasks.
 pub struct Core {
+    configuration_status: crate::storage::ConfigurationStatus,
+    configuration_recovery_available: bool,
     preferences: crate::storage::Config,
     session: Option<Session>,
     next_session: u64,
@@ -53,6 +55,8 @@ pub struct Core {
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
         Self {
+            configuration_status: crate::storage::ConfigurationStatus::Ready,
+            configuration_recovery_available: false,
             preferences: crate::storage::Config {
                 session_timeout_ms: timeout.as_millis() as u64,
                 ..Default::default()
@@ -113,7 +117,9 @@ impl Core {
     }
     pub fn audio_wake(&mut self, now: Instant) {
         self.expire(now);
-        if self.session.is_none() {
+        if self.session.is_none()
+            && self.configuration_status == crate::storage::ConfigurationStatus::Ready
+        {
             self.start_session(format!("wake_{}", self.sequence + 1), now);
         }
     }
@@ -545,11 +551,16 @@ impl Core {
     }
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
+            configuration_status: self.configuration_status,
+            configuration_recovery_available: self.configuration_recovery_available,
             preferences: self.preferences.clone(),
             command: self.command_outcome.clone(),
             speech_status: self.speech_status,
             speech_samples: self.speech_samples,
-            text_input_available: self.virtual_input && self.command_wake.is_some(),
+            text_input_available: self.configuration_status
+                == crate::storage::ConfigurationStatus::Ready
+                && self.virtual_input
+                && self.command_wake.is_some(),
             speech: self.speech_summary.clone(),
             version: VERSION,
             stt_status: self.stt_status,
@@ -571,6 +582,11 @@ impl Core {
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
         self.preferences = config.clone();
         self.timeout = Duration::from_millis(config.session_timeout_ms);
+    }
+    pub fn configure_storage(&mut self, storage: &crate::storage::Storage) {
+        self.configure_preferences(&storage.config);
+        self.configuration_status = storage.configuration_status;
+        self.configuration_recovery_available = storage.recovery_available();
     }
     pub fn handle(&mut self, req: Request, now: Instant) -> Response {
         self.handle_with_storage(req, now, None)
@@ -599,6 +615,34 @@ impl Core {
         }
         self.recent_requests.push_back(req.request_id.clone());
         let code = match req.operation {
+            Operation::RecoverConfiguration { revision }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::RecoverConfiguration { .. }
+                if self.configuration_status != crate::storage::ConfigurationStatus::SafeMode =>
+            {
+                "recovery_unavailable"
+            }
+            Operation::RecoverConfiguration { revision } => {
+                if let Some(storage) = storage {
+                    let result = storage.recover_configuration(revision);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        self.emit(req.request_id.clone(), None, "configuration_recovered");
+                        "ok"
+                    } else {
+                        "configuration_recovery_error"
+                    }
+                } else {
+                    "recovery_unavailable"
+                }
+            }
+            _ if self.configuration_status != crate::storage::ConfigurationStatus::Ready => {
+                "configuration_not_ready"
+            }
+
             Operation::Preferences { revision, .. }
             | Operation::RollbackPreferences { revision }
                 if revision != self.preferences.revision =>
@@ -714,6 +758,39 @@ mod tests {
             request_id: id.into(),
             operation,
         }
+    }
+    #[test]
+    fn safe_configuration_fences_native_wake_and_public_actions() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        drop(crate::storage::Storage::open(&root).unwrap());
+        std::fs::write(root.join("config.json"), b"invalid").unwrap();
+        let mut storage = crate::storage::Storage::open_for_runtime(&root).unwrap();
+        storage.set_safe_epoch(99);
+        let mut core = Core::new(Duration::from_secs(30), true);
+        core.configure_storage(&storage);
+        core.configure_commands("custom wake".into());
+        let now = Instant::now();
+        core.audio_wake(now);
+        let snapshot = core.handle(request("snapshot", Operation::Snapshot), now);
+        assert!(snapshot.session_id.is_none());
+        assert!(!snapshot.text_input_available);
+        assert_eq!(
+            core.handle(request("wake", Operation::VirtualWake), now)
+                .code,
+            "configuration_not_ready"
+        );
+        let recovered = core.handle_with_storage(
+            request("recover", Operation::RecoverConfiguration { revision: 99 }),
+            now,
+            Some(&mut storage),
+        );
+        assert_eq!(
+            recovered.configuration_status,
+            crate::storage::ConfigurationStatus::RestartRequired
+        );
+        core.audio_wake(now);
+        assert!(core.response("next".into(), "ok").session_id.is_none());
     }
     #[test]
     fn lifecycle_and_deadline_fence() {

@@ -23,6 +23,12 @@ def validate_snapshot(data,request_id,min_sequence):
         if key in data:require(short(data[key]))
     if 'text_input_available' in data:require(type(data['text_input_available']) is bool)
     if 'speech_samples' in data:require(integer(data['speech_samples'],0,240000))
+    if 'configuration_status' in data:
+        require(data['configuration_status'] in ('ready','safe_mode','restart_required'))
+        if data['configuration_status']!='ready':require(data['state']=='idle' and data['session_id'] is None and data.get('text_input_available') is not True)
+    if 'configuration_recovery_available' in data:
+        require(type(data['configuration_recovery_available']) is bool)
+        require(not data['configuration_recovery_available'] or data.get('configuration_status')=='safe_mode')
     prefs=data.get('preferences')
     if prefs is not None:
         require(isinstance(prefs,dict) and type(prefs.get('version')) is int and prefs['version']==1)
@@ -104,7 +110,9 @@ class Bridge(QObject):
             self.timeout.stop();self.pending=None;self.pending_op=None;self.online=True;self.poll.start()
             # Python retains u64 precisely; QML never receives numeric session IDs.
             data['session_id']=str(sid) if sid is not None else ''
-            if pending_op in ('preferences','rollback_preferences'):
+            if pending_op=='recover_configuration':
+                self.preferences_result=('Configuração recuperada; reinício necessário' if data.get('code')=='ok' else data.get('code','invalid_message'))
+            elif pending_op in ('preferences','rollback_preferences'):
                 self.preferences_result=('Preferências salvas pelo Core' if data.get('code')=='ok' else data.get('code','invalid_message'))
             data.pop('request_id',None)
             if data!=self.snapshot:self.snapshot=data;self.changed.emit()
@@ -126,6 +134,18 @@ class Bridge(QObject):
         if self.textAvailable:
             if self.pending:self.text_request=text;self.changed.emit()
             else:self._request('text',raw=text)
+    @Slot()
+    def recoverConfiguration(self):
+        if self.recoveryAvailable:self._preferences('recover_configuration',revision=int(self.preferencesRevision))
+    @Property(str,notify=changed)
+    def configurationStatus(self):return self.snapshot.get('configuration_status','ready' if self.online else 'offline')
+    @Property(bool,notify=changed)
+    def recoveryAvailable(self):return self.online and self.configurationStatus=='safe_mode' and bool(self.snapshot.get('configuration_recovery_available')) and self.preferences_request is None
+    @Property(str,notify=changed)
+    def configurationMessage(self):
+        if self.configurationStatus=='safe_mode':return ('Modo seguro: configuração inválida preservada; áudio e comandos bloqueados' if self.snapshot.get('configuration_recovery_available') else 'Modo seguro: arquivo excede o limite de recuperação automática; conteúdo preservado')
+        if self.configurationStatus=='restart_required':return 'Configuração recuperada; reinicie o Core para ativar os recursos'
+        return ''
     @Slot(bool,int)
     def savePreferences(self,audible,timeout):
         if self.preferencesAvailable:
@@ -139,7 +159,7 @@ class Bridge(QObject):
         else:self._request(op,**kw)
         self.changed.emit()
     @Property(bool,notify=changed)
-    def preferencesAvailable(self):return self.online and 'preferences' in self.snapshot and not self.sessionId and self.preferences_request is None
+    def preferencesAvailable(self):return self.online and self.configurationStatus=='ready' and 'preferences' in self.snapshot and not self.sessionId and self.preferences_request is None
     @Property(bool,notify=changed)
     def rollbackAvailable(self):return self.preferencesAvailable and bool(self.snapshot.get("preferences",{}).get("previous_preferences"))
     @Property(bool,notify=changed)
@@ -157,7 +177,7 @@ class Bridge(QObject):
     @Property(bool,notify=changed)
     def connected(self):return self.online
     @Property(str,notify=changed)
-    def state(self):return self.snapshot.get('state','offline')
+    def state(self):return 'safe_mode' if self.configurationStatus=='safe_mode' else 'restart_required' if self.configurationStatus=='restart_required' else self.snapshot.get('state','offline')
     @Property(str,notify=changed)
     def sessionId(self):return self.snapshot.get('session_id','')
     @Property(str,notify=changed)
@@ -173,4 +193,4 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def diagnostic(self):
         if not self.online:return self.error
-        return ' · '.join([self.snapshot.get('wake_status','unavailable'),self.snapshot.get('stt_status','unavailable'),self.snapshot.get('speech_status','unavailable')])
+        return self.configurationMessage or ' · '.join([self.snapshot.get('wake_status','unavailable'),self.snapshot.get('stt_status','unavailable'),self.snapshot.get('speech_status','unavailable')])

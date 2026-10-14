@@ -116,3 +116,57 @@ fn atomic_preferences_restart_rollback_and_failed_update() {
     assert_eq!(store.config.session_timeout_ms, 9000);
     assert_eq!(store.config.revision, 3);
 }
+
+#[test]
+fn safe_mode_preserves_invalid_bytes_and_requires_restart_after_recovery() {
+    use gideon_base::storage::ConfigurationStatus;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    drop(Storage::open(&root).unwrap());
+    let bytes = b"{broken private marker}";
+    fs::write(root.join("config.json"), bytes).unwrap();
+    let mut store = Storage::open_for_runtime(&root).unwrap();
+    assert_eq!(store.configuration_status, ConfigurationStatus::SafeMode);
+    store.set_safe_epoch(1701);
+    assert!(store.update_preferences(1701, false, 9000).is_err());
+    assert!(store.recover_configuration(0).is_err());
+    fs::write(root.join("config.json"), b"changed").unwrap();
+    assert!(store.recover_configuration(1701).is_err());
+    fs::write(root.join("config.json"), bytes).unwrap();
+    store.recover_configuration(1701).unwrap();
+    assert_eq!(fs::read(root.join("config.invalid.json")).unwrap(), bytes);
+    assert_eq!(
+        store.configuration_status,
+        ConfigurationStatus::RestartRequired
+    );
+    assert_eq!(store.config.revision, 1702);
+    assert!(!store.recovery_available());
+    assert!(store.update_preferences(1702, false, 9000).is_err());
+    drop(store);
+    let store = Storage::open_for_runtime(&root).unwrap();
+    assert_eq!(store.configuration_status, ConfigurationStatus::Ready);
+    assert_eq!(store.config.revision, 1702);
+}
+
+#[test]
+fn safe_mode_never_weakens_file_guards_or_recovers_oversized_content() {
+    use gideon_base::storage::ConfigurationStatus;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    drop(Storage::open(&root).unwrap());
+    fs::write(root.join("config.json"), vec![b'x'; 4097]).unwrap();
+    let mut store = Storage::open_for_runtime(&root).unwrap();
+    assert_eq!(store.configuration_status, ConfigurationStatus::SafeMode);
+    assert!(!store.recovery_available());
+    assert!(store.recover_configuration(0).is_err());
+    drop(store);
+    fs::set_permissions(root.join("config.json"), fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(Storage::open_for_runtime(&root).is_err());
+    fs::remove_file(root.join("config.json")).unwrap();
+    let sentinel = temp.path().join("sentinel");
+    fs::write(&sentinel, "unchanged").unwrap();
+    fs::set_permissions(&sentinel, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::hard_link(&sentinel, root.join("config.json")).unwrap();
+    assert!(Storage::open_for_runtime(&root).is_err());
+    assert_eq!(fs::read_to_string(sentinel).unwrap(), "unchanged");
+}

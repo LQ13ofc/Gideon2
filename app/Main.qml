@@ -18,6 +18,8 @@ ApplicationWindow {
         onOpened: { audible.checked = core.audibleFeedback; timeout.value = core.sessionTimeout }
         ColumnLayout {
             anchors.fill: parent
+            Label { objectName: "configurationMessage"; visible: core.configurationMessage.length > 0; text: core.configurationMessage; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Button { objectName: "recoverConfigurationButton"; visible: core.configurationStatus === "safe_mode"; text: "Preservar arquivo e restaurar padrões"; enabled: core.recoveryAvailable; onClicked: core.recoverConfiguration(); Accessible.name: text }
             CheckBox { id: audible; objectName: "audiblePreference"; text: core.voiceAvailable ? "Resposta por voz (saída virtual)" : "Resposta por voz indisponível"; enabled: core.preferencesAvailable && core.voiceAvailable }
             Label { text: "Prazo da sessão em milissegundos"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             SpinBox { id: timeout; objectName: "timeoutPreference"; from: 50; to: 60000; stepSize: 1000; editable: true; enabled: core.preferencesAvailable }
@@ -25,7 +27,7 @@ ApplicationWindow {
                 Button { objectName: "savePreferencesButton"; text: "Salvar"; enabled: core.preferencesAvailable; onClicked: core.savePreferences(audible.checked, timeout.value) }
                 Button { objectName: "rollbackPreferencesButton"; text: "Restaurar anterior"; enabled: core.rollbackAvailable; onClicked: core.rollbackPreferences() }
             }
-            Label { text: "Atual no Core: " + (core.audibleFeedback ? "voz ligada" : "voz desligada") + " · " + core.sessionTimeout + " ms"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { text: (core.configurationStatus === "safe_mode" ? "Padrões de recuperação: " : "Atual no Core: ") + (core.audibleFeedback ? "voz ligada" : "voz desligada") + " · " + core.sessionTimeout + " ms"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Label { objectName: "preferencesResult"; text: core.preferencesResult; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Label { text: "Alterações se aplicam à próxima sessão. Voz, frases e dispositivos dependem do pack e dos adaptadores disponíveis."; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         }
@@ -43,7 +45,7 @@ ApplicationWindow {
         RowLayout {
             spacing: 16
             Rectangle { width: 18; height: 18; radius: 9; color: core.connected ? (core.state === "idle" ? "#70d6b0" : "#73b7ff") : "#ffc674"; Accessible.name: "Estado do Gideon" }
-            Label { objectName: "aura"; text: ({idle:"Em espera",capturing:"Ouvindo",transcribing:"Transcrevendo",executing:"Executando",speaking:"Respondendo",offline:"Core indisponível"})[core.state] || "Erro"; color: "#e6edf4"; font.pixelSize: 24; Accessible.name: text }
+            Label { objectName: "aura"; text: ({idle:"Em espera",capturing:"Ouvindo",transcribing:"Transcrevendo",executing:"Executando",speaking:"Respondendo",offline:"Core indisponível",safe_mode:"Modo seguro",restart_required:"Reinício necessário"})[core.state] || "Erro"; color: "#e6edf4"; font.pixelSize: 24; Accessible.name: text }
         }
         Label { text: "Conversa atual"; color: "#9bb0c5"; font.pixelSize: 16 }
         ScrollView {

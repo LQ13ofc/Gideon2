@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[]
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -52,6 +52,29 @@ elif args.phase=='cancel':
     wait(lambda:bridge.state=='idle',5)
     check('keyboard cancel reaches actual Core',any(e['kind']=='cancelled' and str(e['session_id'])==original for e in bridge.snapshot['events']))
     check('cancel revokes subtitle and result',not bridge.subtitle and not bridge.result)
+elif args.phase=='safe_mode':
+    check('connected Core reports safe mode',bridge.configurationStatus=='safe_mode' and bridge.state=='safe_mode')
+    check('safe mode disables ordinary controls',not bridge.preferencesAvailable and not bridge.textAvailable and not button.property('enabled'))
+    settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'preferencesDialog');wait(lambda:dialog.property('visible'),3)
+    recover=window.findChild(QObject,'recoverConfigurationButton');check('recovery control is actionable',recover.property('enabled'))
+    check('safe mode explanatory message matches Core',window.findChild(QObject,'configurationMessage').property('text')==bridge.configurationMessage)
+    window.setProperty('width',window.property('minimumWidth'));window.setProperty('height',window.property('minimumHeight'));QTest.qWait(100)
+    point=recover.mapToItem(window.contentItem(),QPointF(0,0))
+    check('recovery fits minimum viewport',point.x()>=0 and point.y()>=0 and point.x()+recover.width()<=window.width() and point.y()+recover.height()<=window.height())
+    check('safe transcript viewport stays readable',window.findChild(QObject,'transcriptViewport').property('height')>=48)
+    image=window.grabWindow();image.save(str(Path(args.artifacts)/'safe-mode.png'))
+    recover.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.configurationStatus=='restart_required',5)
+    check('recovery requires restart, not fictitious live activation',not bridge.recoveryAvailable and not bridge.preferencesAvailable and not bridge.textAvailable)
+    check('recovery acknowledgement reflects persisted Core state','reinício necessário' in bridge.preferencesResult)
+    dialog.close();Path(args.artifacts,'recovered').touch()
+    wait(lambda:not bridge.connected,10);Path(args.artifacts,'offline').touch()
+    wait(lambda:bridge.connected,10)
+    check('actual restarted Core leaves safe mode',bridge.configurationStatus=='ready')
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('native voice flow resumes after real restart',bridge.snapshot['transcript']['source']=='voice' and bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
+    check('physical capability remains virtual only',bridge.snapshot['speech']['sink']=='virtual')
 elif args.phase=='preferences':
     settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     dialog=window.findChild(QObject,'preferencesDialog');wait(lambda:dialog.property('visible'),3)

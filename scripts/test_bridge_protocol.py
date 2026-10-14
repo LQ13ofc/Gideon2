@@ -28,6 +28,13 @@ class Tests(unittest.TestCase):
         for key,value in [('version',True),('revision',True),('revision',-1),('revision',2**64),('audible_feedback','yes'),('session_timeout_ms',0),('session_timeout_ms',60001),('wake_phrase','../private'),('previous_preferences',[]),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':0})]:
             cfg=copy.deepcopy(BASE);cfg['preferences']={**valid,key:value}
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+    def test_configuration_health_cannot_present_active_sessions(self):
+        for status in ('safe_mode','restart_required'):
+            valid={**BASE,'text_input_available':False,'configuration_status':status,'configuration_recovery_available':status=='safe_mode'}
+            validate_snapshot(valid,'r',0)
+            for key,value in [('state','capturing'),('session_id',1),('text_input_available',True),('configuration_recovery_available','yes')]:
+                with self.subTest(status=status,key=key),self.assertRaises(ValueError):validate_snapshot({**valid,key:value},'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({**BASE,'configuration_status':'ready','configuration_recovery_available':True},'r',0)
     def test_real_socket_malformed_nested_data_and_deep_json_clear_stale_state(self):
         for deep in (False,True,"preferences"):
             with self.subTest(deep=deep),tempfile.TemporaryDirectory(prefix='gideon-ipc-audit-') as td:

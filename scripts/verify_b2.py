@@ -2,6 +2,7 @@
 """B2.1 actual daemon persistence/CAS/failure and native offscreen preference flow."""
 import hashlib,json,os,signal,socket,subprocess,tempfile,time
 from pathlib import Path
+from ui_fixture import offscreen_command
 BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';checks=[]
 def check(name,condition):
     assert condition,name
@@ -57,8 +58,7 @@ with tempfile.TemporaryDirectory(prefix='gideon-b2-') as td:
         stop();core=None
         # Fresh private root for the GUI/native feedback integration.
         root=Path(td)/'ui-core';args[2]=str(root);core=start()
-        py=BASE/'target/ui-venv/bin/python';runtime=py.resolve().parents[1];alias=py.readlink().parents[1]
-        cmd=['/usr/bin/bwrap','--unshare-all','--die-with-parent','--ro-bind','/usr','/usr','--symlink','usr/lib','/lib','--symlink','usr/lib','/lib64','--ro-bind','/etc/fonts','/etc/fonts','--proc','/proc','--dev','/dev','--tmpfs','/tmp','--ro-bind',str(runtime),str(runtime),'--ro-bind',str(runtime),str(alias),'--ro-bind',str(BASE),str(BASE),'--bind',td,td,'--setenv','HOME','/tmp','--setenv','XDG_CACHE_HOME','/tmp/cache','--setenv','XDG_CONFIG_HOME','/tmp/config','--setenv','XDG_RUNTIME_DIR','/tmp/runtime','--setenv','QT_QPA_PLATFORM','offscreen','--setenv','QT_QUICK_BACKEND','software','--setenv','QT_SCALE_FACTOR','2','--chdir','/tmp','--',str(py),'-I',str(BASE/'scripts/test_ui_offscreen.py'),'--root',str(root),'--artifacts',str(artifacts),'--phase','preferences']
+        cmd=offscreen_command(root,artifacts,'preferences')
         ui=subprocess.run(cmd,env={'PATH':'/usr/bin:/bin'},capture_output=True,timeout=55)
         if ui.returncode:raise RuntimeError(ui.stderr.decode()+ui.stdout.decode())
         row=json.loads(ui.stdout);checks.extend(row['checks']);(BASE/'target/evidence/b2-preferences.png').write_bytes((artifacts/'ui.png').read_bytes())

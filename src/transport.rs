@@ -246,8 +246,8 @@ pub async fn serve(
     mut storage: Storage,
     virtual_input: bool,
     mut replay: Option<WakeReplay>,
-    commands_sandbox: bool,
-    tts: Option<crate::tts::Config>,
+    mut commands_sandbox: bool,
+    mut tts: Option<crate::tts::Config>,
 ) -> io::Result<()> {
     storage.clear_stale_socket()?;
     let path = storage.socket_path();
@@ -257,13 +257,21 @@ pub async fn serve(
         Duration::from_millis(storage.config.session_timeout_ms),
         virtual_input,
     );
-    core.configure_preferences(&storage.config);
     let mut seed = [0u8; 8];
     // SAFETY: writable 8-byte buffer; kernel randomness, no personal audio device.
     if unsafe { libc::getrandom(seed.as_mut_ptr().cast(), seed.len(), 0) } != seed.len() as isize {
         return Err(io::Error::last_os_error());
     }
-    core.set_boot_seed((u64::from_ne_bytes(seed) & (u64::MAX / 2)) | 1);
+    let epoch = (u64::from_ne_bytes(seed) & (u64::MAX / 2)) | 1;
+    core.set_boot_seed(epoch);
+    storage.set_safe_epoch(epoch);
+    core.configure_storage(&storage);
+    if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
+        replay = None;
+        tts = None;
+        commands_sandbox = false;
+    }
+
     let (stt_tx, stt_requests) = mpsc::channel::<SttRequest>(16);
     let (stt_replies, mut stt_rx) = mpsc::channel::<Result<SttReply, ()>>(2);
     let mut stt_task = None;
