@@ -7,7 +7,7 @@ ApplicationWindow {
     objectName: "mainWindow"
     visible: true
     width: 840; height: 620
-    minimumWidth: 480; minimumHeight: 420
+    minimumWidth: 480; minimumHeight: 520
     title: "Gideon"
     color: "#101923"
     ColumnLayout {
@@ -25,6 +25,8 @@ ApplicationWindow {
         }
         Label { text: "Conversa atual"; color: "#9bb0c5"; font.pixelSize: 16 }
         ScrollView {
+            objectName: "transcriptViewport"
+            Layout.minimumHeight: 48
             Layout.fillWidth: true; Layout.fillHeight: true
             TextArea {
                 objectName: "subtitle"

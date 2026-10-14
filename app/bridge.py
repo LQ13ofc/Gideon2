@@ -4,6 +4,50 @@ from pathlib import Path
 from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer
 from PySide6.QtNetwork import QLocalSocket
 
+
+def validate_snapshot(data,request_id,min_sequence):
+    """Validate presentation data before QML sees it; no command policy lives here."""
+    def require(condition):
+        if not condition:raise ValueError('invalid IPC snapshot')
+    def integer(value,minimum=0,maximum=2**64-1):
+        return type(value) is int and minimum<=value<=maximum
+    def sid(value):return integer(value,1)
+    def short(value,limit=64):return isinstance(value,str) and len(value.encode('utf-8'))<=limit
+    require(isinstance(data,dict))
+    require(type(data.get('version')) is int and data['version']==1)
+    require(data.get('request_id')==request_id and isinstance(request_id,str))
+    require(data.get('state') in ('idle','capturing','transcribing','executing','speaking'))
+    require(integer(data.get('sequence')) and data['sequence']>=min_sequence)
+    require('session_id' in data and (data['session_id'] is None or sid(data['session_id'])))
+    for key in ('code','wake_status','stt_status','speech_status'):
+        if key in data:require(short(data[key]))
+    if 'text_input_available' in data:require(type(data['text_input_available']) is bool)
+    if 'speech_samples' in data:require(integer(data['speech_samples'],0,240000))
+    t=data.get('transcript')
+    if t is not None:
+        require(isinstance(t,dict))
+        require(short(t.get('raw'),4096) and type(t.get('is_final')) is bool and sid(t.get('session_id')))
+        require(integer(t.get('revision'),1,256))
+    command=data.get('command')
+    if command is not None:
+        require(isinstance(command,dict) and sid(command.get('session_id')) and short(command.get('code')))
+        receipt=command.get('receipt')
+        if receipt is not None:
+            require(isinstance(receipt,dict))
+            require(type(receipt.get('verified')) is bool and short(receipt.get('scope')) and short(receipt.get('result'),256))
+            job=receipt.get('job')
+            require(isinstance(job,dict) and job.get('session_id')==command['session_id'] and isinstance(job.get('command'),dict))
+    if 'events' in data:
+        require(isinstance(data['events'],list) and len(data['events'])<=64)
+        previous=-1
+        for event in data['events']:
+            require(isinstance(event,dict))
+            require(integer(event.get('sequence')) and previous<event['sequence']<=data['sequence'])
+            require(short(event.get('kind')) and short(event.get('request_id')))
+            require('session_id' in event and (event['session_id'] is None or sid(event['session_id'])))
+            previous=event['sequence']
+    return data
+
 class Bridge(QObject):
     changed=Signal()
     def __init__(self,root):
@@ -43,13 +87,10 @@ class Bridge(QObject):
             line,_,tail=self.buffer.partition(b'\n');self.buffer=bytearray(tail)
             try:
                 data=json.loads(line)
-                if data['version']!=1 or data['request_id']!=self.pending or data['state'] not in ('idle','capturing','transcribing','executing','speaking'):raise ValueError('IPC correlation')
-                sequence=data['sequence']
-                if type(sequence) is not int or sequence<self._sequence:raise ValueError('stale state')
-                self._sequence=sequence
+                validate_snapshot(data,self.pending,self._sequence)
                 sid=data['session_id']
-                if sid is not None and (type(sid) is not int or not 0<sid<2**64):raise ValueError('session identity')
-            except (ValueError,KeyError,TypeError):self._offline();return
+                self._sequence=data['sequence']
+            except (ValueError,KeyError,TypeError,RecursionError,UnicodeError):self._offline();return
             self.timeout.stop();self.pending=None;self.online=True;self.poll.start()
             # Python retains u64 precisely; QML never receives numeric session IDs.
             data['session_id']=str(sid) if sid is not None else ''

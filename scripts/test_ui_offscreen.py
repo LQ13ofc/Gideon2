@@ -4,7 +4,7 @@ import argparse,json,sys,time
 from pathlib import Path
 BASE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(BASE/'app'))
 from PySide6.QtGui import QGuiApplication,QAccessible
-from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent
+from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
 parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout'],required=True);args=parser.parse_args()
@@ -35,6 +35,14 @@ if args.phase=='voice':
     check('UI observes actual virtual PCM',bridge.snapshot['speech']['samples']>0)
     check('cancel disabled after session',not button.property('enabled') and not bridge.sessionId)
     image=window.grabWindow();check('HiDPI offscreen rendering',image.width()==1280 and image.height()==1040);image.save(str(Path(args.artifacts)/'ui.png'))
+    window.setProperty('width',window.property('minimumWidth'));window.setProperty('height',window.property('minimumHeight'));QTest.qWait(100)
+    column=window.contentItem().childItems()[0];outside=[]
+    for item in column.childItems():
+        if not item.isVisible():continue
+        point=item.mapToItem(window.contentItem(),QPointF(0,0))
+        if point.x()<-0.5 or point.y()<-0.5 or point.x()+item.width()>window.width()+0.5 or point.y()+item.height()>window.height()+0.5:outside.append({'class':item.metaObject().className(),'y':point.y(),'height':item.height()})
+    check('all visible rows fit minimum viewport '+json.dumps(outside),not outside)
+    check('transcript viewport retains readable minimum height',window.findChild(QObject,'transcriptViewport').property('height')>=48)
     changes=len(deltas);QTest.qWait(1200);check('identical snapshots do not emit UI deltas',len(deltas)==changes)
     check('unsupported text control stays disabled',not inputbox.property('enabled'))
 elif args.phase=='cancel':
