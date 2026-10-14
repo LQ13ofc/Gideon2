@@ -1,7 +1,7 @@
 # Mapa da Base para S2
 
-Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b e feedback/ganho B2.3.
-Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json.
+Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b feedback/ganho B2.3 e descoberta Hub B3.1.
+Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json e docs/evidence/b3-catalog.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
 
@@ -32,6 +32,7 @@ flowchart LR
 |---|---|---|
 | src/main.rs | Flags/perfil e entrada do daemon | App não inicia/desliga Core por fechar janela |
 | src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1: feedback/visual/ganho/prazo em idle, CAS/rollback; conteúdo inválido→safe mode; recuperação→restart |
+| src/hub.rs | Catálogo offline v1 pinado por SHA, schema/limites/compatibilidade | Sem instalação/execução; permissões declaradas não são grants; publisher não verificado |
 | src/pack.rs | Pack v1, hashes/proveniência/modelos e catálogo | DEV qualificado não é freeze/certificação física; sem Model Manager |
 | src/protocol.rs | Request/Response/Event e esquema estrito | v1, IDs e erros são contratos; não enviar grants |
 | src/transport.rs | SO_PEERCRED, peers, filas, tarefas, namespace, sinais | Processos internos supervisionados; sem dispositivo pessoal |
@@ -112,7 +113,8 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
 | Volume/mute command | Estado simulado por invocação em tmpfs | Não usar receipt como volume atual do host |
 | Open app | Desktop ID allowlist → app fixture | Não afirmar que Brave real ou janela Wayland abriu |
 | Hora/data | UTC no executor sandbox | Não prometer timezone configurável antes de suporte |
-| LLM / Plugins / Skills / Connections | Não implementados | Nenhum painel Models/LLM até plugin S3 |
+| Hub / Plugins | Catálogo local lido e exibido; instalação/execução ausentes | Publisher não autenticado; checksum verifica só os bytes do catálogo |
+| LLM / Skills / Connections | Não implementados | Nenhum painel Models/LLM até plugin S3 |
 
 ## Dependências antes de B2/B3/B4
 
@@ -132,8 +134,11 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
    sem controles falsos; língua da UI (PT) distinta de ASR/TTS (EN).
 4. B2: recuperação de conexão já existe; recuperação de worker exige restart do
    Core atualmente. Não anunciar auto-recovery de engine nem deixar UI ser daemon.
-5. B3: catálogo/install/permission approval simulado em namespace com hashes,
-   path traversal/symlink guards, atomic stage/update/rollback/removal; sem publicação.
+5. B3.1: --hub-catalog recebe arquivo absoluto + SHA; parse bounded estrito,
+   compatibilidade API/target e dependências pendentes, descoberta Core→Qt. Falha
+   coloca somente catálogo em quarentena; Base continua. Nenhum binário baixado
+   ou instalado. B3.2/3.3 ainda precisam approval de permissões, staged install,
+   persistência, update/rollback/removal em namespace e audit; sem publicação.
 6. B4: paths de workers usam CARGO_MANIFEST_DIR e assets/venvs do workspace;
    relocalização/pacote offline/lifecycle precisam trabalho antes de distribuição.
    Nenhum Flatpak/portal/auto-login do host foi instalado ou validado.
