@@ -1,6 +1,7 @@
 use crate::{
     audio::AudioFrame,
     capture::{Capture, CaptureSummary},
+    commands::{self, Command, Job, Outcome, Receipt},
     protocol::*,
     stt::{SttReply, SttRequest, Transcript},
 };
@@ -36,6 +37,10 @@ pub struct Core {
     stt_status: &'static str,
     stt_requests: VecDeque<SttRequest>,
     transcript: Option<Transcript>,
+    command_wake: Option<String>,
+    command_job: Option<Job>,
+    expected_command: Option<Job>,
+    command_outcome: Option<Outcome>,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -55,6 +60,10 @@ impl Core {
             stt_status: "unavailable",
             stt_requests: VecDeque::new(),
             transcript: None,
+            command_wake: None,
+            command_job: None,
+            expected_command: None,
+            command_outcome: None,
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -64,6 +73,7 @@ impl Core {
         self.completed_audio = None;
         self.capture_summary = None;
         self.transcript = None;
+        self.command_outcome = None;
         let id = self.next_session;
         self.next_session += 1;
         self.session = Some(Session {
@@ -215,6 +225,7 @@ impl Core {
         if s.id != id
             || self.stt_status != "ready"
             || self.stt_engine.as_ref() != Some(&engine)
+            || s.stage == State::Executing
             || revision <= s.revision
             || revision > 256
             || raw.len() > 4096
@@ -234,10 +245,84 @@ impl Core {
         });
         let request_id = s.request_id.clone();
         if final_result {
-            self.finish("transcript_final");
+            if self.command_wake.is_some() {
+                self.emit(request_id, Some(id), "transcript_final");
+                self.dispatch_command(now);
+            } else {
+                self.finish("transcript_final");
+            }
         } else {
             self.emit(request_id, Some(id), "transcript_partial");
         }
+    }
+    pub fn configure_commands(&mut self, wake_text: String) {
+        self.command_wake = Some(wake_text);
+    }
+    pub fn take_command_job(&mut self) -> Option<Job> {
+        self.command_job.take()
+    }
+    pub fn command_is_active(&self, id: u64) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|s| s.id == id && s.stage == State::Executing)
+    }
+    fn dispatch_command(&mut self, now: Instant) {
+        let transcript = self.transcript.as_ref().expect("final transcript");
+        let id = transcript.session_id;
+        let parsed = commands::parse(&transcript.raw, self.command_wake.as_deref().unwrap_or(""));
+        let command = match parsed {
+            Some(Command::Cancel) => {
+                self.finish("cancelled");
+                return;
+            }
+            Some(command) => command,
+            None => {
+                self.command_outcome = Some(Outcome {
+                    session_id: id,
+                    code: "unsupported",
+                    receipt: None,
+                });
+                self.finish("command_rejected");
+                return;
+            }
+        };
+        if let Err(code) = commands::authorize(&command) {
+            self.command_outcome = Some(Outcome {
+                session_id: id,
+                code,
+                receipt: None,
+            });
+            self.finish("command_denied");
+            return;
+        }
+        let s = self.session.as_mut().expect("live final session");
+        s.stage = State::Executing;
+        s.deadline = s.deadline.min(now + Duration::from_secs(2));
+        self.command_job = Some(Job {
+            session_id: id,
+            command,
+        });
+        self.expected_command = self.command_job.clone();
+        let request_id = s.request_id.clone();
+        self.emit(request_id, Some(id), "command_authorized");
+    }
+    pub fn command_reply(&mut self, job: Job, receipt: Option<Receipt>, now: Instant) {
+        self.expire(now);
+        if !self.command_is_active(job.session_id) || self.expected_command.as_ref() != Some(&job) {
+            return;
+        }
+        let receipt = receipt.filter(|r| commands::verify(&job, r));
+        let kind = if receipt.is_some() {
+            "command_success"
+        } else {
+            "command_failed"
+        };
+        self.command_outcome = Some(Outcome {
+            session_id: job.session_id,
+            code: kind,
+            receipt,
+        });
+        self.finish(kind);
     }
     pub fn audio_eof(&mut self) {
         if self.session.as_ref().is_some_and(|s| s.capture.is_some()) {
@@ -297,7 +382,16 @@ impl Core {
                     self.completed_audio = Some(capture);
                 }
             }
-            if kind != "transcript_final" {
+            self.command_job = None;
+            self.expected_command = None;
+            if s.stage == State::Executing && self.command_outcome.is_none() {
+                self.command_outcome = Some(Outcome {
+                    session_id: s.id,
+                    code: kind,
+                    receipt: None,
+                });
+            }
+            if kind != "transcript_final" && !kind.starts_with("command_") {
                 self.transcript = None;
             }
             if self.stt_engine.is_some() && kind != "transcript_final" {
@@ -321,6 +415,7 @@ impl Core {
     }
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
+            command: self.command_outcome.clone(),
             version: VERSION,
             stt_status: self.stt_status,
             transcript: self.transcript.clone(),
@@ -370,7 +465,7 @@ impl Core {
                 "ok"
             }
             Operation::Cancel { .. } => "stale_session",
-            // No execution is available at A0; caller-supplied capability is never a grant.
+            // Caller-supplied capability is never an internal grant.
             Operation::Action {
                 session_id,
                 capability: _,
@@ -695,5 +790,110 @@ mod tests {
                 .code,
             "invalid_id"
         );
+    }
+    fn command_session(text: &str) -> (Core, Instant) {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), true);
+        c.configure_commands("Hey Gideon".into());
+        c.configure_stt("test".into());
+        c.stt_reply(
+            SttReply::Ready {
+                engine: "test".into(),
+            },
+            now,
+        );
+        c.audio_wake(now);
+        c.session.as_mut().unwrap().stage = State::Transcribing;
+        c.stt_reply(
+            SttReply::Final {
+                engine: "test".into(),
+                session_id: 1,
+                revision: 1,
+                audio_end_us: 1,
+                raw: text.into(),
+            },
+            now,
+        );
+        (c, now)
+    }
+    #[test]
+    fn command_fences_result_cancel_timeout_duplicate_and_busy() {
+        let (mut c, now) = command_session("Hey Gideon, open Brave.");
+        let job = c.take_command_job().unwrap();
+        assert!(c.command_is_active(1));
+        assert_eq!(
+            c.handle(request("busy", Operation::VirtualWake), now).code,
+            "busy"
+        );
+        let receipt = Receipt {
+            job: job.clone(),
+            verified: true,
+            scope: "sandbox".into(),
+            result: "verified".into(),
+        };
+        let wrong = Job {
+            session_id: 1,
+            command: Command::Mute,
+        };
+        c.command_reply(
+            wrong.clone(),
+            Some(Receipt {
+                job: wrong,
+                ..receipt.clone()
+            }),
+            now,
+        );
+        assert!(c.command_is_active(1));
+        c.command_reply(job.clone(), Some(receipt.clone()), now);
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "command_success");
+        let seq = c.sequence;
+        c.command_reply(job.clone(), Some(receipt.clone()), now);
+        assert_eq!(c.sequence, seq);
+        let (mut c, now) = command_session("open brave");
+        assert_eq!(
+            c.handle(request("cancel", Operation::Cancel { session_id: 1 }), now)
+                .code,
+            "ok"
+        );
+        assert_eq!(
+            c.handle(request("cancel", Operation::Cancel { session_id: 1 }), now)
+                .code,
+            "duplicate"
+        );
+        c.command_reply(job.clone(), Some(receipt.clone()), now);
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "cancelled");
+        assert!(c.take_command_job().is_none());
+        let (mut c, now) = command_session("open brave");
+        c.command_reply(job, Some(receipt), now + Duration::from_secs(3));
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "timed_out");
+    }
+    #[test]
+    fn command_safety_denial_failure_and_final_only() {
+        for (text, code) in [
+            ("do not open brave", "unsupported"),
+            ("open steam", "app_unavailable"),
+        ] {
+            let (mut c, _) = command_session(text);
+            assert!(c.take_command_job().is_none());
+            assert_eq!(c.command_outcome.as_ref().unwrap().code, code);
+        }
+        let (mut c, now) = command_session("open brave");
+        let job = c.take_command_job().unwrap();
+        c.stt_reply(
+            SttReply::Partial {
+                engine: "test".into(),
+                session_id: 1,
+                revision: 2,
+                audio_end_us: 1,
+                raw: "mute".into(),
+            },
+            now,
+        );
+        assert!(c.transcript.as_ref().unwrap().is_final);
+        c.command_reply(job, None, now);
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "command_failed");
+        let (mut c, _) = command_session("cancel");
+        assert!(c.take_command_job().is_none());
+        assert!(c.session.is_none());
     }
 }

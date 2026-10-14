@@ -97,7 +97,14 @@ pub(crate) fn namespace_command(
     args: &[String],
     mounts: &[PathBuf],
 ) -> io::Result<Command> {
-    let interpreter = fs::read_link(python).unwrap_or_else(|_| python.to_path_buf());
+    let interpreter = match fs::read_link(python) {
+        Ok(target) if target.is_relative() => python
+            .parent()
+            .unwrap_or(std::path::Path::new("/"))
+            .join(target),
+        Ok(target) => target,
+        Err(_) => python.to_path_buf(),
+    };
     let runtime = interpreter
         .parent()
         .and_then(|p| p.parent())
@@ -223,6 +230,7 @@ pub async fn serve(
     storage: Storage,
     virtual_input: bool,
     mut replay: Option<WakeReplay>,
+    commands_sandbox: bool,
 ) -> io::Result<()> {
     storage.clear_stale_socket()?;
     let path = storage.socket_path();
@@ -259,6 +267,7 @@ pub async fn serve(
     }
     let (wake_sender, mut wake_rx) = mpsc::channel(2);
     let mut wake_tx = Some(wake_sender);
+    let mut command_wake_text = String::new();
     let mut wake_input = match replay.as_mut() {
         Some(r) => {
             let bytes = fs::read(&r.manifest)?;
@@ -272,11 +281,23 @@ pub async fn serve(
             if let Some(phrase) = storage.config.wake_phrase.as_ref() {
                 descriptor.active_phrase = phrase.clone();
             }
+            command_wake_text = descriptor
+                .supported_phrases
+                .get(&descriptor.active_phrase)
+                .map(|label| label.replace('_', " "))
+                .unwrap_or_default();
             r.active_phrase = Some(descriptor.active_phrase.clone());
             Some(WakeInput::new(descriptor).map_err(|_| io::Error::other("invalid wake catalog"))?)
         }
         None => None,
     };
+    if commands_sandbox {
+        core.configure_commands(command_wake_text);
+    }
+    let mut command_task: Option<(
+        crate::commands::Job,
+        tokio::task::JoinHandle<io::Result<crate::commands::Receipt>>,
+    )> = None;
     let mut pending_replay = if stt_task.is_some() {
         replay.take()
     } else {
@@ -305,6 +326,11 @@ pub async fn serve(
             _ = shutdown.recv() => break,
             _ = tokio::signal::ctrl_c() => break,
             _ = async { match deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => { core.expire(std::time::Instant::now()); storage.audit(core.response(String::new(), "ok").sequence)?; },
+            result = async { (&mut command_task.as_mut().expect("active task").1).await }, if command_task.is_some() => {
+                let (job, _) = command_task.take().expect("active task");
+                core.command_reply(job,result.ok().and_then(Result::ok),std::time::Instant::now());
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
             Some(call) = rx.recv() => {
                 let response = core.handle(call.request, std::time::Instant::now()); storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
@@ -362,6 +388,19 @@ pub async fn serve(
             },
             Some(_) = peers.join_next(), if !peers.is_empty() => {},
         }
+        if command_task
+            .as_ref()
+            .is_some_and(|(job, _)| !core.command_is_active(job.session_id))
+        {
+            if let Some((_, task)) = command_task.take() {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        if let Some(job) = core.take_command_job() {
+            let pending = job.clone();
+            command_task = Some((job, tokio::spawn(crate::commands::execute(pending))));
+        }
         for request in core.take_stt_requests() {
             if stt_tx.try_send(request).is_err() {
                 core.stt_failed();
@@ -372,6 +411,10 @@ pub async fn serve(
                 break;
             }
         }
+    }
+    if let Some((_, task)) = command_task.take() {
+        task.abort();
+        let _ = task.await;
     }
     if let Some(task) = wake_task.take() {
         task.abort();

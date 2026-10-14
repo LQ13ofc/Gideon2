@@ -39,6 +39,7 @@ pub enum State {
     Idle,
     Capturing,
     Transcribing,
+    Executing,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +52,7 @@ pub struct Event {
 
 #[derive(Debug, Serialize)]
 pub struct Response {
+    pub command: Option<crate::commands::Outcome>,
     pub stt_status: &'static str,
     pub transcript: Option<crate::stt::Transcript>,
     pub capture: Option<crate::capture::CaptureSummary>,

@@ -1,0 +1,352 @@
+{
+  "gate": "A4_INTEGRATION",
+  "passed": 138,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": {\"session_id\": 8933525449820523610, \"revision\": 4, \"audio_end_us\": 2720000, \"raw\": \"Hey Gideon, open brave.\", \"normalized\": \"Hey Gideon, open brave.\", \"is_final\": true, \"confidence\": null}, \"command\": {\"session_id\": 8933525449820523610, \"code\": \"command_success\", \"receipt\": {\"job\": {\"session_id\": 8933525449820523610, \"command\": {\"kind\": \"open_app\", \"desktop_id\": \"com.brave.Browser.desktop\"}}, \"verified\": true, \"scope\": \"sandbox\", \"result\": \"Sandbox app process verified: com.brave.Browser.desktop\"}}}",
+    "sandbox effect verified with exact session",
+    "authorization and success emitted once",
+    "actual app proof reported",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": {\"session_id\": 2674027155605457974, \"revision\": 5, \"audio_end_us\": 3040000, \"raw\": \"Hey Gideon, open brave.\", \"normalized\": \"Hey Gideon, open brave.\", \"is_final\": true, \"confidence\": null}, \"command\": {\"session_id\": 2674027155605457974, \"code\": \"command_success\", \"receipt\": {\"job\": {\"session_id\": 2674027155605457974, \"command\": {\"kind\": \"open_app\", \"desktop_id\": \"com.brave.Browser.desktop\"}}, \"verified\": true, \"scope\": \"sandbox\", \"result\": \"Sandbox app process verified: com.brave.Browser.desktop\"}}}",
+    "sandbox effect verified with exact session",
+    "authorization and success emitted once",
+    "actual app proof reported",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": {\"session_id\": 4144739347839640256, \"revision\": 4, \"audio_end_us\": 2800000, \"raw\": \"Hey Gideon, open brave.\", \"normalized\": \"Hey Gideon, open brave.\", \"is_final\": true, \"confidence\": null}, \"command\": {\"session_id\": 4144739347839640256, \"code\": \"command_success\", \"receipt\": {\"job\": {\"session_id\": 4144739347839640256, \"command\": {\"kind\": \"open_app\", \"desktop_id\": \"com.brave.Browser.desktop\"}}, \"verified\": true, \"scope\": \"sandbox\", \"result\": \"Sandbox app process verified: com.brave.Browser.desktop\"}}}",
+    "sandbox effect verified with exact session",
+    "authorization and success emitted once",
+    "actual app proof reported",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": {\"session_id\": 6865566730886638361, \"revision\": 5, \"audio_end_us\": 2720000, \"raw\": \"Hey Gideon, open brave.\", \"normalized\": \"Hey Gideon, open brave.\", \"is_final\": true, \"confidence\": null}, \"command\": {\"session_id\": 6865566730886638361, \"code\": \"command_success\", \"receipt\": {\"job\": {\"session_id\": 6865566730886638361, \"command\": {\"kind\": \"open_app\", \"desktop_id\": \"com.brave.Browser.desktop\"}}, \"verified\": true, \"scope\": \"sandbox\", \"result\": \"Sandbox app process verified: com.brave.Browser.desktop\"}}}",
+    "sandbox effect verified with exact session",
+    "authorization and success emitted once",
+    "actual app proof reported",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "cancel accepted during streaming",
+    "producer EOF and terminal session",
+    "cancel leaves no receipt or authorization",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "cancel executing task accepted",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": null, \"command\": {\"session_id\": 1476824304446030979, \"code\": \"cancelled\", \"receipt\": null}}",
+    "execution interrupted at live boundary",
+    "no success or receipt on rejection/failure",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "executor process owned and identifiable",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": {\"session_id\": 4389934991458632779, \"revision\": 4, \"audio_end_us\": 2720000, \"raw\": \"Hey Gideon, open brave.\", \"normalized\": \"Hey Gideon, open brave.\", \"is_final\": true, \"confidence\": null}, \"command\": {\"session_id\": 4389934991458632779, \"code\": \"command_failed\", \"receipt\": null}}",
+    "execution interrupted at live boundary",
+    "no success or receipt on rejection/failure",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": {\"session_id\": 4111008797377828912, \"revision\": 5, \"audio_end_us\": 3360000, \"raw\": \"Hey Gideon, open YAPYAP.\", \"normalized\": \"Hey Gideon, open YAPYAP.\", \"is_final\": true, \"confidence\": null}, \"command\": {\"session_id\": 4111008797377828912, \"code\": \"unsupported\", \"receipt\": null}}",
+    "no success or receipt on rejection/failure",
+    "no authorization on safety rejection",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "partial never executes",
+    "caller capability cannot grant",
+    "producer EOF and terminal session",
+    "final native transcript present or revoked on cancel",
+    "expected deterministic result {\"transcript\": {\"session_id\": 1472549480114791031, \"revision\": 5, \"audio_end_us\": 2800000, \"raw\": \"K Gideon Open Steam\", \"normalized\": \"K Gideon Open Steam\", \"is_final\": true, \"confidence\": null}, \"command\": {\"session_id\": 1472549480114791031, \"code\": \"unsupported\", \"receipt\": null}}",
+    "no success or receipt on rejection/failure",
+    "no authorization on safety rejection",
+    "terminal result stable without duplicate effect",
+    "late IPC action fenced",
+    "private root contains no voice or command artifacts",
+    "supervised shutdown"
+  ],
+  "rows": [
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": false,
+      "wake_phrase": null,
+      "transcript": {
+        "session_id": 8933525449820523610,
+        "revision": 4,
+        "audio_end_us": 2720000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "command": {
+        "session_id": 8933525449820523610,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 8933525449820523610,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__bm_george__clean",
+      "cancel": false,
+      "wake_phrase": null,
+      "transcript": {
+        "session_id": 2674027155605457974,
+        "revision": 5,
+        "audio_end_us": 3040000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "command": {
+        "session_id": 2674027155605457974,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 2674027155605457974,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__af_bella__clean",
+      "cancel": false,
+      "wake_phrase": null,
+      "transcript": {
+        "session_id": 4144739347839640256,
+        "revision": 4,
+        "audio_end_us": 2800000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "command": {
+        "session_id": 4144739347839640256,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 4144739347839640256,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__am_michael__clean",
+      "cancel": false,
+      "wake_phrase": null,
+      "transcript": {
+        "session_id": 6865566730886638361,
+        "revision": 5,
+        "audio_end_us": 2720000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "command": {
+        "session_id": 6865566730886638361,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 6865566730886638361,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": true,
+      "wake_phrase": null,
+      "transcript": null,
+      "command": null
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": false,
+      "wake_phrase": null,
+      "transcript": null,
+      "command": {
+        "session_id": 1476824304446030979,
+        "code": "cancelled",
+        "receipt": null
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": false,
+      "wake_phrase": null,
+      "transcript": {
+        "session_id": 4389934991458632779,
+        "revision": 4,
+        "audio_end_us": 2720000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "command": {
+        "session_id": 4389934991458632779,
+        "code": "command_failed",
+        "receipt": null
+      }
+    },
+    {
+      "fixture_id": "wake-hey-yapyap__bf_emma__clean",
+      "cancel": false,
+      "wake_phrase": null,
+      "transcript": {
+        "session_id": 4111008797377828912,
+        "revision": 5,
+        "audio_end_us": 3360000,
+        "raw": "Hey Gideon, open YAPYAP.",
+        "normalized": "Hey Gideon, open YAPYAP.",
+        "is_final": true,
+        "confidence": null
+      },
+      "command": {
+        "session_id": 4111008797377828912,
+        "code": "unsupported",
+        "receipt": null
+      }
+    },
+    {
+      "fixture_id": "wake-okay-steam__bf_emma__clean",
+      "cancel": false,
+      "wake_phrase": "okay_gideon",
+      "transcript": {
+        "session_id": 1472549480114791031,
+        "revision": 5,
+        "audio_end_us": 2800000,
+        "raw": "K Gideon Open Steam",
+        "normalized": "K Gideon Open Steam",
+        "is_final": true,
+        "confidence": null
+      },
+      "command": {
+        "session_id": 1472549480114791031,
+        "code": "unsupported",
+        "receipt": null
+      }
+    }
+  ],
+  "binary_sha256": "fabb5a5458033fd6242eb7cd7a952bc1677989d403de6b8116d8bb6eae198ce1",
+  "physical_validation": "NOT_PERFORMED",
+  "source_sha256": {
+    "src/core.rs": "2cb0554dd615dcbeea2fccaaeb55eba282db069607d2c72237635a1c676d0b2e",
+    "src/commands.rs": "4e977a8bb9c7ec8269e868d175df9c29e05b741302b9dcae55b53260efbd7974",
+    "src/transport.rs": "438ebe0e62534ae852026f0142219300691159e7339df8159b5e21841fe2f73d",
+    "scripts/command_worker.py": "096151c8f190297400f0cf0915309ff3d3a42073aa0f0c656248c1aa8bc70c30",
+    "scripts/verify_a4.py": "e259c16017b7cf016e23a159c7babcaae90af05659856c55158e04f6c77d0480"
+  }
+}

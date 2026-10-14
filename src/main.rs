@@ -15,9 +15,11 @@ async fn main() -> io::Result<()> {
     );
     let mut virtual_input = false;
     let mut replay = None;
+    let mut commands_sandbox = false;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--virtual-input" if !virtual_input => virtual_input = true,
+            "--commands-sandbox" if !commands_sandbox => commands_sandbox = true,
             "--wake-replay" if replay.is_none() => {
                 let python = PathBuf::from(
                     args.next()
@@ -45,5 +47,11 @@ async fn main() -> io::Result<()> {
             _ => return Err(io::Error::other("unknown or duplicate option")),
         }
     }
-    transport::serve(Storage::open(&root)?, virtual_input, replay).await
+    transport::serve(
+        Storage::open(&root)?,
+        virtual_input,
+        replay,
+        commands_sandbox,
+    )
+    .await
 }
