@@ -12,7 +12,7 @@ import time
 BASE = Path(__file__).resolve().parents[1]
 BINARY = BASE/'target/release/gideon-base'
 PYTHON = BASE/'target/a1-venv/bin/python'
-MANIFEST = BASE/'target/a1-assets/manifest.json'
+MANIFEST = BASE/'target/a1-competitive/manifest.json'
 
 
 def run():
@@ -22,11 +22,15 @@ def run():
         checks.append(name)
     m = json.loads(MANIFEST.read_text())
     positive = next(i for i,r in enumerate(m['fixtures']) if r['id']=='wake-hey__bf_emma__clean')
+    confusables = [next(i for i,r in enumerate(m['fixtures']) if r['id']==name) for name in ('wake-okay__bf_emma__clean','negative-hi-gideon__bf_emma__clean')]
     negative = next(i for i,r in enumerate(m['fixtures']) if r['id']=='ordinary-unrelated__bf_emma__clean')
-    def scenario(index, bad=False, early=False):
+    def scenario(index, bad=False, early=False, active_phrase=None):
         with tempfile.TemporaryDirectory(prefix='gideon-a1-') as td:
             home = Path(td); root = home/'core'; home.chmod(0o700)
-            env = {'PATH':'/usr/bin:/bin','HOME':td,'XDG_CONFIG_HOME':str(home/'config'),'XDG_DATA_HOME':str(home/'data'),'XDG_CACHE_HOME':str(home/'cache'),'XDG_RUNTIME_DIR':td,'PYTHONDONTWRITEBYTECODE':'1','OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'}
+            if active_phrase:
+                root.mkdir(mode=0o700)
+                config=root/'config.json';config.write_text(json.dumps({'version':1,'session_timeout_ms':30000,'wake_phrase':active_phrase}));config.chmod(0o600)
+            env = {'PATH' :'/usr/bin:/bin','HOME':td,'XDG_CONFIG_HOME':str(home/'config'),'XDG_DATA_HOME':str(home/'data'),'XDG_CACHE_HOME':str(home/'cache'),'XDG_RUNTIME_DIR':td,'PYTHONDONTWRITEBYTECODE':'1','OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1'}
             manifest = MANIFEST
             if bad:
                 altered = dict(m); altered['hashes'] = dict(m['hashes']); altered['hashes']['tokens.txt'] = '0'*64
@@ -70,7 +74,7 @@ def run():
                 if bad or early:
                     check('hash or worker exit fail closed',last['wake_status']=='failed' and not started and last['state']=='idle')
                     check('worker failure observable',any(e['kind']=='wake_failed' for e in last['events']))
-                elif index==positive:
+                elif m['fixtures'][index]['positive'] or active_phrase=='okay_gideon':
                     check('one session per wake PCM',len(started)==1 and wake is not None)
                     check('replay completed honestly',last['wake_status']=='replay_finished')
                     check('cancel remains terminal after late frames',last['state']=='idle')
@@ -84,7 +88,12 @@ def run():
                 if s:s.close()
                 if p.poll() is None:p.terminate();p.wait(timeout=3)
                 p.stderr.close()
-    rss=[scenario(positive),scenario(negative),scenario(positive,bad=True),scenario(positive,early=True)]
+    with tempfile.TemporaryDirectory(prefix='gideon-a1-unknown-') as td:
+        root=Path(td)/'core';root.mkdir(mode=0o700)
+        config=root/'config.json';config.write_text(json.dumps({'version':1,'session_timeout_ms':30000,'wake_phrase':'unknown_phrase'}));config.chmod(0o600)
+        result=subprocess.run([str(BINARY),'--root',str(root),'--wake-replay',str(PYTHON),str(MANIFEST),str(positive)],env={'HOME':td,'PATH':'/usr/bin:/bin'},capture_output=True,timeout=3)
+        check('unsupported configured phrase fails startup without altering config',result.returncode!=0 and json.loads(config.read_text())['wake_phrase']=='unknown_phrase')
+    rss=[scenario(positive),scenario(negative),*[scenario(i) for i in confusables],scenario(positive,bad=True),scenario(positive,early=True),scenario(confusables[0],active_phrase="okay_gideon")]
     return {'gate':'A1_INTEGRATION_ONLY','passed':len(checks),'checks':checks,'failed':0,'ignored':0,'max_core_rss_bytes':max(rss),'binary_sha256':hashlib.sha256(BINARY.read_bytes()).hexdigest(),'manifest_sha256':hashlib.sha256(MANIFEST.read_bytes()).hexdigest(),'scope':'real CPU inference PCM replay into Rust Core; isolated HOME/XDG; no physical audio; corpus quality gate separate'}
 
 if __name__=='__main__':

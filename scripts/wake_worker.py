@@ -9,7 +9,7 @@ import numpy as np
 import sherpa_onnx
 import soundfile as sf
 
-ENGINE = 'sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8'
+ENGINE = 'sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8/competitive-v2'
 
 
 def check_hash(path, expected):
@@ -18,11 +18,22 @@ def check_hash(path, expected):
 
 
 class WakeEngine:
-    supported_phrases = ('hey_gideon',)
     def __init__(self, manifest, *, dev_threshold=0.25):
         if not 0.25 <= dev_threshold <= 1: raise ValueError('invalid DEV threshold')
         if manifest['engine'] != ENGINE or sherpa_onnx.__version__ != '1.13.8':
             raise ValueError('engine version mismatch')
+        phrases = manifest['supported_phrases']
+        if not isinstance(phrases, dict) or not 1 <= len(phrases) <= 8:
+            raise ValueError('invalid phrase catalog')
+        labels = list(phrases.values()) + manifest['rejection_labels']
+        if len(set(labels)) != len(labels) or any(not isinstance(x,str) or not x.isascii() or not x.replace('_','').isalnum() or len(x)>64 for x in [*phrases, *labels]):
+            raise ValueError('invalid phrase IDs or labels')
+        self.supported_phrases = tuple(phrases)
+        self.active_phrase = manifest['active_phrase']
+        if self.active_phrase not in phrases:
+            raise ValueError('unsupported active phrase')
+        self.active_label = phrases[self.active_phrase]
+        self.labels = frozenset(labels)
         assets = Path(manifest['asset_root'])
         required = {manifest['encoder'], manifest['decoder'], manifest['joiner'], 'tokens.txt', 'keywords.txt'}
         if set(manifest['hashes']) != required:
@@ -30,8 +41,15 @@ class WakeEngine:
         for name, digest in manifest['hashes'].items():
             if Path(name).name != name: raise ValueError('unsafe asset path')
             check_hash(assets/name, digest)
-        if (assets/'keywords.txt').read_text().strip() != 'HH EY1 G IH1 D IY0 AH0 N @HEY_GIDEON':
-            raise ValueError('unsupported keyword set')
+        declared = []
+        vocab = {line.split()[0] for line in (assets/'tokens.txt').read_text().splitlines() if line.split()}
+        for line in (assets/'keywords.txt').read_text().splitlines():
+            tokens = line.split()
+            if len(tokens)<2 or not tokens[-1].startswith('@') or any(t not in vocab for t in tokens[:-1]):
+                raise ValueError('invalid keyword tokens')
+            declared.append(tokens[-1][1:])
+        if len(declared) != len(self.labels) or set(declared) != self.labels:
+            raise ValueError('keyword catalog mismatch')
         self.kws = sherpa_onnx.KeywordSpotter(tokens=str(assets/'tokens.txt'), encoder=str(assets/manifest['encoder']), decoder=str(assets/manifest['decoder']), joiner=str(assets/manifest['joiner']), keywords_file=str(assets/'keywords.txt'), num_threads=1, provider='cpu', keywords_threshold=dev_threshold, keywords_score=1.0)
         self.reset()
 
@@ -47,11 +65,14 @@ class WakeEngine:
             self.kws.decode_stream(self.stream)
             result = self.kws.get_result(self.stream)
             if result:
-                if result != 'HEY_GIDEON': raise ValueError('unsupported detection')
+                if result not in self.labels: raise ValueError('unsupported detection')
+                if result != self.active_label:
+                    self.kws.reset_stream(self.stream)
+                    continue
                 native = self.kws.keyword_spotter.get_result(self.stream)
                 times = native.timestamps
                 start = self.stream_start_us + int((native.start_time + min(times))*1e6) if times else self.last_end-80000
-                events.append({'phrase_id':'hey_gideon','confidence':None,'start_us':start,'end_us':self.last_end,'engine':ENGINE})
+                events.append({'phrase_id':self.active_phrase,'confidence':None,'start_us':start,'end_us':self.last_end,'engine':ENGINE})
                 self.kws.reset_stream(self.stream)
         return events
 
@@ -116,5 +137,7 @@ def stream_fixture(manifest, row):
 
 if __name__ == '__main__':
     manifest = json.loads(Path(sys.argv[1]).read_text())
+    if len(sys.argv) == 5 and sys.argv[3] == '--active-phrase': manifest['active_phrase'] = sys.argv[4]
+    elif len(sys.argv) != 3: raise ValueError('invalid arguments')
     row = manifest['fixtures'][int(sys.argv[2])]
     stream_fixture(manifest, row)

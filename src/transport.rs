@@ -2,7 +2,7 @@ use crate::{
     core::Core,
     protocol::{Request, MAX_MESSAGE},
     storage::Storage,
-    wake::{Packet, WakeInput},
+    wake::{Packet, WakeDescriptor, WakeInput},
 };
 use std::{
     fs, io, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::Arc, time::Duration,
@@ -87,6 +87,7 @@ pub struct WakeReplay {
     pub python: PathBuf,
     pub manifest: PathBuf,
     pub fixture: usize,
+    pub active_phrase: Option<String>,
 }
 async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>) {
     let outcome = async {
@@ -112,7 +113,8 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>)
         let canonical_runtime = fs::canonicalize(runtime)?;
         // Explicit read-only mounts; no personal audio socket, bus, home or network.
         // A missing namespace facility is an observable failure, never an unsandboxed fallback.
-        let mut child = Command::new("/usr/bin/bwrap")
+        let mut command = Command::new("/usr/bin/bwrap");
+        command
             .args([
                 "--unshare-all",
                 "--die-with-parent",
@@ -158,7 +160,11 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>)
                 "/scripts/wake_worker.py"
             ))
             .arg(replay.manifest)
-            .arg(replay.fixture.to_string())
+            .arg(replay.fixture.to_string());
+        if let Some(phrase) = replay.active_phrase {
+            command.arg("--active-phrase").arg(phrase);
+        }
+        let mut child = command
             .env_remove("DBUS_SESSION_BUS_ADDRESS")
             .env_remove("PULSE_SERVER")
             .stdin(Stdio::null())
@@ -197,7 +203,7 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>)
 pub async fn serve(
     storage: Storage,
     virtual_input: bool,
-    replay: Option<WakeReplay>,
+    mut replay: Option<WakeReplay>,
 ) -> io::Result<()> {
     storage.clear_stale_socket()?;
     let path = storage.socket_path();
@@ -214,8 +220,22 @@ pub async fn serve(
     }
     core.set_boot_seed(u64::from_ne_bytes(seed) & (u64::MAX / 2));
     let (wake_tx, mut wake_rx) = mpsc::channel(2);
+    let mut wake_input = match replay.as_mut() {
+        Some(r) => {
+            let bytes = fs::read(&r.manifest)?;
+            if bytes.len() > 1_048_576 {
+                return Err(io::Error::other("wake manifest too large"));
+            }
+            let mut descriptor: WakeDescriptor = serde_json::from_slice(&bytes)?;
+            if let Some(phrase) = storage.config.wake_phrase.as_ref() {
+                descriptor.active_phrase = phrase.clone();
+            }
+            r.active_phrase = Some(descriptor.active_phrase.clone());
+            Some(WakeInput::new(descriptor).map_err(|_| io::Error::other("invalid wake catalog"))?)
+        }
+        None => None,
+    };
     let mut wake_task = replay.map(|r| tokio::spawn(replay_worker(r, wake_tx)));
-    let mut wake_input = WakeInput::default();
     if wake_task.is_some() {
         core.wake_health("starting");
     }
@@ -235,7 +255,7 @@ pub async fn serve(
             },
             packet = wake_rx.recv(), if wake_task.is_some() => {
                 match packet {
-                    Some(Ok(p)) => match wake_input.accept(p) {
+                    Some(Ok(p)) => match wake_input.as_mut().expect("configured wake input").accept(p) {
                         Ok(detection) => {
                             core.wake_health("replaying");
                             if detection.is_some() { core.audio_wake(std::time::Instant::now()); }

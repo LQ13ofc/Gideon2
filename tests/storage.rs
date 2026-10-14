@@ -50,12 +50,14 @@ fn bounded_logging_and_config_validation() {
     assert!(fs::metadata(root.join("audit.log")).unwrap().len() <= 65580);
     assert!(Config {
         version: 2,
+        wake_phrase: None,
         session_timeout_ms: 100
     }
     .validate()
     .is_err());
     assert!(Config {
         version: 1,
+        wake_phrase: None,
         session_timeout_ms: 0
     }
     .validate()

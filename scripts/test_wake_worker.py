@@ -8,7 +8,7 @@ import numpy as np
 from wake_worker import WakeEngine, read_fixture
 
 BASE=Path(__file__).resolve().parents[1]
-MANIFEST=BASE/'target/a1-assets/manifest.json'
+MANIFEST=BASE/'target/a1-competitive/manifest.json'
 
 
 class NativeWakeTests(unittest.TestCase):
@@ -27,6 +27,29 @@ class NativeWakeTests(unittest.TestCase):
         self.assertGreater(events[0]['start_us'],9_000_000)
         self.assertLess(events[0]['start_us'],events[0]['end_us'])
         self.assertLessEqual(sum(len(a) for _,a in engine.recent),32000)
+    def test_rejection_classes_never_emit_wake(self):
+        engine=WakeEngine(self.manifest)
+        for name in ('wake-okay__bf_emma__clean','negative-hi-gideon__bf_emma__clean'):
+            engine.reset()
+            row=next(r for r in self.manifest['fixtures'] if r['id']==name)
+            samples=np.concatenate([read_fixture(row),np.zeros(16000,dtype=np.float32)])
+            events=[]
+            for offset in range(0,len(samples),1280):
+                events+=engine.accept(samples[offset:offset+1280],offset*1000000//16000)
+            self.assertEqual(events,[],name)
+        self.assertEqual(engine.supported_phrases,('hey_gideon','okay_gideon'))
+    def test_phrase_selection_uses_catalog(self):
+        manifest=dict(self.manifest);manifest['active_phrase']='okay_gideon'
+        engine=WakeEngine(manifest)
+        row=next(r for r in manifest['fixtures'] if r['id']=='wake-okay__bf_emma__clean')
+        samples=np.concatenate([read_fixture(row),np.zeros(16000,dtype=np.float32)])
+        events=[]
+        for offset in range(0,len(samples),1280):
+            events+=engine.accept(samples[offset:offset+1280],offset*1000000//16000)
+        self.assertEqual(len(events),1)
+        self.assertEqual(events[0]['phrase_id'],'okay_gideon')
+        manifest['active_phrase']='not_supported'
+        with self.assertRaises(ValueError):WakeEngine(manifest)
     def test_hashes_required_before_inference(self):
         bad=dict(self.manifest);bad['hashes']=dict(bad['hashes']);bad['hashes'].pop('tokens.txt')
         with self.assertRaises(ValueError):WakeEngine(bad)

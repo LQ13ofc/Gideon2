@@ -39,6 +39,7 @@ async fn main() -> io::Result<()> {
                     python,
                     manifest,
                     fixture,
+                    active_phrase: None,
                 });
             }
             _ => return Err(io::Error::other("unknown or duplicate option")),

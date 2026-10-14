@@ -14,18 +14,27 @@ use std::{
 pub struct Config {
     pub version: u16,
     pub session_timeout_ms: u64,
+    #[serde(default)]
+    pub wake_phrase: Option<String>,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
             version: 1,
             session_timeout_ms: 30000,
+            wake_phrase: None,
         }
     }
 }
 impl Config {
     pub fn validate(&self) -> io::Result<()> {
-        if self.version != 1 || !(50..=60000).contains(&self.session_timeout_ms) {
+        if self.version != 1
+            || !(50..=60000).contains(&self.session_timeout_ms)
+            || self
+                .wake_phrase
+                .as_deref()
+                .is_some_and(|id| !crate::protocol::valid_id(id))
+        {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid config"));
         }
         Ok(())
