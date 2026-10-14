@@ -1,4 +1,8 @@
-use crate::protocol::*;
+use crate::{
+    audio::AudioFrame,
+    capture::{Capture, CaptureSummary},
+    protocol::*,
+};
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
@@ -8,6 +12,8 @@ struct Session {
     id: u64,
     request_id: String,
     deadline: Instant,
+    capture: Option<Capture>,
+    audio_deadline: Option<Instant>,
 }
 
 /// Single owner for sessions, events and authority; no detached action tasks.
@@ -20,6 +26,9 @@ pub struct Core {
     timeout: Duration,
     virtual_input: bool,
     wake_status: &'static str,
+    capture_enabled: bool,
+    completed_audio: Option<Capture>,
+    capture_summary: Option<CaptureSummary>,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -32,18 +41,25 @@ impl Core {
             timeout,
             virtual_input,
             wake_status: "unavailable",
+            capture_enabled: false,
+            completed_audio: None,
+            capture_summary: None,
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
         self.next_session = seed;
     }
     fn start_session(&mut self, request_id: String, now: Instant) {
+        self.completed_audio = None;
+        self.capture_summary = None;
         let id = self.next_session;
         self.next_session += 1;
         self.session = Some(Session {
             id,
             request_id: request_id.clone(),
             deadline: now + self.timeout,
+            capture: None,
+            audio_deadline: None,
         });
         self.emit(request_id, Some(id), "session_started");
     }
@@ -53,28 +69,104 @@ impl Core {
             self.start_session(format!("wake_{}", self.sequence + 1), now);
         }
     }
+    pub fn enable_capture(&mut self) {
+        self.capture_enabled = true;
+    }
+    pub fn capture_packet(
+        &mut self,
+        frame: AudioFrame,
+        speech: Option<bool>,
+        pre_roll: Vec<f32>,
+        detected: bool,
+        now: Instant,
+    ) {
+        if frame.validate().is_err() {
+            self.finish("audio_error");
+            return;
+        }
+        if !self.capture_enabled {
+            if detected {
+                self.audio_wake(now);
+            }
+            return;
+        }
+        self.expire(now);
+        let Some(speech) = speech else {
+            self.wake_health("failed");
+            return;
+        };
+        if self.session.is_none() {
+            if detected {
+                self.audio_wake(now);
+                match Capture::new(pre_roll, frame.end_us()) {
+                    Ok(c) => {
+                        if let Some(s) = self.session.as_mut() {
+                            s.capture = Some(c);
+                            s.audio_deadline = Some(now + Duration::from_secs(1));
+                        }
+                    }
+                    Err(_) => self.finish("audio_error"),
+                }
+            }
+            return;
+        }
+        if let Some(s) = self.session.as_mut() {
+            if let Some(c) = s.capture.as_mut() {
+                s.audio_deadline = Some(now + Duration::from_secs(1));
+                match c.push(frame, speech) {
+                    Ok(Some(reason)) => self.finish(reason),
+                    Err(_) => self.finish("audio_error"),
+                    Ok(None) => {}
+                }
+            }
+        }
+    }
+    pub fn audio_eof(&mut self) {
+        if self.session.as_ref().is_some_and(|s| s.capture.is_some()) {
+            self.finish("capture_completed");
+        }
+    }
     pub fn wake_health(&mut self, status: &'static str) {
         self.wake_status = status;
         if status == "failed" {
+            self.completed_audio = None;
             self.finish("cancelled");
             self.emit("wake_worker".into(), None, "wake_failed");
         }
     }
     pub fn deadline(&self) -> Option<Instant> {
-        self.session.as_ref().map(|s| s.deadline)
+        self.session
+            .as_ref()
+            .map(|s| s.audio_deadline.map_or(s.deadline, |a| a.min(s.deadline)))
     }
     pub fn expire(&mut self, now: Instant) {
         if self.deadline().is_some_and(|d| now >= d) {
-            self.finish("timed_out");
+            let kind = if self
+                .session
+                .as_ref()
+                .is_some_and(|s| s.audio_deadline.is_some_and(|d| now >= d))
+            {
+                "audio_error"
+            } else {
+                "timed_out"
+            };
+            self.finish(kind);
         }
     }
     pub fn shutdown(&mut self) {
+        self.completed_audio = None;
         if self.session.is_some() {
             self.finish("cancelled");
         }
     }
     fn finish(&mut self, kind: &'static str) {
-        if let Some(s) = self.session.take() {
+        if let Some(mut s) = self.session.take() {
+            if let Some(capture) = s.capture.take() {
+                self.capture_summary = Some(capture.summary(s.id, kind));
+                if kind == "capture_completed" {
+                    self.completed_audio = Some(capture);
+                }
+            }
             self.emit(s.request_id, Some(s.id), kind);
         }
     }
@@ -93,6 +185,7 @@ impl Core {
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
             version: VERSION,
+            capture: self.capture_summary.clone(),
             wake_status: self.wake_status,
             request_id,
             code,
@@ -226,6 +319,90 @@ mod tests {
         assert_eq!(c.session.as_ref().unwrap().id, 2);
         c.shutdown();
         assert!(c.session.is_none());
+    }
+    #[test]
+    fn capture_no_speech_cancel_and_stalled_producer_release_pcm() {
+        fn frame(ts: u64) -> AudioFrame {
+            AudioFrame {
+                timestamp_us: ts,
+                sample_rate: 16000,
+                channels: 1,
+                samples: vec![0.; 1600],
+            }
+        }
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.enable_capture();
+        c.capture_packet(frame(0), Some(false), vec![0.; 1600], true, now);
+        for i in 1..=30 {
+            c.capture_packet(
+                frame(i * 100000),
+                Some(false),
+                vec![],
+                false,
+                now + Duration::from_millis(i * 100),
+            );
+        }
+        assert_eq!(c.capture_summary.as_ref().unwrap().reason, "no_speech");
+        assert!(c.session.is_none() && c.completed_audio.is_none());
+        c.capture_packet(
+            frame(4000000),
+            Some(true),
+            vec![0.; 1600],
+            true,
+            now + Duration::from_secs(4),
+        );
+        let sid = c.session.as_ref().unwrap().id;
+        c.handle(
+            request("cancel_capture", Operation::Cancel { session_id: sid }),
+            now + Duration::from_secs(4),
+        );
+        assert_eq!(c.capture_summary.as_ref().unwrap().reason, "cancelled");
+        assert!(c.session.is_none() && c.completed_audio.is_none());
+        c.capture_packet(
+            frame(5000000),
+            Some(true),
+            vec![0.; 1600],
+            true,
+            now + Duration::from_secs(5),
+        );
+        c.expire(now + Duration::from_secs(6));
+        assert_eq!(c.capture_summary.as_ref().unwrap().reason, "audio_error");
+        assert!(c.session.is_none() && c.completed_audio.is_none());
+        c.capture_packet(
+            frame(6000000),
+            Some(false),
+            vec![],
+            false,
+            now + Duration::from_secs(6),
+        );
+        assert!(c.session.is_none());
+    }
+    #[test]
+    fn eof_retains_one_bounded_audio_until_next_session_or_shutdown() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.enable_capture();
+        c.capture_packet(
+            AudioFrame {
+                timestamp_us: 0,
+                sample_rate: 16000,
+                channels: 1,
+                samples: vec![0.; 1600],
+            },
+            Some(true),
+            vec![0.; 1600],
+            true,
+            now,
+        );
+        c.audio_eof();
+        assert!(c.completed_audio.is_some());
+        assert_eq!(
+            c.capture_summary.as_ref().unwrap().reason,
+            "capture_completed"
+        );
+        c.shutdown();
+        assert!(c.completed_audio.is_none());
     }
     #[test]
     fn native_wake_reuses_session_authority_and_failure_cancels() {

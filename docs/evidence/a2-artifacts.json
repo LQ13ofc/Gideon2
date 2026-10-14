@@ -1,0 +1,17 @@
+{
+  "engine": "silero-vad-v5.0/sherpa-onnx-1.13.8",
+  "source": "https://raw.githubusercontent.com/snakers4/silero-vad/v5.0/files/silero_vad.onnx",
+  "sha256": "6b99cbfd39246b6706f98ec13c7c50c6b299181f2474fa05cbc8046acc274396",
+  "size_bytes": 2313101,
+  "sample_rate": 16000,
+  "threshold": 0.5,
+  "min_speech_duration": 0.1,
+  "min_silence_duration": 0.1,
+  "window_size": 512,
+  "max_speech_duration": 30.0,
+  "provider": "cpu",
+  "threads": 1,
+  "license_source": "https://github.com/snakers4/silero-vad/blob/v5.0/LICENSE",
+  "license": "MIT",
+  "distribution_certified": false
+}

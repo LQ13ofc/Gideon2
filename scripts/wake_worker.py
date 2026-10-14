@@ -123,14 +123,32 @@ def replay(manifest, row, emit=None):
     return {'detections': detections, 'wall_s': time.monotonic()-started, 'audio_s': len(samples)/16000}
 
 
+class VadEngine:
+    def __init__(self, manifest):
+        if manifest['engine']!='silero-vad-v5.0/sherpa-onnx-1.13.8':raise ValueError('unsupported VAD')
+        check_hash(Path(manifest['path']),manifest['sha256'])
+        config=sherpa_onnx.VadModelConfig()
+        config.silero_vad.model=manifest['path'];config.silero_vad.threshold=0.5
+        config.silero_vad.min_speech_duration=0.1;config.silero_vad.min_silence_duration=0.1
+        config.silero_vad.max_speech_duration=30.;config.silero_vad.window_size=512
+        config.sample_rate=16000;config.num_threads=1;config.provider='cpu'
+        self.vad=sherpa_onnx.VoiceActivityDetector(config,buffer_size_in_seconds=1.)
+    def accept(self, samples):
+        self.vad.accept_waveform(samples)
+        result=self.vad.is_speech_detected()
+        while not self.vad.empty():self.vad.pop()
+        return bool(result)
+
+
 def stream_fixture(manifest, row):
     engine = WakeEngine(manifest)
+    vad = VadEngine(manifest["vad"]) if "vad" in manifest else None
     samples = np.concatenate([read_fixture(row), np.zeros(16000, dtype=np.float32)])
     for offset in range(0, len(samples), 1280):
         chunk = samples[offset:offset+1280]
         timestamp = offset*1_000_000//16000
         events = engine.accept(chunk, timestamp)
-        print(json.dumps({'timestamp_us': timestamp, 'samples': chunk.tolist(), 'detections': events}), flush=True)
+        print(json.dumps({'timestamp_us': timestamp, 'samples': chunk.tolist(), 'detections': events, 'speech':vad.accept(chunk) if vad else None}), flush=True)
         # Replay at real cadence; the Rust owner remains responsive to IPC/cancel.
         time.sleep(len(chunk)/16000)
 

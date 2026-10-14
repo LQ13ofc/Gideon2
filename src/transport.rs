@@ -1,4 +1,5 @@
 use crate::{
+    audio::AudioFrame,
     core::Core,
     protocol::{Request, MAX_MESSAGE},
     storage::Storage,
@@ -226,6 +227,9 @@ pub async fn serve(
             if bytes.len() > 1_048_576 {
                 return Err(io::Error::other("wake manifest too large"));
             }
+            if serde_json::from_slice::<serde_json::Value>(&bytes)?["vad"].is_object() {
+                core.enable_capture();
+            }
             let mut descriptor: WakeDescriptor = serde_json::from_slice(&bytes)?;
             if let Some(phrase) = storage.config.wake_phrase.as_ref() {
                 descriptor.active_phrase = phrase.clone();
@@ -255,21 +259,27 @@ pub async fn serve(
             },
             packet = wake_rx.recv(), if wake_task.is_some() => {
                 match packet {
-                    Some(Ok(p)) => match wake_input.as_mut().expect("configured wake input").accept(p) {
+                    Some(Ok(p)) => {
+                        let frame=AudioFrame {timestamp_us:p.timestamp_us,sample_rate:16000,channels:1,samples:p.samples.clone()};
+                        let speech=p.speech;
+                        match wake_input.as_mut().expect("configured wake input").accept(p) {
                         Ok(detection) => {
                             core.wake_health("replaying");
-                            if detection.is_some() { core.audio_wake(std::time::Instant::now()); }
+                            let pre_roll=if detection.is_some() { wake_input.as_ref().expect("configured wake input").pre_roll() } else { Vec::new() };
+                            core.capture_packet(frame,speech,pre_roll,detection.is_some(),std::time::Instant::now());
                         },
                         Err(_) => {
                             core.wake_health("failed");
                             if let Some(task) = wake_task.take() { task.abort(); let _ = task.await; }
                         }
+                    }
                     },
                     Some(Err(())) => {
                         core.wake_health("failed");
                         if let Some(task) = wake_task.take() { task.abort(); let _ = task.await; }
                     },
                     None => {
+                        core.audio_eof();
                         core.wake_health("replay_finished");
                         if let Some(task) = wake_task.take() { let _ = task.await; }
                     }

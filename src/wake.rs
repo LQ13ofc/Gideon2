@@ -43,6 +43,8 @@ pub struct Packet {
     pub timestamp_us: u64,
     pub samples: Vec<f32>,
     pub detections: Vec<Detection>,
+    #[serde(default)]
+    pub speech: Option<bool>,
 }
 
 pub struct WakeInput {
@@ -104,6 +106,9 @@ impl WakeInput {
         }
         Ok(None)
     }
+    pub fn pre_roll(&self) -> Vec<f32> {
+        self.pre_roll.iter().copied().collect()
+    }
     pub fn buffered_samples(&self) -> usize {
         self.pre_roll.len()
     }
@@ -143,6 +148,7 @@ mod tests {
         Packet {
             timestamp_us: ts,
             samples: vec![0.; 1600],
+            speech: None,
             detections: phrase
                 .map(|p| Detection {
                     phrase_id: p.into(),
