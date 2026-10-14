@@ -1,6 +1,6 @@
 # Mapa da Base para S2
 
-Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b feedback/ganho B2.3 e descoberta Hub B3.1.
+Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b feedback/ganho B2.3 e descoberta/aprovação Hub B3.1/B3.2a.
 Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json e docs/evidence/b3-catalog.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
@@ -137,8 +137,9 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
 5. B3.1: --hub-catalog recebe arquivo absoluto + SHA; parse bounded estrito,
    compatibilidade API/target e dependências pendentes, descoberta Core→Qt. Falha
    coloca somente catálogo em quarentena; Base continua. Nenhum binário baixado
-   ou instalado. B3.2/3.3 ainda precisam approval de permissões, staged install,
-   persistência, update/rollback/removal em namespace e audit; sem publicação.
+   ou instalado. B3.2a aprova permissões exatas via Core/IPC/Qt, vinculadas ao manifest e catálogo,
+   com revisão/persistência privada/restart; não concede grants Base. B3.2b/3.3
+   ainda precisam bytes/staging, update/rollback/removal em namespace e audit.
 6. B4: paths de workers usam CARGO_MANIFEST_DIR e assets/venvs do workspace;
    relocalização/pacote offline/lifecycle precisam trabalho antes de distribuição.
    Nenhum Flatpak/portal/auto-login do host foi instalado ou validado.
@@ -164,3 +165,11 @@ UI/Core real docs/evidence/ui-reference.json. 7 rotas, tema/cor por janela,
 indicador persistido no Core; nenhum caminho de device/LLM/installer inventado.
 Conversa concluída no Início; legenda ativa/Cancel globais. Rasters reais,
 clipping software, sem shader/animation/polling adicional. B3.2 continua próximo.
+
+## Aprovação Hub B3.2a
+
+Core possui o ledger privado hub-approvals.json; Qt solicita revisão e acknowledgement
+explícito, sem autoridade local. Botão desabilitado até acknowledgement e após
+aprovação; aviso identifica plugin aprovado. Mudança de manifest/catálogo não herda
+aprovação; ledger inválido põe somente Hub em quarentena. Revisão usa string u64
+na UI. Nenhum payload importado, publisher autenticado ou plugin executado.

@@ -1,0 +1,283 @@
+{
+  "gate": "B3_2A_PERMISSIONS",
+  "passed": 64,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "discovery does not create approval file",
+    "reject publisher_ack_required",
+    "reject unknown_plugin",
+    "reject plugin_incompatible",
+    "reject manifest_mismatch",
+    "reject permissions_mismatch",
+    "reject permissions_mismatch",
+    "reject invalid_message",
+    "reject stale_hub_revision",
+    "busy approval refused",
+    "cancel remains available",
+    "unsafe pending file leaves effective state",
+    "sentinel preserved",
+    "approval ack reflects persisted exact manifest",
+    "duplicate request fenced",
+    "already approved cannot widen",
+    "private bounded approval file",
+    "approval does not install or authenticate publisher",
+    "Base config intact",
+    "Base real effect still verified",
+    "clean shutdown",
+    "actual restart keeps approval",
+    "clean shutdown",
+    "new catalog cannot inherit approval",
+    "clean shutdown",
+    "invalid quarantines only Hub",
+    "invalid cannot approve",
+    "Base real effect still verified",
+    "clean shutdown",
+    "unsafe_permissions quarantines only Hub",
+    "unsafe_permissions cannot approve",
+    "Base real effect still verified",
+    "clean shutdown",
+    "symlink quarantines only Hub",
+    "symlink cannot approve",
+    "Base real effect still verified",
+    "clean shutdown",
+    "hardlink quarantines only Hub",
+    "hardlink cannot approve",
+    "Base real effect still verified",
+    "clean shutdown",
+    "oversized quarantines only Hub",
+    "oversized cannot approve",
+    "Base real effect still verified",
+    "clean shutdown",
+    "fifo quarantines only Hub",
+    "fifo cannot approve",
+    "Base real effect still verified",
+    "clean shutdown",
+    "clean shutdown",
+    "actual Core connection",
+    "accessible cancel name",
+    "minimum layout size respected",
+    "native S1 before permission review",
+    "review never defaults to publisher acknowledgement",
+    "actual checkbox enables explicit approval",
+    "Qt action persists exact manifest approval in Core",
+    "acknowledged approval disables duplicate submit",
+    "approval remains distinct from installation and identity",
+    "review fits minimum viewport",
+    "offline revokes cached approval UI",
+    "real restart reloads exact approval",
+    "native S1 after approval and restart",
+    "clean shutdown"
+  ],
+  "rows": [
+    {
+      "phase": "permissions",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0,
+      "checks": [
+        "actual Core connection",
+        "accessible cancel name",
+        "minimum layout size respected",
+        "native S1 before permission review",
+        "review never defaults to publisher acknowledgement",
+        "actual checkbox enables explicit approval",
+        "Qt action persists exact manifest approval in Core",
+        "acknowledged approval disables duplicate submit",
+        "approval remains distinct from installation and identity",
+        "review fits minimum viewport",
+        "offline revokes cached approval UI",
+        "real restart reloads exact approval",
+        "native S1 after approval and restart"
+      ],
+      "state_trace": [
+        "offline",
+        "idle",
+        "capturing",
+        "transcribing",
+        "speaking",
+        "idle",
+        "offline",
+        "idle",
+        "capturing",
+        "executing",
+        "speaking"
+      ],
+      "metrics": {}
+    }
+  ],
+  "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+  "scope": "manifest-bound approval only; no installation/execution/publisher authentication",
+  "physical_validation": "NOT_PERFORMED",
+  "code_commit": "2fb3dde1f0a4050e578ebe09d9987019e8903f19",
+  "rust_tests": 47,
+  "python_tests": 18,
+  "regressions": [
+    {
+      "report": "target/evidence/a0.json",
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "adcbedf903f31952542b3ca94a150f30d4ec55a86c18667236c437c7f26564b8"
+    },
+    {
+      "report": "target/evidence/a1-integration.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "c3356676aaefa4118ea4c87d7817ca520ca8b8a96fb47148773035877b51f474"
+    },
+    {
+      "report": "target/evidence/a3-integration.json",
+      "passed": 67,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "bd15ec01226cc0bac676cdc1a9bee07e16bf2e01d97950c544778160415f1795"
+    },
+    {
+      "report": "target/evidence/a4-integration.json",
+      "passed": 138,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "4d037920a9fa633d91c6eea211cfa9622d659c412cc609db6c929e5e90a2aa7c"
+    },
+    {
+      "report": "target/evidence/a5-integration.json",
+      "passed": 93,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "fecf9bcdea630cc260a431c3d4577c1164a1336a0fd6798ba8a89fb34b6a5f17"
+    },
+    {
+      "report": "target/evidence/a5-soak.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "96b736c0b9535766637ea6ca1e4055b8a21fed19db98854b07a55a97362c19cc"
+    },
+    {
+      "report": "target/evidence/a5-shutdown.json",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "459f4922a9151d65b52ea6ef803442b19ef8366d498bc11a44d6c15fef21d2eb"
+    },
+    {
+      "report": "target/evidence/b1-ui.json",
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "3092ca7b1fce829770e0da565d56334c3ce23d9a795545c9420133c06bba3a40"
+    },
+    {
+      "report": "target/evidence/b2-preferences.json",
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "db4360ef44e311b2e1bda49054301b01f2f1570ddcb1a812e2ef960e854a1fb7"
+    },
+    {
+      "report": "target/evidence/b2-safe-mode.json",
+      "passed": 96,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "a5b7adb6f5f60666fc4696a53a04c9ff92dcdaeea7244dcb0acc13bda3633e38"
+    },
+    {
+      "report": "target/evidence/b2-pack.json",
+      "passed": 36,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "07dcbee60e0f2ef01aab048fcd15b4e3d2b2390a4b4db7b55052c95f5b5b0df7"
+    },
+    {
+      "report": "target/evidence/b2-feedback.json",
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "16b7a4aeb226cb308f046f88ad22a580ae4e8b638135eb5b14504fdd7ce11c43"
+    },
+    {
+      "report": "target/evidence/b3-catalog.json",
+      "passed": 69,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "fc9a7971f99ec8efca8ce2752cf8f178230525bae6475af793ba1b155d93af00"
+    },
+    {
+      "report": "target/evidence/design.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "7d41ffd6371ab12e3504756dd6eba69b0020fb09f53976da996721121e156507"
+    },
+    {
+      "report": "target/evidence/b32a-a2.log",
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "9c293c599b65427a4ac1b0d720ac0af005b6f5b61f942c4868d1c92ce23eb129",
+      "report_sha256": "02ce54bb99f743a44bf2fdc025aba2333326c9c6e34b4f825e3ce256386b1099"
+    }
+  ],
+  "regression_checks_total": 766,
+  "total_process_checks": 830,
+  "build_checks": [
+    "fmt",
+    "check",
+    "test",
+    "clippy --all-targets -- -D warnings",
+    "release",
+    "diff --check"
+  ],
+  "profile_and_qualification_sha256": {
+    "target/a3-assets/replay-manifest.json": "878dc1cade183900a178a2abce9426e6d6d7a37381d6bd85d1bb9f48a6d61653",
+    "target/a3-assets/manifest.json": "3f12fa9c7d075c98f6215734e2b3e053670b58087b74db87d92c9749a88d6a07",
+    "target/a5-assets/manifest.json": "12e5510428df7486355dee526ca51ccb2fe89981f4bfb5d7efcec46279a88649",
+    "target/a1-competitive/manifest.json": "8abb349c5af1413146922e9daf40778e383c91234599c5116672e094e96c9c0c",
+    "target/evidence/a1-selectable-hey.json": "6faedf5a042d5ea6f67eee2d6fd7f6a1c76ee1c138941dec20e60df52d4b2b4b",
+    "target/evidence/a1-selectable-okay.json": "e4bef5b66c89996d0341fb830585f48c74053fb0520f524e5ead8f8c2cc89247"
+  },
+  "screenshots_sha256": {
+    "target/evidence/b3-permissions.png": "4d0988ad8c24e9baf6e7285677d083621e572f8f1db692ad103fb3940079685e"
+  },
+  "graph": {
+    "nodes": 794,
+    "edges": 1632,
+    "scope": "AST only; QML validated with actual Qt runtime"
+  },
+  "limitations": [
+    "No payload imported or plugin installed/executed; B3.2b next.",
+    "Publisher remains unauthenticated; approval does not grant Base command authority.",
+    "First A1 early-worker termination assertion failed intermittently; added diagnostics and repeat passed without changing deadlines or assertions; cause unresolved.",
+    "Physical audio, CPAL/PipeWire/AEC/hotplug/barge-in and relocatable packaging require implementation; no personal devices used."
+  ],
+  "source_sha256": {
+    "app/Main.qml": "82ee4347f8f08e1fca29cff326c069e5a7330e0b3e6a3d9b212e8fe6038662c4",
+    "app/bridge.py": "dd0d6e9fbb913f5f9cb98f8097fd52660ff90187c53e752ffc56e8d4ce0a19c5",
+    "scripts/test_bridge_protocol.py": "212a7467d33f08f42b8b3a2cb7b415b585ff94fd5d7a85446c0158e12e70bb03",
+    "scripts/test_ui_offscreen.py": "96214755178fd340da9df6593644dc099eae8e8d30fc0553178ead795316de2f",
+    "scripts/verify_a1.py": "52836a6ad00028dd8b2e81b72cbf3624f762cca4fca3f8fa7f9020442f2d531a",
+    "scripts/verify_b3_permissions.py": "7337e880a3b0c65416c3a01cffb8406c6d8a8ded0e7bbc1886ed77099ed1b065",
+    "src/core.rs": "900ebc315a70d7e68a78b0a455bcd6c69829b4128310ded5581d8deec02d0f93",
+    "src/hub.rs": "620cfe28c440fa91c83943cf1d5bbe0d5e2dbf650a9cd89855748fddb7da2a58",
+    "src/protocol.rs": "ba987101b716f3c0e8f7b9699bd5616f430c51834b4a018eee57a49843b16143",
+    "src/storage.rs": "ef376075c0b201cf6966c1a00bab660adc373adc85e294562d93a3e55b59ae16",
+    "src/transport.rs": "ff62e42dc0a3a2e616c5769eb1eaa964695bb764d7cf094abf21fe715e6132e5",
+    "tests/hub.rs": "d1522f566502ca59818f9a926928c89009078038f201017b69a0ef0fe1332bfb"
+  }
+}

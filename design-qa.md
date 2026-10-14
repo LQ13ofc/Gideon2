@@ -82,3 +82,12 @@ instância nativa por vez. Isso não certifica latência sob contenção ou acú
 UI real testada; resultados e limites registrados; sem publicação ou sessão pessoal.
 
 final result: passed
+
+
+B3.2a review de permissões: diálogo real Qt offscreen/HiDPI em 640x520, scroll
+e keyboard; acknowledgement desmarcado, botão bloqueado, aprovação persistida pelo
+Core e duplicate desabilitado. Publisher continua não autenticado/nenhum instalado.
+Aviso de aprovação separado de preferências e identifica o plugin; não reutiliza
+resultado antigo ao abrir review. Screenshot target/evidence/b3-permissions.png.
+Restart privado mantém aprovação e repete fluxo wake/STT/comando/Pocket. Nenhuma
+qualificação física ou humana foi feita. Resultado: passed.
