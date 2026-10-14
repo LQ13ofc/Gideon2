@@ -24,6 +24,7 @@ struct Session {
 
 /// Single owner for sessions, events and authority; no detached action tasks.
 pub struct Core {
+    preferences: crate::storage::Config,
     session: Option<Session>,
     next_session: u64,
     sequence: u64,
@@ -52,6 +53,10 @@ pub struct Core {
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
         Self {
+            preferences: crate::storage::Config {
+                session_timeout_ms: timeout.as_millis() as u64,
+                ..Default::default()
+            },
             session: None,
             next_session: 1,
             sequence: 0,
@@ -371,7 +376,7 @@ impl Core {
             .is_some_and(|s| s.id == id && s.stage == State::Speaking)
     }
     fn command_terminal(&mut self, kind: &'static str, now: Instant) {
-        if !self.tts_enabled {
+        if !self.tts_enabled || !self.preferences.audible_feedback {
             self.finish(kind);
             return;
         }
@@ -540,6 +545,7 @@ impl Core {
     }
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
+            preferences: self.preferences.clone(),
             command: self.command_outcome.clone(),
             speech_status: self.speech_status,
             speech_samples: self.speech_samples,
@@ -562,7 +568,19 @@ impl Core {
             events: self.events.iter().cloned().collect(),
         }
     }
+    pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
+        self.preferences = config.clone();
+        self.timeout = Duration::from_millis(config.session_timeout_ms);
+    }
     pub fn handle(&mut self, req: Request, now: Instant) -> Response {
+        self.handle_with_storage(req, now, None)
+    }
+    pub fn handle_with_storage(
+        &mut self,
+        req: Request,
+        now: Instant,
+        storage: Option<&mut crate::storage::Storage>,
+    ) -> Response {
         self.expire(now);
         if req.version != VERSION {
             return self.response(req.request_id, "version_mismatch");
@@ -581,6 +599,49 @@ impl Core {
         }
         self.recent_requests.push_back(req.request_id.clone());
         let code = match req.operation {
+            Operation::Preferences { revision, .. }
+            | Operation::RollbackPreferences { revision }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::Preferences { .. } | Operation::RollbackPreferences { .. }
+                if self.session.is_some() =>
+            {
+                "busy"
+            }
+            Operation::Preferences {
+                session_timeout_ms, ..
+            } if !(50..=60000).contains(&session_timeout_ms) => "invalid_preferences",
+            operation @ (Operation::Preferences { .. } | Operation::RollbackPreferences { .. }) => {
+                if let Some(storage) = storage {
+                    let result = match operation {
+                        Operation::Preferences {
+                            revision,
+                            audible_feedback,
+                            session_timeout_ms,
+                        } => storage.update_preferences(
+                            revision,
+                            audible_feedback,
+                            session_timeout_ms,
+                        ),
+                        Operation::RollbackPreferences { revision } => {
+                            storage.rollback_preferences(revision)
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.configure_preferences(&storage.config);
+                    if result.is_ok() {
+                        self.emit(req.request_id.clone(), None, "preferences_updated");
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
+
             Operation::Text { raw } => {
                 if !self.virtual_input || self.command_wake.is_none() {
                     "input_disabled"

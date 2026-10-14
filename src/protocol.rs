@@ -15,6 +15,14 @@ pub struct Request {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Snapshot,
+    Preferences {
+        revision: u64,
+        audible_feedback: bool,
+        session_timeout_ms: u64,
+    },
+    RollbackPreferences {
+        revision: u64,
+    },
     Text {
         raw: String,
     },
@@ -56,6 +64,7 @@ pub struct Event {
 
 #[derive(Debug, Serialize)]
 pub struct Response {
+    pub preferences: crate::storage::Config,
     pub command: Option<crate::commands::Outcome>,
     pub text_input_available: bool,
     pub speech_samples: usize,
@@ -86,6 +95,18 @@ pub fn valid_id(id: &str) -> bool {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum WireRequest {
+    Preferences {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        audible_feedback: bool,
+        session_timeout_ms: u64,
+    },
+    RollbackPreferences {
+        version: u16,
+        request_id: String,
+        revision: u64,
+    },
     Snapshot {
         version: u16,
         request_id: String,
@@ -114,6 +135,30 @@ enum WireRequest {
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let (version, request_id, operation) = match WireRequest::deserialize(d)? {
+            WireRequest::Preferences {
+                version,
+                request_id,
+                revision,
+                audible_feedback,
+                session_timeout_ms,
+            } => (
+                version,
+                request_id,
+                Operation::Preferences {
+                    revision,
+                    audible_feedback,
+                    session_timeout_ms,
+                },
+            ),
+            WireRequest::RollbackPreferences {
+                version,
+                request_id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::RollbackPreferences { revision },
+            ),
             WireRequest::Snapshot {
                 version,
                 request_id,

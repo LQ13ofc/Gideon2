@@ -243,7 +243,7 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>)
     }
 }
 pub async fn serve(
-    storage: Storage,
+    mut storage: Storage,
     virtual_input: bool,
     mut replay: Option<WakeReplay>,
     commands_sandbox: bool,
@@ -257,6 +257,7 @@ pub async fn serve(
         Duration::from_millis(storage.config.session_timeout_ms),
         virtual_input,
     );
+    core.configure_preferences(&storage.config);
     let mut seed = [0u8; 8];
     // SAFETY: writable 8-byte buffer; kernel randomness, no personal audio device.
     if unsafe { libc::getrandom(seed.as_mut_ptr().cast(), seed.len(), 0) } != seed.len() as isize {
@@ -363,7 +364,7 @@ pub async fn serve(
             },
             Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
             Some(call) = rx.recv() => {
-                let response = core.handle(call.request, std::time::Instant::now()); storage.audit(response.sequence)?;
+                let response = core.handle_with_storage(call.request, std::time::Instant::now(), Some(&mut storage)); storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
             },
             reply=stt_rx.recv(), if stt_task.is_some() => {

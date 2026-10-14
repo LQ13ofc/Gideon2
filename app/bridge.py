@@ -23,6 +23,15 @@ def validate_snapshot(data,request_id,min_sequence):
         if key in data:require(short(data[key]))
     if 'text_input_available' in data:require(type(data['text_input_available']) is bool)
     if 'speech_samples' in data:require(integer(data['speech_samples'],0,240000))
+    prefs=data.get('preferences')
+    if prefs is not None:
+        require(isinstance(prefs,dict) and type(prefs.get('version')) is int and prefs['version']==1)
+        require(integer(prefs.get('revision')) and integer(prefs.get('session_timeout_ms'),50,60000))
+        require(type(prefs.get('audible_feedback')) is bool)
+        previous=prefs.get('previous_preferences')
+        if previous is not None:require(isinstance(previous,dict) and type(previous.get('audible_feedback')) is bool and integer(previous.get('session_timeout_ms'),50,60000))
+        wake=prefs.get('wake_phrase')
+        require(wake is None or (short(wake) and len(wake)>0 and all(c.isascii() and (c.isalnum() or c in '_-') for c in wake)))
     t=data.get('transcript')
     if t is not None:
         require(isinstance(t,dict))
@@ -51,7 +60,7 @@ def validate_snapshot(data,request_id,min_sequence):
 class Bridge(QObject):
     changed=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.cancel_id=None;self.text_request=None;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
         self.poll=QTimer(self);self.poll.setInterval(1000);self.poll.timeout.connect(self.refresh)
         self.retry=QTimer(self);self.retry.setSingleShot(True);self.retry.timeout.connect(self.connect_core)
@@ -70,13 +79,13 @@ class Bridge(QObject):
     def _connected(self):
         self.retry.stop();self.error='';self._backoff=500;self.refresh()
     def _offline(self,*args):
-        self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.cancel_id=None;self.text_request=None;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
+        self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         self.changed.emit()
         if not self.retry.isActive():self.retry.start(self._backoff);self._backoff=min(5000,self._backoff*2)
     def _request(self,op,**kw):
         if self.pending or self.socket.state()!=QLocalSocket.LocalSocketState.ConnectedState or (not self.online and op!='snapshot'):return
-        self._counter+=1;rid=f'{self._prefix}_{self._counter}';self.pending=rid
+        self._counter+=1;rid=f'{self._prefix}_{self._counter}';self.pending=rid;self.pending_op=op
         self.socket.write((json.dumps({'version':1,'request_id':rid,'op':op,**kw})+'\n').encode());self.timeout.start()
     @Slot()
     def refresh(self):self._request('snapshot')
@@ -91,14 +100,19 @@ class Bridge(QObject):
                 sid=data['session_id']
                 self._sequence=data['sequence']
             except (ValueError,KeyError,TypeError,RecursionError,UnicodeError):self._offline();return
-            self.timeout.stop();self.pending=None;self.online=True;self.poll.start()
+            pending_op=self.pending_op
+            self.timeout.stop();self.pending=None;self.pending_op=None;self.online=True;self.poll.start()
             # Python retains u64 precisely; QML never receives numeric session IDs.
             data['session_id']=str(sid) if sid is not None else ''
+            if pending_op in ('preferences','rollback_preferences'):
+                self.preferences_result=('Preferências salvas pelo Core' if data.get('code')=='ok' else data.get('code','invalid_message'))
             data.pop('request_id',None)
             if data!=self.snapshot:self.snapshot=data;self.changed.emit()
             self.poll.setInterval(150 if sid is not None else 1000)
             if self.cancel_id is not None:
                 old=self.cancel_id;self.cancel_id=None;self._request('cancel',session_id=int(old))
+            elif self.preferences_request is not None:
+                op,kw=self.preferences_request;self.preferences_request=None;self._request(op,**kw)
             elif self.text_request is not None:
                 text=self.text_request;self.text_request=None;self._request('text',raw=text)
     @Slot()
@@ -112,6 +126,32 @@ class Bridge(QObject):
         if self.textAvailable:
             if self.pending:self.text_request=text;self.changed.emit()
             else:self._request('text',raw=text)
+    @Slot(bool,int)
+    def savePreferences(self,audible,timeout):
+        if self.preferencesAvailable:
+            self._preferences('preferences',revision=int(self.preferencesRevision),audible_feedback=audible,session_timeout_ms=timeout)
+    @Slot()
+    def rollbackPreferences(self):
+        if self.preferencesAvailable:self._preferences('rollback_preferences',revision=int(self.preferencesRevision))
+    def _preferences(self,op,**kw):
+        self.preferences_result='Enviando ao Core'
+        if self.pending:self.preferences_request=(op,kw)
+        else:self._request(op,**kw)
+        self.changed.emit()
+    @Property(bool,notify=changed)
+    def preferencesAvailable(self):return self.online and 'preferences' in self.snapshot and not self.sessionId and self.preferences_request is None
+    @Property(bool,notify=changed)
+    def rollbackAvailable(self):return self.preferencesAvailable and bool(self.snapshot.get("preferences",{}).get("previous_preferences"))
+    @Property(bool,notify=changed)
+    def voiceAvailable(self):return self.online and self.snapshot.get("speech_status","unavailable")!="unavailable"
+    @Property(bool,notify=changed)
+    def audibleFeedback(self):return self.snapshot.get('preferences',{}).get('audible_feedback',True)
+    @Property(int,notify=changed)
+    def sessionTimeout(self):return self.snapshot.get('preferences',{}).get('session_timeout_ms',30000)
+    @Property(str,notify=changed)
+    def preferencesRevision(self):return str(self.snapshot.get('preferences',{}).get('revision',0))
+    @Property(str,notify=changed)
+    def preferencesResult(self):return self.preferences_result
     @Property(bool,notify=changed)
     def textAvailable(self):return self.online and bool(self.snapshot.get('text_input_available')) and not self.sessionId and self.text_request is None
     @Property(bool,notify=changed)

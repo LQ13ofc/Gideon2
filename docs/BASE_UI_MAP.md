@@ -1,6 +1,7 @@
 # Mapa da Base para S2
 
-Escopo: implementação nova em `base`, S1 e cliente B1 existente. B2 não começou.
+Escopo: implementação nova em `base`, S1, cliente B1 e preferências B2.1.
+Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-preferences.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
 
@@ -21,7 +22,8 @@ flowchart LR
   T --> V[PCM validado / VirtualSpeaker]
   V --> C
   UI[Qt QML / Bridge] <-->|IPC v1 privado| C
-  UI -->|Cancel ou Text no perfil de teste| C
+  UI -->|Cancel / preferências / Text de teste| C
+  C -->|Config atômica + rollback| S[Storage privado]
 ```
 
 ## Onde fica cada responsabilidade
@@ -29,7 +31,7 @@ flowchart LR
 | Arquivo | Responsabilidade | Limite relevante para a UI |
 |---|---|---|
 | src/main.rs | Flags/perfil e entrada do daemon | App não inicia/desliga Core por fechar janela |
-| src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1 só carrega no boot; sem API de edição ainda |
+| src/storage.rs | Root 0700, arquivos 0600, singleton/config/audit | Config v1: feedback/prazo live em idle, CAS e rollback atômicos; wake ainda no boot |
 | src/protocol.rs | Request/Response/Event e esquema estrito | v1, IDs e erros são contratos; não enviar grants |
 | src/transport.rs | SO_PEERCRED, peers, filas, tarefas, namespace, sinais | Processos internos supervisionados; sem dispositivo pessoal |
 | src/core.rs | Único owner de sessão/deadline/autoridade/resultado | UI representa fatos, não replica decisões |
@@ -77,10 +79,12 @@ ortogonal a state: Core pode estar idle e stt_status=failed.
 | speech_status / speech_samples / speech | Progresso/conclusão; cancel/failed não produzem summary concluído |
 | wake_status / stt_status | Saúde/disponibilidade; replay_finished não significa listener armado |
 | text_input_available | Test-only, exige --virtual-input + --commands-sandbox |
+| preferences | Config efetiva, revisão u64 e preferências anteriores para rollback |
 | code | Resultado do request; distinto de resultado da ação e resultado de fala |
 
-Somente Snapshot, Cancel, Text de teste, VirtualWake de teste e Action negada.
-Não existem endpoints Config/GetCapabilities/Install/VoiceDevices no momento.
+Snapshot, Cancel, Text de teste, VirtualWake de teste, Action negada, Preferences
+e RollbackPreferences. Config exige idle e revisão atual; App não escreve disco.
+Discovery de packs, Install e VoiceDevices ainda não têm endpoints.
 Incoming frame 4096B, UI response até 65536B; 8 peers/16 calls. Um request Qt em
 voo, active poll 150ms, idle 1s; watchdog 2s; reconnect 0.5–5s. Delta ignora
 request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga controles.
@@ -106,10 +110,11 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
    capabilities); catalogar IDs, texto de frase, qualificação, voz/idioma/devices.
    Hoje texto de wake deriva do label com underscores; packs futuros com labels
    opacos precisam texto explícito, não convenção implícita na interface.
-2. B2: API de config actor-owned; validate → persistência atômica → aplicar ou
-   declarar restart necessário; busy/cancel/rollback; manter config corrompida
-   preservada. Não há hot-swap, safe-mode ou update de config implementado.
-3. B2: preferências audível/visual e voz só refletidas quando alterarem o fluxo real;
+2. B2.1: feedback/prazo têm API actor-owned, revisão, idle-only, persistência e
+   rollback atômicos. Ainda faltam discovery/troca de wake e modo seguro para
+   config inválida; dados corrompidos continuam preservados e boot recusado.
+3. B2.1: feedback audível altera o fluxo real e prazo se aplica à próxima sessão.
+   Preferências adicionais de visual/voz continuam dependentes de suporte;
    separar língua da UI (PT) da língua do ASR/TTS (EN no pack testado).
 4. B2: recuperação de conexão já existe; recuperação de worker exige restart do
    Core atualmente. Não anunciar auto-recovery de engine nem deixar UI ser daemon.

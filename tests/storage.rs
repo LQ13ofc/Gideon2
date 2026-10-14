@@ -51,14 +51,16 @@ fn bounded_logging_and_config_validation() {
     assert!(Config {
         version: 2,
         wake_phrase: None,
-        session_timeout_ms: 100
+        session_timeout_ms: 100,
+        ..Default::default()
     }
     .validate()
     .is_err());
     assert!(Config {
         version: 1,
         wake_phrase: None,
-        session_timeout_ms: 0
+        session_timeout_ms: 0,
+        ..Default::default()
     }
     .validate()
     .is_err());
@@ -81,4 +83,36 @@ fn private_hardlinks_are_rejected_without_modifying_the_other_file() {
     fs::hard_link(&sentinel, root.join("core.lock")).unwrap();
     assert!(Storage::open(&root).is_err());
     assert_eq!(fs::read(&sentinel).unwrap(), data);
+}
+
+#[test]
+fn atomic_preferences_restart_rollback_and_failed_update() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let mut store = Storage::open(&root).unwrap();
+    assert!(store.update_preferences(0, false, 0).is_err());
+    assert!(store.config.previous_preferences.is_none());
+    store.update_preferences(0, false, 9000).unwrap();
+    assert!(store.update_preferences(0, true, 10000).is_err());
+    drop(store);
+    let mut store = Storage::open(&root).unwrap();
+    assert!(!store.config.audible_feedback);
+    assert_eq!(store.config.revision, 1);
+    store.rollback_preferences(1).unwrap();
+    assert!(store.config.audible_feedback);
+    assert_eq!(store.config.session_timeout_ms, 30000);
+    assert_eq!(store.config.revision, 2);
+    let before = fs::read(root.join("config.json")).unwrap();
+    let sentinel = temp.path().join("sentinel");
+    fs::write(&sentinel, "unchanged").unwrap();
+    symlink(&sentinel, root.join(".config.json.pending")).unwrap();
+    assert!(store.update_preferences(2, false, 10000).is_err());
+    assert_eq!(fs::read(root.join("config.json")).unwrap(), before);
+    assert_eq!(fs::read_to_string(sentinel).unwrap(), "unchanged");
+    assert_eq!(store.config.revision, 2);
+    fs::remove_file(root.join(".config.json.pending")).unwrap();
+    store.rollback_preferences(2).unwrap();
+    assert!(!store.config.audible_feedback);
+    assert_eq!(store.config.session_timeout_ms, 9000);
+    assert_eq!(store.config.revision, 3);
 }

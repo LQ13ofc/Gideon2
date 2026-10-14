@@ -21,15 +21,26 @@ class Tests(unittest.TestCase):
         self.assertIs(validate_snapshot(copy.deepcopy(BASE),'r',1)['session_id'],None)
         with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(BASE),'other',1)
         with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(BASE),'r',2)
+    def test_preferences_presentation_rejects_bad_values(self):
+        valid={'version':1,'revision':2**64-1,'audible_feedback':False,'session_timeout_ms':60000,'wake_phrase':None}
+        cfg=copy.deepcopy(BASE);cfg['preferences']=valid
+        validate_snapshot(cfg,'r',0)
+        for key,value in [('version',True),('revision',True),('revision',-1),('revision',2**64),('audible_feedback','yes'),('session_timeout_ms',0),('session_timeout_ms',60001),('wake_phrase','../private'),('previous_preferences',[]),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':0})]:
+            cfg=copy.deepcopy(BASE);cfg['preferences']={**valid,key:value}
+            with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
     def test_real_socket_malformed_nested_data_and_deep_json_clear_stale_state(self):
-        for deep in (False,True):
+        for deep in (False,True,"preferences"):
             with self.subTest(deep=deep),tempfile.TemporaryDirectory(prefix='gideon-ipc-audit-') as td:
                 root=Path(td);root.chmod(0o700);server=QLocalServer();self.assertTrue(server.listen(str(root/'core.sock')));(root/'core.sock').chmod(0o600)
                 bridge=Bridge(root);pump(lambda:server.hasPendingConnections());peer=server.nextPendingConnection();pump(lambda:peer.canReadLine())
                 request=json.loads(bytes(peer.readLine()));good=copy.deepcopy(BASE);good['request_id']=request['request_id'];peer.write((json.dumps(good)+'\n').encode());peer.flush();pump(lambda:bridge.connected)
                 bridge.refresh();pump(lambda:peer.canReadLine());request=json.loads(bytes(peer.readLine()))
-                if deep:bad='['*1100+'0'+']'*1100+'\n'
-                else:good['request_id']=request['request_id'];good['command']=[];bad=json.dumps(good)+'\n'
+                if deep is True:bad='['*1100+'0'+']'*1100+'\n'
+                else:
+                    good['request_id']=request['request_id']
+                    if deep=='preferences':good['preferences']={'version':1,'revision':True,'audible_feedback':False,'session_timeout_ms':30000}
+                    else:good['command']=[]
+                    bad=json.dumps(good)+'\n'
                 peer.write(bad.encode());peer.flush();pump(lambda:not bridge.connected)
                 self.assertEqual(bridge.snapshot,{});self.assertFalse(bridge.textAvailable);self.assertEqual(bridge.result,'')
                 bridge.poll.stop();bridge.timeout.stop();bridge.socket.abort();bridge.retry.stop();peer.close();server.close()

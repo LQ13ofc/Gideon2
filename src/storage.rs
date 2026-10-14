@@ -9,13 +9,28 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviousPreferences {
+    pub audible_feedback: bool,
+    pub session_timeout_ms: u64,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u16,
     pub session_timeout_ms: u64,
     #[serde(default)]
     pub wake_phrase: Option<String>,
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default = "enabled")]
+    pub audible_feedback: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_preferences: Option<PreviousPreferences>,
+}
+fn enabled() -> bool {
+    true
 }
 impl Default for Config {
     fn default() -> Self {
@@ -23,6 +38,9 @@ impl Default for Config {
             version: 1,
             session_timeout_ms: 30000,
             wake_phrase: None,
+            revision: 0,
+            audible_feedback: true,
+            previous_preferences: None,
         }
     }
 }
@@ -30,6 +48,10 @@ impl Config {
     pub fn validate(&self) -> io::Result<()> {
         if self.version != 1
             || !(50..=60000).contains(&self.session_timeout_ms)
+            || self
+                .previous_preferences
+                .as_ref()
+                .is_some_and(|p| !(50..=60000).contains(&p.session_timeout_ms))
             || self
                 .wake_phrase
                 .as_deref()
@@ -136,6 +158,70 @@ impl Storage {
             config,
             _lock: lock,
         })
+    }
+    /// Same-directory atomic replacement; no client paths or retained speech data.
+    fn replace(&self, name: &str, config: &Config) -> io::Result<()> {
+        config.validate()?;
+        let path = self.root.join(name);
+        if fs::symlink_metadata(&path).is_ok() {
+            private_metadata(&path, false)?;
+        }
+        let temporary = self.root.join(format!(".{name}.pending"));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temporary)?;
+        let result = (|| {
+            file.write_all(&serde_json::to_vec(config)?)?;
+            file.sync_all()?;
+            fs::rename(&temporary, &path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+    pub fn update_preferences(
+        &mut self,
+        revision: u64,
+        audible: bool,
+        timeout_ms: u64,
+    ) -> io::Result<()> {
+        if revision != self.config.revision {
+            return Err(io::Error::other("stale revision"));
+        }
+        let mut next = self.config.clone();
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        next.audible_feedback = audible;
+        next.session_timeout_ms = timeout_ms;
+        next.validate()?;
+        next.previous_preferences = Some(PreviousPreferences {
+            audible_feedback: self.config.audible_feedback,
+            session_timeout_ms: self.config.session_timeout_ms,
+        });
+        self.replace("config.json", &next)?;
+        // Reflect the committed rename even if directory durability reporting fails.
+        self.config = next;
+        File::open(&self.root)?.sync_all()
+    }
+    pub fn rollback_preferences(&mut self, revision: u64) -> io::Result<()> {
+        if revision != self.config.revision {
+            return Err(io::Error::other("stale revision"));
+        }
+        let previous = self
+            .config
+            .previous_preferences
+            .clone()
+            .ok_or_else(|| io::Error::other("no previous preferences"))?;
+        self.update_preferences(
+            revision,
+            previous.audible_feedback,
+            previous.session_timeout_ms,
+        )
     }
     pub fn socket_path(&self) -> PathBuf {
         self.root.join("core.sock")

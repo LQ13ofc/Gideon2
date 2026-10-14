@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[]
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -36,7 +36,7 @@ if args.phase=='voice':
     check('cancel disabled after session',not button.property('enabled') and not bridge.sessionId)
     image=window.grabWindow();check('HiDPI offscreen rendering',image.width()==1280 and image.height()==1040);image.save(str(Path(args.artifacts)/'ui.png'))
     window.setProperty('width',window.property('minimumWidth'));window.setProperty('height',window.property('minimumHeight'));QTest.qWait(100)
-    column=window.contentItem().childItems()[0];outside=[]
+    column=window.findChild(QObject,"mainColumn");outside=[]
     for item in column.childItems():
         if not item.isVisible():continue
         point=item.mapToItem(window.contentItem(),QPointF(0,0))
@@ -52,6 +52,26 @@ elif args.phase=='cancel':
     wait(lambda:bridge.state=='idle',5)
     check('keyboard cancel reaches actual Core',any(e['kind']=='cancelled' and str(e['session_id'])==original for e in bridge.snapshot['events']))
     check('cancel revokes subtitle and result',not bridge.subtitle and not bridge.result)
+elif args.phase=='preferences':
+    settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'preferencesDialog');wait(lambda:dialog.property('visible'),3)
+    check('settings dialog opens on actual Qt control',dialog.property('visible'))
+    audible=window.findChild(QObject,'audiblePreference');audible.setProperty('checked',False)
+    timeout=window.findChild(QObject,'timeoutPreference');timeout.setProperty('value',20000)
+    save=window.findChild(QObject,'savePreferencesButton');save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.preferencesRevision=='1',5)
+    check('Qt save reaches Core configuration',not bridge.audibleFeedback and bridge.sessionTimeout==20000)
+    check('Core reports persisted preferences',bridge.preferencesResult=='Preferências salvas pelo Core')
+    dialog.close();bridge.submitText('open brave');wait(lambda:bool(bridge.result),5)
+    check('same executor verifies effect with feedback off',bridge.resultVerified and bridge.state=='idle')
+    check('disabled feedback produces no virtual speech',bridge.snapshot['speech'] is None and not any(e['kind']=='speech_started' for e in bridge.snapshot['events']))
+    dialog.open();rollback=window.findChild(QObject,'rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.preferencesRevision=='2',5)
+    check('Qt rollback restores Core preferences',bridge.audibleFeedback and bridge.sessionTimeout==30000)
+    dialog.close();bridge.submitText('open brave');wait(lambda:bridge.snapshot.get('speech_status')=='completed',35)
+    check('restored preference integrates real native TTS',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
+    dialog.open();QTest.qWait(100);image=window.grabWindow();image.save(str(Path(args.artifacts)/'ui.png'))
+    check('settings renders offscreen',not image.isNull())
 else:
     # Outer fixture controller kills/restarts Core. Observe offline, then one new server.
     Path(args.artifacts,'connected').touch();wait(lambda:not bridge.connected,10)

@@ -10,12 +10,34 @@ ApplicationWindow {
     minimumWidth: 480; minimumHeight: 520
     title: "Gideon"
     color: "#101923"
+    Dialog {
+        id: preferences; objectName: "preferencesDialog"
+        title: "Preferências da Base"; modal: true
+        anchors.centerIn: parent; width: Math.min(420, window.width - 32)
+        standardButtons: Dialog.Close
+        onOpened: { audible.checked = core.audibleFeedback; timeout.value = core.sessionTimeout }
+        ColumnLayout {
+            anchors.fill: parent
+            CheckBox { id: audible; objectName: "audiblePreference"; text: core.voiceAvailable ? "Resposta por voz (saída virtual)" : "Resposta por voz indisponível"; enabled: core.preferencesAvailable && core.voiceAvailable }
+            Label { text: "Prazo da sessão em milissegundos"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            SpinBox { id: timeout; objectName: "timeoutPreference"; from: 50; to: 60000; stepSize: 1000; editable: true; enabled: core.preferencesAvailable }
+            RowLayout {
+                Button { objectName: "savePreferencesButton"; text: "Salvar"; enabled: core.preferencesAvailable; onClicked: core.savePreferences(audible.checked, timeout.value) }
+                Button { objectName: "rollbackPreferencesButton"; text: "Restaurar anterior"; enabled: core.rollbackAvailable; onClicked: core.rollbackPreferences() }
+            }
+            Label { text: "Atual no Core: " + (core.audibleFeedback ? "voz ligada" : "voz desligada") + " · " + core.sessionTimeout + " ms"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { objectName: "preferencesResult"; text: core.preferencesResult; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { text: "Alterações se aplicam à próxima sessão. Voz, frases e dispositivos dependem do pack e dos adaptadores disponíveis."; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        }
+    }
     ColumnLayout {
+        objectName: "mainColumn"
         anchors.fill: parent; anchors.margins: 28; spacing: 18
         RowLayout {
             Layout.fillWidth: true
             Label { text: "Gideon"; font.pixelSize: 30; font.bold: true; color: "#e6edf4" }
             Item { Layout.fillWidth: true }
+            Button { objectName: "settingsButton"; text: "Preferências"; enabled: core.connected; onClicked: preferences.open() }
             Label { text: core.connected ? "Conectado" : "Offline"; color: core.connected ? "#70d6b0" : "#ffc674"; Accessible.name: text }
         }
         RowLayout {
