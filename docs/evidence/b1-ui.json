@@ -1,0 +1,116 @@
+{
+  "gate": "B1_UI_INTEGRATION",
+  "passed": 32,
+  "failed": 0,
+  "ignored": 0,
+  "rows": [
+    {
+      "phase": "voice",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "checks": [
+        "actual Core connection",
+        "accessible cancel name",
+        "minimum layout size respected",
+        "partial is actual Core subtitle",
+        "cancel enabled during live voice",
+        "keyboard focus works",
+        "final voice text and verified result rendered",
+        "UI observes actual virtual PCM",
+        "cancel disabled after session",
+        "HiDPI offscreen rendering",
+        "identical snapshots do not emit UI deltas",
+        "unsupported text control stays disabled"
+      ],
+      "state_trace": [
+        "offline",
+        "idle",
+        "capturing",
+        "executing",
+        "speaking"
+      ]
+    },
+    {
+      "phase": "cancel",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "checks": [
+        "actual Core connection",
+        "accessible cancel name",
+        "minimum layout size respected",
+        "u64 session stays string",
+        "keyboard cancel reaches actual Core",
+        "cancel revokes subtitle and result"
+      ],
+      "state_trace": [
+        "offline",
+        "idle",
+        "capturing"
+      ]
+    },
+    {
+      "phase": "reconnect",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "checks": [
+        "actual Core connection",
+        "accessible cancel name",
+        "minimum layout size respected",
+        "offline clears stale session/subtitle and blocks cancel",
+        "automatic reconnect to real restarted Core",
+        "text uses actual shared sandbox executor",
+        "new server sequence resets safely"
+      ],
+      "state_trace": [
+        "offline",
+        "idle",
+        "offline",
+        "executing"
+      ]
+    },
+    {
+      "phase": "timeout",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "checks": [
+        "actual Core connection",
+        "accessible cancel name",
+        "minimum layout size respected",
+        "offline clears stale session/subtitle and blocks cancel",
+        "automatic reconnect to real restarted Core",
+        "text uses actual shared sandbox executor",
+        "new server sequence resets safely"
+      ],
+      "state_trace": [
+        "offline",
+        "idle",
+        "offline",
+        "executing"
+      ]
+    }
+  ],
+  "binary_sha256": "01341320a24e7cdc6ca4a0cdc565aeed95398732fa1fd184afd71a6894495b97",
+  "physical_validation": "NOT_PERFORMED",
+  "source_sha256": {
+    "src/core.rs": "3ad6c60f78a324d9846f7961b89ac2339d99981c7cf2bf1d2539deefdc083704",
+    "src/protocol.rs": "c4510e4376e7ce9de23e646ac04ab156395f7ba5db29376f0b8b05abe3d81173",
+    "src/stt.rs": "b39bbc28531dd93835b31c252aa2337dfbf54769c1940653a404a5c269a0c3c6",
+    "src/transport.rs": "c464376e28a39eb0c21f96c77829e710dfc0141463feca860fc8dc06fe375481",
+    "app/main.py": "074521008889f3b9b2b31b30feb5b841dca6fca8a4e446369dcdcdcdfc6a0eae",
+    "app/bridge.py": "4a3edaf0d74e4c95f918372a3abac3c51ec25616d50120421ad68369c0037359",
+    "app/Main.qml": "df6c9d4c8a91cb77073a6a1b7fb4db70acaf6518212bdeeab205e5fa545670c4",
+    "scripts/test_ui_offscreen.py": "819401e176cc4f22db426a19df037eeaaafa697da3113acc7e9d5bb6ff872a21",
+    "scripts/verify_b1.py": "b8315a7f807cb7445bc00d66d3026e799dc502bc8705431a2dd88efc27a3e139",
+    "scripts/requirements-ui.txt": "7d07a42e412095f4b3e554fadbfdb3f3dff09190a2a39c05a91a7aea7dffa9d0"
+  },
+  "qml_indexing": "Graphify AST does not index QML; source and native offscreen runtime verified directly",
+  "legacy_readonly_check": {
+    "head": "ef0a0f3d5c2ab907d648a0223d8833edda8f6820",
+    "dirty_entries": 51,
+    "worktrees": 12
+  }
+}

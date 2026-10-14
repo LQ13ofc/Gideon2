@@ -252,6 +252,7 @@ impl Core {
         }
         s.revision = revision;
         self.transcript = Some(Transcript {
+            source: "voice",
             session_id: id,
             revision,
             audio_end_us: end,
@@ -510,6 +511,7 @@ impl Core {
             command: self.command_outcome.clone(),
             speech_status: self.speech_status,
             speech_samples: self.speech_samples,
+            text_input_available: self.virtual_input && self.command_wake.is_some(),
             speech: self.speech_summary.clone(),
             version: VERSION,
             stt_status: self.stt_status,
@@ -547,6 +549,39 @@ impl Core {
         }
         self.recent_requests.push_back(req.request_id.clone());
         let code = match req.operation {
+            Operation::Text { raw } => {
+                if !self.virtual_input || self.command_wake.is_none() {
+                    "input_disabled"
+                } else if self.session.is_some() {
+                    "busy"
+                } else if raw.trim().is_empty()
+                    || raw.len() > 512
+                    || raw.chars().any(char::is_control)
+                {
+                    "invalid_text"
+                } else {
+                    self.start_session(req.request_id.clone(), now);
+                    let s = self.session.as_mut().expect("text session");
+                    s.stage = State::Transcribing;
+                    self.transcript = Some(Transcript {
+                        source: "user_text",
+                        session_id: s.id,
+                        revision: 1,
+                        audio_end_us: 0,
+                        normalized: raw.split_whitespace().collect::<Vec<_>>().join(" "),
+                        raw,
+                        is_final: true,
+                        confidence: None,
+                    });
+                    self.emit(
+                        req.request_id.clone(),
+                        self.session.as_ref().map(|s| s.id),
+                        "transcript_final",
+                    );
+                    self.dispatch_command(now);
+                    "ok"
+                }
+            }
             Operation::VirtualWake if !self.virtual_input => "virtual_input_disabled",
             Operation::VirtualWake if self.session.is_some() => "busy",
             Operation::VirtualWake => {
@@ -1034,5 +1069,70 @@ mod tests {
         c.command_reply(job, Some(receipt), now);
         c.speech_reply(1, None, now + Duration::from_secs(21));
         assert_eq!(c.speech_status, "timed_out");
+    }
+    #[test]
+    fn explicit_text_input_shares_command_policy_but_cannot_inject_native_finals() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.configure_commands("custom phrase".into());
+        assert_eq!(
+            c.handle(
+                request(
+                    "t1",
+                    Operation::Text {
+                        raw: "open brave".into()
+                    }
+                ),
+                now
+            )
+            .code,
+            "input_disabled"
+        );
+        c.virtual_input = true;
+        assert_eq!(
+            c.handle(
+                request(
+                    "t2",
+                    Operation::Text {
+                        raw: "open brave\nreboot".into()
+                    }
+                ),
+                now
+            )
+            .code,
+            "invalid_text"
+        );
+        c.handle(
+            request(
+                "t3",
+                Operation::Text {
+                    raw: "don't open brave".into(),
+                },
+            ),
+            now,
+        );
+        assert!(c.take_command_job().is_none());
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "unsupported");
+        c.handle(
+            request(
+                "t4",
+                Operation::Text {
+                    raw: "open brave".into(),
+                },
+            ),
+            now,
+        );
+        assert_eq!(c.transcript.as_ref().unwrap().source, "user_text");
+        assert!(c.take_command_job().is_some());
+        assert_eq!(
+            c.handle(request("t5", Operation::Text { raw: "mute".into() }), now)
+                .code,
+            "busy"
+        );
+        assert_eq!(
+            c.handle(request("t4", Operation::Text { raw: "mute".into() }), now)
+                .code,
+            "duplicate"
+        );
     }
 }

@@ -15,6 +15,9 @@ pub struct Request {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Snapshot,
+    Text {
+        raw: String,
+    },
     VirtualWake,
     Cancel {
         session_id: u64,
@@ -54,6 +57,7 @@ pub struct Event {
 #[derive(Debug, Serialize)]
 pub struct Response {
     pub command: Option<crate::commands::Outcome>,
+    pub text_input_available: bool,
     pub speech_samples: usize,
     pub speech_status: &'static str,
     pub speech: Option<crate::tts::Summary>,
@@ -86,6 +90,11 @@ enum WireRequest {
         version: u16,
         request_id: String,
     },
+    Text {
+        version: u16,
+        request_id: String,
+        raw: String,
+    },
     VirtualWake {
         version: u16,
         request_id: String,
@@ -109,6 +118,11 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
             } => (version, request_id, Operation::Snapshot),
+            WireRequest::Text {
+                version,
+                request_id,
+                raw,
+            } => (version, request_id, Operation::Text { raw }),
             WireRequest::VirtualWake {
                 version,
                 request_id,

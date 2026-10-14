@@ -1,11 +1,12 @@
 # Agent state — 2026-10-14
 
-- S1/A0–A5 AUTO_VERIFIED/PHYSICAL_PENDING EN/DEV sandbox; B1 PLANNED, spec S2 lida em docs/sources/s2.md. Nada S3–S5 implementado.
-- Branch main; A4 db64f48, A5 código no commit seguinte. Sem remoto/push/publicação. Identidade binário/source em docs/evidence/a5*.json.
-- 26 Rust, 5 nativos; A0/A1/A2/A3/A4 regressão 32/44/33/67/138 checks. A5 93 checks, soak dois ciclos 8, shutdown após PCM separado. fmt/check/clippy/release/diff-check PASS; zero ignored.
-- Wake→Silero/pre-roll→Moonshine partial/final→parser/grant interno→app fixture verificado→Pocket CPU→PCM paced sink virtual. Cancel/timeout/dup/stale/worker death/hash failure; feedback Failed/NotUnderstood e Core vivo. Sem dispositivo/sessão pessoal.
-- Pocket 3.3.0/Torch 2.14.1+cpu/EN 2026-09/Alba local hash-pinned; sem download runtime/clonagem pessoal/Model Manager/LLM. Comparação Piper/Kokoro antes de freeze; Parakeet candidato STT.
-- Limites: primeira PCM fria 7.99–8.42s; pico soma RSS própria ~1.53GB; após EOF 0% CPU/2s, RSS 434434048 bytes (STT carregado, TTS descarregado, shared pages duplicadas). Otimização cold start pendente; não qualidade física/pt-BR/holdout independente.
-- Wake selecionável por catálogo: Hey DEV; Okay STT "K Gideon" recusado, POC_REQUIRED. Parser também testado com frase customizada. Nada forced no Core.
-- Legado/branches/worktrees/dirty/models/datasets preservados. Graphify 0.9.90 AST local atualizado. Human validation só consolidada após S5.
-- Próximo B1: UI Qt/QML thin+IPC real autenticado/versionado, estados/texto/resultados/cancel/reconnect; offscreen em HOME/XDG isolado. B2 configurações, B3 Hub, B4 pacote apenas após respectivos gates.
+- S1/A0–A5 e B1 AUTO_VERIFIED/PHYSICAL_PENDING EN/DEV/sandbox/offscreen. B2 PLANNED; S2 completo ainda não aprovado. B3–S5 não iniciados.
+- Branch main; A4 db64f48, A5 f2c1bf7; B1 no commit seguinte. Binário/source: docs/evidence/b1*.json. Sem remoto/push/publicação.
+- 28 Rust, 5 nativos; regressões A0–A5 32/44/33/67/138/93 checks, B1 32 checks em 4 cenários. fmt/check/test/clippy/release/diff-check PASS; zero ignored.
+- Qt/QML thin: mesmo Core, partial/final/efeito/PCM; Cancel por teclado; kill/restart/reconnect e timeout/SIGSTOP/SIGCONT reais. SO_PEERCRED+root/socket privados, session u64 string, envelopes/correlation/sequence/bounds/watchdog. Connected só depois de handshake válido; snapshots iguais sem delta.
+- Entrada texto só em perfil virtual-input+commands-sandbox: mesmo parser/grant/executor, source=user_text, nunca STT fictício. UI não duplica lógica ou oferece modelos/capacidades futuras. Qt Essentials 6.12.0/Shiboken apenas.
+- A5 cold first PCM ~8s/pico soma RSS ~1.53GB; após EOF 0% CPU/2s, 434434048 bytes (STT carregado/TTS descarregado; shared pages somadas). Cold start pendente de otimização; Piper/Kokoro/Parakeet antes de freeze. Nenhum vencedor final/model manager/LLM.
+- Wake selecionável por catálogo: Hey DEV; Okay STT "K Gideon" recusado, POC_REQUIRED; parser aceita frase customizada via contrato. Nada forced no Core.
+- Física/acústica/pt-BR/holdout/Wayland/hotplug: AWAITING_HUMAN_VALIDATION, somente rodada consolidada após S5. Não pedir participação intermediária.
+- Legado confirmado intacto: ef0a0f3, 51 dirty, 12 worktrees; modelos/datasets e sessão pessoal preservados. Graphify 0.9.90 AST (488 nós); QML verificado por fonte/runtime offscreen.
+- Próximo B2: config validada/persistência/restart/rollback refletida no App; somente opções suportadas/certificadas no escopo real, controles não suportados desabilitados. Fontes S2 em docs/sources/s2.md. Depois B3 Hub, B4 pacote, então S3.

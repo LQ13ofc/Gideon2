@@ -21,7 +21,18 @@ struct Call {
     request: Request,
     reply: oneshot::Sender<Vec<u8>>,
 }
+fn authenticate(stream: &UnixStream, owner: u32) -> io::Result<()> {
+    if stream.peer_cred()?.uid() != owner {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "IPC owner mismatch",
+        ));
+    }
+    Ok(())
+}
 async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
+    // SAFETY: getuid has no arguments or mutable state; authenticate the kernel peer.
+    authenticate(&stream, unsafe { libc::getuid() })?;
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     loop {
@@ -465,4 +476,20 @@ pub async fn serve(
     while peers.join_next().await.is_some() {}
     fs::remove_file(path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn actual_socket_credentials_match_owner_and_reject_other_uid() {
+        let (socket, _) = tokio::net::UnixStream::pair().unwrap();
+        let actual = socket.peer_cred().unwrap().uid();
+        assert!(super::authenticate(&socket, actual).is_ok());
+        assert_eq!(
+            super::authenticate(&socket, actual.wrapping_add(1))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+    }
 }

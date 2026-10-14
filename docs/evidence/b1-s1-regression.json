@@ -1,0 +1,269 @@
+{
+  "gate": "B1_S1_REGRESSION",
+  "binary_sha256": "01341320a24e7cdc6ca4a0cdc565aeed95398732fa1fd184afd71a6894495b97",
+  "rust_passed": 28,
+  "native_wake_passed": 5,
+  "process_checks": {
+    "A0": 32,
+    "A1": 44,
+    "A2": 33,
+    "A3": 67,
+    "A4": 138,
+    "A5": 93
+  },
+  "failed": 0,
+  "ignored": 0,
+  "tts_rows": [
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 2712700438222268072,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 2712700438222268072,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 2712700438222268072,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 8058,
+        "elapsed_ms": 10563,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1509933056
+    },
+    {
+      "fixture_id": "wake-hey-brave__bm_george__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 1568406548540375015,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 1568406548540375015,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 1568406548540375015,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 8051,
+        "elapsed_ms": 10549,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1522819072
+    },
+    {
+      "fixture_id": "wake-hey-brave__af_bella__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 8472060857875310064,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 8472060857875310064,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 8472060857875310064,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 8026,
+        "elapsed_ms": 10531,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1504845824
+    },
+    {
+      "fixture_id": "wake-hey-brave__am_michael__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 751685386717292392,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 751685386717292392,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 751685386717292392,
+        "sample_rate": 24000,
+        "samples": 51840,
+        "chunks": 27,
+        "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+        "peak": 0.77404326,
+        "rms": 0.08952731957833777,
+        "first_pcm_ms": 8022,
+        "elapsed_ms": 10525,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1511247872
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "executor_failure",
+      "command": {
+        "session_id": 4106645830307730298,
+        "code": "command_failed",
+        "receipt": null
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 4106645830307730298,
+        "sample_rate": 24000,
+        "samples": 30720,
+        "chunks": 16,
+        "pcm_sha256": "e53a5a5e973bd1a6a219028804481b1bf4d7614d46e84602f7fe84730c49fc78",
+        "peak": 0.7335931,
+        "rms": 0.0967655010113182,
+        "first_pcm_ms": 8362,
+        "elapsed_ms": 9998,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1519775744
+    },
+    {
+      "fixture_id": "wake-hey-yapyap__bf_emma__clean",
+      "mode": "normal",
+      "command": {
+        "session_id": 8122535711121017775,
+        "code": "unsupported",
+        "receipt": null
+      },
+      "speech_status": "completed",
+      "speech": {
+        "session_id": 8122535711121017775,
+        "sample_rate": 24000,
+        "samples": 44160,
+        "chunks": 23,
+        "pcm_sha256": "458316d02601595859fa5454b982a8ef1397973f8932557fc25b85bb77982a34",
+        "peak": 0.9582958,
+        "rms": 0.10402539362440637,
+        "first_pcm_ms": 8132,
+        "elapsed_ms": 10318,
+        "sink": "virtual"
+      },
+      "peak_recursive_owned_rss_bytes": 1513541632
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "cancel",
+      "command": {
+        "session_id": 7195565249742435553,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 7195565249742435553,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "cancelled",
+      "speech": null,
+      "peak_recursive_owned_rss_bytes": 1516032000
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "kill",
+      "command": {
+        "session_id": 7705318681208805305,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 7705318681208805305,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "failed",
+      "speech": null,
+      "peak_recursive_owned_rss_bytes": 1522565120
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "mode": "bad_hash",
+      "command": {
+        "session_id": 6417044249854867462,
+        "code": "command_success",
+        "receipt": {
+          "job": {
+            "session_id": 6417044249854867462,
+            "command": {
+              "kind": "open_app",
+              "desktop_id": "com.brave.Browser.desktop"
+            }
+          },
+          "verified": true,
+          "scope": "sandbox",
+          "result": "Sandbox app process verified: com.brave.Browser.desktop"
+        }
+      },
+      "speech_status": "failed",
+      "speech": null,
+      "peak_recursive_owned_rss_bytes": 775876608
+    }
+  ]
+}

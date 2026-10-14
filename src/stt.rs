@@ -52,6 +52,7 @@ pub enum SttReply {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Transcript {
+    pub source: &'static str,
     pub session_id: u64,
     pub revision: u32,
     pub audio_end_us: u64,
