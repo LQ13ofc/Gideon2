@@ -1,0 +1,336 @@
+{
+  "gate": "A3_INTEGRATION",
+  "passed": 67,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "audio EOF remains observable with STT",
+    "native partial before source EOF",
+    "correlated final contains initial command and entity",
+    "raw normalization separate and confidence unknown",
+    "revisions monotonic",
+    "no command executed by STT final",
+    "no voice/text files persisted",
+    "loaded STT idle CPU below one percent",
+    "loaded STT process RSS below one GiB",
+    "both workers shutdown",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "audio EOF remains observable with STT",
+    "native partial before source EOF",
+    "correlated final contains initial command and entity",
+    "raw normalization separate and confidence unknown",
+    "revisions monotonic",
+    "no command executed by STT final",
+    "no voice/text files persisted",
+    "loaded STT idle CPU below one percent",
+    "loaded STT process RSS below one GiB",
+    "both workers shutdown",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "audio EOF remains observable with STT",
+    "native partial before source EOF",
+    "correlated final contains initial command and entity",
+    "raw normalization separate and confidence unknown",
+    "revisions monotonic",
+    "no command executed by STT final",
+    "no voice/text files persisted",
+    "loaded STT idle CPU below one percent",
+    "loaded STT process RSS below one GiB",
+    "both workers shutdown",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "partial cannot authorize action",
+    "audio EOF remains observable with STT",
+    "native partial before source EOF",
+    "correlated final contains initial command and entity",
+    "raw normalization separate and confidence unknown",
+    "revisions monotonic",
+    "no command executed by STT final",
+    "no voice/text files persisted",
+    "loaded STT idle CPU below one percent",
+    "loaded STT process RSS below one GiB",
+    "both workers shutdown",
+    "partial cannot authorize action",
+    "cancel streaming recognized session",
+    "audio EOF remains observable with STT",
+    "late native final fenced after cancel",
+    "no voice/text files persisted",
+    "both workers shutdown",
+    "model integrity failure before any capture",
+    "no voice/text files persisted",
+    "both workers shutdown",
+    "partial cannot authorize action",
+    "STT child owned and distinguishable",
+    "worker failure revokes transcript and session",
+    "no voice/text files persisted",
+    "both workers shutdown"
+  ],
+  "rows": [
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": false,
+      "partials": [
+        {
+          "session_id": 3016729762518207794,
+          "revision": 1,
+          "audio_end_us": 920000,
+          "raw": "Hey, good.",
+          "normalized": "Hey, good.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 3016729762518207794,
+          "revision": 2,
+          "audio_end_us": 1520000,
+          "raw": "Hey Gideon, open",
+          "normalized": "Hey Gideon, open",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 3016729762518207794,
+          "revision": 3,
+          "audio_end_us": 2160000,
+          "raw": "Hey Gideon, open brave.",
+          "normalized": "Hey Gideon, open brave.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        }
+      ],
+      "final": {
+        "session_id": 3016729762518207794,
+        "revision": 4,
+        "audio_end_us": 2720000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "resource": {
+        "idle_cpu_percent_one_core": 0.0,
+        "sum_rss_bytes": 431022080,
+        "scope": "owned process tree after fixture EOF; STT loaded, wake fixture worker exited; RSS sums shared pages"
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__bm_george__clean",
+      "cancel": false,
+      "partials": [
+        {
+          "session_id": 3656301048648446199,
+          "revision": 1,
+          "audio_end_us": 920000,
+          "raw": "Hey, good.",
+          "normalized": "Hey, good.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 3656301048648446199,
+          "revision": 2,
+          "audio_end_us": 1520000,
+          "raw": "Hey Gideon.",
+          "normalized": "Hey Gideon.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 3656301048648446199,
+          "revision": 3,
+          "audio_end_us": 2160000,
+          "raw": "Hey Gideon, open brush.",
+          "normalized": "Hey Gideon, open brush.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 3656301048648446199,
+          "revision": 4,
+          "audio_end_us": 2800000,
+          "raw": "Hey Gideon, open brave.",
+          "normalized": "Hey Gideon, open brave.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        }
+      ],
+      "final": {
+        "session_id": 3656301048648446199,
+        "revision": 5,
+        "audio_end_us": 3040000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "resource": {
+        "idle_cpu_percent_one_core": 0.0,
+        "sum_rss_bytes": 431108096,
+        "scope": "owned process tree after fixture EOF; STT loaded, wake fixture worker exited; RSS sums shared pages"
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__af_bella__clean",
+      "cancel": false,
+      "partials": [
+        {
+          "session_id": 5515994576750572687,
+          "revision": 1,
+          "audio_end_us": 1080000,
+          "raw": "Hey, good.",
+          "normalized": "Hey, good.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 5515994576750572687,
+          "revision": 2,
+          "audio_end_us": 1680000,
+          "raw": "Hey Gideon, what",
+          "normalized": "Hey Gideon, what",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 5515994576750572687,
+          "revision": 3,
+          "audio_end_us": 2320000,
+          "raw": "Hey Gideon, open brave.",
+          "normalized": "Hey Gideon, open brave.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        }
+      ],
+      "final": {
+        "session_id": 5515994576750572687,
+        "revision": 4,
+        "audio_end_us": 2800000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "resource": {
+        "idle_cpu_percent_one_core": 0.0,
+        "sum_rss_bytes": 431095808,
+        "scope": "owned process tree after fixture EOF; STT loaded, wake fixture worker exited; RSS sums shared pages"
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__am_michael__clean",
+      "cancel": false,
+      "partials": [
+        {
+          "session_id": 3120542502368267472,
+          "revision": 1,
+          "audio_end_us": 1080000,
+          "raw": "Hey, good.",
+          "normalized": "Hey, good.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 3120542502368267472,
+          "revision": 2,
+          "audio_end_us": 1680000,
+          "raw": "Hey, Gideon opened",
+          "normalized": "Hey, Gideon opened",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        },
+        {
+          "session_id": 3120542502368267472,
+          "revision": 3,
+          "audio_end_us": 2320000,
+          "raw": "Hey, Gideon, open brave.",
+          "normalized": "Hey, Gideon, open brave.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        }
+      ],
+      "final": {
+        "session_id": 3120542502368267472,
+        "revision": 5,
+        "audio_end_us": 2720000,
+        "raw": "Hey Gideon, open brave.",
+        "normalized": "Hey Gideon, open brave.",
+        "is_final": true,
+        "confidence": null
+      },
+      "resource": {
+        "idle_cpu_percent_one_core": 0.0,
+        "sum_rss_bytes": 430993408,
+        "scope": "owned process tree after fixture EOF; STT loaded, wake fixture worker exited; RSS sums shared pages"
+      }
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": true,
+      "partials": [
+        {
+          "session_id": 2969572037588837094,
+          "revision": 1,
+          "audio_end_us": 920000,
+          "raw": "Hey, good.",
+          "normalized": "Hey, good.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        }
+      ],
+      "final": null,
+      "resource": null
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": false,
+      "partials": [],
+      "final": null,
+      "resource": null
+    },
+    {
+      "fixture_id": "wake-hey-brave__bf_emma__clean",
+      "cancel": false,
+      "partials": [
+        {
+          "session_id": 5677588172687674317,
+          "revision": 1,
+          "audio_end_us": 920000,
+          "raw": "Hey, good.",
+          "normalized": "Hey, good.",
+          "is_final": false,
+          "confidence": null,
+          "source_finished": false
+        }
+      ],
+      "final": null,
+      "resource": null
+    }
+  ],
+  "binary_sha256": "014c9054cb5c2fdf9d6e8adec65b749e0e68fba546d0eefe12edb002e56e824b",
+  "physical_validation": "NOT_PERFORMED",
+  "source_commit": "bf7d5acbec3b1a48148fe74cc714c2ebed082155",
+  "voice_worker_sha256": "6a919c23d38fe7ca7b15ffa7d9e0ea02ea6cae838317089c79d88187df9b5fe8",
+  "stt_worker_sha256": "e28aec8221ade764b2ac0ce5f3916d2d8ef16f94f174b30f59ed5569aa4d68c2",
+  "pcm_fixture_sha256": "549c620107796442acc83f7245316819934ab45bc93d05dc194bfee8997df030"
+}
