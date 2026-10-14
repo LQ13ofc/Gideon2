@@ -122,6 +122,11 @@ pub(crate) fn namespace_command(
         .ok_or_else(|| io::Error::other("python runtime missing"))?;
     let canonical = fs::canonicalize(runtime)?;
     let mut cmd = Command::new("/usr/bin/bwrap");
+    // Workers inherit only explicitly required settings, never ambient credentials.
+    cmd.env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("OMP_NUM_THREADS", "1")
+        .env("OPENBLAS_NUM_THREADS", "1");
     cmd.args([
         "--unshare-all",
         "--die-with-parent",
@@ -257,7 +262,7 @@ pub async fn serve(
     if unsafe { libc::getrandom(seed.as_mut_ptr().cast(), seed.len(), 0) } != seed.len() as isize {
         return Err(io::Error::last_os_error());
     }
-    core.set_boot_seed(u64::from_ne_bytes(seed) & (u64::MAX / 2));
+    core.set_boot_seed((u64::from_ne_bytes(seed) & (u64::MAX / 2)) | 1);
     let (stt_tx, stt_requests) = mpsc::channel::<SttRequest>(16);
     let (stt_replies, mut stt_rx) = mpsc::channel::<Result<SttReply, ()>>(2);
     let mut stt_task = None;
@@ -491,5 +496,22 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::PermissionDenied
         );
+    }
+    #[tokio::test]
+    async fn namespace_has_private_home_and_no_ambient_fixture_secret() {
+        let output = super::namespace_command(
+            std::path::Path::new("/usr/bin/python3"),
+            "scripts/namespace_probe.py",
+            &[],
+            &[],
+        )
+        .unwrap()
+        .output()
+        .await
+        .unwrap();
+        assert!(output.status.success());
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["secret_present"], false);
+        assert_eq!(value["private_home"], true);
     }
 }

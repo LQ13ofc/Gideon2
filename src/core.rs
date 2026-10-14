@@ -19,6 +19,7 @@ struct Session {
     stage: State,
     revision: u32,
     overall_deadline: Instant,
+    audio_end_us: u64,
 }
 
 /// Single owner for sessions, events and authority; no detached action tasks.
@@ -101,6 +102,7 @@ impl Core {
             stage: State::Capturing,
             revision: 0,
             overall_deadline: now + self.timeout,
+            audio_end_us: 0,
         });
         self.emit(request_id, Some(id), "session_started");
     }
@@ -168,6 +170,7 @@ impl Core {
                             }
                         }
                         if let Some(s) = self.session.as_mut() {
+                            s.audio_end_us = frame.end_us();
                             s.capture = Some(c);
                             s.audio_deadline = Some(now + Duration::from_secs(1));
                         }
@@ -180,14 +183,25 @@ impl Core {
         if let Some(s) = self.session.as_mut() {
             if let Some(c) = s.capture.as_mut() {
                 s.audio_deadline = Some(now + Duration::from_secs(1));
-                if self.stt_status == "ready" {
-                    self.stt_requests.push_back(SttRequest::Frame {
-                        session_id: s.id,
-                        end_us: frame.end_us(),
-                        samples: frame.samples.clone(),
-                    });
+                let previous_len = c.samples.len();
+                let begin = frame.timestamp_us;
+                let frame_end = frame.end_us();
+                let endpoint = c.push(frame, speech);
+                // Only accepted PCM goes to STT; valid 100ms capture frames are split
+                // into the worker's <=80ms packets without dropping samples.
+                if endpoint.is_ok() && c.samples.len() > previous_len {
+                    s.audio_end_us = frame_end;
+                    if self.stt_status == "ready" {
+                        for (i, chunk) in c.samples[previous_len..].chunks(1280).enumerate() {
+                            self.stt_requests.push_back(SttRequest::Frame {
+                                session_id: s.id,
+                                end_us: begin + (i * 1280 + chunk.len()) as u64 * 1_000_000 / 16000,
+                                samples: chunk.to_vec(),
+                            });
+                        }
+                    }
                 }
-                match c.push(frame, speech) {
+                match endpoint {
                     Ok(Some(reason)) => self.finish(reason),
                     Err(_) => self.finish("audio_error"),
                     Ok(None) => {}
@@ -245,6 +259,8 @@ impl Core {
             || matches!(s.stage, State::Executing | State::Speaking)
             || revision <= s.revision
             || revision > 256
+            || end > s.audio_end_us
+            || (final_result && end != s.audio_end_us)
             || raw.len() > 4096
             || (final_result && s.stage != State::Transcribing)
         {
@@ -315,7 +331,7 @@ impl Core {
         }
         let s = self.session.as_mut().expect("live final session");
         s.stage = State::Executing;
-        s.deadline = s.deadline.min(now + Duration::from_secs(2));
+        s.deadline = s.overall_deadline.min(now + Duration::from_secs(2));
         self.command_job = Some(Job {
             session_id: id,
             command,
@@ -439,7 +455,23 @@ impl Core {
             } else {
                 "timed_out"
             };
-            self.finish(kind);
+            if kind == "timed_out"
+                && self.tts_enabled
+                && self
+                    .session
+                    .as_ref()
+                    .is_some_and(|s| s.stage == State::Executing && now < s.overall_deadline)
+            {
+                let id = self.session.as_ref().unwrap().id;
+                self.command_outcome = Some(Outcome {
+                    session_id: id,
+                    code: "timed_out",
+                    receipt: None,
+                });
+                self.command_terminal("command_failed", now);
+            } else {
+                self.finish(kind);
+            }
         }
     }
     pub fn shutdown(&mut self) {
@@ -934,6 +966,7 @@ mod tests {
         );
         c.audio_wake(now);
         c.session.as_mut().unwrap().stage = State::Transcribing;
+        c.session.as_mut().unwrap().audio_end_us = 1;
         c.stt_reply(
             SttReply::Final {
                 engine: "test".into(),
@@ -1134,5 +1167,76 @@ mod tests {
                 .code,
             "duplicate"
         );
+    }
+    #[test]
+    fn capture_100ms_frames_are_split_and_invalid_pcm_never_reaches_stt() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.enable_capture();
+        c.configure_stt("test".into());
+        c.stt_reply(
+            SttReply::Ready {
+                engine: "test".into(),
+            },
+            now,
+        );
+        let frame = |ts| AudioFrame {
+            timestamp_us: ts,
+            sample_rate: 16000,
+            channels: 1,
+            samples: vec![0.1; 1600],
+        };
+        c.capture_packet(frame(0), Some(true), vec![0.1; 1600], true, now);
+        c.take_stt_requests();
+        c.capture_packet(frame(100000), Some(true), Vec::new(), false, now);
+        let requests = c.take_stt_requests();
+        let mut received = Vec::new();
+        let mut ends = Vec::new();
+        for r in requests {
+            if let SttRequest::Frame {
+                samples, end_us, ..
+            } = r
+            {
+                assert!(samples.len() <= 1280);
+                received.extend(samples);
+                ends.push(end_us);
+            }
+        }
+        assert_eq!(received, vec![0.1; 1600]);
+        assert_eq!(ends, vec![180000, 200000]);
+        c.stt_reply(
+            SttReply::Partial {
+                engine: "test".into(),
+                session_id: 1,
+                revision: 1,
+                audio_end_us: 300000,
+                raw: "open brave".into(),
+            },
+            now,
+        );
+        assert!(c.transcript.is_none());
+        c.capture_packet(frame(400000), Some(true), Vec::new(), false, now);
+        assert!(c
+            .take_stt_requests()
+            .iter()
+            .all(|r| !matches!(r, SttRequest::Frame { .. })));
+        assert!(c.session.is_none());
+    }
+    #[test]
+    fn executor_gets_its_own_budget_and_deadline_failure_feedback_is_correlated() {
+        let (mut c, now) = command_session("open brave");
+        c.enable_tts();
+        c.session.as_mut().unwrap().deadline = now + Duration::from_secs(2);
+        let job = c.take_command_job().unwrap();
+        c.expire(now + Duration::from_secs(3));
+        assert!(c.speech_is_active(1));
+        assert_eq!(c.command_outcome.as_ref().unwrap().code, "timed_out");
+        assert_eq!(c.take_speech_job().unwrap().text, "Command failed.");
+        c.command_reply(job, None, now + Duration::from_secs(3));
+        assert!(c.speech_is_active(1));
+        let (mut c, now) = command_session("open brave");
+        c.session.as_mut().unwrap().deadline = now + Duration::from_millis(1);
+        c.dispatch_command(now);
+        assert_eq!(c.deadline(), Some(now + Duration::from_secs(2)));
     }
 }

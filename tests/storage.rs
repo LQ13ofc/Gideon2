@@ -63,3 +63,22 @@ fn bounded_logging_and_config_validation() {
     .validate()
     .is_err());
 }
+
+#[test]
+fn private_hardlinks_are_rejected_without_modifying_the_other_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let store = Storage::open(&root).unwrap();
+    let sentinel = temp.path().join("sentinel");
+    let data = vec![b'x'; 70000];
+    fs::write(&sentinel, &data).unwrap();
+    fs::set_permissions(&sentinel, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::hard_link(&sentinel, root.join("audit.log")).unwrap();
+    assert!(store.audit(1).is_err());
+    assert_eq!(fs::read(&sentinel).unwrap(), data);
+    drop(store);
+    fs::remove_file(root.join("core.lock")).unwrap();
+    fs::hard_link(&sentinel, root.join("core.lock")).unwrap();
+    assert!(Storage::open(&root).is_err());
+    assert_eq!(fs::read(&sentinel).unwrap(), data);
+}

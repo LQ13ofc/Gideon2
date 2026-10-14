@@ -53,7 +53,7 @@ fn private_metadata(path: &Path, directory: bool) -> io::Result<()> {
         || m.uid() != uid
         || m.mode() & 0o077 != 0
         || (directory && !m.is_dir())
-        || (!directory && !m.is_file())
+        || (!directory && (!m.is_file() || m.nlink() != 1))
     {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -63,14 +63,28 @@ fn private_metadata(path: &Path, directory: bool) -> io::Result<()> {
     Ok(())
 }
 fn open_private(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
+        .open(path)?;
+    let m = file.metadata()?;
+    // Validate the opened inode, not just a potentially replaced directory entry.
+    // SAFETY: getuid is a read-only process identity query.
+    if !m.is_file()
+        || m.nlink() != 1
+        || m.uid() != unsafe { libc::getuid() }
+        || m.mode() & 0o077 != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "unsafe opened private file",
+        ));
+    }
+    Ok(file)
 }
 impl Storage {
     pub fn open(root: &Path) -> io::Result<Self> {

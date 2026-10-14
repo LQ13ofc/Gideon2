@@ -35,16 +35,22 @@ def run(manifest):
                 if stream:stream.close()
                 state={'session_id':sid,'revision':0,'end_us':0,'lines':{},'raw':''}
                 stream=transcriber.create_stream(update_interval=.25)
-                def listener(event):
-                    if getattr(event,'error',None):raise RuntimeError('native STT error')
+                def listener(event, owner_state=state, owner_sid=sid):
+                    # SDK callbacks may arrive after stream close/new session. Never
+                    # borrow the next loop iteration's mutable state/session ID.
+                    if state is not owner_state:return
+                    if getattr(event,'error',None):
+                        emit({'op':'error'})  # Owner's strict protocol fails closed.
+                        return
                     data=getattr(event,'line',None)
                     if data is None:return
                     state['lines'][data.line_id]=data.text
                     raw=' '.join(t for t in state['lines'].values() if t)
-                    if len(raw.encode())>4096:raise ValueError('transcript too long')
+                    if len(raw.encode())>4096:
+                        emit({'op':'error'});return
                     if raw and raw!=state['raw']:
                         state['raw']=raw;state['revision']+=1
-                        emit({'op':'partial','engine':ENGINE,'session_id':sid,'revision':state['revision'],'audio_end_us':state['end_us'],'raw':raw})
+                        emit({'op':'partial','engine':ENGINE,'session_id':owner_sid,'revision':state['revision'],'audio_end_us':state['end_us'],'raw':raw})
                 stream.add_listener(listener);stream.start()
             elif op in ('frame','finish','cancel'):
                 if state is None or state['session_id']!=sid:continue
@@ -58,9 +64,9 @@ def run(manifest):
                     raw=' '.join(line.text for line in result.lines if line.text)
                     state['revision']+=1
                     emit({'op':'final','engine':ENGINE,'session_id':sid,'revision':state['revision'],'audio_end_us':state['end_us'],'raw':raw})
-                    stream.close();stream=None;state=None
+                    state=None;stream.close();stream=None
                 else:
-                    stream.close();stream=None;state=None
+                    state=None;stream.close();stream=None
             else:raise ValueError('unknown operation')
     finally:
         if stream:stream.close()
