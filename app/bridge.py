@@ -47,6 +47,7 @@ def validate_snapshot(data,request_id,min_sequence):
     if hub is not None:
         require(isinstance(hub,dict) and type(hub.get('version')) is int and hub['version']==1)
         require(hub.get('status') in ('verified','quarantined') and hub.get('publisher_verified') is False)
+        if 'approval_revision' in hub:require(integer(hub['approval_revision']))
         entries=hub.get('entries');require(isinstance(entries,list) and len(entries)<=8)
         if hub['status']=='quarantined':require(not entries and hub.get('repository') is None and hub.get('catalog_sha256') is None)
         else:
@@ -56,6 +57,8 @@ def validate_snapshot(data,request_id,min_sequence):
         for entry in entries:
             require(isinstance(entry,dict))
             for key in ('plugin_id','semver','publisher','license','support_policy'):require(short(entry.get(key),128) and bool(entry[key]))
+            if 'manifest_sha256' in entry:require(isinstance(entry['manifest_sha256'],str) and len(entry['manifest_sha256'])==64 and all(c in '0123456789abcdef' for c in entry['manifest_sha256']))
+            if 'permissions_approved' in entry:require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status')=='not_installed' and 'manifest_sha256' in entry and integer(hub.get('approval_revision'),1))))
             require(entry['plugin_id'] not in ids);ids.add(entry['plugin_id'])
             require(integer(entry.get('api_version'),0,65535) and integer(entry.get('download_size'),0,67108864))
             require(entry.get('status') in ('not_installed','incompatible') and entry.get('reason') in ('none','api_version','target','dependencies_unresolved'))
@@ -104,7 +107,7 @@ def validate_snapshot(data,request_id,min_sequence):
 class Bridge(QObject):
     changed=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.hub_result='';self.hub_target='';self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
         self.poll=QTimer(self);self.poll.setInterval(1000);self.poll.timeout.connect(self.refresh)
         self.retry=QTimer(self);self.retry.setSingleShot(True);self.retry.timeout.connect(self.connect_core)
@@ -123,13 +126,14 @@ class Bridge(QObject):
     def _connected(self):
         self.retry.stop();self.error='';self._backoff=500;self.refresh()
     def _offline(self,*args):
-        self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
+        self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.hub_result='';self.hub_target='';self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         self.changed.emit()
         if not self.retry.isActive():self.retry.start(self._backoff);self._backoff=min(5000,self._backoff*2)
     def _request(self,op,**kw):
         if self.pending or self.socket.state()!=QLocalSocket.LocalSocketState.ConnectedState or (not self.online and op!='snapshot'):return
         self._counter+=1;rid=f'{self._prefix}_{self._counter}';self.pending=rid;self.pending_op=op
+        if op=='hub_approve':self.hub_target=kw['plugin_id']
         self.socket.write((json.dumps({'version':1,'request_id':rid,'op':op,**kw})+'\n').encode());self.timeout.start()
     @Slot()
     def refresh(self):self._request('snapshot')
@@ -150,6 +154,8 @@ class Bridge(QObject):
             data['session_id']=str(sid) if sid is not None else ''
             if pending_op=='recover_configuration':
                 self.preferences_result=('Configuração recuperada; reinício necessário' if data.get('code')=='ok' else data.get('code','invalid_message'))
+            elif pending_op=='hub_approve':
+                self.hub_result=(f'Permissões aprovadas: {self.hub_target}' if data.get('code')=='ok' else data.get('code','invalid_message'))
             elif pending_op in ('preferences','rollback_preferences','select_wake','feedback_preferences'):
                 self.preferences_result=('Preferências salvas pelo Core' if data.get('code')=='ok' else data.get('code','invalid_message'))
             data.pop('request_id',None)
@@ -212,7 +218,8 @@ class Bridge(QObject):
     def rollbackPreferences(self):
         if self.preferencesAvailable:self._preferences('rollback_preferences',revision=int(self.preferencesRevision))
     def _preferences(self,op,**kw):
-        self.preferences_result='Enviando ao Core'
+        if op=='hub_approve':self.hub_result='Enviando aprovação ao Core'
+        else:self.preferences_result='Enviando ao Core'
         if self.pending:self.preferences_request=(op,kw)
         else:self._request(op,**kw)
         self.changed.emit()
@@ -240,6 +247,18 @@ class Bridge(QObject):
     def sttStatus(self):return self.snapshot.get('stt_status','unavailable')
     @Property(str,notify=changed)
     def speechStatus(self):return self.snapshot.get('speech_status','unavailable')
+    @Property(str,notify=changed)
+    def hubApprovalResult(self):return self.hub_result
+    @Slot()
+    def beginHubReview(self):
+        self.hub_result='';self.changed.emit()
+    @Property(str,notify=changed)
+    def hubApprovalRevision(self):return str((self.snapshot.get('hub') or {}).get('approval_revision',0))
+    @Property(bool,notify=changed)
+    def hubApprovalAvailable(self):return self.preferencesAvailable and (self.snapshot.get('hub') or {}).get('status')=='verified' and 'approval_revision' in self.snapshot['hub']
+    @Slot(str,str,'QVariantList',bool)
+    def approveHub(self,plugin,manifest,permissions,acknowledged):
+        if self.hubApprovalAvailable:self._preferences('hub_approve',revision=int(self.hubApprovalRevision),plugin_id=plugin,manifest_sha256=manifest,permissions=list(permissions),publisher_unverified_ack=acknowledged)
     @Property('QVariantList',notify=changed)
     def hubEntries(self):return (self.snapshot.get('hub') or {}).get('entries',[])
     @Property(str,notify=changed)
@@ -248,7 +267,7 @@ class Bridge(QObject):
         if not self.online:return 'Core offline'
         if not hub:return 'Catálogo não configurado'
         if hub['status']=='quarantined':return 'Catálogo em quarentena; Base continua disponível'
-        return 'Catálogo local com checksum verificado; publisher não autenticado. Permissões apenas declaradas; nenhum plugin instalado ou executado.'
+        return 'Catálogo local com checksum verificado; publisher não autenticado. Nenhum plugin instalado ou executado.'
     @Property(bool,notify=changed)
     def connected(self):return self.online
     @Property(str,notify=changed)

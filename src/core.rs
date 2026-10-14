@@ -667,6 +667,36 @@ impl Core {
                 "configuration_not_ready"
             }
 
+            Operation::HubApprove { .. } if self.session.is_some() => "busy",
+            Operation::HubApprove {
+                revision,
+                plugin_id,
+                manifest_sha256,
+                permissions,
+                publisher_unverified_ack,
+            } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::approve(
+                        storage,
+                        hub,
+                        revision,
+                        &plugin_id,
+                        &manifest_sha256,
+                        &permissions,
+                        publisher_unverified_ack,
+                    );
+                    self.hub = Some(hub.clone().with_approvals(storage));
+                    match result {
+                        Ok(()) => {
+                            self.emit(req.request_id.clone(), None, "hub_permissions_approved");
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
             Operation::FeedbackPreferences { revision, .. }
                 if revision != self.preferences.revision =>
             {

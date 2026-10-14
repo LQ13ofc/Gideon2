@@ -296,7 +296,8 @@ pub async fn serve(
     if let Some((path, digest)) = hub_catalog {
         core.configure_hub(
             crate::hub::load(&path, &digest)
-                .unwrap_or_else(|_| crate::hub::Snapshot::quarantined()),
+                .unwrap_or_else(|_| crate::hub::Snapshot::quarantined())
+                .with_approvals(&storage),
         );
     }
     if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {

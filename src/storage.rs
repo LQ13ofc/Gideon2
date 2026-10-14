@@ -245,6 +245,9 @@ impl Storage {
     /// Same-directory atomic replacement; no client paths or retained speech data.
     fn replace(&self, name: &str, config: &Config) -> io::Result<()> {
         config.validate()?;
+        self.replace_json(name, &serde_json::to_vec(config)?)
+    }
+    fn replace_json(&self, name: &str, bytes: &[u8]) -> io::Result<()> {
         let path = self.root.join(name);
         if fs::symlink_metadata(&path).is_ok() {
             private_metadata(&path, false)?;
@@ -257,7 +260,7 @@ impl Storage {
             .custom_flags(libc::O_NOFOLLOW)
             .open(&temporary)?;
         let result = (|| {
-            file.write_all(&serde_json::to_vec(config)?)?;
+            file.write_all(bytes)?;
             file.sync_all()?;
             fs::rename(&temporary, &path)
         })();
@@ -265,6 +268,32 @@ impl Storage {
             let _ = fs::remove_file(&temporary);
         }
         result
+    }
+    pub(crate) fn hub_approvals(&self) -> io::Result<crate::hub::Approvals> {
+        let path = self.root.join("hub-approvals.json");
+        let file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Default::default()),
+            Err(e) => return Err(e),
+        };
+        validate_opened_private(&file)?;
+        let mut bytes = Vec::new();
+        file.take(16385).read_to_end(&mut bytes)?;
+        if bytes.len() > 16384 {
+            return Err(io::Error::other("Hub approvals too large"));
+        }
+        let state: crate::hub::Approvals = serde_json::from_slice(&bytes)?;
+        state.validate()?;
+        Ok(state)
+    }
+    pub(crate) fn save_hub_approvals(&self, state: &crate::hub::Approvals) -> io::Result<()> {
+        state.validate()?;
+        self.replace_json("hub-approvals.json", &serde_json::to_vec(state)?)?;
+        File::open(&self.root)?.sync_all()
     }
     pub fn update_preferences(
         &mut self,

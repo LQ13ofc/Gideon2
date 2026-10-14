@@ -14,6 +14,13 @@ pub struct Request {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    HubApprove {
+        revision: u64,
+        plugin_id: String,
+        manifest_sha256: String,
+        permissions: Vec<String>,
+        publisher_unverified_ack: bool,
+    },
     Snapshot,
     FeedbackPreferences {
         revision: u64,
@@ -112,6 +119,15 @@ pub fn valid_id(id: &str) -> bool {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum WireRequest {
+    HubApprove {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+        manifest_sha256: String,
+        permissions: Vec<String>,
+        publisher_unverified_ack: bool,
+    },
     FeedbackPreferences {
         version: u16,
         request_id: String,
@@ -170,6 +186,25 @@ enum WireRequest {
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let (version, request_id, operation) = match WireRequest::deserialize(d)? {
+            WireRequest::HubApprove {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+                manifest_sha256,
+                permissions,
+                publisher_unverified_ack,
+            } => (
+                version,
+                request_id,
+                Operation::HubApprove {
+                    revision,
+                    plugin_id,
+                    manifest_sha256,
+                    permissions,
+                    publisher_unverified_ack,
+                },
+            ),
             WireRequest::FeedbackPreferences {
                 version,
                 request_id,

@@ -10,14 +10,14 @@ use std::{
 };
 
 const MAX_CATALOG: u64 = 65536;
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Catalog {
     version: u16,
     repository: String,
     plugins: Vec<Manifest>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
     plugin_id: String,
@@ -36,7 +36,7 @@ struct Manifest {
     #[serde(default)]
     signature: Option<String>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Binary {
     target: String,
@@ -52,6 +52,8 @@ pub struct Dependency {
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct Entry {
+    pub manifest_sha256: String,
+    pub permissions_approved: bool,
     pub plugin_id: String,
     pub semver: String,
     pub publisher: String,
@@ -68,6 +70,7 @@ pub struct Entry {
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
+    pub approval_revision: u64,
     pub version: u16,
     pub status: &'static str,
     pub repository: Option<String>,
@@ -76,8 +79,28 @@ pub struct Snapshot {
     pub entries: Vec<Entry>,
 }
 impl Snapshot {
+    pub fn with_approvals(mut self, storage: &crate::storage::Storage) -> Self {
+        if self.status != "verified" {
+            return self;
+        }
+        let Ok(state) = storage.hub_approvals() else {
+            return Self::quarantined();
+        };
+        self.approval_revision = state.revision;
+        for entry in &mut self.entries {
+            entry.permissions_approved = state.records.iter().any(|r| {
+                Some(&r.catalog_sha256) == self.catalog_sha256.as_ref()
+                    && r.plugin_id == entry.plugin_id
+                    && r.manifest_sha256 == entry.manifest_sha256
+                    && r.permissions == entry.permissions
+                    && entry.status == "not_installed"
+            });
+        }
+        self
+    }
     pub fn quarantined() -> Self {
         Self {
+            approval_revision: 0,
             version: 1,
             status: "quarantined",
             repository: None,
@@ -86,6 +109,113 @@ impl Snapshot {
             entries: vec![],
         }
     }
+}
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Approval {
+    plugin_id: String,
+    catalog_sha256: String,
+    manifest_sha256: String,
+    permissions: Vec<String>,
+    publisher_unverified_ack: bool,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Approvals {
+    version: u16,
+    pub revision: u64,
+    records: Vec<Approval>,
+}
+impl Default for Approvals {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            revision: 0,
+            records: vec![],
+        }
+    }
+}
+impl Approvals {
+    pub(crate) fn validate(&self) -> io::Result<()> {
+        if self.version != 1
+            || self.records.len() > 8
+            || self
+                .records
+                .iter()
+                .map(|r| &r.plugin_id)
+                .collect::<HashSet<_>>()
+                .len()
+                != self.records.len()
+            || self.records.iter().any(|r| {
+                !crate::protocol::valid_id(&r.plugin_id)
+                    || !digest(&r.catalog_sha256)
+                    || !digest(&r.manifest_sha256)
+                    || !ids(&r.permissions)
+                    || !r.publisher_unverified_ack
+            })
+        {
+            return Err(fail());
+        }
+        Ok(())
+    }
+}
+pub fn approve(
+    storage: &crate::storage::Storage,
+    hub: &Snapshot,
+    revision: u64,
+    plugin_id: &str,
+    manifest_sha256: &str,
+    permissions: &[String],
+    acknowledged: bool,
+) -> Result<(), &'static str> {
+    if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
+        return Err("configuration_not_ready");
+    }
+    if hub.status != "verified" {
+        return Err("hub_unavailable");
+    }
+    if revision != hub.approval_revision {
+        return Err("stale_hub_revision");
+    }
+    let entry = hub
+        .entries
+        .iter()
+        .find(|e| e.plugin_id == plugin_id)
+        .ok_or("unknown_plugin")?;
+    if entry.status != "not_installed" {
+        return Err("plugin_incompatible");
+    }
+    if entry.manifest_sha256 != manifest_sha256 {
+        return Err("manifest_mismatch");
+    }
+    if entry.permissions != permissions {
+        return Err("permissions_mismatch");
+    }
+    if !acknowledged {
+        return Err("publisher_ack_required");
+    }
+    if entry.permissions_approved {
+        return Err("already_approved");
+    }
+    let mut state = storage.hub_approvals().map_err(|_| "hub_storage_error")?;
+    if state.revision != revision {
+        return Err("stale_hub_revision");
+    }
+    // Keep only records for this pinned catalog; a catalog change never inherits approval.
+    state.records.retain(|r| {
+        Some(&r.catalog_sha256) == hub.catalog_sha256.as_ref() && r.plugin_id != plugin_id
+    });
+    state.records.push(Approval {
+        plugin_id: plugin_id.to_owned(),
+        catalog_sha256: hub.catalog_sha256.clone().ok_or("hub_unavailable")?,
+        manifest_sha256: manifest_sha256.to_owned(),
+        permissions: permissions.to_vec(),
+        publisher_unverified_ack: acknowledged,
+    });
+    state.revision = revision.checked_add(1).ok_or("hub_revision_exhausted")?;
+    storage
+        .save_hub_approvals(&state)
+        .map_err(|_| "hub_storage_error")
 }
 fn fail() -> io::Error {
     io::Error::other("invalid Hub catalog")
@@ -118,7 +248,7 @@ fn github(s: &str) -> bool {
                     .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
         })
 }
-fn digest(s: &str) -> bool {
+pub(crate) fn digest(s: &str) -> bool {
     s.len() == 64
         && s.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -224,6 +354,11 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                 "none"
             };
             Entry {
+                manifest_sha256: format!(
+                    "{:x}",
+                    Sha256::digest(serde_json::to_vec(m).expect("serializable manifest"))
+                ),
+                permissions_approved: false,
                 plugin_id: m.plugin_id.clone(),
                 semver: m.semver.clone(),
                 publisher: m.publisher.clone(),
@@ -249,6 +384,7 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         })
         .collect();
     Ok(Snapshot {
+        approval_revision: 0,
         version: 1,
         status: "verified",
         repository: Some(catalog.repository),

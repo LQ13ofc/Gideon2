@@ -45,6 +45,14 @@ class Tests(unittest.TestCase):
         validate_snapshot({**BASE,'hub':valid},'r',0)
         for key,value in [('version',True),('status','installed'),('publisher_verified',True),('entries',[{}]),('catalog_sha256','a'*64)]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**valid,key:value}},'r',0)
+    def test_hub_approval_cannot_fake_authority_or_revision(self):
+        entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':['notifications'],'dependencies':[],'conflicts':[],'download_size':1,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':2**64-1,'entries':[entry]}
+        validate_snapshot({**BASE,'hub':hub},'r',0)
+        for key,value in [('approval_revision',True),('approval_revision',0),('approval_revision',2**64)]:
+            with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,key:value}},'r',0)
+        for key,value in [('manifest_sha256','false'),('permissions_approved','yes'),('status','installed')]:
+            with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,'entries':[{**entry,key:value}]}},'r',0)
     def test_real_socket_malformed_nested_data_and_deep_json_clear_stale_state(self):
         for deep in (False,True,"preferences","hub"):
             with self.subTest(deep=deep),tempfile.TemporaryDirectory(prefix='gideon-ipc-audit-') as td:

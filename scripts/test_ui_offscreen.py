@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -32,7 +32,29 @@ def visual_item(name):
         if current.objectName()==name:return current
         stack.extend(current.childItems())
     raise AssertionError('missing visual item '+name)
-if args.phase=='design':
+if args.phase=='permissions':
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('native S1 before permission review',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
+    hubButton=window.findChild(QObject,'hubButton');hubButton.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    hubDialog=window.findChild(QObject,'hubDialog');wait(lambda:hubDialog.property('visible'),3)
+    review=visual_item('review_benign_fixture');review.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'hubReviewDialog');wait(lambda:dialog.property('visible'),3)
+    ack=window.findChild(QObject,'publisherAcknowledgement');approve=window.findChild(QObject,'approveHubButton')
+    check('review never defaults to publisher acknowledgement',not ack.property('checked') and not approve.property('enabled'))
+    ack.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    check('actual checkbox enables explicit approval',ack.property('checked') and approve.property('enabled'))
+    approve.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.hubApprovalRevision=='1' and bridge.hubEntries[0]['permissions_approved'],5)
+    check('Qt action persists exact manifest approval in Core',bridge.hubApprovalResult=='Permissões aprovadas: benign_fixture')
+    QTest.qWait(100);check('acknowledged approval disables duplicate submit',not approve.property('enabled'))
+    check('approval remains distinct from installation and identity',bridge.hubEntries[0]['status']=='not_installed' and not bridge.snapshot['hub']['publisher_verified'])
+    image=window.grabWindow();image.save(str(Path(args.artifacts)/'ui.png'));check('review fits minimum viewport',dialog.property('height')<=window.height())
+    dialog.close();hubDialog.close();Path(args.artifacts,'approved').touch()
+    wait(lambda:not bridge.connected,10);check('offline revokes cached approval UI',not bridge.hubEntries and not bridge.hubApprovalAvailable);Path(args.artifacts,'offline').touch()
+    wait(lambda:bridge.connected,10);wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('real restart reloads exact approval',bridge.hubApprovalRevision=='1' and bridge.hubEntries[0]['permissions_approved'])
+    check('native S1 after approval and restart',bridge.resultVerified and bridge.snapshot['transcript']['source']=='voice' and bridge.snapshot['speech']['samples']>0)
+elif args.phase=='design':
     window.setProperty('width',1380);window.setProperty('height',904)
     wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
     check('new dashboard preserves native voice command and PCM',bridge.resultVerified and bridge.snapshot['transcript']['source']=='voice' and bridge.snapshot['speech']['samples']>0)

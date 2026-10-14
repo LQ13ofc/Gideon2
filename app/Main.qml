@@ -17,6 +17,7 @@ ApplicationWindow {
     palette.button: "#243b66"; palette.buttonText: "#edf2ff"
     palette.base: "#11203a"; palette.text: "#edf2ff"
     palette.highlight: accentColor; palette.highlightedText: "#ffffff"
+    property var reviewPlugin: null
     property int page: 0
     property int themeIndex: 0
     property color accentColor: "#7693ff"
@@ -24,6 +25,7 @@ ApplicationWindow {
     readonly property bool packAvailable: core.wakeChoices.length > 0
     readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub"]
     readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub"]
+    function approvalDone() { if (!reviewPlugin) return false; var entries = core.hubEntries; for (var i=0;i<entries.length;i++) if (entries[i].plugin_id === reviewPlugin.plugin_id && entries[i].manifest_sha256 === reviewPlugin.manifest_sha256) return entries[i].permissions_approved === true; return false; }
     function wakeText() { var pack = core.snapshotPack; if (!pack.wake_phrases) return "Não configurada"; for (var i=0;i<pack.wake_phrases.length;i++) if (pack.wake_phrases[i].id === pack.active_phrase) return pack.wake_phrases[i].text; return "Não ativa"; }
     Dialog {
         id: preferences; objectName: "preferencesDialog"
@@ -84,11 +86,31 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Label { text: modelData.plugin_id + " " + modelData.semver + " · " + modelData.publisher; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { text: (modelData.status === "not_installed" ? "Não instalado" : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { text: "Permissões declaradas (não aprovadas): " + (modelData.permissions.join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: (modelData.permissions_approved ? "Permissões aprovadas para este manifest: " : "Permissões declaradas (não aprovadas): ") + (modelData.permissions.join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        GlowButton { objectName: "review_" + modelData.plugin_id; text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"; enabled: core.hubApprovalAvailable && modelData.status === "not_installed" && !modelData.permissions_approved; onClicked: { window.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() } }
                     }
                 }
                 Label { text: "Instalação indisponível nesta etapa. O catálogo não concede acesso ao computador."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             }
+        }
+    }
+    Dialog {
+        id: reviewDialog; objectName: "hubReviewDialog"
+        onOpened: core.beginHubReview()
+        title: "Revisar permissões"; modal: true; anchors.centerIn: parent
+        width: Math.min(440, window.width - 32); standardButtons: Dialog.Close
+        background: GlassCard { theme: window.themeIndex }
+        contentItem: ScrollView {
+            implicitHeight: Math.min(reviewColumn.implicitHeight, window.height - 120); clip: true
+        ColumnLayout {
+            id: reviewColumn; width: reviewDialog.availableWidth
+            Label { text: window.reviewPlugin ? window.reviewPlugin.plugin_id + " " + window.reviewPlugin.semver + " · " + window.reviewPlugin.publisher : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { text: window.reviewPlugin ? "Permissões: " + (window.reviewPlugin.permissions.join(", ") || "nenhuma") : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifest."; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            CheckBox { id: reviewAck; objectName: "publisherAcknowledgement"; text: "Entendo que o publisher não foi autenticado"; enabled: core.hubApprovalAvailable }
+            GlowButton { objectName: "approveHubButton"; text: "Aprovar estas permissões"; enabled: core.hubApprovalAvailable && reviewAck.checked && window.reviewPlugin !== null && !window.approvalDone(); onClicked: core.approveHub(window.reviewPlugin.plugin_id, window.reviewPlugin.manifest_sha256, window.reviewPlugin.permissions, reviewAck.checked) }
+            Label { objectName: "hubApprovalResult"; text: core.hubApprovalResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        }
         }
     }
     Rectangle {

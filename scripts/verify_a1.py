@@ -17,8 +17,8 @@ MANIFEST = BASE/'target/a1-competitive/manifest.json'
 
 def run():
     checks = []
-    def check(name, value):
-        if not value: raise AssertionError(name)
+    def check(name, value, context=None):
+        if not value: raise AssertionError(name + (" " + json.dumps(context) if context is not None else ""))
         checks.append(name)
     m = json.loads(MANIFEST.read_text())
     positive = next(i for i,r in enumerate(m['fixtures']) if r['id']=='wake-hey__bf_emma__clean')
@@ -72,7 +72,7 @@ def run():
                     if last['wake_status'] in ('failed','replay_finished'):break
                     time.sleep(.03)
                 if bad or early:
-                    check('hash or worker exit fail closed',last['wake_status']=='failed' and not started and last['state']=='idle')
+                    check('hash or worker exit fail closed',last['wake_status']=='failed' and not started and last['state']=='idle',{'bad':bad,'early':early,'wake_status':last['wake_status'],'state':last['state'],'events':last['events']})
                     check('worker failure observable',any(e['kind']=='wake_failed' for e in last['events']))
                 elif m['fixtures'][index]['positive'] or active_phrase=='okay_gideon':
                     check('one session per wake PCM',len(started)==1 and wake is not None)
