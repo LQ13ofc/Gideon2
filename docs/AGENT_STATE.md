@@ -1,12 +1,11 @@
 # Agent state — 2026-10-14
 
-- S1/A0–A5 e B1 AUTO_VERIFIED/PHYSICAL_PENDING EN/DEV/sandbox/offscreen. B2 PLANNED; S2 completo ainda não aprovado. B3–S5 não iniciados.
-- Branch main; A4 db64f48, A5 f2c1bf7, B1 9062cce (HEAD de código; checkpoints posteriores no Git). Binário/source: docs/evidence/b1*.json. Sem remoto/push/publicação.
-- 28 Rust, 5 nativos; regressões A0–A5 32/44/33/67/138/93 checks, B1 32 checks em 4 cenários. fmt/check/test/clippy/release/diff-check PASS; zero ignored.
-- Qt/QML thin: mesmo Core, partial/final/efeito/PCM; Cancel por teclado; kill/restart/reconnect e timeout/SIGSTOP/SIGCONT reais. SO_PEERCRED+root/socket privados, session u64 string, envelopes/correlation/sequence/bounds/watchdog. Connected só depois de handshake válido; snapshots iguais sem delta.
-- Entrada texto só em perfil virtual-input+commands-sandbox: mesmo parser/grant/executor, source=user_text, nunca STT fictício. UI não duplica lógica ou oferece modelos/capacidades futuras. Qt Essentials 6.12.0/Shiboken apenas.
-- A5 cold first PCM ~8s/pico soma RSS ~1.53GB; após EOF 0% CPU/2s, 434434048 bytes (STT carregado/TTS descarregado; shared pages somadas). Cold start pendente de otimização; Piper/Kokoro/Parakeet antes de freeze. Nenhum vencedor final/model manager/LLM.
-- Wake selecionável por catálogo: Hey DEV; Okay STT "K Gideon" recusado, POC_REQUIRED; parser aceita frase customizada via contrato. Nada forced no Core.
-- Física/acústica/pt-BR/holdout/Wayland/hotplug: AWAITING_HUMAN_VALIDATION, somente rodada consolidada após S5. Não pedir participação intermediária.
-- Legado confirmado intacto: ef0a0f3, 51 dirty, 12 worktrees; modelos/datasets e sessão pessoal preservados. Graphify 0.9.90 AST (488 nós); QML verificado por fonte/runtime offscreen.
-- Próximo B2: config validada/persistência/restart/rollback refletida no App; somente opções suportadas/certificadas no escopo real, controles não suportados desabilitados. Fontes S2 em docs/sources/s2.md. Depois B3 Hub, B4 pacote, então S3.
+- Rodada S1/B1 AUDIT AUTO_VERIFIED em EN/DEV/virtual/offscreen; B2 permanece PLANNED, não iniciado. Mapas docs/BASE_AUDIT.md e docs/BASE_UI_MAP.md.
+- Branch main; HEAD de código 2ad4338; fixes Base 82c8783, App 8b16886, harness 2ad4338. Evidência e source→binary em docs/evidence/base-audit.json; nove grupos com MESMO SHA final. Sem remoto/push.
+- PASS fmt/check/test/clippy/release/diff-check. 32 Rust, 5 wake nativos, 7 adversariais adicionais; A0–A5 32/44/33/67/138/93 checks, soak 8, shutdown 2, B1 34. Zero failed/ignored.
+- Corrigidos: frame 100ms→STT 80ms split sem perda; PCM inválido não enviado; clock Final/Partial; callback STT de sessão antiga/error; hardlinks/descriptor privado; TTS hashes obrigatórios/paths; deadline de executor/feedback timeout; payload IPC/deep JSON; viewport ilegível; ambiente mínimo de workers; sampler /proc de processo encerrado; seed positivo.
+- Testes adversariais não substituem inferência/namespace/Qt reais: regressão completa reexecutada, imagem offscreen inspecionada. Legado read-only confirmado ef0a0f3/51 dirty/12 worktrees; datasets/modelos e sessão pessoal preservados.
+- Graphify 0.9.90 atualizado (545 nós/1104 arestas); QML revisado diretamente, não indexado. Sem Model Manager/LLM/funções futuras expostas.
+- Limites: Pocket cold first PCM em segundos e pico RSS ~1.5GB; números atuais/idle pós EOF no JSON. EN/fixtures sintéticas, sem holdout/pt-BR/freeze; Okay POC_REQUIRED; comparação Parakeet/Piper/Kokoro pendente.
+- CPAL/PipeWire/AEC/hotplug/barge-in e pacote relocável são trabalho de IMPLEMENTAÇÃO, não só teste físico. Acústica/periféricos/Wayland: AWAITING_HUMAN_VALIDATION após S5, sem solicitar participação intermediária.
+- Próximo: B2 apenas com opções realmente suportadas e discovery/config actor-owned/persistência atômica/restart/rollback, conforme mapa. Não declarar Base para uso físico nem pacote pronto com adapters ausentes. Depois B3 Hub e B4, então S3.

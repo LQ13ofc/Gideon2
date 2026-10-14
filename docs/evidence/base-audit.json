@@ -1,0 +1,159 @@
+{
+  "gate": "S1_B1_AUDIT_AUTO_VERIFIED",
+  "scope": "EN DEV authorized fixtures, namespace executors, virtual audio, Qt offscreen; B2 not started",
+  "branch": "main",
+  "baseline_commit": "37a305a",
+  "code_commits": [
+    "82c8783",
+    "8b16886",
+    "2ad4338"
+  ],
+  "binary_sha256": "83ca77adcb645011b1c74ac6d649e9e9e0ea9bad10300ef27f99346058602503",
+  "source_sha256": {
+    "app/Main.qml": "56991e131c84ea419bc62e7402cb8e85b8c08d6d6e2703a74b1a541b7be085a8",
+    "app/bridge.py": "fc5a8feeaa4c907cd80e6124f6608fba7afaa0caadb167f9fbf5641c7f2712e0",
+    "app/main.py": "074521008889f3b9b2b31b30feb5b841dca6fca8a4e446369dcdcdcdfc6a0eae",
+    "scripts/command_worker.py": "096151c8f190297400f0cf0915309ff3d3a42073aa0f0c656248c1aa8bc70c30",
+    "scripts/evaluate_wake.py": "61cea65a7c7a2744ffb6ab84890451a129d6375038ecac343fcd328c9e09d019",
+    "scripts/experiment_wake_competition.py": "cc2f5e01fe2d77585be04728bde372ff7af6cf05928a428a045cd630ad803180",
+    "scripts/graph.py": "027487fdbedb2c01ac517a59e046ee0ed9663302f5a4652693a27d575495a88f",
+    "scripts/namespace_probe.py": "abd5179d1b37a5d646792bfaf5b1a20d6838b5b21bf47e12ec343f9be603259d",
+    "scripts/pcm_fixture.py": "549c620107796442acc83f7245316819934ab45bc93d05dc194bfee8997df030",
+    "scripts/process_fixture.py": "1ae14a70ca4f1dcb4b3d515caf184339685e4467aa4c7efdc2765342205299b0",
+    "scripts/provision_tts.py": "a418119e332072fe59d86056de01bd80c6c083fa99b6166f118c4fa5a5297421",
+    "scripts/requirements-a1.txt": "6e08b00554b8db4d315bfa18cbfbdab9b0f28b4551b299266978d91b44bf21b2",
+    "scripts/requirements-graphify.txt": "a13ed2e184a660bc3a95fd9c3765d6a311dbacf71e1b39a9a4b00483578a8ddb",
+    "scripts/requirements-stt.txt": "e03541c91fb6ed0f8376658f2efd514a0e44a072bce690d598cb52db4ee55244",
+    "scripts/requirements-tts.txt": "9746ce0f0ebbc3071a5706ee57717e6265efdd3e66610f96aea083923c7870c7",
+    "scripts/requirements-ui.txt": "7d07a42e412095f4b3e554fadbfdb3f3dff09190a2a39c05a91a7aea7dffa9d0",
+    "scripts/stt_worker.py": "267a6907711e19428db2c575e95dc8b70ead4304130abdcd8bd026b0e859f255",
+    "scripts/test_bridge_protocol.py": "da8dc2003f929e2d0263e7d3f3b25738b39e90beac9d1705ba97bdfc75bffcf2",
+    "scripts/test_process_fixture.py": "e7318996897888afeee1a6192244ae459c700eb37c48fc2f71dcce63377866bd",
+    "scripts/test_stt_lifecycle.py": "cd3d2a19626a73f2a2cc5e325c64c580ef4f464bfcec8a2295a87718daf030a2",
+    "scripts/test_tts_profile.py": "faa923dd5bf4085391b2df5b6bb3672c1f1a756d392e43bfbd749328c353bcb6",
+    "scripts/test_ui_offscreen.py": "fda69d8a9f94f42089e0a156e1e6a7c3d682b3d130302704628d5102ce5ac95b",
+    "scripts/test_wake_worker.py": "83425a3091501471821a0a3a61d085a2ad354425b722a3826642a8b00d53da23",
+    "scripts/tts_worker.py": "bd1835789444e1f75d4ef892c17ec61efaaa0b95a95ebd984333d67880706a12",
+    "scripts/verify_a0.py": "3edb2b3059c72af49048d9d84fd80eae964968a990fe4e18447870cf825c1601",
+    "scripts/verify_a1.py": "60fc50dbf10e906d4384d112fe931073d058ca46956f51f4dbc8a9048f162acc",
+    "scripts/verify_a2.py": "3a6e328ad536363b4ed6c3416a53cfab2371a0c908ba7b30822762a2d0afb28f",
+    "scripts/verify_a3.py": "8af6286fcc3d6f19171094bd7e5b992d108edf74f980c6f10d38d441b3456b56",
+    "scripts/verify_a4.py": "a88cab2a4749fff15e0bf4c725af8d44422511a6f4e20fdc0fd3f34e74110f9a",
+    "scripts/verify_a5.py": "98c444fa23c23687ba549c5a12efddc9cfe186dd767d6ccce2de7a4d9eb097d9",
+    "scripts/verify_a5_soak.py": "a658afb690db0b8ff1d6a0d6e22bc03d32dfed3fcc5322fc2009c2489c19851c",
+    "scripts/verify_b1.py": "b8315a7f807cb7445bc00d66d3026e799dc502bc8705431a2dd88efc27a3e139",
+    "scripts/wake_worker.py": "6a919c23d38fe7ca7b15ffa7d9e0ea02ea6cae838317089c79d88187df9b5fe8",
+    "src/audio.rs": "69d9e9d54f09c80051787b9226ad763e7d474f5212d68800e11b7e53a5479b23",
+    "src/capture.rs": "4eee82b7112a1ed97cadbf5912dcd9f9640d82ad986687318e7aeffa35b2f9ca",
+    "src/commands.rs": "4e977a8bb9c7ec8269e868d175df9c29e05b741302b9dcae55b53260efbd7974",
+    "src/core.rs": "072ae59ab190c9a200f1a0819e675714f85e0ac53bc31e492ec23381297c15f7",
+    "src/lib.rs": "41c462993bd27ad6c22f8f1710d5397abd6cdc302e66cf99703335cd86e2e3db",
+    "src/main.rs": "e080049a417d67d4b615e39a66baa60e9feb1aeb915ba712a539afd6379e835e",
+    "src/protocol.rs": "c4510e4376e7ce9de23e646ac04ab156395f7ba5db29376f0b8b05abe3d81173",
+    "src/storage.rs": "85acfbbb118ef9b92dff130f07047367be29c67c3c051e9684d96864880ca001",
+    "src/stt.rs": "b39bbc28531dd93835b31c252aa2337dfbf54769c1940653a404a5c269a0c3c6",
+    "src/transport.rs": "153be41be59643ed9937ce418c1661ec2af2428128f8da02e69b6fd6afc53b91",
+    "src/tts.rs": "270099c0e1070d7be761344fabc71ecb7988f43efa94cf5a5506f4b3da7102b9",
+    "src/wake.rs": "c8ab8ba61c880e83af6ec1a6403daa7b21004b7228886d4c1a55cce1226f73e4",
+    "tests/storage.rs": "21fc4974291fd1e704f9d75456661206bd63f7ea50d4f3e1cf318e4890daba4a"
+  },
+  "checks": {
+    "rust": 32,
+    "native_wake": 5,
+    "adversarial_callback": 2,
+    "tts_profile": 2,
+    "qt_ipc_faults": 2,
+    "process_sampler": 1,
+    "stages": {
+      "A0": {
+        "passed": 32,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a0.json"
+      },
+      "A1": {
+        "passed": 44,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a1-integration.json"
+      },
+      "A2": {
+        "passed": 33,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a2.json"
+      },
+      "A3": {
+        "passed": 67,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a3-integration.json"
+      },
+      "A4": {
+        "passed": 138,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a4-integration.json"
+      },
+      "A5": {
+        "passed": 93,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a5-integration.json"
+      },
+      "soak": {
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a5-soak.json"
+      },
+      "shutdown": {
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "a5-shutdown.json"
+      },
+      "B1": {
+        "passed": 34,
+        "failed": 0,
+        "ignored": 0,
+        "evidence_file": "b1-ui.json"
+      }
+    }
+  },
+  "failed": 0,
+  "ignored": 0,
+  "resources": {
+    "cold_first_pcm_ms": [
+      8247,
+      8161,
+      8290,
+      8371,
+      8254,
+      8514
+    ],
+    "peak_recursive_owned_rss_bytes": 1526685696,
+    "post_eof_idle_cpu_percent": 0.0,
+    "post_eof_idle_sum_rss_bytes": 430706688,
+    "scope": "owned process tree; RSS sums shared pages; EOF idle retains STT and unloads TTS; no physical continuous listener measurement"
+  },
+  "graphify": {
+    "version": "0.9.90",
+    "nodes": 545,
+    "edges": 1104,
+    "qml_indexed": false
+  },
+  "legacy_readonly": {
+    "head": "ef0a0f3d5c2ab907d648a0223d8833edda8f6820",
+    "dirty_entries": 51,
+    "worktrees": 12
+  },
+  "physical_validation": "NOT_PERFORMED",
+  "implementation_gaps": [
+    "CPAL/PipeWire physical adapters",
+    "AEC/barge-in",
+    "Core config update/discovery APIs",
+    "relocatable package"
+  ],
+  "model_selection": "PROVISIONAL; no freeze or winner claim"
+}
