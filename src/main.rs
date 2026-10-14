@@ -18,8 +18,22 @@ async fn main() -> io::Result<()> {
     let mut commands_sandbox = false;
     let mut tts = None;
     let mut base_pack = None;
+    let mut hub_catalog = None;
     while let Some(option) = args.next() {
         match option.as_str() {
+            "--hub-catalog" if hub_catalog.is_none() => {
+                let path = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| io::Error::other("Hub catalog required"))?,
+                );
+                let digest = args
+                    .next()
+                    .ok_or_else(|| io::Error::other("Hub checksum required"))?;
+                if !path.is_absolute() {
+                    return Err(io::Error::other("absolute Hub path required"));
+                }
+                hub_catalog = Some((path, digest));
+            }
             "--base-pack" if base_pack.is_none() => {
                 let path = PathBuf::from(
                     args.next()
@@ -81,6 +95,7 @@ async fn main() -> io::Result<()> {
         commands_sandbox,
         tts,
         base_pack,
+        hub_catalog,
     )
     .await
 }

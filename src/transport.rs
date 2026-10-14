@@ -249,6 +249,7 @@ pub async fn serve(
     mut commands_sandbox: bool,
     mut tts: Option<crate::tts::Config>,
     base_pack_path: Option<std::path::PathBuf>,
+    hub_catalog: Option<(std::path::PathBuf, String)>,
 ) -> io::Result<()> {
     let mut base_pack =
         if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
@@ -292,6 +293,12 @@ pub async fn serve(
     core.set_boot_seed(epoch);
     storage.set_safe_epoch(epoch);
     core.configure_storage(&storage);
+    if let Some((path, digest)) = hub_catalog {
+        core.configure_hub(
+            crate::hub::load(&path, &digest)
+                .unwrap_or_else(|_| crate::hub::Snapshot::quarantined()),
+        );
+    }
     if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
         replay = None;
         tts = None;

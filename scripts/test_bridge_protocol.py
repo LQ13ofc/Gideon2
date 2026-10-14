@@ -40,8 +40,13 @@ class Tests(unittest.TestCase):
         validate_snapshot({**BASE,'base_pack':pack},'r',0)
         for key,value in [('version',True),('wake_phrases',[]),('wake_phrases',[{'id':'x','text':'no grant','qualification':'certified'}]),('active_phrase',[]),('default_phrase','missing'),('audio_input','microphone')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'base_pack':{**pack,key:value}},'r',0)
+    def test_hub_cannot_fake_installation_or_publisher_verification(self):
+        valid={'version':1,'status':'quarantined','repository':None,'catalog_sha256':None,'publisher_verified':False,'entries':[]}
+        validate_snapshot({**BASE,'hub':valid},'r',0)
+        for key,value in [('version',True),('status','installed'),('publisher_verified',True),('entries',[{}]),('catalog_sha256','a'*64)]:
+            with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**valid,key:value}},'r',0)
     def test_real_socket_malformed_nested_data_and_deep_json_clear_stale_state(self):
-        for deep in (False,True,"preferences"):
+        for deep in (False,True,"preferences","hub"):
             with self.subTest(deep=deep),tempfile.TemporaryDirectory(prefix='gideon-ipc-audit-') as td:
                 root=Path(td);root.chmod(0o700);server=QLocalServer();self.assertTrue(server.listen(str(root/'core.sock')));(root/'core.sock').chmod(0o600)
                 bridge=Bridge(root);pump(lambda:server.hasPendingConnections());peer=server.nextPendingConnection();pump(lambda:peer.canReadLine())
@@ -50,7 +55,8 @@ class Tests(unittest.TestCase):
                 if deep is True:bad='['*1100+'0'+']'*1100+'\n'
                 else:
                     good['request_id']=request['request_id']
-                    if deep=='preferences':good['preferences']={'version':1,'revision':True,'audible_feedback':False,'session_timeout_ms':30000}
+                    if deep=='hub':good['hub']={'version':1,'status':'verified','publisher_verified':True,'entries':[]}
+                    elif deep=='preferences':good['preferences']={'version':1,'revision':True,'audible_feedback':False,'session_timeout_ms':30000}
                     else:good['command']=[]
                     bad=json.dumps(good)+'\n'
                 peer.write(bad.encode());peer.flush();pump(lambda:not bridge.connected)

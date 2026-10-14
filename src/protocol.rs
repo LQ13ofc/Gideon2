@@ -76,6 +76,8 @@ pub struct Event {
 
 #[derive(Debug, Serialize)]
 pub struct Response {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub: Option<crate::hub::Snapshot>,
     pub base_pack: Option<crate::pack::Snapshot>,
     pub configuration_status: crate::storage::ConfigurationStatus,
     pub configuration_recovery_available: bool,

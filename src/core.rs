@@ -25,6 +25,7 @@ struct Session {
 /// Single owner for sessions, events and authority; no detached action tasks.
 pub struct Core {
     base_pack: Option<crate::pack::Snapshot>,
+    hub: Option<crate::hub::Snapshot>,
     configuration_status: crate::storage::ConfigurationStatus,
     configuration_recovery_available: bool,
     preferences: crate::storage::Config,
@@ -57,6 +58,7 @@ impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
         Self {
             base_pack: None,
+            hub: None,
             configuration_status: crate::storage::ConfigurationStatus::Ready,
             configuration_recovery_available: false,
             preferences: crate::storage::Config {
@@ -566,6 +568,7 @@ impl Core {
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
             base_pack: self.base_pack.clone(),
+            hub: self.hub.clone(),
             configuration_status: self.configuration_status,
             configuration_recovery_available: self.configuration_recovery_available,
             preferences: self.preferences.clone(),
@@ -597,6 +600,9 @@ impl Core {
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
         self.preferences = config.clone();
         self.timeout = Duration::from_millis(config.session_timeout_ms);
+    }
+    pub fn configure_hub(&mut self, hub: crate::hub::Snapshot) {
+        self.hub = Some(hub);
     }
     pub fn configure_pack(&mut self, pack: crate::pack::Snapshot) {
         self.base_pack = Some(pack);

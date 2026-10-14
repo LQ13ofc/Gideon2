@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[]
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -25,7 +25,23 @@ button=window.findChild(QObject,'cancelButton');subtitle=window.findChild(QObjec
 check('accessible cancel name',QAccessible.queryAccessibleInterface(button).text(QAccessible.Text.Name)=='Cancelar sessão')
 window.setProperty('width',640);window.setProperty('height',520);QTest.qWait(100)
 check('minimum layout size respected',window.property('width')>=480 and window.property('height')>=420)
-if args.phase=='voice':
+if args.phase in ('hub','hub_quarantine'):
+    hubButton=window.findChild(QObject,'hubButton');hubButton.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'hubDialog');wait(lambda:dialog.property('visible'),3)
+    label=window.findChild(QObject,'hubDescription')
+    check('actual Qt Hub opens with actor snapshot',label.property('text')==bridge.hubDescription)
+    if args.phase=='hub':
+        check('Hub never presents declared permissions as approval',len(bridge.hubEntries)==3 and 'não autenticado' in bridge.hubDescription and bridge.hubEntries[0]['status']=='not_installed')
+        check('Core compatibility appears in UI',bridge.hubEntries[1]['reason']=='api_version' and bridge.hubEntries[2]['reason']=='dependencies_unresolved')
+    else:
+        check('quarantined catalog renders no plugins',not bridge.hubEntries and 'quarentena' in label.property('text'))
+    check('Hub dialog bounded in minimum window',dialog.property('height')<=window.height())
+    QTest.qWait(100);image=window.grabWindow();image.save(str(Path(args.artifacts)/'ui.png'))
+    check('Hub renders offscreen',not image.isNull());dialog.close()
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('native S1 remains verified with Hub loaded or quarantined',bridge.resultVerified and bridge.snapshot['transcript']['source']=='voice' and bridge.snapshot['speech']['samples']>0)
+    check('S1 remains virtual',bridge.snapshot['speech']['sink']=='virtual')
+elif args.phase=='voice':
     wait(lambda:bridge.partial)
     check('partial is actual Core subtitle',subtitle.property('text')==bridge.subtitle and bridge.partial)
     check('cancel enabled during live voice',button.property('enabled'))

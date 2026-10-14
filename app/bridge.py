@@ -43,6 +43,26 @@ def validate_snapshot(data,request_id,min_sequence):
             if 'output_volume_percent' in previous:require(integer(previous['output_volume_percent'],0,100))
         wake=prefs.get('wake_phrase')
         require(wake is None or (short(wake) and len(wake)>0 and all(c.isascii() and (c.isalnum() or c in '_-') for c in wake)))
+    hub=data.get('hub')
+    if hub is not None:
+        require(isinstance(hub,dict) and type(hub.get('version')) is int and hub['version']==1)
+        require(hub.get('status') in ('verified','quarantined') and hub.get('publisher_verified') is False)
+        entries=hub.get('entries');require(isinstance(entries,list) and len(entries)<=8)
+        if hub['status']=='quarantined':require(not entries and hub.get('repository') is None and hub.get('catalog_sha256') is None)
+        else:
+            require(short(hub.get('repository'),256) and hub['repository'].startswith('https://github.com/'))
+            digest=hub.get('catalog_sha256');require(isinstance(digest,str) and len(digest)==64 and all(c in '0123456789abcdef' for c in digest))
+        ids=set()
+        for entry in entries:
+            require(isinstance(entry,dict))
+            for key in ('plugin_id','semver','publisher','license','support_policy'):require(short(entry.get(key),128) and bool(entry[key]))
+            require(entry['plugin_id'] not in ids);ids.add(entry['plugin_id'])
+            require(integer(entry.get('api_version'),0,65535) and integer(entry.get('download_size'),0,67108864))
+            require(entry.get('status') in ('not_installed','incompatible') and entry.get('reason') in ('none','api_version','target','dependencies_unresolved'))
+            require((entry['status']=='not_installed') == (entry['reason']=='none'))
+            for key in ('targets','permissions','conflicts'):
+                require(isinstance(entry.get(key),list) and len(entry[key])<=8 and all(short(v) and bool(v) for v in entry[key]))
+            deps=entry.get('dependencies');require(isinstance(deps,list) and len(deps)<=8 and all(isinstance(d,dict) and short(d.get('plugin_id')) and short(d.get('semver')) for d in deps))
     pack=data.get('base_pack')
     if pack is not None:
         require(isinstance(pack,dict) and type(pack.get('version')) is int and pack['version']==1)
@@ -212,6 +232,15 @@ class Bridge(QObject):
     def preferencesResult(self):return self.preferences_result
     @Property(bool,notify=changed)
     def textAvailable(self):return self.online and bool(self.snapshot.get('text_input_available')) and not self.sessionId and self.text_request is None
+    @Property('QVariantList',notify=changed)
+    def hubEntries(self):return (self.snapshot.get('hub') or {}).get('entries',[])
+    @Property(str,notify=changed)
+    def hubDescription(self):
+        hub=self.snapshot.get('hub')
+        if not self.online:return 'Core offline'
+        if not hub:return 'Catálogo não configurado'
+        if hub['status']=='quarantined':return 'Catálogo em quarentena; Base continua disponível'
+        return 'Catálogo local com checksum verificado; publisher não autenticado. Permissões apenas declaradas; nenhum plugin instalado ou executado.'
     @Property(bool,notify=changed)
     def connected(self):return self.online
     @Property(str,notify=changed)

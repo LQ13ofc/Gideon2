@@ -50,6 +50,30 @@ ApplicationWindow {
         }
         }
     }
+    Dialog {
+        id: hubDialog; objectName: "hubDialog"
+        title: "Plugins — Gideon Hub"; modal: true
+        anchors.centerIn: parent; width: Math.min(420, window.width - 32)
+        standardButtons: Dialog.Close
+        contentItem: ScrollView {
+            implicitHeight: Math.min(hubColumn.implicitHeight, window.height - 120); clip: true
+            ColumnLayout {
+                id: hubColumn; width: hubDialog.availableWidth
+                Label { objectName: "hubDescription"; text: core.hubDescription; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Repeater {
+                    model: core.hubEntries
+                    delegate: ColumnLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Label { text: modelData.plugin_id + " " + modelData.semver + " · " + modelData.publisher; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: (modelData.status === "not_installed" ? "Não instalado" : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: "Permissões declaradas (não aprovadas): " + (modelData.permissions.join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    }
+                }
+                Label { text: "Instalação indisponível nesta etapa. O catálogo não concede acesso ao computador."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            }
+        }
+    }
     ColumnLayout {
         objectName: "mainColumn"
         anchors.fill: parent; anchors.margins: 28; spacing: 18
@@ -57,6 +81,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Label { text: "Gideon"; font.pixelSize: 30; font.bold: true; color: "#e6edf4" }
             Item { Layout.fillWidth: true }
+            Button { objectName: "hubButton"; text: "Plugins"; enabled: core.connected; onClicked: hubDialog.open() }
             Button { objectName: "settingsButton"; text: "Preferências"; enabled: core.connected; onClicked: preferences.open() }
             Label { text: core.connected ? "Conectado" : "Offline"; color: core.connected ? "#70d6b0" : "#ffc674"; Accessible.name: text }
         }
