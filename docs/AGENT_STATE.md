@@ -1,7 +1,7 @@
 # Agent state — 2026-10-14
 
 - S1/A0–A5 e B1 AUTO_VERIFIED/PHYSICAL_PENDING EN/DEV/sandbox/offscreen. B2 PLANNED; S2 completo ainda não aprovado. B3–S5 não iniciados.
-- Branch main; A4 db64f48, A5 f2c1bf7; B1 no commit seguinte. Binário/source: docs/evidence/b1*.json. Sem remoto/push/publicação.
+- Branch main; A4 db64f48, A5 f2c1bf7, B1 9062cce (HEAD de código; checkpoints posteriores no Git). Binário/source: docs/evidence/b1*.json. Sem remoto/push/publicação.
 - 28 Rust, 5 nativos; regressões A0–A5 32/44/33/67/138/93 checks, B1 32 checks em 4 cenários. fmt/check/test/clippy/release/diff-check PASS; zero ignored.
 - Qt/QML thin: mesmo Core, partial/final/efeito/PCM; Cancel por teclado; kill/restart/reconnect e timeout/SIGSTOP/SIGCONT reais. SO_PEERCRED+root/socket privados, session u64 string, envelopes/correlation/sequence/bounds/watchdog. Connected só depois de handshake válido; snapshots iguais sem delta.
 - Entrada texto só em perfil virtual-input+commands-sandbox: mesmo parser/grant/executor, source=user_text, nunca STT fictício. UI não duplica lógica ou oferece modelos/capacidades futuras. Qt Essentials 6.12.0/Shiboken apenas.
