@@ -44,7 +44,7 @@ flowchart LR
 | src/commands.rs + scripts/command_worker.py | Gramática/policy/grant/executor/receipt | App fixture realmente executa; navegador pessoal não |
 | src/tts.rs + scripts/tts_worker.py | Template/engine CPU/PCM e sink virtual | Ganho/hash/pico/RMS verificados nos bytes consumidos; sem playback físico comprovado |
 | app/bridge.py | Transporte Qt, validação, delta/reconnect e projeção | Session u64 é string em QML; estado velho é apagado |
-| app/main.py / Main.qml | Janela/HUD, legenda, resultado e Cancel | Qt thin; leitura mínima e acessibilidade offscreen testadas |
+| app/main.py / Main.qml / GlassCard.qml / GlowButton.qml / visual.py | Sidebar/rotas, tema de janela, esfera/raster software, HUD, legenda, resultado e Cancel | Qt thin; leitura mínima e acessibilidade offscreen testadas |
 | scripts/provision_tts.py | Provisionamento de assets por revisões fixas | Ferramenta de engenharia, não Model Manager de produto |
 | scripts/graph.py | Graphify AST isolado | QML não indexado; revisar QML/fazer teste runtime diretamente |
 
@@ -155,3 +155,12 @@ O fechamento B2 considera somente as preferências disponíveis no perfil
 virtual/qualificado DEV; devices/performance/freeze físicos continuam pendentes.
 B3 deverá conservar esse mesmo fluxo e testar somente extensões benignas isoladas. Produto para uso real não está declarado
 pronto. Validação humana consolidada somente após S5; nenhum teste pessoal solicitado.
+
+
+## Referência visual aprovada
+
+Aplicada à Qt existente: docs/UI_REFERENCE.md e design-qa.md; evidência
+UI/Core real docs/evidence/ui-reference.json. 7 rotas, tema/cor por janela,
+indicador persistido no Core; nenhum caminho de device/LLM/installer inventado.
+Conversa concluída no Início; legenda ativa/Cancel globais. Rasters reais,
+clipping software, sem shader/animation/polling adicional. B3.2 continua próximo.
