@@ -1,11 +1,12 @@
 # Agent state — 2026-10-14
 
-- Rodada S1/B1 AUDIT AUTO_VERIFIED em EN/DEV/virtual/offscreen; B2 permanece PLANNED, não iniciado. Mapas docs/BASE_AUDIT.md e docs/BASE_UI_MAP.md.
-- Branch main; HEAD de código 2ad4338; fixes Base 82c8783, App 8b16886, harness 2ad4338. Evidência e source→binary em docs/evidence/base-audit.json; nove grupos com MESMO SHA final. Sem remoto/push.
-- PASS fmt/check/test/clippy/release/diff-check. 32 Rust, 5 wake nativos, 7 adversariais adicionais; A0–A5 32/44/33/67/138/93 checks, soak 8, shutdown 2, B1 34. Zero failed/ignored.
-- Corrigidos: frame 100ms→STT 80ms split sem perda; PCM inválido não enviado; clock Final/Partial; callback STT de sessão antiga/error; hardlinks/descriptor privado; TTS hashes obrigatórios/paths; deadline de executor/feedback timeout; payload IPC/deep JSON; viewport ilegível; ambiente mínimo de workers; sampler /proc de processo encerrado; seed positivo.
-- Testes adversariais não substituem inferência/namespace/Qt reais: regressão completa reexecutada, imagem offscreen inspecionada. Legado read-only confirmado ef0a0f3/51 dirty/12 worktrees; datasets/modelos e sessão pessoal preservados.
-- Graphify 0.9.90 atualizado (551 nós/1110 arestas); QML revisado diretamente, não indexado. Sem Model Manager/LLM/funções futuras expostas.
-- Limites: Pocket cold first PCM em segundos e pico RSS ~1.5GB; números atuais/idle pós EOF no JSON. EN/fixtures sintéticas, sem holdout/pt-BR/freeze; Okay POC_REQUIRED; comparação Parakeet/Piper/Kokoro pendente.
-- CPAL/PipeWire/AEC/hotplug/barge-in e pacote relocável são trabalho de IMPLEMENTAÇÃO, não só teste físico. Acústica/periféricos/Wayland: AWAITING_HUMAN_VALIDATION após S5, sem solicitar participação intermediária.
-- Próximo: B2 apenas com opções realmente suportadas e discovery/config actor-owned/persistência atômica/restart/rollback, conforme mapa. Não declarar Base para uso físico nem pacote pronto com adapters ausentes. Depois B3 Hub e B4, então S3.
+- B2.1 AUTO_VERIFIED: feedback audível/prazo integrados Core→Qt. B2 IN_PROGRESS; B3 não iniciado. Contratos docs/B2.md; mapa docs/BASE_UI_MAP.md atualizado.
+- Branch main; HEAD de código 7e4d241; fix coletor 910efcd. Local somente, sem remoto/push. Auditoria anterior docs/BASE_AUDIT.md preservada.
+- PASS fmt/check/test/clippy -D warnings/release/diff-check. 33 Rust, 14 Python nativos/adversariais, 31 checks B2.1. Regressões A0/A1/A2/A3/A4/A5/B1/soak/shutdown 32/44/33/67/138/93/34/8/2 = 451. Zero failed/ignored na rodada final.
+- Mesmo SHA release em nove grupos: 140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6. Source→binary e resultados docs/evidence/b2-preferences.json. Imagem offscreen target/evidence/b2-preferences.png inspecionada.
+- preferences/rollback_preferences actor-owned: idle, request_id e revisão. Config atômica com anterior no mesmo JSON; CAS/rollback sobrevivem restart/falha. Feedback off mantém execução verificada sem TTS; rollback restaura PCM Pocket. UI mostra estado efetivo, não escreve disco nem gerencia daemon.
+- Corrigidos: backup separado podia perder rollback em falha (commit único); ProcessLookupError de child encerrado em /proc/statm (helper compartilhado; A3/A5/soak/shutdown repetidos); resultado de preferências correlacionado à operação IPC.
+- Graphify 592 nós/1197 arestas; AST local; QML revisado/testado diretamente. Legado/sessão pessoal não modificados; nenhum dispositivo pessoal usado.
+- Limites: config inválida preservada ainda recusa boot; safe mode pendente. Wake/voz/idioma/discovery sem edição pelo App. Hey DEV-qualified; Okay POC_REQUIRED; EN/fixtures, sem holdout/freeze; comparação Parakeet/Piper/Kokoro pendente.
+- CPAL/PipeWire/AEC/hotplug/barge-in/pacote relocável são IMPLEMENTAÇÃO pendente. Pocket cold ~8s/RSS pico ~1.5GB na auditoria anterior, não requalificados nesta rodada. AWAITING_HUMAN_VALIDATION física consolidada após S5.
+- Próximo B2.2: discovery de pack com IDs/texto explícito/qualificação/preflight, opções realmente compatíveis e safe mode preservando dados corrompidos; testar persist/restart/rollback/permissões/unsupported e regressões antes de B3.

@@ -1,0 +1,165 @@
+{
+  "gate": "B2_1_PREFERENCES",
+  "passed": 31,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "default backwards compatible",
+    "invalid timeout rejected",
+    "invalid request does not create rollback state",
+    "rollback absent fails safely",
+    "caller grant rejected",
+    "busy refuses config",
+    "cancel still works",
+    "update acknowledges effective state",
+    "duplicate fenced",
+    "stale revision fenced",
+    "private configuration files",
+    "clean shutdown",
+    "persisted across actual restart",
+    "rollback restores with new revision",
+    "unsafe temporary path is refused",
+    "failure preserves committed file and sentinel",
+    "failed write preserves prior rollback",
+    "no speech persisted",
+    "clean shutdown",
+    "actual Core connection",
+    "accessible cancel name",
+    "minimum layout size respected",
+    "settings dialog opens on actual Qt control",
+    "Qt save reaches Core configuration",
+    "Core reports persisted preferences",
+    "same executor verifies effect with feedback off",
+    "disabled feedback produces no virtual speech",
+    "Qt rollback restores Core preferences",
+    "restored preference integrates real native TTS",
+    "settings renders offscreen",
+    "clean shutdown"
+  ],
+  "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6",
+  "physical_validation": "NOT_PERFORMED",
+  "regressions": {
+    "a0": {
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "a1": {
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "a2": {
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "a3": {
+      "passed": 67,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "a4": {
+      "passed": 138,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "a5": {
+      "passed": 93,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "b1": {
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "soak": {
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    },
+    "shutdown": {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "140e3365bc12ee16b4fa9557104955dadf6b1f2a640005cc96db9dc251cde2d6"
+    }
+  },
+  "regression_checks_total": 451,
+  "status": "AUTO_VERIFIED",
+  "scope": "B2.1 feedback and session deadline; EN/DEV, virtual audio and Qt offscreen only",
+  "branch": "main",
+  "baseline_commit": "33e046b",
+  "code_commit": "7e4d24167c7eed075f14b03238ff5fbbc9c8b3bf",
+  "testkit_commit": "910efcd",
+  "rust_tests": 33,
+  "adversarial_python_tests": 14,
+  "remaining_b2": [
+    "certified engine-pack discovery and compatible wake settings",
+    "safe mode for invalid configuration",
+    "supported device/voice/language/performance capability contracts"
+  ],
+  "problems_corrected": [
+    "rollback committed together with preferences in one atomic JSON document",
+    "ProcessLookupError during exited-child RSS sampling; shared sampler fixed, affected regressions repeated"
+  ],
+  "source_sha256": {
+    "Cargo.lock": "acd03e278a839454a4250aa98add14cc320776d8c1500a2a068a4789b9231dae",
+    "Cargo.toml": "5fb0506c5d165ede7e4ef4a31154a28216454956283fae1944508bcf91ed3e45",
+    "app/Main.qml": "dd77677bd97f85c2bcbb7e3f1a1e7e8806c2f5521e68819b1209bb2fb65a8129",
+    "app/bridge.py": "b4129b3c0949ee382b125d1a363e93cfa63462dd7639bbe3d0c108000825d8dd",
+    "app/main.py": "074521008889f3b9b2b31b30feb5b841dca6fca8a4e446369dcdcdcdfc6a0eae",
+    "scripts/command_worker.py": "096151c8f190297400f0cf0915309ff3d3a42073aa0f0c656248c1aa8bc70c30",
+    "scripts/evaluate_wake.py": "61cea65a7c7a2744ffb6ab84890451a129d6375038ecac343fcd328c9e09d019",
+    "scripts/experiment_wake_competition.py": "cc2f5e01fe2d77585be04728bde372ff7af6cf05928a428a045cd630ad803180",
+    "scripts/graph.py": "027487fdbedb2c01ac517a59e046ee0ed9663302f5a4652693a27d575495a88f",
+    "scripts/namespace_probe.py": "abd5179d1b37a5d646792bfaf5b1a20d6838b5b21bf47e12ec343f9be603259d",
+    "scripts/pcm_fixture.py": "549c620107796442acc83f7245316819934ab45bc93d05dc194bfee8997df030",
+    "scripts/process_fixture.py": "76563a8b75dee61cfd73861b02e01f0abbc4cfc1a4e11f8e1fbb8b7eeca741fe",
+    "scripts/provision_tts.py": "a418119e332072fe59d86056de01bd80c6c083fa99b6166f118c4fa5a5297421",
+    "scripts/stt_worker.py": "267a6907711e19428db2c575e95dc8b70ead4304130abdcd8bd026b0e859f255",
+    "scripts/test_bridge_protocol.py": "7610fad0d3602182b09adef25278ddb68c655afa7c7c99b04f6fa1ccf299129f",
+    "scripts/test_process_fixture.py": "d2a964f108a28dc12b655538571a7f75c7d0d52d92c5477584d9357ed2d9b514",
+    "scripts/test_stt_lifecycle.py": "cd3d2a19626a73f2a2cc5e325c64c580ef4f464bfcec8a2295a87718daf030a2",
+    "scripts/test_tts_profile.py": "faa923dd5bf4085391b2df5b6bb3672c1f1a756d392e43bfbd749328c353bcb6",
+    "scripts/test_ui_offscreen.py": "85d4a73dc84bcc26649d079de3082287ab3902fb414aecc7eb73211c346b9bb7",
+    "scripts/test_wake_worker.py": "83425a3091501471821a0a3a61d085a2ad354425b722a3826642a8b00d53da23",
+    "scripts/tts_worker.py": "bd1835789444e1f75d4ef892c17ec61efaaa0b95a95ebd984333d67880706a12",
+    "scripts/verify_a0.py": "3edb2b3059c72af49048d9d84fd80eae964968a990fe4e18447870cf825c1601",
+    "scripts/verify_a1.py": "60fc50dbf10e906d4384d112fe931073d058ca46956f51f4dbc8a9048f162acc",
+    "scripts/verify_a2.py": "3a6e328ad536363b4ed6c3416a53cfab2371a0c908ba7b30822762a2d0afb28f",
+    "scripts/verify_a3.py": "c02054c29f909d133262bf077424efe008d40a60a02cfb200f13663e30ee4e99",
+    "scripts/verify_a4.py": "a88cab2a4749fff15e0bf4c725af8d44422511a6f4e20fdc0fd3f34e74110f9a",
+    "scripts/verify_a5.py": "0d8b01c325de5051092f9047a7ab09610172cdf069d14013fce2ac1e08d36cc4",
+    "scripts/verify_a5_soak.py": "21e3c15bc51668e969b6bcb33cc252d6344bdacf626aa7bde9bbc593003de474",
+    "scripts/verify_b1.py": "b8315a7f807cb7445bc00d66d3026e799dc502bc8705431a2dd88efc27a3e139",
+    "scripts/verify_b2.py": "6206a0f22957b3d4b2e4c95f1fed3e11e8657989aaadf990b45660b906a17432",
+    "scripts/wake_worker.py": "6a919c23d38fe7ca7b15ffa7d9e0ea02ea6cae838317089c79d88187df9b5fe8",
+    "src/audio.rs": "69d9e9d54f09c80051787b9226ad763e7d474f5212d68800e11b7e53a5479b23",
+    "src/capture.rs": "4eee82b7112a1ed97cadbf5912dcd9f9640d82ad986687318e7aeffa35b2f9ca",
+    "src/commands.rs": "4e977a8bb9c7ec8269e868d175df9c29e05b741302b9dcae55b53260efbd7974",
+    "src/core.rs": "2a0f597680390d7a4c794f9e6cba89326098e20b3596e62e53319e3de17991c6",
+    "src/lib.rs": "41c462993bd27ad6c22f8f1710d5397abd6cdc302e66cf99703335cd86e2e3db",
+    "src/main.rs": "e080049a417d67d4b615e39a66baa60e9feb1aeb915ba712a539afd6379e835e",
+    "src/protocol.rs": "7203022baddeb2efada92520ca977d965583fb51514a2169879f36f3e2b1f67f",
+    "src/storage.rs": "cf4f4a6e009cfe1dac6ee484309b456b2e2c8ddb0cbbf06e327dece4127ccd2c",
+    "src/stt.rs": "b39bbc28531dd93835b31c252aa2337dfbf54769c1940653a404a5c269a0c3c6",
+    "src/transport.rs": "788e0710a6f0a385f1c89a05c607f24c6aecebca7bb00e6a5471f5e1fbb17a57",
+    "src/tts.rs": "270099c0e1070d7be761344fabc71ecb7988f43efa94cf5a5506f4b3da7102b9",
+    "src/wake.rs": "c8ab8ba61c880e83af6ec1a6403daa7b21004b7228886d4c1a55cce1226f73e4",
+    "tests/storage.rs": "8d0f8b0dbdb9a7bff78fc207dfc21da7088580d9a927ee4b3ffe16a2070703ce"
+  },
+  "graphify": {
+    "nodes": 592,
+    "edges": 1197
+  }
+}
