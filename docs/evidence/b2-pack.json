@@ -1,0 +1,202 @@
+{
+  "gate": "B2_2B_BASE_PACK",
+  "passed": 36,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "pack rejects version",
+    "pack rejects wake_profile_sha256",
+    "pack rejects stt_profile_sha256",
+    "pack rejects tts_profile_sha256",
+    "qualification evidence hash guarded",
+    "model hash preflight happens before workers",
+    "catalog verified and bounded",
+    "qualification distinct from support",
+    "no paths in discovery",
+    "reject caller qualification injection",
+    "unknown phrase denied",
+    "POC phrase denied",
+    "busy selection denied",
+    "clean pack shutdown",
+    "incompatible stored phrase enters safe mode",
+    "incompatible config starts no workers",
+    "compatible defaults recover with restart",
+    "clean pack shutdown",
+    "clean pack shutdown",
+    "actual Core connection",
+    "accessible cancel name",
+    "minimum layout size respected",
+    "pack metadata comes from actual Core",
+    "initial native S1 uses preflighted pack",
+    "explicit phrase text presented",
+    "POC phrase cannot be selected",
+    "Qt selection persisted by actor",
+    "selection requires actual restart",
+    "selected wake runs native integrated flow after restart",
+    "rollback restores default selection with new revision",
+    "selection rollback persisted",
+    "clean pack shutdown",
+    "rollback accepted by pack on restart",
+    "healthy recovery operation refused",
+    "stale config fenced",
+    "clean pack shutdown"
+  ],
+  "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d",
+  "pack_sha256": "1d3d867a3492aa57dc248ba0c0bdd66ca4e5323972f5c00b9fc23152f8b8938f",
+  "physical_validation": "NOT_PERFORMED",
+  "regressions": {
+    "a0": {
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "a1": {
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "a2": {
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "a3": {
+      "passed": 67,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "a4": {
+      "passed": 138,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "a5": {
+      "passed": 93,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "b1": {
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "soak": {
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "shutdown": {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "b2_1": {
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    },
+    "safe_mode": {
+      "passed": 96,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "df44535e0cb59c75fad6bb99827198ddd320126ec14809efa9c5e31da6f0fe6d"
+    }
+  },
+  "regression_checks_total": 578,
+  "status": "AUTO_VERIFIED",
+  "scope": "B2.2b internal EN/DEV pack preflight, metadata and qualified wake selection; virtual PCM/native inference/Qt offscreen",
+  "branch": "main",
+  "baseline_commit": "0db2270",
+  "code_commit": "3d8a858073a61eac07fade697d7695485d4547ba",
+  "rust_tests": 37,
+  "adversarial_python_tests": 16,
+  "problems_corrected": [
+    "trusted public asset aliases resolved to regular files and expected SHA256; private config link guards unchanged",
+    "fixture pack checksum captured before temporary directory cleanup",
+    "clippy range check repaired before final release"
+  ],
+  "limitations": [
+    "Hey only DEV-qualified; Okay POC_REQUIRED and denied by Core/UI",
+    "one Alba EN TTS candidate, no final model freeze or arbitrary wake training",
+    "operator-trusted local reports and metadata are not cryptographic publisher signatures or physical certification",
+    "only asset/metadata preflight; runtime SDK readiness still owned by workers",
+    "pack/profile absolute paths not yet relocatable; physical adapters/AEC still pending"
+  ],
+  "remaining_b2": [
+    "supported preferences matrix including visual feedback and real virtual-output gain",
+    "privacy/retention and unavailable physical-device/sensitivity/performance/login controls"
+  ],
+  "source_sha256": {
+    "Cargo.lock": "acd03e278a839454a4250aa98add14cc320776d8c1500a2a068a4789b9231dae",
+    "Cargo.toml": "5fb0506c5d165ede7e4ef4a31154a28216454956283fae1944508bcf91ed3e45",
+    "app/Main.qml": "9222c24a03bac5e10c1c4d06bd347ec2d4ebdd3e2b792a3a57b381b8630eef6b",
+    "app/bridge.py": "d1ce0e2b35e96bbfad296801864b8d8957960c2c726aaee1fa5e04edefbd24d8",
+    "app/main.py": "074521008889f3b9b2b31b30feb5b841dca6fca8a4e446369dcdcdcdfc6a0eae",
+    "scripts/build_base_pack.py": "b8c569e3b37fc37837ac60276f72235dcb96bf9f53cb36fc27432f419730b1fd",
+    "scripts/command_worker.py": "096151c8f190297400f0cf0915309ff3d3a42073aa0f0c656248c1aa8bc70c30",
+    "scripts/evaluate_wake.py": "61cea65a7c7a2744ffb6ab84890451a129d6375038ecac343fcd328c9e09d019",
+    "scripts/experiment_wake_competition.py": "cc2f5e01fe2d77585be04728bde372ff7af6cf05928a428a045cd630ad803180",
+    "scripts/graph.py": "027487fdbedb2c01ac517a59e046ee0ed9663302f5a4652693a27d575495a88f",
+    "scripts/namespace_probe.py": "abd5179d1b37a5d646792bfaf5b1a20d6838b5b21bf47e12ec343f9be603259d",
+    "scripts/pcm_fixture.py": "549c620107796442acc83f7245316819934ab45bc93d05dc194bfee8997df030",
+    "scripts/process_fixture.py": "76563a8b75dee61cfd73861b02e01f0abbc4cfc1a4e11f8e1fbb8b7eeca741fe",
+    "scripts/provision_tts.py": "a418119e332072fe59d86056de01bd80c6c083fa99b6166f118c4fa5a5297421",
+    "scripts/stt_worker.py": "267a6907711e19428db2c575e95dc8b70ead4304130abdcd8bd026b0e859f255",
+    "scripts/test_bridge_protocol.py": "f2bdf4b5b47d2526fce49957468ce6ac8629e8d631d12c489d7f5c51438c10ad",
+    "scripts/test_process_fixture.py": "d2a964f108a28dc12b655538571a7f75c7d0d52d92c5477584d9357ed2d9b514",
+    "scripts/test_stt_lifecycle.py": "cd3d2a19626a73f2a2cc5e325c64c580ef4f464bfcec8a2295a87718daf030a2",
+    "scripts/test_tts_profile.py": "faa923dd5bf4085391b2df5b6bb3672c1f1a756d392e43bfbd749328c353bcb6",
+    "scripts/test_ui_offscreen.py": "d642ac7f2457a11a70032a7b96da59ec4b93a6cfe265e13b026415f1902430d3",
+    "scripts/test_wake_worker.py": "83425a3091501471821a0a3a61d085a2ad354425b722a3826642a8b00d53da23",
+    "scripts/tts_worker.py": "bd1835789444e1f75d4ef892c17ec61efaaa0b95a95ebd984333d67880706a12",
+    "scripts/ui_fixture.py": "ab13f0f6ceb560814fc238b187b9c6a2097ba7bfa49dcd42a2dc47028a9ad17d",
+    "scripts/verify_a0.py": "43b71f78f45715560d38bd2bd5a22bfb135cea7636bf38240c5fcf4897c20559",
+    "scripts/verify_a1.py": "60fc50dbf10e906d4384d112fe931073d058ca46956f51f4dbc8a9048f162acc",
+    "scripts/verify_a2.py": "3a6e328ad536363b4ed6c3416a53cfab2371a0c908ba7b30822762a2d0afb28f",
+    "scripts/verify_a3.py": "c02054c29f909d133262bf077424efe008d40a60a02cfb200f13663e30ee4e99",
+    "scripts/verify_a4.py": "a88cab2a4749fff15e0bf4c725af8d44422511a6f4e20fdc0fd3f34e74110f9a",
+    "scripts/verify_a5.py": "0d8b01c325de5051092f9047a7ab09610172cdf069d14013fce2ac1e08d36cc4",
+    "scripts/verify_a5_soak.py": "21e3c15bc51668e969b6bcb33cc252d6344bdacf626aa7bde9bbc593003de474",
+    "scripts/verify_b1.py": "1f36e7194500e5789c10a2b418195e41da624344df9366892b767c6f410ea038",
+    "scripts/verify_b2.py": "a3f6b691c5ed719b59a1b9897b90cbb0c98cc29ebdcdf5301f296089e57d10ec",
+    "scripts/verify_b2_pack.py": "4174cbfc510032864616f46a403702210bdaef84b59bb62a66a54c0c0637ba56",
+    "scripts/verify_b2_safe.py": "a97434503895bdc861c656325a22d2c0b2f4488934dff8fc140537ec23c68847",
+    "scripts/wake_worker.py": "6a919c23d38fe7ca7b15ffa7d9e0ea02ea6cae838317089c79d88187df9b5fe8",
+    "src/audio.rs": "69d9e9d54f09c80051787b9226ad763e7d474f5212d68800e11b7e53a5479b23",
+    "src/capture.rs": "4eee82b7112a1ed97cadbf5912dcd9f9640d82ad986687318e7aeffa35b2f9ca",
+    "src/commands.rs": "4e977a8bb9c7ec8269e868d175df9c29e05b741302b9dcae55b53260efbd7974",
+    "src/core.rs": "3108a6118a214a5983deb04c989a614bbbef2be5fbbd8fd07a179d3850dbc92d",
+    "src/lib.rs": "bbf502801acfff519684567df3e3213901de95ae7b40f6d7584e37e3f04610c6",
+    "src/main.rs": "31e0b7e544a3225c56e16cd6490bec6a0e1d4a6be7a6f9175392b208a7ce50f9",
+    "src/pack.rs": "b179a48e4c6e7a0191c18e624215976e37cde118ebbdc7559cc604673e8c85aa",
+    "src/protocol.rs": "f6905bffaeda94d0c14887130e32117fbb787d8394f58314b1d66e6694488de4",
+    "src/storage.rs": "8af166dbed3d59d95f01ccaf05f198ccdb03128e5123ca2c067b44a912a63287",
+    "src/stt.rs": "b39bbc28531dd93835b31c252aa2337dfbf54769c1940653a404a5c269a0c3c6",
+    "src/transport.rs": "f5193cb0b9d27529b8c7ee8ef1102581f77ab80d9a359cf09201186e8241eb74",
+    "src/tts.rs": "270099c0e1070d7be761344fabc71ecb7988f43efa94cf5a5506f4b3da7102b9",
+    "src/wake.rs": "c8ab8ba61c880e83af6ec1a6403daa7b21004b7228886d4c1a55cce1226f73e4",
+    "tests/storage.rs": "c73c9f7daab75b39620bfa57911359a5ea40b0a1b6854d6732a3ef581009edaf"
+  },
+  "profile_and_qualification_sha256": {
+    "target/a3-assets/replay-manifest.json": "878dc1cade183900a178a2abce9426e6d6d7a37381d6bd85d1bb9f48a6d61653",
+    "target/a3-assets/manifest.json": "3f12fa9c7d075c98f6215734e2b3e053670b58087b74db87d92c9749a88d6a07",
+    "target/a5-assets/manifest.json": "12e5510428df7486355dee526ca51ccb2fe89981f4bfb5d7efcec46279a88649",
+    "target/a1-competitive/manifest.json": "8abb349c5af1413146922e9daf40778e383c91234599c5116672e094e96c9c0c",
+    "target/evidence/a1-selectable-hey.json": "6faedf5a042d5ea6f67eee2d6fd7f6a1c76ee1c138941dec20e60df52d4b2b4b",
+    "target/evidence/a1-selectable-okay.json": "e4bef5b66c89996d0341fb830585f48c74053fb0520f524e5ead8f8c2cc89247"
+  },
+  "graphify": {
+    "nodes": 670,
+    "edges": 1391
+  }
+}
