@@ -2,6 +2,7 @@
 """Native S1 pipeline with actual namespace app process and receipt, never host effects."""
 import hashlib,json,os,socket,subprocess,tempfile,time
 from pathlib import Path
+from process_fixture import command_line
 BASE=Path(__file__).resolve().parents[1]
 BINARY=BASE/'target/release/gideon-base';PYTHON=BASE/'target/a1-venv/bin/python';MANIFEST=BASE/'target/a3-assets/replay-manifest.json'
 BINARY_ID=hashlib.sha256(BINARY.read_bytes()).hexdigest()
@@ -44,7 +45,7 @@ def run():
                             check('cancel executing task accepted',req('cancel',session_id=sid)['code']=='ok')
                         else:
                             children=Path(f'/proc/{p.pid}/task/{p.pid}/children').read_text().split()
-                            targets=[int(x) for x in children if b'command_worker.py' in Path(f'/proc/{x}/cmdline').read_bytes()]
+                            targets=[int(x) for x in children if b'command_worker.py' in command_line(x)]
                             check('executor process owned and identifiable',len(targets)==1)
                             os.kill(targets[0],9)
                         interrupted=True

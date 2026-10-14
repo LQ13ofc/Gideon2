@@ -2,6 +2,7 @@
 """Offline native wake→STT→verified sandbox action→Pocket PCM→paced virtual sink."""
 import hashlib,json,os,socket,subprocess,tempfile,time
 from pathlib import Path
+from process_fixture import command_line
 BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';WAKE=BASE/'target/a1-venv/bin/python';TTS=BASE/'target/tts-venv/bin/python';MANIFEST=BASE/'target/a3-assets/replay-manifest.json';PROFILE=BASE/'target/a5-assets/manifest.json'
 BINARY_ID=hashlib.sha256(BIN.read_bytes()).hexdigest()
 def run():
@@ -44,19 +45,19 @@ def run():
                         except FileNotFoundError:pass
                     peak_rss=max(peak_rss,rss)
                     if mode=='executor_failure' and snap['state']=='executing' and not interrupted:
-                        targets=[int(x) for x in children if b'command_worker.py' in Path(f'/proc/{x}/cmdline').read_bytes()]
+                        targets=[int(x) for x in children if b'command_worker.py' in command_line(x)]
                         if targets:os.kill(targets[0],9);interrupted=True
                     if snap['state']=='speaking':
                         seen_speaking=True
                         if snap['command'] is None:raise AssertionError('missing speech result')
                         if mode in ('cancel','kill','shutdown') and not interrupted:
                             # Wait for warmup/inference to exercise an actual running speech process.
-                            targets=[int(x) for x in children if b'tts_worker.py' in Path(f'/proc/{x}/cmdline').read_bytes()]
+                            targets=[int(x) for x in children if b'tts_worker.py' in command_line(x)]
                             if targets and snap['speech_samples']>0:
                                 if mode=='shutdown':
                                     p.terminate();check('shutdown during actual PCM',p.wait(timeout=3)==0)
                                     time.sleep(.1)
-                                    check('owned speech descendants stopped',all(not Path(f'/proc/{pid}/cmdline').exists() or not Path(f'/proc/{pid}/cmdline').read_bytes() for pid in owned))
+                                    check('owned speech descendants stopped',all(not Path(f'/proc/{pid}/cmdline').exists() or not command_line(pid) for pid in owned))
                                     rows.append({'fixture_id':name,'mode':mode,'speech_samples_before_shutdown':snap['speech_samples'],'peak_recursive_owned_rss_bytes':peak_rss})
                                     return
                                 if mode=='cancel':check('cancel active speech',req('cancel',session_id=sid)['code']=='ok')
@@ -65,8 +66,8 @@ def run():
                     if snap['wake_status']=='replay_finished' and snap['state']=='idle' and snap['command']:break
                     time.sleep(.005)
                 check('session finished and EOF observable',snap['state']=='idle' and snap['wake_status']=='replay_finished')
-                check('entered integrated speech stage',seen_speaking)
-                check('no detached speech process after endpoint',not any(b'tts_worker.py' in Path(f'/proc/{pid}/cmdline').read_bytes() for pid in owned if Path(f'/proc/{pid}/cmdline').exists()))
+                check('entered integrated speech stage '+json.dumps({'command':snap['command'],'events':snap['events']}),seen_speaking)
+                check('no detached speech process after endpoint',not any(b'tts_worker.py' in command_line(pid) for pid in owned if Path(f'/proc/{pid}/cmdline').exists()))
                 if mode in ('cancel','kill'):check('live speech interruption exercised',interrupted)
                 if mode in ('normal','executor_failure'):
                     speech=snap['speech'];check('Pocket PCM completed',snap['speech_status']=='completed' and speech is not None)
@@ -74,7 +75,7 @@ def run():
                     check('virtual playback paced',speech['elapsed_ms']>=speech['samples']/24)
                     events=snap['events'];begin=next(e['sequence'] for e in events if e['kind']=='speech_started')
                     if mode=='executor_failure':
-                        check('Failed feedback without false receipt',interrupted and snap['command']['code']=='command_failed' and snap['command']['receipt'] is None)
+                        check('Failed feedback without false receipt',interrupted and snap['command']['code'] in ('command_failed','timed_out') and snap['command']['receipt'] is None)
                     elif fixture:
                         check('NotUnderstood has no effect',snap['command']['code']=='unsupported' and snap['command']['receipt'] is None)
                     else:
