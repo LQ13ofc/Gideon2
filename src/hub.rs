@@ -74,6 +74,8 @@ pub struct Entry {
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub approval_revision: u64,
+    pub install_revision: u64,
+    pub installed: Vec<InstalledSummary>,
     pub import: Option<ImportSummary>,
     pub version: u16,
     pub status: &'static str,
@@ -90,15 +92,46 @@ impl Snapshot {
         let Ok(state) = storage.hub_approvals() else {
             return Self::quarantined();
         };
+        let Ok(ledger) = storage.hub_installed() else {
+            return Self::quarantined();
+        };
         self.approval_revision = state.revision;
+        self.install_revision = ledger.revision;
+        self.installed = ledger
+            .records
+            .iter()
+            .map(|r| installed_summary(storage, r))
+            .collect();
         for entry in &mut self.entries {
-            entry.permissions_approved = state.records.iter().any(|r| {
-                Some(&r.catalog_sha256) == self.catalog_sha256.as_ref()
-                    && r.plugin_id == entry.plugin_id
-                    && r.manifest_sha256 == entry.manifest_sha256
-                    && r.permissions == entry.permissions
-                    && entry.status == "not_installed"
-            });
+            if matches!(entry.status, "installed" | "update_available") {
+                entry.status = "not_installed";
+            }
+        }
+        for entry in &mut self.entries {
+            if entry.status != "not_installed" {
+                continue;
+            }
+            if let Some(record) = ledger
+                .records
+                .iter()
+                .find(|r| r.plugin_id == entry.plugin_id)
+            {
+                entry.status = if record.manifest_sha256 == entry.manifest_sha256 {
+                    "installed"
+                } else {
+                    "update_available"
+                };
+            }
+        }
+        for entry in &mut self.entries {
+            entry.permissions_approved =
+                matches!(entry.status, "not_installed" | "update_available")
+                    && state.records.iter().any(|r| {
+                        Some(&r.catalog_sha256) == self.catalog_sha256.as_ref()
+                            && r.plugin_id == entry.plugin_id
+                            && r.manifest_sha256 == entry.manifest_sha256
+                            && r.permissions == entry.permissions
+                    });
         }
         for entry in &mut self.entries {
             match staged(storage, entry) {
@@ -112,6 +145,8 @@ impl Snapshot {
     pub fn quarantined() -> Self {
         Self {
             approval_revision: 0,
+            install_revision: 0,
+            installed: vec![],
             import: None,
             version: 1,
             status: "quarantined",
@@ -194,7 +229,7 @@ pub fn approve(
         .iter()
         .find(|e| e.plugin_id == plugin_id)
         .ok_or("unknown_plugin")?;
-    if entry.status != "not_installed" {
+    if !matches!(entry.status, "not_installed" | "update_available") {
         return Err("plugin_incompatible");
     }
     if entry.manifest_sha256 != manifest_sha256 {
@@ -403,6 +438,8 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         .collect();
     Ok(Snapshot {
         approval_revision: 0,
+        install_revision: 0,
+        installed: vec![],
         import: None,
         version: 1,
         status: "verified",
@@ -413,6 +450,337 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledSummary {
+    pub plugin_id: String,
+    pub semver: String,
+    pub manifest_sha256: String,
+    pub state: &'static str,
+    pub runtime: &'static str,
+    pub previous: Option<PreviousSummary>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviousSummary {
+    pub semver: String,
+    pub manifest_sha256: String,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct InstalledVersion {
+    semver: String,
+    manifest_sha256: String,
+    payload_sha256: String,
+    size: u64,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct InstalledRecord {
+    plugin_id: String,
+    semver: String,
+    manifest_sha256: String,
+    payload_sha256: String,
+    size: u64,
+    previous: Option<InstalledVersion>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct InstalledLedger {
+    version: u16,
+    pub revision: u64,
+    records: Vec<InstalledRecord>,
+}
+impl Default for InstalledLedger {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            revision: 0,
+            records: vec![],
+        }
+    }
+}
+fn size_ok(size: u64) -> bool {
+    (1..=67108864).contains(&size)
+}
+impl InstalledLedger {
+    pub(crate) fn validate(&self) -> io::Result<()> {
+        if self.version != 1
+            || self.records.len() > 8
+            || self
+                .records
+                .iter()
+                .map(|r| &r.plugin_id)
+                .collect::<HashSet<_>>()
+                .len()
+                != self.records.len()
+            || self.records.iter().any(|r| {
+                !crate::protocol::valid_id(&r.plugin_id)
+                    || !semver(&r.semver)
+                    || !digest(&r.manifest_sha256)
+                    || !digest(&r.payload_sha256)
+                    || !size_ok(r.size)
+                    || r.previous.as_ref().is_some_and(|p| {
+                        !semver(&p.semver)
+                            || !digest(&p.manifest_sha256)
+                            || !digest(&p.payload_sha256)
+                            || !size_ok(p.size)
+                            || p.manifest_sha256 == r.manifest_sha256
+                    })
+            })
+        {
+            return Err(fail());
+        }
+        Ok(())
+    }
+}
+fn installed_summary(
+    storage: &crate::storage::Storage,
+    record: &InstalledRecord,
+) -> InstalledSummary {
+    let active = installed_file(
+        storage,
+        &record.plugin_id,
+        &record.manifest_sha256,
+        record.size,
+        &record.payload_sha256,
+    );
+    let previous = record.previous.as_ref().map(|p| {
+        installed_file(
+            storage,
+            &record.plugin_id,
+            &p.manifest_sha256,
+            p.size,
+            &p.payload_sha256,
+        )
+    });
+    let verified = active.is_ok() && previous.as_ref().is_none_or(|p| p.is_ok());
+    InstalledSummary {
+        plugin_id: record.plugin_id.clone(),
+        semver: record.semver.clone(),
+        manifest_sha256: record.manifest_sha256.clone(),
+        state: if verified { "installed" } else { "quarantined" },
+        runtime: "disabled",
+        previous: record.previous.as_ref().map(|p| PreviousSummary {
+            semver: p.semver.clone(),
+            manifest_sha256: p.manifest_sha256.clone(),
+        }),
+    }
+}
+fn namespace_dir(storage: &crate::storage::Storage) -> std::path::PathBuf {
+    storage.root.join("hub-plugins")
+}
+fn namespace_file(
+    storage: &crate::storage::Storage,
+    plugin_id: &str,
+    manifest_sha256: &str,
+) -> std::path::PathBuf {
+    namespace_dir(storage).join(format!("{plugin_id}-{manifest_sha256}.payload"))
+}
+fn installed_file(
+    storage: &crate::storage::Storage,
+    plugin_id: &str,
+    manifest_sha256: &str,
+    size: u64,
+    payload_sha256: &str,
+) -> io::Result<()> {
+    crate::storage::private_metadata(&namespace_dir(storage), true)?;
+    open_verified(
+        &namespace_file(storage, plugin_id, manifest_sha256),
+        size,
+        payload_sha256,
+    )
+}
+fn ensure_namespace(storage: &crate::storage::Storage) -> io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    let path = namespace_dir(storage);
+    match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
+    }
+    crate::storage::private_metadata(&path, true)?;
+    Ok(path)
+}
+/// Shared gate for install, rollback and remove: Ready, verified, no import, revision CAS.
+fn preflight(
+    storage: &crate::storage::Storage,
+    hub: &Snapshot,
+    revision: u64,
+) -> Result<Snapshot, &'static str> {
+    if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
+        return Err("configuration_not_ready");
+    }
+    if hub.status != "verified" {
+        return Err("hub_unavailable");
+    }
+    if storage.hub_import.is_some() {
+        return Err("hub_import_busy");
+    }
+    let refreshed = hub.clone().with_approvals(storage);
+    if refreshed.status != "verified" {
+        return Err("hub_unavailable");
+    }
+    if revision != refreshed.install_revision {
+        return Err("stale_install_revision");
+    }
+    Ok(refreshed)
+}
+pub fn install(
+    storage: &crate::storage::Storage,
+    hub: &Snapshot,
+    revision: u64,
+    plugin_id: &str,
+    manifest: &str,
+) -> Result<&'static str, &'static str> {
+    let refreshed = preflight(storage, hub, revision)?;
+    let entry = refreshed
+        .entries
+        .iter()
+        .find(|e| e.plugin_id == plugin_id)
+        .ok_or("unknown_plugin")?;
+    match entry.status {
+        "not_installed" | "update_available" => {}
+        "installed" => return Err("already_installed"),
+        _ => return Err("plugin_incompatible"),
+    }
+    if refreshed
+        .installed
+        .iter()
+        .any(|s| s.plugin_id == plugin_id && s.state == "quarantined")
+    {
+        return Err("plugin_quarantined");
+    }
+    if entry.manifest_sha256 != manifest {
+        return Err("manifest_mismatch");
+    }
+    if !entry.permissions_approved {
+        return Err("permissions_not_approved");
+    }
+    if !entry.payload_staged {
+        return Err("payload_not_staged");
+    }
+    let mut ledger = storage.hub_installed().map_err(|_| "hub_storage_error")?;
+    if ledger.revision != revision {
+        return Err("stale_install_revision");
+    }
+    if ledger.records.iter().any(|r| {
+        r.plugin_id == plugin_id
+            && r.previous
+                .as_ref()
+                .is_some_and(|p| p.manifest_sha256 == manifest)
+    }) {
+        return Err("version_retained_use_rollback");
+    }
+    let next_revision = revision.checked_add(1).ok_or("hub_revision_exhausted")?;
+    let namespace = ensure_namespace(storage).map_err(|_| "hub_storage_error")?;
+    let destination = namespace_file(storage, plugin_id, manifest);
+    publish_no_replace(&payload_path(storage, entry), &destination)
+        .map_err(|_| "hub_storage_error")?;
+    // From here the destination is ours: remove it if the commit does not happen.
+    let verified = (|| -> io::Result<()> {
+        open_verified(&destination, entry.download_size, &entry.payload_sha256)?;
+        std::fs::File::open(&namespace)?.sync_all()
+    })();
+    if verified.is_err() {
+        let _ = std::fs::remove_file(&destination);
+        return Err("hub_storage_error");
+    }
+    let position = ledger.records.iter().position(|r| r.plugin_id == plugin_id);
+    let replaced = position.map(|i| ledger.records.remove(i));
+    let dropped = replaced.as_ref().and_then(|r| r.previous.clone());
+    let previous = replaced.map(|r| InstalledVersion {
+        semver: r.semver,
+        manifest_sha256: r.manifest_sha256,
+        payload_sha256: r.payload_sha256,
+        size: r.size,
+    });
+    ledger.records.push(InstalledRecord {
+        plugin_id: plugin_id.to_owned(),
+        semver: entry.semver.clone(),
+        manifest_sha256: manifest.to_owned(),
+        payload_sha256: entry.payload_sha256.clone(),
+        size: entry.download_size,
+        previous,
+    });
+    ledger.revision = next_revision;
+    if storage.save_hub_installed(&ledger).is_err() {
+        let _ = std::fs::remove_file(&destination);
+        return Err("hub_storage_error");
+    }
+    if let Some(old) = dropped {
+        if crate::storage::private_metadata(&namespace_dir(storage), true).is_ok() {
+            let _ = std::fs::remove_file(namespace_file(storage, plugin_id, &old.manifest_sha256));
+        }
+    }
+    Ok(if position.is_some() {
+        "hub_plugin_updated"
+    } else {
+        "hub_plugin_installed"
+    })
+}
+pub fn rollback(
+    storage: &crate::storage::Storage,
+    hub: &Snapshot,
+    revision: u64,
+    plugin_id: &str,
+) -> Result<&'static str, &'static str> {
+    let refreshed = preflight(storage, hub, revision)?;
+    let mut ledger = storage.hub_installed().map_err(|_| "hub_storage_error")?;
+    let record = ledger
+        .records
+        .iter_mut()
+        .find(|r| r.plugin_id == plugin_id)
+        .ok_or("not_installed")?;
+    if refreshed
+        .installed
+        .iter()
+        .any(|s| s.plugin_id == plugin_id && s.state == "quarantined")
+    {
+        return Err("plugin_quarantined");
+    }
+    let previous = record.previous.take().ok_or("no_previous_version")?;
+    let active = InstalledVersion {
+        semver: std::mem::replace(&mut record.semver, previous.semver),
+        manifest_sha256: std::mem::replace(&mut record.manifest_sha256, previous.manifest_sha256),
+        payload_sha256: std::mem::replace(&mut record.payload_sha256, previous.payload_sha256),
+        size: std::mem::replace(&mut record.size, previous.size),
+    };
+    record.previous = Some(active);
+    ledger.revision = revision.checked_add(1).ok_or("hub_revision_exhausted")?;
+    storage
+        .save_hub_installed(&ledger)
+        .map_err(|_| "hub_storage_error")?;
+    Ok("hub_plugin_rolled_back")
+}
+pub fn remove(
+    storage: &crate::storage::Storage,
+    hub: &Snapshot,
+    revision: u64,
+    plugin_id: &str,
+) -> Result<&'static str, &'static str> {
+    preflight(storage, hub, revision)?;
+    let mut ledger = storage.hub_installed().map_err(|_| "hub_storage_error")?;
+    let position = ledger
+        .records
+        .iter()
+        .position(|r| r.plugin_id == plugin_id)
+        .ok_or("not_installed")?;
+    let record = ledger.records.remove(position);
+    ledger.revision = revision.checked_add(1).ok_or("hub_revision_exhausted")?;
+    storage
+        .save_hub_installed(&ledger)
+        .map_err(|_| "hub_storage_error")?;
+    if crate::storage::private_metadata(&namespace_dir(storage), true).is_ok() {
+        let _ = std::fs::remove_file(namespace_file(storage, plugin_id, &record.manifest_sha256));
+        if let Some(previous) = &record.previous {
+            let _ = std::fs::remove_file(namespace_file(
+                storage,
+                plugin_id,
+                &previous.manifest_sha256,
+            ));
+        }
+    }
+    Ok("hub_plugin_removed")
+}
 /// Opaque verified payload only; never extracted, executable, or installed.
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportSummary {
@@ -453,22 +821,30 @@ fn payload_path(storage: &crate::storage::Storage, entry: &Entry) -> std::path::
         .join(format!("hub-{}.payload", entry.manifest_sha256))
 }
 fn staged(storage: &crate::storage::Storage, entry: &Entry) -> io::Result<bool> {
-    let mut file = match OpenOptions::new()
+    match open_verified(
+        &payload_path(storage, entry),
+        entry.download_size,
+        &entry.payload_sha256,
+    ) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+/// Private 0600 regular file, exact size, exact SHA-256; opened without following links.
+fn open_verified(path: &Path, size: u64, sha256: &str) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(payload_path(storage, entry))
-    {
-        Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e),
-    };
+        .open(path)?;
     crate::storage::validate_opened_private(&file)?;
-    use std::os::unix::fs::MetadataExt;
-    if file.metadata()?.mode() & 0o777 != 0o600 || file.metadata()?.len() != entry.download_size {
+    let meta = file.metadata()?;
+    if meta.mode() & 0o777 != 0o600 || meta.len() != size {
         return Err(fail());
     }
     let mut hash = Sha256::new();
-    let mut remaining = entry.download_size;
+    let mut remaining = size;
     let mut buffer = [0; 8192];
     while remaining > 0 {
         let n = file.read(&mut buffer[..remaining.min(8192) as usize])?;
@@ -478,11 +854,10 @@ fn staged(storage: &crate::storage::Storage, entry: &Entry) -> io::Result<bool> 
         hash.update(&buffer[..n]);
         remaining -= n as u64;
     }
-    if file.read(&mut buffer[..1])? != 0 || format!("{:x}", hash.finalize()) != entry.payload_sha256
-    {
+    if file.read(&mut buffer[..1])? != 0 || format!("{:x}", hash.finalize()) != sha256 {
         return Err(fail());
     }
-    Ok(true)
+    Ok(())
 }
 pub fn begin_import(
     storage: &mut crate::storage::Storage,
@@ -513,7 +888,7 @@ pub fn begin_import(
         .iter()
         .find(|e| e.plugin_id == plugin_id)
         .ok_or("unknown_plugin")?;
-    if entry.status != "not_installed" {
+    if !matches!(entry.status, "not_installed" | "update_available") {
         return Err("plugin_incompatible");
     }
     if entry.manifest_sha256 != manifest {

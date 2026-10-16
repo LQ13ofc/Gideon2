@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -49,6 +49,34 @@ if args.phase=='staging':
     wait(lambda:bridge.connected,10);wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
     check('restart rechecks persisted payload and approval',bridge.hubEntries[0]['payload_staged'] and bridge.hubEntries[0]['permissions_approved'])
     check('native S1 after staging restart',bridge.resultVerified and bridge.snapshot['transcript']['source']=='voice' and bridge.snapshot['speech']['samples']>0)
+elif args.phase=='lifecycle':
+    hubButton=window.findChild(QObject,'hubButton');hubButton.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    hubDialog=window.findChild(QObject,'hubDialog');wait(lambda:hubDialog.property('visible'),3)
+    Path(args.artifacts,'ready').touch()
+    def fixture_record():return next((p for p in bridge.hubInstalled if p.get('plugin_id')=='benign_fixture'),None)
+    wait(lambda:fixture_record() is not None,50)
+    record=fixture_record()
+    check('Core ledger shows fixture installed with runtime disabled',record['state']=='installed' and record['runtime']=='disabled' and record['previous'] is None)
+    check('status label shows installed and disabled',visual_item('status_benign_fixture').property('text').startswith('Instalado · desativado (sem execução)'))
+    check('install control unavailable once installed',not visual_item('install_benign_fixture').property('enabled'))
+    check('rollback unavailable without previous version',not visual_item('rollback_benign_fixture').property('enabled'))
+    check('remove control available for installed plugin',visual_item('remove_benign_fixture').property('enabled'))
+    Path(args.artifacts,'installed').touch()
+    wait(lambda:not bridge.connected,15);Path(args.artifacts,'offline').touch()
+    wait(lambda:bridge.connected,15);wait(lambda:fixture_record() is not None,15)
+    record=fixture_record()
+    check('restart preserves installed disabled record',record['state']=='installed' and record['runtime']=='disabled')
+    check('restarted UI keeps disabled status',visual_item('status_benign_fixture').property('text').startswith('Instalado · desativado (sem execução)'))
+    remove=visual_item('remove_benign_fixture');remove.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    confirm=window.findChild(QObject,'removeConfirm');wait(lambda:confirm.property('visible'),3)
+    check('remove requires confirmation and does not act yet',fixture_record() is not None)
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'));confirm.close();QTest.qWait(50)
+    check('cancelled removal keeps installed record',fixture_record() is not None)
+    remove=visual_item('remove_benign_fixture');remove.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:confirm.property('visible'),3);confirm.accept()
+    wait(lambda:fixture_record() is None and visual_item('hubLifecycleResult').property('text')!='Removendo no Core',15)
+    check('Qt removal confirmed reaches Core ledger',fixture_record() is None)
+    check('hub result label shows Plugin removido',visual_item('hubLifecycleResult').property('text')=='Plugin removido')
 elif args.phase=='permissions':
     wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
     check('native S1 before permission review',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)

@@ -96,7 +96,7 @@ pub struct Storage {
     _lock: File,
     pub(crate) hub_import: Option<crate::hub::Import>,
 }
-fn private_metadata(path: &Path, directory: bool) -> io::Result<()> {
+pub(crate) fn private_metadata(path: &Path, directory: bool) -> io::Result<()> {
     let m = fs::symlink_metadata(path)?;
     // SAFETY: getuid has no preconditions and does not alter host state.
     let uid = unsafe { libc::getuid() };
@@ -295,6 +295,35 @@ impl Storage {
     pub(crate) fn save_hub_approvals(&self, state: &crate::hub::Approvals) -> io::Result<()> {
         state.validate()?;
         self.replace_json("hub-approvals.json", &serde_json::to_vec(state)?)?;
+        File::open(&self.root)?.sync_all()
+    }
+    pub(crate) fn hub_installed(&self) -> io::Result<crate::hub::InstalledLedger> {
+        let path = self.root.join("hub-installed.json");
+        let file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Default::default()),
+            Err(e) => return Err(e),
+        };
+        validate_opened_private(&file)?;
+        let mut bytes = Vec::new();
+        file.take(16385).read_to_end(&mut bytes)?;
+        if bytes.len() > 16384 {
+            return Err(io::Error::other("Hub installed ledger too large"));
+        }
+        let ledger: crate::hub::InstalledLedger = serde_json::from_slice(&bytes)?;
+        ledger.validate()?;
+        Ok(ledger)
+    }
+    pub(crate) fn save_hub_installed(
+        &self,
+        ledger: &crate::hub::InstalledLedger,
+    ) -> io::Result<()> {
+        ledger.validate()?;
+        self.replace_json("hub-installed.json", &serde_json::to_vec(ledger)?)?;
         File::open(&self.root)?.sync_all()
     }
     pub fn update_preferences(

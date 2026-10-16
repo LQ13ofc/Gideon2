@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "repository": "https://github.com/LQ13ofc/Gideon2",
+  "plugins": [
+    {
+      "plugin_id": "benign_fixture",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.1.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/fixture-v1/benign_fixture.bin",
+          "sha256": "496d47696e6691915fbe6b1f7c34c52671552d7dcad27112dd24f99e20378514",
+          "size": 15
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "notifications"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/benign_fixture",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/fixture-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null
+    },
+    {
+      "plugin_id": "future_api",
+      "api_version": 2,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/fixture-v1/benign_fixture.bin",
+          "sha256": "496d47696e6691915fbe6b1f7c34c52671552d7dcad27112dd24f99e20378514",
+          "size": 15
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "notifications"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/benign_fixture",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/fixture-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null
+    },
+    {
+      "plugin_id": "needs_dependency",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/fixture-v1/benign_fixture.bin",
+          "sha256": "496d47696e6691915fbe6b1f7c34c52671552d7dcad27112dd24f99e20378514",
+          "size": 15
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "notifications"
+      ],
+      "dependencies": [
+        {
+          "plugin_id": "absent",
+          "semver": "1.0.0"
+        }
+      ],
+      "conflicts": [],
+      "entrypoint": "bin/benign_fixture",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/fixture-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null
+    }
+  ]
+}

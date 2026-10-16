@@ -41,13 +41,13 @@ class Tests(unittest.TestCase):
         for key,value in [('version',True),('wake_phrases',[]),('wake_phrases',[{'id':'x','text':'no grant','qualification':'certified'}]),('active_phrase',[]),('default_phrase','missing'),('audio_input','microphone')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'base_pack':{**pack,key:value}},'r',0)
     def test_hub_cannot_fake_installation_or_publisher_verification(self):
-        valid={'version':1,'status':'quarantined','repository':None,'catalog_sha256':None,'publisher_verified':False,'entries':[]}
+        valid={'version':1,'status':'quarantined','repository':None,'catalog_sha256':None,'publisher_verified':False,'entries':[],'install_revision':0,'installed':[]}
         validate_snapshot({**BASE,'hub':valid},'r',0)
         for key,value in [('version',True),('status','installed'),('publisher_verified',True),('entries',[{}]),('catalog_sha256','a'*64)]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**valid,key:value}},'r',0)
     def test_hub_approval_cannot_fake_authority_or_revision(self):
         entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':['notifications'],'dependencies':[],'conflicts':[],'download_size':1,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True}
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':2**64-1,'entries':[entry]}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':2**64-1,'entries':[entry],'install_revision':0,'installed':[]}
         validate_snapshot({**BASE,'hub':hub},'r',0)
         for key,value in [('approval_revision',True),('approval_revision',0),('approval_revision',2**64)]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,key:value}},'r',0)
@@ -56,12 +56,41 @@ class Tests(unittest.TestCase):
     def test_staging_progress_cannot_invent_payload_installation_or_bounds(self):
         entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True,'payload_staged':False}
         transfer={'import_id':'transfer','plugin_id':'benign','received':0,'expected':15}
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'entries':[entry],'import':transfer}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'entries':[entry],'import':transfer,'install_revision':0,'installed':[]}
         validate_snapshot({**BASE,'hub':hub},'r',0)
         for key,value in [('received',True),('received',16),('expected',0),('expected',16),('plugin_id','missing')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,'import':{**transfer,key:value}}},'r',0)
         for key,value in [('payload_staged','yes'),('status','installed'),('permissions_approved',False)]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,'entries':[{**entry,key:value}]}},'r',0)
+    def test_installed_lifecycle_cannot_invent_execution_or_authority(self):
+        digest='a'*64;new='c'*64
+        record={'plugin_id':'benign','semver':'1.0.0','manifest_sha256':digest,'state':'installed','runtime':'disabled','previous':None}
+        entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'installed','reason':'none','manifest_sha256':digest,'permissions_approved':False,'payload_staged':False}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'install_revision':3,'entries':[entry],'installed':[record]}
+        validate_snapshot({**BASE,'hub':hub},'r',0)
+        update={**entry,'status':'update_available','manifest_sha256':new,'payload_staged':True}
+        validate_snapshot({**BASE,'hub':{**hub,'entries':[update]}},'r',0)
+        validate_snapshot({**BASE,'hub':{**hub,'entries':[update],'installed':[{**record,'previous':{'semver':'0.9.0','manifest_sha256':'d'*64}}]}},'r',0)
+        bad_cases=[
+            ('runtime enabled',{**hub,'installed':[{**record,'runtime':'enabled'}]}),
+            ('state running',{**hub,'installed':[{**record,'state':'running'}]}),
+            ('installed without record',{**hub,'installed':[]}),
+            ('update without record',{**hub,'entries':[update],'installed':[]}),
+            ('update same manifest',{**hub,'entries':[{**update,'manifest_sha256':digest}]}),
+            ('duplicate plugin_id',{**hub,'installed':[record,dict(record)]}),
+            ('more than eight installed',{**hub,'installed':[{**record,'plugin_id':f'p{i}'} for i in range(9)]}),
+            ('bad digest',{**hub,'installed':[{**record,'manifest_sha256':'A'*64}]}),
+            ('bad previous digest',{**hub,'installed':[{**record,'previous':{'semver':'0.9.0','manifest_sha256':'short'}}]}),
+            ('extra key',{**hub,'installed':[{**record,'payload_path':'/tmp/x'}]}),
+            ('publisher verified',{**hub,'publisher_verified':True}),
+            ('quarantined with installed',{**hub,'status':'quarantined','repository':None,'catalog_sha256':None,'entries':[],'installed':[record]}),
+            ('missing install_revision',{k:v for k,v in hub.items() if k!='install_revision'}),
+            ('install_revision bool',{**hub,'install_revision':True}),
+            ('status installed on incompatible reason',{**hub,'entries':[{**entry,'reason':'api_version'}]}),
+            ('payload staged on installed',{**hub,'entries':[{**entry,'payload_staged':True}]}),
+        ]
+        for name,bad in bad_cases:
+            with self.subTest(case=name),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':bad},'r',0)
     def test_real_socket_malformed_nested_data_and_deep_json_clear_stale_state(self):
         for deep in (False,True,"preferences","hub"):
             with self.subTest(deep=deep),tempfile.TemporaryDirectory(prefix='gideon-ipc-audit-') as td:

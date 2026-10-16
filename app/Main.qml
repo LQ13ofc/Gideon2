@@ -87,12 +87,25 @@ ApplicationWindow {
                         required property var modelData
                         Layout.fillWidth: true
                         Label { text: modelData.plugin_id + " " + modelData.semver + " · " + modelData.publisher; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { text: (modelData.status === "not_installed" ? (modelData.payload_staged ? "Pacote verificado em staging; não instalado" : "Não instalado") : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "status_" + modelData.plugin_id; text: (modelData.status === "installed" ? "Instalado · desativado (sem execução)" : modelData.status === "update_available" ? "Atualização disponível" : modelData.status === "not_installed" ? (modelData.payload_staged ? "Pacote verificado em staging; não instalado" : "Não instalado") : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { text: (modelData.permissions_approved ? "Permissões aprovadas para este manifest: " : "Permissões declaradas (não aprovadas): ") + (modelData.permissions.join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        GlowButton { objectName: "review_" + modelData.plugin_id; text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"; enabled: core.hubApprovalAvailable && modelData.status === "not_installed" && !modelData.permissions_approved; onClicked: { window.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() } }
+                        GlowButton { objectName: "review_" + modelData.plugin_id; text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"; enabled: core.hubApprovalAvailable && (modelData.status === "not_installed" || modelData.status === "update_available") && !modelData.permissions_approved; onClicked: { window.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() } }
+                        GlowButton { objectName: "install_" + modelData.plugin_id; text: "Instalar pacote verificado"; enabled: core.hubLifecycleAvailable && modelData.payload_staged === true && modelData.permissions_approved === true && (modelData.status === "not_installed" || modelData.status === "update_available"); onClicked: core.installHub(modelData.plugin_id, modelData.manifest_sha256) }
                     }
                 }
-                Label { text: "Instalação indisponível nesta etapa. O catálogo não concede acesso ao computador."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Label { text: "Instalados no Core"; visible: core.hubInstalled.length > 0; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Repeater {
+                    model: core.hubInstalled
+                    delegate: ColumnLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Label { text: modelData.plugin_id + " " + modelData.semver + " · " + (modelData.state === "quarantined" ? "Em quarentena" : "Instalado · desativado (sem execução)"); textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        GlowButton { objectName: "rollback_" + modelData.plugin_id; text: "Reverter versão"; enabled: core.hubLifecycleAvailable && !!modelData.previous && modelData.state === "installed"; onClicked: core.rollbackHub(modelData.plugin_id) }
+                        GlowButton { objectName: "remove_" + modelData.plugin_id; text: "Remover plugin"; enabled: core.hubLifecycleAvailable; onClicked: { removeConfirm.plugin = modelData; removeConfirm.open() } }
+                    }
+                }
+                Label { objectName: "hubLifecycleResult"; text: core.hubApprovalResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Label { text: "Instalar copia o pacote verificado para o Core; nada é executado. O catálogo não concede acesso ao computador."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             }
         }
     }
@@ -114,6 +127,16 @@ ApplicationWindow {
             Label { objectName: "hubApprovalResult"; text: core.hubApprovalResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         }
         }
+    }
+    Dialog {
+        id: removeConfirm; objectName: "removeConfirm"
+        property var plugin: null
+        title: "Remover plugin"; modal: true; anchors.centerIn: parent
+        width: Math.min(400, window.width - 32)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        background: GlassCard { theme: window.themeIndex }
+        onAccepted: { if (plugin) core.removeHub(plugin.plugin_id) }
+        Label { text: removeConfirm.plugin ? "Remover " + removeConfirm.plugin.plugin_id + " " + removeConfirm.plugin.semver + " do Core? Nada é executado e o catálogo não muda."  : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: removeConfirm.availableWidth }
     }
     Rectangle {
         id: sidebar

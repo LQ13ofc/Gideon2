@@ -443,3 +443,508 @@ fn real_core_can_cancel_import_when_configuration_requires_restart() {
         .join(format!(".hub-{}.pending", entry.manifest_sha256))
         .exists());
 }
+
+const PLUGIN: &str = "benign_fixture";
+fn versioned(semver: &str) -> Vec<u8> {
+    let mut value: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    value["plugins"][0]["semver"] = serde_json::json!(semver);
+    serde_json::to_vec(&value).unwrap()
+}
+fn stage(storage: &mut gideon_base::storage::Storage, snap: &hub::Snapshot, id: &str) {
+    begin(storage, snap, id);
+    hub::chunk_import(storage, id, 0, PAYLOAD_HEX).unwrap();
+    hub::finish_import(storage, snap, id).unwrap();
+}
+/// Approves then stages entry 0 of `bytes`; returns the refreshed snapshot.
+fn approve_and_stage(
+    storage: &mut gideon_base::storage::Storage,
+    bytes: &[u8],
+    id: &str,
+) -> hub::Snapshot {
+    let snap = load(bytes).unwrap().with_approvals(storage);
+    let e = &snap.entries[0];
+    hub::approve(
+        storage,
+        &snap,
+        snap.approval_revision,
+        &e.plugin_id,
+        &e.manifest_sha256,
+        &e.permissions,
+        true,
+    )
+    .unwrap();
+    let snap = load(bytes).unwrap().with_approvals(storage);
+    stage(storage, &snap, id);
+    load(bytes).unwrap().with_approvals(storage)
+}
+fn installed_v1(storage: &mut gideon_base::storage::Storage) -> hub::Snapshot {
+    let snap = approve_and_stage(storage, FIXTURE.as_bytes(), "v1");
+    let manifest = snap.entries[0].manifest_sha256.clone();
+    assert_eq!(
+        hub::install(storage, &snap, 0, PLUGIN, &manifest),
+        Ok("hub_plugin_installed")
+    );
+    load(FIXTURE.as_bytes()).unwrap().with_approvals(storage)
+}
+fn updated_to(storage: &mut gideon_base::storage::Storage, semver: &str) -> hub::Snapshot {
+    let bytes = versioned(semver);
+    let snap = approve_and_stage(storage, &bytes, &format!("up{}", semver.replace('.', "_")));
+    let manifest = snap.entries[0].manifest_sha256.clone();
+    assert_eq!(
+        hub::install(storage, &snap, snap.install_revision, PLUGIN, &manifest),
+        Ok("hub_plugin_updated")
+    );
+    load(&bytes).unwrap().with_approvals(storage)
+}
+fn namespace_file(storage: &gideon_base::storage::Storage, manifest: &str) -> std::path::PathBuf {
+    storage
+        .root
+        .join("hub-plugins")
+        .join(format!("{PLUGIN}-{manifest}.payload"))
+}
+
+#[test]
+fn install_promotes_verified_payload_privately_and_survives_restart() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let (dir, mut storage, snap) = approved_import();
+    stage(&mut storage, &snap, "upload");
+    let snap = snap.with_approvals(&storage);
+    let manifest = snap.entries[0].manifest_sha256.clone();
+    assert_eq!(
+        hub::install(&storage, &snap, 0, PLUGIN, &manifest),
+        Ok("hub_plugin_installed")
+    );
+    let path = namespace_file(&storage, &manifest);
+    assert_eq!(fs::read(&path).unwrap(), b"benign fixture\n");
+    let meta = fs::metadata(&path).unwrap();
+    assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    assert_eq!(meta.nlink(), 1);
+    assert!(!storage
+        .root
+        .join(format!("hub-{manifest}.payload"))
+        .exists());
+    let snap = snap.with_approvals(&storage);
+    assert_eq!(snap.install_revision, 1);
+    assert_eq!(snap.entries[0].status, "installed");
+    assert!(!snap.entries[0].payload_staged);
+    assert_eq!(snap.installed.len(), 1);
+    assert_eq!(snap.installed[0].state, "installed");
+    assert_eq!(snap.installed[0].runtime, "disabled");
+    assert!(snap.installed[0].previous.is_none());
+    drop(storage);
+    let storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let restarted = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(restarted.install_revision, 1);
+    assert_eq!(restarted.entries[0].status, "installed");
+    assert_eq!(restarted.installed[0].state, "installed");
+    assert_eq!(restarted.installed[0].runtime, "disabled");
+}
+
+#[test]
+fn install_refuses_unsafe_preconditions_before_any_file_moves() {
+    let (dir, mut storage, snap) = approved_import();
+    let manifest = snap.entries[0].manifest_sha256.clone();
+    assert_eq!(
+        hub::install(&storage, &snap, 0, PLUGIN, &manifest),
+        Err("payload_not_staged")
+    );
+    assert_eq!(
+        hub::install(&storage, &snap, 9, PLUGIN, &manifest),
+        Err("stale_install_revision")
+    );
+    assert_eq!(
+        hub::install(&storage, &snap, 0, "absent", &manifest),
+        Err("unknown_plugin")
+    );
+    assert_eq!(
+        hub::install(&storage, &snap, 0, PLUGIN, &"0".repeat(64)),
+        Err("manifest_mismatch")
+    );
+    assert_eq!(
+        hub::install(
+            &storage,
+            &snap,
+            0,
+            "future_api",
+            &snap.entries[1].manifest_sha256
+        ),
+        Err("plugin_incompatible")
+    );
+    begin(&mut storage, &snap, "busy");
+    assert_eq!(
+        hub::install(&storage, &snap, 0, PLUGIN, &manifest),
+        Err("hub_import_busy")
+    );
+    hub::abort_import(&mut storage, "busy").unwrap();
+    stage(&mut storage, &snap, "upload");
+    let snap = snap.with_approvals(&storage);
+    assert_eq!(
+        hub::install(&storage, &snap, 0, PLUGIN, &manifest),
+        Ok("hub_plugin_installed")
+    );
+    assert_eq!(
+        hub::install(&storage, &snap, 0, PLUGIN, &manifest),
+        Err("stale_install_revision")
+    );
+    let snap = snap.with_approvals(&storage);
+    assert_eq!(
+        hub::install(&storage, &snap, 1, PLUGIN, &manifest),
+        Err("already_installed")
+    );
+    // Unapproved catalog entry on a fresh root never reaches the payload check.
+    let other = tempfile::tempdir().unwrap();
+    let fresh_storage = gideon_base::storage::Storage::open(&other.path().join("core")).unwrap();
+    let fresh = load(FIXTURE.as_bytes())
+        .unwrap()
+        .with_approvals(&fresh_storage);
+    assert_eq!(
+        hub::install(&fresh_storage, &fresh, 0, PLUGIN, &manifest),
+        Err("permissions_not_approved")
+    );
+    drop(dir);
+}
+
+#[test]
+fn update_keeps_one_previous_and_rollback_swaps_only_ledger() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let v1 = installed_v1(&mut storage);
+    let v1_manifest = v1.installed[0].manifest_sha256.clone();
+    let v2_bytes = versioned("1.1.0");
+    let v2 = updated_to(&mut storage, "1.1.0");
+    assert_eq!(v2.install_revision, 2);
+    assert_eq!(v2.installed[0].semver, "1.1.0");
+    assert_eq!(v2.installed[0].state, "installed");
+    assert_eq!(v2.entries[0].status, "installed");
+    let previous = v2.installed[0].previous.clone().unwrap();
+    assert_eq!(previous.semver, "1.0.0");
+    assert_eq!(previous.manifest_sha256, v1_manifest);
+    assert!(namespace_file(&storage, &v1_manifest).exists());
+
+    assert_eq!(
+        hub::rollback(&storage, &v2, 2, PLUGIN),
+        Ok("hub_plugin_rolled_back")
+    );
+    let back = load(&v2_bytes).unwrap().with_approvals(&storage);
+    assert_eq!(back.installed[0].semver, "1.0.0");
+    assert_eq!(back.installed[0].previous.clone().unwrap().semver, "1.1.0");
+    assert_eq!(back.entries[0].status, "update_available");
+    assert_eq!(
+        hub::rollback(&storage, &back, 3, PLUGIN),
+        Ok("hub_plugin_rolled_back")
+    );
+    let again = load(&v2_bytes).unwrap().with_approvals(&storage);
+    assert_eq!(again.installed[0].semver, "1.1.0");
+    assert_eq!(again.installed[0].previous.clone().unwrap().semver, "1.0.0");
+    assert_eq!(
+        hub::rollback(&storage, &again, 99, PLUGIN),
+        Err("stale_install_revision")
+    );
+
+    // A third version drops the oldest previous file after its commit.
+    let v3 = updated_to(&mut storage, "1.2.0");
+    assert_eq!(v3.installed[0].semver, "1.2.0");
+    assert_eq!(v3.installed[0].previous.clone().unwrap().semver, "1.1.0");
+    assert!(!namespace_file(&storage, &v1_manifest).exists());
+}
+
+#[test]
+fn remove_deletes_active_and_previous_files_and_ledger_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    installed_v1(&mut storage);
+    let v2 = updated_to(&mut storage, "1.1.0");
+    let active = v2.installed[0].manifest_sha256.clone();
+    let previous = v2.installed[0].previous.clone().unwrap().manifest_sha256;
+    assert!(namespace_file(&storage, &active).exists());
+    assert!(namespace_file(&storage, &previous).exists());
+    assert_eq!(
+        hub::remove(&storage, &v2, v2.install_revision, PLUGIN),
+        Ok("hub_plugin_removed")
+    );
+    assert!(!namespace_file(&storage, &active).exists());
+    assert!(!namespace_file(&storage, &previous).exists());
+    let after = load(&versioned("1.1.0")).unwrap().with_approvals(&storage);
+    assert!(after.installed.is_empty());
+    assert_eq!(after.install_revision, 3);
+    assert_eq!(after.entries[0].status, "not_installed");
+    assert_eq!(
+        hub::remove(&storage, &after, 3, PLUGIN),
+        Err("not_installed")
+    );
+}
+
+fn quarantined_after_tamper(tamper: fn(&std::path::Path, &std::path::Path)) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let snap = installed_v1(&mut storage);
+    let path = namespace_file(&storage, &snap.installed[0].manifest_sha256);
+    tamper(&path, &dir.path().join("sentinel"));
+    let snap = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(snap.status, "verified");
+    assert_eq!(snap.installed[0].state, "quarantined");
+    assert_eq!(snap.entries[0].status, "installed");
+    assert_eq!(
+        hub::rollback(&storage, &snap, snap.install_revision, PLUGIN),
+        Err("plugin_quarantined")
+    );
+    assert_eq!(
+        hub::remove(&storage, &snap, snap.install_revision, PLUGIN),
+        Ok("hub_plugin_removed")
+    );
+    assert!(fs::symlink_metadata(&path).is_err());
+}
+
+#[test]
+fn tampered_installed_payload_quarantines_only_that_plugin() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    quarantined_after_tamper(|path, _| {
+        fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .unwrap()
+            .write_all(b"!")
+            .unwrap();
+    });
+    quarantined_after_tamper(|path, _| {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644)).unwrap();
+    });
+    quarantined_after_tamper(|path, sentinel| {
+        fs::write(sentinel, b"outside").unwrap();
+        fs::remove_file(path).unwrap();
+        symlink(sentinel, path).unwrap();
+        assert_eq!(fs::read(sentinel).unwrap(), b"outside");
+    });
+}
+
+#[test]
+fn corrupt_install_ledger_quarantines_hub_without_stopping_base() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    installed_v1(&mut storage);
+    let path = storage.root.join("hub-installed.json");
+    for (bytes, mode) in [
+        (b"{".to_vec(), 0o600),
+        (
+            b"{\"version\":1,\"revision\":1,\"records\":[],\"extra\":1}".to_vec(),
+            0o600,
+        ),
+        (
+            b"{\"version\":1,\"revision\":1,\"records\":[]}".to_vec(),
+            0o644,
+        ),
+    ] {
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        assert_eq!(
+            load(FIXTURE.as_bytes())
+                .unwrap()
+                .with_approvals(&storage)
+                .status,
+            "quarantined"
+        );
+    }
+    assert_eq!(
+        storage.configuration_status,
+        gideon_base::storage::ConfigurationStatus::Ready
+    );
+}
+
+#[test]
+fn install_collision_fails_closed_and_keeps_foreign_file_and_staged_payload() {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let (_dir, mut storage, snap) = approved_import();
+    stage(&mut storage, &snap, "upload");
+    let snap = snap.with_approvals(&storage);
+    let manifest = snap.entries[0].manifest_sha256.clone();
+    let namespace = storage.root.join("hub-plugins");
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&namespace)
+        .unwrap();
+    let foreign = namespace_file(&storage, &manifest);
+    fs::write(&foreign, b"foreign").unwrap();
+    fs::set_permissions(&foreign, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        hub::install(&storage, &snap, 0, PLUGIN, &manifest),
+        Err("hub_storage_error")
+    );
+    assert_eq!(fs::read(&foreign).unwrap(), b"foreign");
+    let after = snap.with_approvals(&storage);
+    assert!(after.entries[0].payload_staged);
+    assert_eq!(after.entries[0].status, "not_installed");
+    assert_eq!(after.install_revision, 0);
+}
+
+#[test]
+fn retained_previous_version_cannot_reinstall_via_install() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    installed_v1(&mut storage);
+    let v2_bytes = versioned("1.1.0");
+    let v2 = updated_to(&mut storage, "1.1.0");
+    let v2_manifest = v2.installed[0].manifest_sha256.clone();
+    let v1_manifest = v2.installed[0].previous.clone().unwrap().manifest_sha256;
+    assert_eq!(
+        hub::rollback(&storage, &v2, 2, PLUGIN),
+        Ok("hub_plugin_rolled_back")
+    );
+    let back = load(&v2_bytes).unwrap().with_approvals(&storage);
+    assert_eq!(back.install_revision, 3);
+    assert_eq!(back.installed[0].semver, "1.0.0");
+    assert_eq!(back.installed[0].previous.clone().unwrap().semver, "1.1.0");
+    assert_eq!(back.entries[0].status, "update_available");
+    stage(&mut storage, &back, "again");
+    let staged = load(&v2_bytes).unwrap().with_approvals(&storage);
+    assert!(staged.entries[0].payload_staged);
+    assert_eq!(staged.entries[0].manifest_sha256, v2_manifest);
+    assert_eq!(
+        hub::install(&storage, &staged, 3, PLUGIN, &v2_manifest),
+        Err("version_retained_use_rollback")
+    );
+    let after = load(&v2_bytes).unwrap().with_approvals(&storage);
+    assert_eq!(after.install_revision, 3);
+    assert_eq!(after.installed[0].semver, "1.0.0");
+    assert_eq!(after.entries[0].status, "update_available");
+    assert!(after.entries[0].payload_staged);
+    assert_eq!(
+        fs::read(namespace_file(&storage, &v1_manifest)).unwrap(),
+        b"benign fixture\n"
+    );
+    assert_eq!(
+        fs::read(namespace_file(&storage, &v2_manifest)).unwrap(),
+        b"benign fixture\n"
+    );
+    assert!(storage
+        .root
+        .join(format!("hub-{v2_manifest}.payload"))
+        .exists());
+}
+
+/// Approves then stages entry 0 of `bytes`, chaining the cached snapshot like Core does.
+fn approve_stage_chain(
+    storage: &mut gideon_base::storage::Storage,
+    bytes: &[u8],
+    id: &str,
+) -> hub::Snapshot {
+    let s = load(bytes).unwrap().with_approvals(storage);
+    let e = &s.entries[0];
+    hub::approve(
+        storage,
+        &s,
+        s.approval_revision,
+        &e.plugin_id,
+        &e.manifest_sha256,
+        &e.permissions,
+        true,
+    )
+    .unwrap();
+    let s = s.with_approvals(storage);
+    stage(storage, &s, id);
+    s.with_approvals(storage)
+}
+
+#[test]
+fn chained_snapshots_reset_installed_status_after_remove() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let s0 = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    let manifest = s0.entries[0].manifest_sha256.clone();
+    hub::approve(
+        &storage,
+        &s0,
+        0,
+        PLUGIN,
+        &manifest,
+        &s0.entries[0].permissions,
+        true,
+    )
+    .unwrap();
+    let mut cached = s0.with_approvals(&storage);
+    stage(&mut storage, &cached, "upload");
+    cached = cached.with_approvals(&storage);
+    assert_eq!(
+        hub::install(
+            &storage,
+            &cached,
+            cached.install_revision,
+            PLUGIN,
+            &manifest
+        ),
+        Ok("hub_plugin_installed")
+    );
+    cached = cached.with_approvals(&storage);
+    assert_eq!(cached.entries[0].status, "installed");
+    assert_eq!(cached.install_revision, 1);
+    assert_eq!(
+        hub::remove(&storage, &cached, cached.install_revision, PLUGIN),
+        Ok("hub_plugin_removed")
+    );
+    cached = cached.with_approvals(&storage);
+    assert_eq!(cached.entries[0].status, "not_installed");
+    assert!(cached.installed.is_empty());
+}
+
+#[test]
+fn chained_snapshots_track_update_and_rollback_statuses() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let v1 = approve_stage_chain(&mut storage, FIXTURE.as_bytes(), "v1");
+    let v1_manifest = v1.entries[0].manifest_sha256.clone();
+    assert_eq!(
+        hub::install(&storage, &v1, v1.install_revision, PLUGIN, &v1_manifest),
+        Ok("hub_plugin_installed")
+    );
+    let mut v2 = approve_stage_chain(&mut storage, &versioned("1.1.0"), "v2");
+    let v2_manifest = v2.entries[0].manifest_sha256.clone();
+    assert_eq!(
+        hub::install(&storage, &v2, v2.install_revision, PLUGIN, &v2_manifest),
+        Ok("hub_plugin_updated")
+    );
+    v2 = v2.with_approvals(&storage);
+    assert_eq!(v2.entries[0].status, "installed");
+    assert_eq!(v2.installed[0].semver, "1.1.0");
+
+    assert_eq!(
+        hub::rollback(&storage, &v2, v2.install_revision, PLUGIN),
+        Ok("hub_plugin_rolled_back")
+    );
+    v2 = v2.with_approvals(&storage);
+    assert_eq!(v2.entries[0].status, "update_available");
+    assert_eq!(v2.installed[0].semver, "1.0.0");
+
+    assert_eq!(
+        hub::rollback(&storage, &v2, v2.install_revision, PLUGIN),
+        Ok("hub_plugin_rolled_back")
+    );
+    v2 = v2.with_approvals(&storage);
+    assert_eq!(v2.entries[0].status, "installed");
+    assert_eq!(v2.installed[0].semver, "1.1.0");
+}
+
+#[test]
+fn remove_never_unlinks_through_replaced_namespace_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let snap = installed_v1(&mut storage);
+    let manifest = snap.installed[0].manifest_sha256.clone();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let target = elsewhere
+        .path()
+        .join(format!("{PLUGIN}-{manifest}.payload"));
+    fs::write(&target, b"outside").unwrap();
+    let namespace = storage.root.join("hub-plugins");
+    fs::remove_dir_all(&namespace).unwrap();
+    symlink(elsewhere.path(), &namespace).unwrap();
+    let snap = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(
+        hub::remove(&storage, &snap, snap.install_revision, PLUGIN),
+        Ok("hub_plugin_removed")
+    );
+    let after = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert!(after.installed.is_empty());
+    assert_eq!(after.install_revision, 2);
+    assert_eq!(fs::read(&target).unwrap(), b"outside");
+}

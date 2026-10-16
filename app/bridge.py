@@ -51,24 +51,35 @@ def validate_snapshot(data,request_id,min_sequence):
         if hub.get('import') is not None:
             transfer=hub['import'];require(isinstance(transfer,dict) and short(transfer.get('import_id')) and short(transfer.get('plugin_id')) and integer(transfer.get('expected'),1,67108864) and integer(transfer.get('received'),0,transfer['expected']))
         entries=hub.get('entries');require(isinstance(entries,list) and len(entries)<=8)
+        installed=hub.get('installed');require(integer(hub.get('install_revision')) and isinstance(installed,list) and len(installed)<=8 and (hub['status']=='verified' or not installed))
+        records={};digest=lambda v:isinstance(v,str) and len(v)==64 and all(c in '0123456789abcdef' for c in v)
+        for record in installed:
+            require(isinstance(record,dict) and set(record)=={'plugin_id','semver','manifest_sha256','state','runtime','previous'})
+            require(short(record['plugin_id'],128) and bool(record['plugin_id']) and short(record['semver'],128) and bool(record['semver']) and record['state'] in ('installed','quarantined') and record['runtime']=='disabled' and digest(record['manifest_sha256']))
+            previous=record['previous'];require(previous is None or (isinstance(previous,dict) and set(previous)=={'semver','manifest_sha256'} and short(previous['semver'],128) and bool(previous['semver']) and digest(previous['manifest_sha256'])))
+            require(record['plugin_id'] not in records);records[record['plugin_id']]=record
         if hub['status']=='quarantined':require(hub.get('import') is None and not entries and hub.get('repository') is None and hub.get('catalog_sha256') is None)
         else:
             require(short(hub.get('repository'),256) and hub['repository'].startswith('https://github.com/'))
             digest=hub.get('catalog_sha256');require(isinstance(digest,str) and len(digest)==64 and all(c in '0123456789abcdef' for c in digest))
         if hub.get('import') is not None:
             transfer=hub['import'];matching=[e for e in entries if e.get('plugin_id')==transfer['plugin_id']]
-            require(len(matching)==1 and matching[0].get('status')=='not_installed' and matching[0].get('permissions_approved') is True and transfer['expected']==matching[0].get('download_size'))
+            require(len(matching)==1 and matching[0].get('status') in ('not_installed','update_available') and matching[0].get('permissions_approved') is True and transfer['expected']==matching[0].get('download_size'))
         ids=set()
         for entry in entries:
             require(isinstance(entry,dict))
             for key in ('plugin_id','semver','publisher','license','support_policy'):require(short(entry.get(key),128) and bool(entry[key]))
             if 'manifest_sha256' in entry:require(isinstance(entry['manifest_sha256'],str) and len(entry['manifest_sha256'])==64 and all(c in '0123456789abcdef' for c in entry['manifest_sha256']))
-            if 'payload_staged' in entry:require(type(entry['payload_staged']) is bool and (not entry['payload_staged'] or entry.get('status')=='not_installed'))
-            if 'permissions_approved' in entry:require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status')=='not_installed' and 'manifest_sha256' in entry and integer(hub.get('approval_revision'),1))))
+            if 'payload_staged' in entry:require(type(entry['payload_staged']) is bool and (not entry['payload_staged'] or entry.get('status') in ('not_installed','update_available')))
+            if 'permissions_approved' in entry:require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status') in ('not_installed','update_available') and 'manifest_sha256' in entry and integer(hub.get('approval_revision'),1))))
             require(entry['plugin_id'] not in ids);ids.add(entry['plugin_id'])
             require(integer(entry.get('api_version'),0,65535) and integer(entry.get('download_size'),0,67108864))
-            require(entry.get('status') in ('not_installed','incompatible') and entry.get('reason') in ('none','api_version','target','dependencies_unresolved'))
-            require((entry['status']=='not_installed') == (entry['reason']=='none'))
+            require(entry.get('status') in ('not_installed','incompatible','installed','update_available') and entry.get('reason') in ('none','api_version','target','dependencies_unresolved'))
+            require((entry['status']=='incompatible') == (entry['reason']!='none'))
+            record=records.get(entry['plugin_id'])
+            if entry['status']=='installed':require(record is not None and 'manifest_sha256' in entry and record['manifest_sha256']==entry['manifest_sha256'])
+            elif entry['status']=='update_available':require(record is not None and 'manifest_sha256' in entry and record['manifest_sha256']!=entry['manifest_sha256'])
+            elif entry['status']=='not_installed':require(record is None)
             for key in ('targets','permissions','conflicts'):
                 require(isinstance(entry.get(key),list) and len(entry[key])<=8 and all(short(v) and bool(v) for v in entry[key]))
             deps=entry.get('dependencies');require(isinstance(deps,list) and len(deps)<=8 and all(isinstance(d,dict) and short(d.get('plugin_id')) and short(d.get('semver')) for d in deps))
@@ -109,6 +120,9 @@ def validate_snapshot(data,request_id,min_sequence):
             require('session_id' in event and (event['session_id'] is None or sid(event['session_id'])))
             previous=event['sequence']
     return data
+
+HUB_PENDING={'hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core'}
+HUB_DONE={'hub_install':'Plugin instalado (desativado)','hub_rollback':'Versão revertida','hub_remove':'Plugin removido'}
 
 class Bridge(QObject):
     changed=Signal()
@@ -164,6 +178,8 @@ class Bridge(QObject):
                 self.hub_result=('Importação cancelada' if data.get('code')=='ok' else data.get('code','invalid_message'))
             elif pending_op=='hub_approve':
                 self.hub_result=(f'Permissões aprovadas: {self.hub_target}' if data.get('code')=='ok' else data.get('code','invalid_message'))
+            elif pending_op in HUB_PENDING:
+                self.hub_result=(HUB_DONE[pending_op] if data.get('code')=='ok' else data.get('code','invalid_message'))
             elif pending_op in ('preferences','rollback_preferences','select_wake','feedback_preferences'):
                 self.preferences_result=('Preferências salvas pelo Core' if data.get('code')=='ok' else data.get('code','invalid_message'))
             data.pop('request_id',None)
@@ -228,6 +244,7 @@ class Bridge(QObject):
     def _preferences(self,op,**kw):
         if op=='hub_approve':self.hub_result='Enviando aprovação ao Core'
         elif op=='hub_abort':self.hub_result='Enviando cancelamento ao Core'
+        elif op in HUB_PENDING:self.hub_result=HUB_PENDING[op]
         else:self.preferences_result='Enviando ao Core'
         if self.pending:self.preferences_request=(op,kw)
         else:self._request(op,**kw)
@@ -269,6 +286,21 @@ class Bridge(QObject):
     def approveHub(self,plugin,manifest,permissions,acknowledged):
         if self.hubApprovalAvailable:self._preferences('hub_approve',revision=int(self.hubApprovalRevision),plugin_id=plugin,manifest_sha256=manifest,permissions=list(permissions),publisher_unverified_ack=acknowledged)
     @Property(bool,notify=changed)
+    def hubLifecycleAvailable(self):return self.preferencesAvailable and (self.snapshot.get('hub') or {}).get('status')=='verified' and self.snapshot['hub'].get('import') is None
+    @Property(str,notify=changed)
+    def hubInstallRevision(self):return str((self.snapshot.get('hub') or {}).get('install_revision',0))
+    @Property('QVariantList',notify=changed)
+    def hubInstalled(self):return (self.snapshot.get('hub') or {}).get('installed',[])
+    @Slot(str,str)
+    def installHub(self,plugin,manifest):
+        if self.hubLifecycleAvailable:self._preferences('hub_install',revision=int(self.hubInstallRevision),plugin_id=plugin,manifest_sha256=manifest)
+    @Slot(str)
+    def rollbackHub(self,plugin):
+        if self.hubLifecycleAvailable:self._preferences('hub_rollback',revision=int(self.hubInstallRevision),plugin_id=plugin)
+    @Slot(str)
+    def removeHub(self,plugin):
+        if self.hubLifecycleAvailable:self._preferences('hub_remove',revision=int(self.hubInstallRevision),plugin_id=plugin)
+    @Property(bool,notify=changed)
     def hubImportActive(self):return self.online and bool((self.snapshot.get('hub') or {}).get('import'))
     @Property(str,notify=changed)
     def hubImportDescription(self):
@@ -285,7 +317,7 @@ class Bridge(QObject):
         if not self.online:return 'Core offline'
         if not hub:return 'Catálogo não configurado'
         if hub['status']=='quarantined':return 'Catálogo em quarentena; Base continua disponível'
-        return 'Catálogo local com checksum verificado; publisher não autenticado. Nenhum plugin instalado ou executado.'
+        return 'Catálogo local com checksum verificado; publisher não autenticado. Plugins instalados ficam desativados; nenhum é executado.'
     @Property(bool,notify=changed)
     def connected(self):return self.online
     @Property(str,notify=changed)

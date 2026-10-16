@@ -38,6 +38,19 @@ pub enum Operation {
         permissions: Vec<String>,
         publisher_unverified_ack: bool,
     },
+    HubInstall {
+        revision: u64,
+        plugin_id: String,
+        manifest_sha256: String,
+    },
+    HubRollback {
+        revision: u64,
+        plugin_id: String,
+    },
+    HubRemove {
+        revision: u64,
+        plugin_id: String,
+    },
     Snapshot,
     FeedbackPreferences {
         revision: u64,
@@ -170,6 +183,25 @@ enum WireRequest {
         permissions: Vec<String>,
         publisher_unverified_ack: bool,
     },
+    HubInstall {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+        manifest_sha256: String,
+    },
+    HubRollback {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+    },
+    HubRemove {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+    },
     FeedbackPreferences {
         version: u16,
         request_id: String,
@@ -285,6 +317,47 @@ impl<'de> Deserialize<'de> for Request {
                     manifest_sha256,
                     permissions,
                     publisher_unverified_ack,
+                },
+            ),
+            WireRequest::HubInstall {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+                manifest_sha256,
+            } => (
+                version,
+                request_id,
+                Operation::HubInstall {
+                    revision,
+                    plugin_id,
+                    manifest_sha256,
+                },
+            ),
+            WireRequest::HubRollback {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+            } => (
+                version,
+                request_id,
+                Operation::HubRollback {
+                    revision,
+                    plugin_id,
+                },
+            ),
+            WireRequest::HubRemove {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+            } => (
+                version,
+                request_id,
+                Operation::HubRemove {
+                    revision,
+                    plugin_id,
                 },
             ),
             WireRequest::FeedbackPreferences {

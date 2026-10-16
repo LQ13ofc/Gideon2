@@ -794,6 +794,69 @@ impl Core {
                     "hub_unavailable"
                 }
             }
+            Operation::HubInstall { .. }
+            | Operation::HubRollback { .. }
+            | Operation::HubRemove { .. }
+                if self.session.is_some() =>
+            {
+                "busy"
+            }
+            Operation::HubInstall {
+                revision,
+                plugin_id,
+                manifest_sha256,
+            } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result =
+                        crate::hub::install(storage, hub, revision, &plugin_id, &manifest_sha256);
+                    self.hub = Some(hub.clone().with_approvals(storage));
+                    match result {
+                        Ok(event) => {
+                            self.emit(req.request_id.clone(), None, event);
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
+            Operation::HubRollback {
+                revision,
+                plugin_id,
+            } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::rollback(storage, hub, revision, &plugin_id);
+                    self.hub = Some(hub.clone().with_approvals(storage));
+                    match result {
+                        Ok(event) => {
+                            self.emit(req.request_id.clone(), None, event);
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
+            Operation::HubRemove {
+                revision,
+                plugin_id,
+            } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::remove(storage, hub, revision, &plugin_id);
+                    self.hub = Some(hub.clone().with_approvals(storage));
+                    match result {
+                        Ok(event) => {
+                            self.emit(req.request_id.clone(), None, event);
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
             Operation::FeedbackPreferences { revision, .. }
                 if revision != self.preferences.revision =>
             {
