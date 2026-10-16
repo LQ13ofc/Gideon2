@@ -41,11 +41,7 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     loop {
-        let line = tokio::time::timeout(
-            Duration::from_secs(5),
-            bounded_frame(&mut read, MAX_INVOKE_MESSAGE),
-        )
-        .await??;
+        let line = tokio::time::timeout(Duration::from_secs(5), request_frame(&mut read)).await??;
         let Some(line) = line else {
             return Ok(());
         };
@@ -81,6 +77,54 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
 }
 /// Raw line bound: 8 KiB capability input plus envelope; other operations stay at MAX_MESSAGE.
 const MAX_INVOKE_MESSAGE: usize = 16384;
+/// Client request line: bounded by MAX_MESSAGE unless it looks like a JSON object (`{"`), in which
+/// case it may reach MAX_INVOKE_MESSAGE; the parsed operation is checked afterwards, and only
+/// capability_invoke may actually exceed MAX_MESSAGE. Garbage without a newline closes at 4 KiB.
+async fn request_frame<R: tokio::io::AsyncBufRead + Unpin>(
+    read: &mut R,
+) -> io::Result<Option<Vec<u8>>> {
+    let mut bytes = Vec::new();
+    loop {
+        let chunk = read.fill_buf().await?;
+        if chunk.is_empty() {
+            return if bytes.is_empty() {
+                Ok(None)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "partial message",
+                ))
+            };
+        }
+        let size = chunk
+            .iter()
+            .position(|c| *c == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(chunk.len());
+        let total = bytes.len() + size;
+        let first = bytes.first().or_else(|| chunk.first());
+        let second = bytes.get(1).or_else(|| {
+            if bytes.is_empty() {
+                chunk.get(1)
+            } else {
+                chunk.first()
+            }
+        });
+        let object_like = first == Some(&b'{') && second == Some(&b'"');
+        if total > MAX_INVOKE_MESSAGE || (total > MAX_MESSAGE && !object_like) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "message too large",
+            ));
+        }
+        let done = chunk[size - 1] == b'\n';
+        bytes.extend_from_slice(&chunk[..size]);
+        read.consume(size);
+        if done {
+            return Ok(Some(bytes));
+        }
+    }
+}
 pub(crate) async fn bounded_frame<R: tokio::io::AsyncBufRead + Unpin>(
     read: &mut R,
     limit: usize,

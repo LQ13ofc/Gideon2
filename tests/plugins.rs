@@ -1200,3 +1200,44 @@ fn shipped_c0_catalog_loads_with_runtime_declarations() {
     assert_eq!(ids, ["dummy_echo", "dummy_evil", "plain_opaque"]);
     assert!(snapshot.entries.iter().all(|e| e.status == "not_installed"));
 }
+
+#[test]
+fn only_capability_invoke_lines_may_exceed_the_four_kib_request_bound() {
+    use std::io::Read;
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    let cat = catalog(dir.path(), "bound.json", &[]);
+    let mut core = Core::new(dir.path(), cat);
+    core.start();
+    // Garbage without a newline must be cut at the ordinary bound, not wait for 16 KiB.
+    let mut stream = UnixStream::connect(core.root.join("core.sock")).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream.write_all(&[b'x'; 5000]).unwrap();
+    let mut buf = [0u8; 10];
+    match stream.read(&mut buf) {
+        Ok(0) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+        other => panic!("oversize line was not closed promptly: {other:?}"),
+    }
+    // A long line that does not name capability_invoke is also refused at 4 KiB.
+    let mut other = UnixStream::connect(core.root.join("core.sock")).unwrap();
+    other
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let filler = "a".repeat(6000);
+    let line = format!(
+        "{{\"version\":1,\"request_id\":\"long\",\"op\":\"snapshot\",\"x\":\"{filler}\"}}\n"
+    );
+    let _ = other.write_all(line.as_bytes());
+    match other.read(&mut buf) {
+        Ok(0) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+        other => panic!("long non-invoke line was not closed: {other:?}"),
+    }
+    assert!(
+        core.try_snapshot().is_some(),
+        "Core must survive both peers"
+    );
+}
