@@ -51,6 +51,67 @@ pub const SYNTHETIC_REGISTRY: [(&str, Risk); 4] = [
     ("synth_publish", Risk::Destructive),
 ];
 
+/// C4 bridge: a model tool that maps onto a plugin capability and a synthetic world service.
+/// Exists only under `--agent-synthetic`. The owner plugin must run and hold the permission.
+pub struct Bridge {
+    pub name: &'static str,
+    pub risk: Risk,
+    pub capability: &'static str,
+    pub permission: &'static str,
+    pub service: &'static str,
+}
+
+/// Argument names of each bridge tool equal the service's exact argument names.
+pub const BRIDGE_REGISTRY: [Bridge; 6] = [
+    Bridge {
+        name: "screen_capture",
+        risk: Risk::ReadOnly,
+        capability: "screen_observe.capture",
+        permission: "screen_observe",
+        service: "screen.capture",
+    },
+    Bridge {
+        name: "ui_tree",
+        risk: Risk::ReadOnly,
+        capability: "computer_control.tree",
+        permission: "input_control",
+        service: "input.a11y_tree",
+    },
+    Bridge {
+        name: "ui_click",
+        risk: Risk::StateChanging,
+        capability: "computer_control.act",
+        permission: "input_control",
+        service: "input.click",
+    },
+    Bridge {
+        name: "ui_type",
+        risk: Risk::StateChanging,
+        capability: "computer_control.act",
+        permission: "input_control",
+        service: "input.type",
+    },
+    Bridge {
+        name: "audio_set_route",
+        risk: Risk::StateChanging,
+        capability: "audio_advanced.act",
+        permission: "audio_route",
+        service: "audio.set_route",
+    },
+    Bridge {
+        name: "audio_app_volume",
+        risk: Risk::StateChanging,
+        capability: "audio_advanced.act",
+        permission: "audio_route",
+        service: "audio.app_volume",
+    },
+];
+
+/// Bridge entry for a tool name, reachable only when the caller enabled the synthetic registry.
+pub fn bridge(name: &str) -> Option<&'static Bridge> {
+    BRIDGE_REGISTRY.iter().find(|entry| entry.name == name)
+}
+
 pub fn risk(name: &str) -> Option<Risk> {
     REGISTRY
         .iter()

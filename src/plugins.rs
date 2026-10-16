@@ -7,6 +7,7 @@ use crate::{
     llmcfg::{Access, HostAuth, LlmState, NETWORK_PERMISSION, SETTINGS_PERMISSION},
     storage::{self, PluginState, Storage},
     transport::bounded_frame,
+    world,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -174,6 +175,8 @@ pub enum Intent {
         input: Value,
         deadline_ms: u64,
         auth: HostAuth,
+        /// Approved C4 synthetic permissions of the owner (empty unless approved).
+        grants: Vec<String>,
     },
     Cancel {
         plugin_id: String,
@@ -208,6 +211,11 @@ pub enum Ev {
     FallbackUsed {
         plugin_id: String,
         invocation: u64,
+    },
+    /// A C4 synthetic service reached the world (audit kind only, never content).
+    Audit {
+        plugin_id: String,
+        kind: &'static str,
     },
 }
 /// Event tagged with the actor generation that produced it; stale generations are dropped.
@@ -579,6 +587,11 @@ impl PluginView {
         let granted =
             |name: &str| owner.permissions_approved && owner.permissions.iter().any(|p| p == name);
         let auth = llm.host_auth(granted(NETWORK_PERMISSION), granted(SETTINGS_PERMISSION));
+        let grants: Vec<String> = world::PERMISSIONS
+            .iter()
+            .filter(|name| granted(name))
+            .map(|name| name.to_string())
+            .collect();
         self.active = Some(Active {
             invocation,
             plugin_id: owner.plugin_id.clone(),
@@ -593,6 +606,7 @@ impl PluginView {
             input,
             deadline_ms,
             auth,
+            grants,
         });
         self.events.push("capability_invoked");
         Ok(())
@@ -727,6 +741,11 @@ impl PluginView {
                     self.events.push("llm_fallback_used");
                 }
             }
+            Ev::Audit { plugin_id, kind } => {
+                if self.ledger.enabled.iter().any(|id| *id == plugin_id) {
+                    self.events.push(kind);
+                }
+            }
             Ev::Log { .. } => {
                 while self
                     .logs
@@ -809,13 +828,18 @@ impl PluginView {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
+/// Authority of one invocation: brokered-HTTP/settings grants and the C4 synthetic grants.
+struct Scope {
+    auth: HostAuth,
+    grants: Vec<String>,
+}
 enum Cmd {
     Invoke {
         invocation: u64,
         capability: String,
         input: Value,
         deadline_ms: u64,
-        auth: HostAuth,
+        scope: Box<Scope>,
     },
     Cancel {
         invocation: u64,
@@ -915,6 +939,7 @@ impl Host {
                 input,
                 deadline_ms,
                 auth,
+                grants,
             } => {
                 let sent = self.actors.get(&plugin_id).is_some_and(|a| {
                     a.commands
@@ -923,7 +948,7 @@ impl Host {
                             capability,
                             input,
                             deadline_ms,
-                            auth,
+                            scope: Box::new(Scope { auth, grants }),
                         })
                         .is_ok()
                 });
@@ -957,6 +982,7 @@ impl Host {
             | Ev::Result { plugin_id, .. }
             | Ev::Partial { plugin_id, .. }
             | Ev::FallbackUsed { plugin_id, .. }
+            | Ev::Audit { plugin_id, .. }
             | Ev::Log { plugin_id } => plugin_id.clone(),
         };
         if self.actors.get(&id).is_none_or(|a| a.epoch != wire.epoch) {
@@ -1165,6 +1191,8 @@ struct Session {
     root: PathBuf,
     plugin_id: String,
     auth: HostAuth,
+    /// Approved C4 synthetic permissions for the active invocation (fixed at invoke time).
+    grants: Vec<String>,
     host: Option<HostCall>,
     /// Last upstream status the broker reported for the active invocation (Core-side only).
     http_status: Option<u16>,
@@ -1566,6 +1594,7 @@ impl Session {
             root: ctx.root.clone(),
             plugin_id: ctx.plugin_id.clone(),
             auth: HostAuth::default(),
+            grants: Vec::new(),
             host: None,
             http_status: None,
         };
@@ -1627,8 +1656,8 @@ impl Session {
                     }
                 },
                 command = commands.recv() => match command {
-                    Some(Cmd::Invoke { invocation, capability, input, deadline_ms, auth }) => {
-                        if let Err(exit) = self.invoke(out, invocation, &capability, input, deadline_ms, auth).await {
+                    Some(Cmd::Invoke { invocation, capability, input, deadline_ms, scope }) => {
+                        if let Err(exit) = self.invoke(out, invocation, &capability, input, deadline_ms, *scope).await {
                             return exit;
                         }
                     }
@@ -1705,8 +1734,9 @@ impl Session {
         capability: &str,
         input: Value,
         deadline_ms: u64,
-        auth: HostAuth,
+        scope: Scope,
     ) -> Result<(), Exit> {
+        let Scope { auth, grants } = scope;
         let started = Instant::now();
         if self.pending.is_some() {
             out.result(invocation, Err("busy"), started);
@@ -1738,6 +1768,7 @@ impl Session {
             message["ctx"] = serde_json::json!({ "llm": llm });
         }
         self.auth = auth;
+        self.grants = grants;
         if self.write(&message).await.is_err() {
             out.result(invocation, Err("plugin_error"), started);
             return Err(Exit::Crashed);
@@ -1955,6 +1986,26 @@ impl Session {
             .await
             .map_err(|_| Exit::Crashed)
     }
+    /// C4 synthetic service: flag first (`unknown_service` without it), then the approved permission
+    /// fixed at invoke time, then the world (strict args, epoch, verification, reply cap).
+    fn synthetic(&mut self, service: &str, args: Value, out: &Out) -> Result<Value, &'static str> {
+        let name = service.strip_prefix("synthetic.").unwrap_or(service);
+        if !crate::agent::options().synthetic {
+            return Err("unknown_service");
+        }
+        let permission = world::permission(name).ok_or("unknown_service")?;
+        if !self.grants.iter().any(|grant| grant == permission) {
+            return Err("permission_denied");
+        }
+        out.send(Ev::Audit {
+            plugin_id: out.plugin_id.clone(),
+            kind: world::audit_kind(name),
+        });
+        world::serve(&world::dir(), name, &args).map_err(|code| match code {
+            "invalid_args" => "invalid_host_call",
+            other => other,
+        })
+    }
     /// Core-side settings store of this plugin (C2). The Core never interprets the object.
     fn settings(&self, service: &str, args: Value) -> Result<Value, &'static str> {
         if service == "settings.get" {
@@ -2027,6 +2078,22 @@ impl Session {
                     Err("permission_denied")
                 } else {
                     self.settings(service, line.args)
+                };
+                match outcome {
+                    Ok(data) => self
+                        .write(&serde_json::json!({"v": 1, "op": "host_reply", "id": id, "done": true, "data": data}))
+                        .await
+                        .map_err(|_| Exit::Crashed),
+                    Err(code) => self.host_error(id, code, None).await,
+                }
+            }
+            name if name.starts_with("synthetic.") => {
+                let outcome = if cancelled {
+                    Err("cancelled")
+                } else if self.host.is_some() {
+                    Err("busy")
+                } else {
+                    self.synthetic(name, line.args, out)
                 };
                 match outcome {
                     Ok(data) => self

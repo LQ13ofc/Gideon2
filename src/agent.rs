@@ -5,14 +5,12 @@
 use crate::{
     core::Core,
     tools::{self, Risk, State as ToolState, View as ProposalView},
+    world,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::{
     collections::{HashMap, VecDeque},
-    fs,
-    io::{self, Write},
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::OnceLock,
     time::{Duration, Instant},
@@ -31,8 +29,6 @@ const LOOP_LIMIT: u8 = 2;
 const STALE_LIMIT: u8 = 2;
 const CHAT_SUFFIX: &str = ".chat";
 const SYNTH_TEXT_MAX: usize = 64;
-const SYNTH_DIR: &str = "synthetic";
-const SYNTH_FILE: &str = "app.json";
 
 /// Test/dev switches, set once by `main` from flags. Production runs with the defaults.
 #[derive(Clone, Copy, Debug, Default)]
@@ -274,6 +270,14 @@ fn system_prompt(synthetic: bool) -> String {
              - synth_set_text {\"epoch\": integer, \"text\": string up to 64 chars}\n\
              - synth_publish {} (destructive)",
         );
+        text.push_str(
+            "\n- screen_capture {} (evidence only; returns epoch and regions)\n\
+             - ui_tree {}\n\
+             - ui_click {\"epoch\": integer, \"element\": id from ui_tree}\n\
+             - ui_type {\"epoch\": integer, \"text\": string up to 64 chars}\n\
+             - audio_set_route {\"route\": id}\n\
+             - audio_app_volume {\"app\": id, \"volume\": 0..100}",
+        );
     }
     text
 }
@@ -299,6 +303,7 @@ fn known_name(name: &str, synthetic: bool) -> Option<&'static str> {
         .iter()
         .find(|(known, _)| *known == name)
         .map(|(known, _)| *known)
+        .or_else(|| tools::bridge(name).map(|entry| entry.name))
 }
 
 fn usage_tokens(usage: &Value) -> Option<u64> {
@@ -371,28 +376,9 @@ fn step_state_for(obs: &Value, state: ToolState) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
-// Synthetic test app (only under --agent-synthetic). State lives in <home>/synthetic/app.json.
+// Synthetic test app (only under --agent-synthetic). The app is the `app` section of the C4
+// world (`world.rs`); `app.json` is only its mirror.
 // ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct App {
-    epoch: u64,
-    counter: u64,
-    text: String,
-    published: bool,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            epoch: 1,
-            counter: 0,
-            text: String::new(),
-            published: false,
-        }
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 enum SynthOp {
@@ -403,36 +389,7 @@ enum SynthOp {
 }
 
 fn app_dir() -> PathBuf {
-    crate::transport::home().join(SYNTH_DIR)
-}
-
-fn load_app(dir: &Path) -> Result<App, &'static str> {
-    match fs::read(dir.join(SYNTH_FILE)) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| "app_unavailable"),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(App::default()),
-        Err(_) => Err("app_unavailable"),
-    }
-}
-
-/// Atomic replace: a 0600 temporary file in the same directory, then rename.
-fn save_app(dir: &Path, app: &App) -> Result<(), &'static str> {
-    let write = || -> io::Result<()> {
-        fs::create_dir_all(dir)?;
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-        let bytes = serde_json::to_vec(app).map_err(io::Error::other)?;
-        let temporary = dir.join(format!("{SYNTH_FILE}.tmp"));
-        let _ = fs::remove_file(&temporary);
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temporary, dir.join(SYNTH_FILE))
-    };
-    write().map_err(|_| "app_write_failed")
+    world::dir()
 }
 
 fn exact_keys(args: &Map<String, Value>, keys: &[&str]) -> bool {
@@ -494,76 +451,64 @@ fn synth_stale() -> SynthOutcome {
     }
 }
 
-/// Runs one synthetic operation against the app file. Changes are verified by re-reading.
+/// Runs one synthetic operation on the world app. Writes are re-read and compared by `world::mutate`.
 fn synth_exec(op: &SynthOp, dir: &Path, allow_destructive: bool) -> SynthOutcome {
-    let app = match load_app(dir) {
-        Ok(app) => app,
-        Err(code) => return synth_failed(code),
-    };
     let done = |result: Value| SynthOutcome {
         state: ToolState::Executed,
         reason: None,
         result: Some(result.to_string()),
         observation: json!({"ok": true, "verified": true, "result": result}),
     };
-    let verify_failed = || SynthOutcome {
-        state: ToolState::Failed,
-        reason: Some("verify_failed"),
-        result: None,
-        observation: json!({"ok": false, "verified": false, "error": "verify_failed"}),
+    let finish = |outcome: Result<Value, &'static str>| match outcome {
+        Ok(result) => done(result),
+        Err("stale_screen") => synth_stale(),
+        Err("verify_failed") => SynthOutcome {
+            state: ToolState::Failed,
+            reason: Some("verify_failed"),
+            result: None,
+            observation: json!({"ok": false, "verified": false, "error": "verify_failed"}),
+        },
+        Err(code) => synth_failed(code),
     };
     match op {
-        SynthOp::Read => {
-            let result = json!({"epoch": app.epoch, "text": app.text});
-            SynthOutcome {
+        SynthOp::Read => match world::read(dir, |w| {
+            Ok(json!({"epoch": w.app.epoch, "text": w.app.text}))
+        }) {
+            Ok(result) => SynthOutcome {
                 state: ToolState::Executed,
                 reason: None,
                 result: Some(result.to_string()),
                 observation: json!({"ok": true, "result": result}),
-            }
-        }
-        SynthOp::Inc { epoch } => {
-            if *epoch != app.epoch {
-                return synth_stale();
-            }
-            let mut next = app.clone();
-            next.counter = app.counter.saturating_add(1);
-            if let Err(code) = save_app(dir, &next) {
-                return synth_failed(code);
-            }
-            match load_app(dir) {
-                Ok(read) if read.counter == next.counter => done(json!({"counter": read.counter})),
-                _ => verify_failed(),
-            }
-        }
-        SynthOp::SetText { epoch, text } => {
-            if *epoch != app.epoch {
-                return synth_stale();
-            }
-            let mut next = app.clone();
-            next.text = text.clone();
-            if let Err(code) = save_app(dir, &next) {
-                return synth_failed(code);
-            }
-            match load_app(dir) {
-                Ok(read) if read.text == *text => done(json!({"text": read.text})),
-                _ => verify_failed(),
-            }
-        }
+            },
+            Err(code) => synth_failed(code),
+        },
+        SynthOp::Inc { epoch } => finish(world::mutate(dir, |w| {
+            fresh_app(w, *epoch)?;
+            w.app.counter = w.app.counter.saturating_add(1);
+            Ok(json!({"counter": w.app.counter}))
+        })),
+        SynthOp::SetText { epoch, text } => finish(world::mutate(dir, |w| {
+            fresh_app(w, *epoch)?;
+            w.app.text = text.clone();
+            Ok(json!({"text": w.app.text}))
+        })),
         SynthOp::Publish => {
             if !allow_destructive {
                 return synth_failed("destructive_disabled");
             }
-            let mut next = app.clone();
-            next.published = true;
-            if let Err(code) = save_app(dir, &next) {
-                return synth_failed(code);
-            }
-            match load_app(dir) {
-                Ok(read) if read.published => done(json!({"published": true})),
-                _ => verify_failed(),
-            }
+            finish(world::mutate(dir, |w| {
+                w.app.published = true;
+                Ok(json!({"published": true}))
+            }))
         }
+    }
+}
+
+fn fresh_app(state: &world::World, epoch: u64) -> Result<(), &'static str> {
+    if state.app.epoch == epoch {
+        Ok(())
+    } else {
+        Err("stale_screen")
     }
 }
 
@@ -670,10 +615,9 @@ impl Core {
         if !self.agent.options.synthetic {
             return "unknown_operation";
         }
-        let dir = app_dir();
-        match load_app(&dir).and_then(|mut app| {
-            app.epoch = app.epoch.saturating_add(1);
-            save_app(&dir, &app)
+        match world::mutate(&app_dir(), |w| {
+            w.app.epoch = w.app.epoch.saturating_add(1);
+            Ok(())
         }) {
             Ok(()) => "ok",
             Err(code) => code,
@@ -748,7 +692,9 @@ impl Core {
         proposal_id: &str,
         view: &ProposalView,
     ) -> &'static str {
-        let risk = tools::risk(&view.tool).or_else(|| tools::synthetic_risk(&view.tool));
+        let risk = tools::risk(&view.tool)
+            .or_else(|| tools::synthetic_risk(&view.tool))
+            .or_else(|| tools::bridge(&view.tool).map(|entry| entry.risk));
         if risk == Some(Risk::Destructive) && !self.agent.options.allow_destructive {
             return "destructive_disabled";
         }
@@ -774,6 +720,9 @@ impl Core {
                     "ok"
                 }
             }
+        } else if tools::bridge(&view.tool).is_some() {
+            self.agent_exec_bridge(proposal_id, view);
+            "ok"
         } else {
             self.agent_exec_synth(proposal_id, view);
             "ok"
@@ -788,6 +737,84 @@ impl Core {
         self.tools
             .set(proposal_id, outcome.state, outcome.reason, outcome.result);
         self.agent_settle(proposal_id, Some(outcome.observation));
+    }
+
+    /// Approved bridge call (C4). Owner checks run again here: a revoke during the run wins.
+    fn agent_exec_bridge(&mut self, proposal_id: &str, view: &ProposalView) {
+        let Some(bridge) = tools::bridge(&view.tool) else {
+            return;
+        };
+        let outcome = match self.bridge_owner(bridge) {
+            Ok(()) => {
+                self.emit(String::new(), None, world::audit_kind(bridge.service));
+                world::serve(&app_dir(), bridge.service, &view.args)
+            }
+            Err(code) => Err(code),
+        };
+        let (state, reason, result, observation) = match outcome {
+            Ok(data) => {
+                let verified = data
+                    .get("verified")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
+                (
+                    ToolState::Executed,
+                    None,
+                    Some(data.to_string()),
+                    json!({"ok": true, "verified": verified, "result": data}),
+                )
+            }
+            Err("stale_screen") => (
+                ToolState::Cancelled,
+                Some("stale_screen"),
+                None,
+                json!({"ok": false, "error": "stale_screen"}),
+            ),
+            Err(code) => (
+                ToolState::Failed,
+                Some(code),
+                None,
+                json!({"ok": false, "error": code}),
+            ),
+        };
+        self.tools.set(proposal_id, state, reason, result);
+        self.agent_settle(proposal_id, Some(observation));
+    }
+
+    /// Owner of a bridge capability must be running with its permission approved. A missing or
+    /// revoked approval is `permission_revoked`; an approved owner that is not running is
+    /// `capability_unavailable`.
+    fn bridge_owner(&self, bridge: &tools::Bridge) -> Result<(), &'static str> {
+        let hub = self
+            .hub
+            .as_ref()
+            .filter(|h| h.status == "verified")
+            .ok_or("capability_unavailable")?;
+        let owner = hub
+            .entries
+            .iter()
+            .find(|e| e.capabilities.iter().any(|c| c == bridge.capability))
+            .ok_or("capability_unavailable")?;
+        if !owner.permissions_approved || !owner.permissions.iter().any(|p| p == bridge.permission)
+        {
+            return Err("permission_revoked");
+        }
+        let running = self
+            .plugins
+            .snapshot(self.hub.as_ref())
+            .items
+            .iter()
+            .any(|item| {
+                item.plugin_id == owner.plugin_id
+                    && item.enabled
+                    && item.state == "running"
+                    && item.capabilities.iter().any(|c| c == bridge.capability)
+            });
+        if running {
+            Ok(())
+        } else {
+            Err("capability_unavailable")
+        }
     }
 
     /// Feeds a finished proposal back to the model. `obs` overrides the ledger view when given.
@@ -806,8 +833,13 @@ impl Core {
             return;
         };
         let state = step_state_for(&obs, view.state);
-        // A stale result carries its code, like the stale step recorded at proposal time.
-        let code = (state == "stale").then_some("stale_screen");
+        // A stale result carries its code, like the stale step recorded at proposal time; a failed
+        // one carries the ledger reason (for example `permission_revoked`).
+        let code = match state {
+            "stale" => Some("stale_screen"),
+            "failed" => view.reason,
+            _ => None,
+        };
         let Some(run) = self.agent.run.as_mut() else {
             return;
         };
@@ -1064,6 +1096,8 @@ impl Core {
             self.agent_base_call(&call, invocation)
         } else if synthetic && tools::synthetic_risk(&call.name).is_some() {
             self.agent_synth_call(&call, invocation)
+        } else if let Some(bridge) = tools::bridge(&call.name).filter(|_| synthetic) {
+            self.agent_bridge_call(&call, invocation, bridge)
         } else {
             self.reject_call(&call.name, invocation, "unknown_tool", "denied")
         }
@@ -1115,17 +1149,58 @@ impl Core {
         // Stale check at proposal time; the same check repeats at authorization.
         if let SynthOp::Inc { epoch } | SynthOp::SetText { epoch, .. } = &op {
             let epoch = *epoch;
-            let app = match load_app(&app_dir()) {
-                Ok(app) => app,
+            let current = match world::read(&app_dir(), |w| Ok(w.app.epoch)) {
+                Ok(current) => current,
                 Err(code) => return self.reject_call(&call.name, invocation, code, "failed"),
             };
-            if epoch != app.epoch {
+            if epoch != current {
                 self.set_step_state(invocation, "stale", Some("stale_screen"));
                 self.observe(&call.name, json!({"ok": false, "error": "stale_screen"}));
                 return Flow::Continue;
             }
         }
         self.agent_wait_approval(call, invocation, risk)
+    }
+
+    /// C4 bridge call. Reads run now (owner checked); state changes wait for approval. The owner is
+    /// checked before proposing, so a missing owner never creates a pending proposal.
+    fn agent_bridge_call(
+        &mut self,
+        call: &Call,
+        invocation: u64,
+        bridge: &'static tools::Bridge,
+    ) -> Flow {
+        let op = match world::parse(bridge.service, &call.args) {
+            Ok(op) => op,
+            Err(code) => return self.reject_call(&call.name, invocation, code, "denied"),
+        };
+        self.set_risk(invocation, bridge.risk);
+        if let Err(code) = self.bridge_owner(bridge) {
+            return self.reject_call(&call.name, invocation, code, "denied");
+        }
+        if bridge.risk == Risk::ReadOnly {
+            self.emit(String::new(), None, world::audit_kind(bridge.service));
+            let (state, code, observation) =
+                match world::serve(&app_dir(), bridge.service, &call.args) {
+                    Ok(data) => ("done", None, json!({"ok": true, "result": data})),
+                    Err(code) => ("failed", Some(code), json!({"ok": false, "error": code})),
+                };
+            self.set_step_state(invocation, state, code);
+            self.observe(&call.name, observation);
+            return Flow::Continue;
+        }
+        if let Some(epoch) = op.epoch() {
+            let current = match world::read(&app_dir(), |w| Ok(w.screen.epoch)) {
+                Ok(current) => current,
+                Err(code) => return self.reject_call(&call.name, invocation, code, "failed"),
+            };
+            if epoch != current {
+                self.set_step_state(invocation, "stale", Some("stale_screen"));
+                self.observe(&call.name, json!({"ok": false, "error": "stale_screen"}));
+                return Flow::Continue;
+            }
+        }
+        self.agent_wait_approval(call, invocation, bridge.risk)
     }
 
     /// State changes and destructive calls wait for `tool_decide`. Destructive calls without
@@ -1213,7 +1288,10 @@ impl Core {
     /// Appends one observation as a `tool` message. Repeated stale results block the run.
     fn observe(&mut self, name: &str, obs: Value) {
         let error = obs.get("error").and_then(Value::as_str).map(str::to_owned);
-        let safe = if tools::risk(name).is_some() || tools::synthetic_risk(name).is_some() {
+        let safe = if tools::risk(name).is_some()
+            || tools::synthetic_risk(name).is_some()
+            || tools::bridge(name).is_some()
+        {
             name
         } else {
             "unknown"
@@ -1339,23 +1417,26 @@ mod tests {
 
     #[test]
     fn app_write_is_private_and_round_trips() {
+        use std::{fs, os::unix::fs::PermissionsExt};
         let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join(SYNTH_DIR);
-        let app = App {
-            epoch: 3,
-            counter: 2,
-            text: "hi".into(),
-            published: false,
-        };
-        save_app(&target, &app).unwrap();
-        let mode = fs::metadata(target.join(SYNTH_FILE))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
-        let read = load_app(&target).unwrap();
-        assert_eq!((read.epoch, read.counter, read.text.as_str()), (3, 2, "hi"));
-        assert!(!target.join("app.json.tmp").exists());
+        let target = dir.path().join("synthetic");
+        world::mutate(&target, |w| {
+            w.app.epoch = 3;
+            w.app.counter = 2;
+            w.app.text = "hi".into();
+            Ok(())
+        })
+        .unwrap();
+        for file in ["world.json", "app.json"] {
+            let mode = fs::metadata(target.join(file))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "{file}");
+        }
+        assert!(!target.join("world.json.tmp").exists());
+        let app = world::read(&target, |w| Ok(w.app.clone())).unwrap();
+        assert_eq!((app.epoch, app.counter, app.text.as_str()), (3, 2, "hi"));
     }
 
     #[test]
@@ -1365,7 +1446,20 @@ mod tests {
         let outcome = synth_exec(&op, dir.path(), false);
         assert_eq!(outcome.state, ToolState::Cancelled);
         assert_eq!(outcome.observation["error"], "stale_screen");
-        assert_eq!(load_app(dir.path()).unwrap().counter, 0);
+        assert!(!dir.path().join("world.json").exists());
+        assert_eq!(world::read(dir.path(), |w| Ok(w.app.counter)).unwrap(), 0);
+    }
+
+    #[test]
+    fn bridge_tools_map_to_registered_services() {
+        for entry in tools::BRIDGE_REGISTRY.iter() {
+            assert_eq!(
+                world::permission(entry.service),
+                Some(entry.permission),
+                "{}",
+                entry.name
+            );
+        }
     }
 
     #[test]
@@ -1373,7 +1467,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let outcome = synth_exec(&SynthOp::Publish, dir.path(), false);
         assert_eq!(outcome.state, ToolState::Failed);
-        assert!(!load_app(dir.path()).unwrap().published);
+        assert!(!world::read(dir.path(), |w| Ok(w.app.published)).unwrap());
     }
 
     #[test]
