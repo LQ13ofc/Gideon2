@@ -103,3 +103,11 @@ Qualidade física/relocação continuam pendentes; cliente gráfico de seleção
 pacotes ainda não é oferecido. Cancel exibe "Enviando cancelamento ao Core"
 (antes reutilizava texto de aprovação). Rodada final: staging 76 (UI 9), zero
 erros QML, design 44 e regressões Base no mesmo release. Resultado: passed.
+
+
+B3.3 ciclo: Hub Qt real mostra instalado/desativado, Reverter versão (desabilitado
+sem previous) e Remover com diálogo de confirmação; cancelar mantém registro,
+confirmar remove no daemon e rótulo "Plugin removido". Restart preserva estado;
+S1 nativo antes/depois. Screenshot target/evidence/b3-lifecycle.png. Clique de
+instalar via Qt não dirigido ponta a ponta (install via CLI). Nenhuma qualificação
+física ou humana. Resultado: passed.

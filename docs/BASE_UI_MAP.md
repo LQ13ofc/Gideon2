@@ -1,7 +1,7 @@
 # Mapa da Base para S2
 
-Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b feedback/ganho B2.3 e descoberta/aprovação Hub B3.1/B3.2a/B3.2b.
-Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json, docs/evidence/b3-catalog.json, docs/evidence/b3-permissions.json e docs/evidence/b3-import.json.
+Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b feedback/ganho B2.3 e descoberta/aprovação Hub B3.1/B3.2a/B3.2b/B3.3.
+Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json, docs/evidence/b3-catalog.json, docs/evidence/b3-permissions.json e docs/evidence/b3-import.json e docs/evidence/b3-lifecycle.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
 
@@ -188,3 +188,11 @@ Payload opaco privado, checksum exato; nenhum archive extraído ou entrypoint
 executado. Arquivo staged é rechecado no restart. Orphans de crash bloqueiam
 reimport até recuperação futura; arquivos/payloads estrangeiros não são removidos
 automaticamente. B3.3 precisa install/update/rollback/remove e fixture isolada.
+
+## Ciclo Hub B3.3
+
+Core guarda ledger privado hub-installed.json e namespace hub-plugins/; Qt só pede
+hub_install/hub_rollback/hub_remove com install_revision. Plugin instalado aparece
+"Instalado · desativado (sem execução)"; Reverter versão exige previous; Remover
+pede confirmação. Quarentena de payload adulterado afeta só aquele plugin. Nenhum
+controle executa plugin, autentica publisher ou concede grant Base.
