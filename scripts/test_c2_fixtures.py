@@ -940,7 +940,12 @@ class ChatRequireAndFallbackTest(C2Base):
                 self.err(chat(self.plugin, self.sim, **extra), "invalid_input")
         self.assertEqual(self.sim.calls, [])
 
-    def test_chat_without_require_makes_no_storage_read(self):
+    def test_chat_without_require_reads_storage_once_per_process(self):
+        # Scripted mode (C3 fixture): the first chat of a process reads agent_script; later plain
+        # chats read nothing. With no script, the output is exactly the provider's.
+        self.ok(chat(self.plugin, self.sim, ctx=LOCAL_CTX))  # at most this one reads storage
+        self.assertLessEqual(len(self.sim.settings_calls()), 1)
+        self.sim.calls.clear()
         self.ok(chat(self.plugin, self.sim, ctx=LOCAL_CTX))
         self.assertEqual(self.sim.settings_calls(), [])
         self.assertEqual([c["service"] for c in self.sim.calls], ["llm.http"])

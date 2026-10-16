@@ -26,7 +26,7 @@ STAGED_ERRORS=('staged_payload_invalid',)
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
@@ -75,6 +75,13 @@ TOOL_KEYS=frozenset({'proposal_id','plugin_id','call_id','tool','args','state','
 PARTIAL_LIMIT=16384;ARGS_LIMIT=8192;TOOL_NAME_LIMIT=256;RESULT_TEXT_LIMIT=1024;TOOL_ITEMS=4
 CHAT_CAPABILITY_SUFFIX='.chat';CHAT_TEXT_LIMIT=4096;CHAT_CONTENT_LIMIT=4096;CHAT_INPUT_LIMIT=8192;CHAT_TURNS=31;CHAT_MAX_TOKENS=512;CHAT_DEADLINE_MS=10000;CHAT_MESSAGES_KEPT=64
 HTTP_STATUS_KEY='http_status'
+# C3 agent runtime (docs/C3.md). Limits and state sets mirror the Core; the codes are an explicit allowlist, anything else refuses the snapshot.
+AGENT_STATES=('thinking','waiting_tool','awaiting_approval','done','failed','aborted','blocked');AGENT_TERMINAL=('done','failed','aborted','blocked');AGENT_ERROR_STATES=('failed','aborted','blocked')
+AGENT_STEP_KINDS=('chat','tool');AGENT_RISKS=('read','state_changing','destructive');AGENT_STEP_STATES=('running','done','awaiting_approval','denied','failed','stale','blocked','cancelled')
+AGENT_CODES=frozenset({'agent_busy','llm_unavailable','unknown_run','loop_blocked','stale_screen','permission_revoked','denied_by_user','revoked','max_steps','budget_exhausted','deadline_exceeded','verification_failed','awaiting_approval','unknown_tool','invalid_args','plugin_unavailable','executor_failed','executor_unavailable','expired','cancelled','timeout','http_error','network_unavailable','response_too_large','key_missing','provider_not_configured','cloud_not_authorized','permission_denied','model_unsupported_feature','invalid_input'})
+AGENT_STATE_LABELS={'thinking':'Pensando','waiting_tool':'Executando ferramenta','awaiting_approval':'Aguardando sua aprovação','done':'Concluído','failed':'Falhou','aborted':'Abortado','blocked':'Bloqueado'}
+AGENT_MAX_STEPS=6;AGENT_CHAT_STEPS=6;AGENT_TOOL_STEPS=24;AGENT_TOTAL_TOKENS=4096;AGENT_GOAL_LIMIT=1024;AGENT_ANSWER_LIMIT=4096
+AGENT_RUN_KEYS=frozenset({'run_id','state','goal_len','step','max_steps','started_ms_ago','steps','budget'});AGENT_STEP_KEYS=frozenset({'n','invocation_id','kind','tool','risk','state','code'});AGENT_PROPOSAL_KEYS=frozenset({'run_id','step'})
 def is_int(value,minimum=0,maximum=2**64-1):return type(value) is int and minimum<=value<=maximum
 def plain_text(value,limit):
     """Core-independent PlainText rule: a string of at most `limit` UTF-8 bytes with no control characters."""
@@ -244,11 +251,11 @@ def valid_args(args):
     """Core stores the model's arguments as found (null when the call is malformed), so any JSON value fits here."""
     return bounded_json(args,ARGS_LIMIT)
 def valid_tools(items):
-    """Core proposal view: at most four items, exact keys, PlainText strings, bounded args."""
+    """Core proposal view: at most four items, exact keys (plus the C3 run_id/step pair), PlainText strings, bounded args."""
     if not (isinstance(items,list) and len(items)<=TOOL_ITEMS):return False
     ids=set()
     for item in items:
-        if not (isinstance(item,dict) and set(item)==TOOL_KEYS):return False
+        if not (isinstance(item,dict) and TOOL_KEYS<=set(item)<=TOOL_KEYS|AGENT_PROPOSAL_KEYS):return False
         pid=item['proposal_id']
         if not (isinstance(pid,str) and PROPOSAL_ID.fullmatch(pid) and pid not in ids):return False
         ids.add(pid)
@@ -259,6 +266,47 @@ def valid_tools(items):
         reason=item['reason']
         if reason is not None and reason not in TOOL_REASONS:return False
         if item['result'] is not None and not (isinstance(item['result'],str) and utf8_len(item['result'])<=RESULT_TEXT_LIMIT):return False
+        # C3: a proposal made by an agent run carries its run_id and step together; a chat or tool-only proposal carries neither.
+        if ('run_id' in item)!=('step' in item):return False
+        if 'run_id' in item and not (is_int(item['run_id'],1) and is_int(item['step'],1,AGENT_MAX_STEPS)):return False
+    return True
+def agent_goal_problem(goal):
+    """Rule for agentStart (docs/C3.md): trimmed, 1..=1024 UTF-8 bytes, no control characters. None means the goal may be sent (the trimmed text)."""
+    try:
+        if not isinstance(goal,str) or not goal.strip():return 'Objetivo vazio'
+        text=goal.strip()
+        if utf8_len(text)>AGENT_GOAL_LIMIT:return 'Objetivo acima de 1024 bytes'
+        if any(unicodedata.category(c)=='Cc' for c in text):return 'Objetivo com quebra de linha ou controle não é aceito'
+    except UnicodeError:return 'Objetivo inválido'
+    return None
+def agent_text_ok(text):
+    """Answer rule: a PlainText string; newlines and tabs are part of a model answer, other control characters are not."""
+    try:return isinstance(text,str) and not any(unicodedata.category(c)=='Cc' and c not in '\n\t' for c in text)
+    except UnicodeError:return False
+def valid_agent_step(step):
+    """One entry of agent.steps: exact keys; chat steps carry no tool or risk; tool steps may. Codes come from AGENT_CODES only."""
+    if not (isinstance(step,dict) and {'n','invocation_id','kind','state'}<=set(step)<=AGENT_STEP_KEYS):return False
+    if not (is_int(step['n'],1,AGENT_MAX_STEPS) and is_int(step['invocation_id']) and step['kind'] in AGENT_STEP_KINDS and step['state'] in AGENT_STEP_STATES):return False
+    if step['kind']=='chat':
+        if 'tool' in step or 'risk' in step:return False
+    else:
+        if 'tool' in step and not (isinstance(step['tool'],str) and step['tool'] and utf8_len(step['tool'])<=TOOL_NAME_LIMIT and plain_text(step['tool'],TOOL_NAME_LIMIT)):return False
+        if 'risk' in step and step['risk'] not in AGENT_RISKS:return False
+    return 'code' not in step or step['code'] in AGENT_CODES
+def valid_agent(agent):
+    """Snapshot block agent (docs/C3.md): null, or the run view with exact keys, bounded steps, answer only when done, error from AGENT_CODES, budget within the Core total."""
+    if agent is None:return True
+    if not (isinstance(agent,dict) and AGENT_RUN_KEYS<=set(agent)<=AGENT_RUN_KEYS|{'answer','error'}):return False
+    if not (is_int(agent['run_id'],1) and agent['state'] in AGENT_STATES and is_int(agent['goal_len'],1,AGENT_GOAL_LIMIT)):return False
+    if not (is_int(agent['step'],0,AGENT_MAX_STEPS) and agent['max_steps']==AGENT_MAX_STEPS and is_int(agent['started_ms_ago'])):return False
+    steps=agent['steps']
+    if not (isinstance(steps,list) and len(steps)<=AGENT_CHAT_STEPS+AGENT_TOOL_STEPS):return False
+    kinds=[step.get('kind') if isinstance(step,dict) else None for step in steps]
+    if kinds.count('chat')>AGENT_CHAT_STEPS or kinds.count('tool')>AGENT_TOOL_STEPS or not all(valid_agent_step(step) for step in steps):return False
+    budget=agent['budget']
+    if not (isinstance(budget,dict) and set(budget)=={'tokens_used','tokens_max'} and budget['tokens_max']==AGENT_TOTAL_TOKENS and is_int(budget['tokens_used'],0,AGENT_TOTAL_TOKENS)):return False
+    if 'answer' in agent and not (agent['state']=='done' and agent_text_ok(agent['answer']) and utf8_len(agent['answer'])<=AGENT_ANSWER_LIMIT):return False
+    if 'error' in agent and not (agent['state'] in AGENT_ERROR_STATES and agent['error'] in AGENT_CODES):return False
     return True
 def chat_problem(text):
     """UI rule for a chat turn: non-blank, at most 4096 UTF-8 bytes, single line, no control characters."""
@@ -402,6 +450,8 @@ def validate_snapshot(data,request_id,min_sequence):
         if HTTP_STATUS_KEY in result:require(result['ok'] is False and result.get('error') in ('http_error','model_selftest_failed') and is_int(result[HTTP_STATUS_KEY],100,599))
     # Core always sends llm and tool_proposals; top-level partial exists only while an invocation streams.
     require('llm' in data and 'tool_proposals' in data and valid_llm(data['llm']) and valid_tools(data['tool_proposals']))
+    # C3: the agent block is optional while Cores without the runtime omit it; when present it is null or the exact run view.
+    if 'agent' in data:require(valid_agent(data['agent']))
     partial=data.get('partial')
     require(partial is None or (isinstance(partial,str) and utf8_len(partial)<=PARTIAL_LIMIT))
     pack=data.get('base_pack')
@@ -508,6 +558,20 @@ CODE_MESSAGES={
     'model_selftest_failed':'Teste do modelo falhou',
     'settings_unavailable':'Armazenamento de configurações do plugin indisponível',
     'no_lkg':'Não há configuração anterior salva para restaurar',
+    # C3: agent runtime codes (AGENT_CODES, docs/C3.md). Keep this list in step with the allowlist above.
+    'agent_busy':'Já existe um agente em execução; aguarde ou aborte',
+    'unknown_run':'Execução do agente desconhecida ou já encerrada',
+    'loop_blocked':'O agente repetiu a mesma ação; execução bloqueada',
+    'stale_screen':'A tela mudou desde a observação; o agente vai reobservar',
+    'permission_revoked':'Permissão da ferramenta revogada; execução bloqueada',
+    'denied_by_user':'Negada pelo usuário; nada foi alterado',
+    'revoked':'Motor LLM desativado ou revogado; execução encerrada',
+    'max_steps':'Limite de passos do agente atingido',
+    'budget_exhausted':'Limite de tokens do agente atingido',
+    'deadline_exceeded':'Tempo limite da execução do agente atingido',
+    'verification_failed':'Verificação após a ação falhou; efeito não confirmado',
+    'awaiting_approval':'Aguardando sua aprovação na proposta de ferramenta',
+    'executor_failed':'Executor da ferramenta falhou',
 }
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
@@ -524,22 +588,23 @@ OPS={
     'text':('text','Texto enviado'),
     'secret_set':('llm','Chave salva pelo Core'),'secret_clear':('llm','Chave removida pelo Core'),'llm_configure':('llm','Configuração salva pelo Core'),
     'tool_decide':('tools','Decisão enviada ao Core'),
+    'agent_start':('agent','Objetivo enviado ao Core'),'agent_abort':('agent','Aborto enviado ao Core'),
 }
-PENDING={'hub_approve':'Enviando aprovação ao Core','hub_abort':'Enviando cancelamento ao Core','hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core','plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…','text':'Enviando texto ao Core',
+PENDING={'agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao Core…','hub_approve':'Enviando aprovação ao Core','hub_abort':'Enviando cancelamento ao Core','hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core','plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…','text':'Enviando texto ao Core',
     'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…'}
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
     preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal()
-    llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal()
+    llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str)
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
@@ -584,7 +649,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -760,6 +825,44 @@ class Bridge(QObject):
         if state!='pending':return self._refuse('tools',CODE_MESSAGES['already_decided'])
         self.tool_inflight=proposal
         if not self._send('tools','tool_decide',proposal_id=proposal,decision=decision):self.tool_inflight=None
+    # ---- C3 agent runtime: one run at a time, decided by the Core. The bridge refuses what it can see is impossible, forwards bounded requests, and shows the snapshot 'agent' block.
+    def _agent_run(self):return self.snapshot.get('agent')
+    def _agent_active(self):
+        run=self._agent_run();return run is not None and run['state'] not in AGENT_TERMINAL
+    @Slot(str)
+    def agentStart(self,goal):
+        problem=agent_goal_problem(goal)
+        if problem is None and self._chat_target() is None:problem=CODE_MESSAGES['llm_unavailable']
+        if problem is None and self._agent_active():problem=CODE_MESSAGES['agent_busy']
+        if problem is None and (self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem='Aguarde a conversa terminar'
+        if problem is None and self._models_busy_now():problem='Aguarde o gerenciador de modelos'
+        if problem is not None:return self._refuse('agent',problem)
+        self._send('agent','agent_start',goal=goal.strip())
+    @Slot()
+    def agentAbort(self):
+        run=self._agent_run()
+        if run is None or not self._agent_active():return self._refuse('agent',CODE_MESSAGES['unknown_run'])
+        self._send('agent','agent_abort',run_id=run['run_id'])
+    @Slot(str,result=str)
+    def agentGoalProblem(self,goal):return agent_goal_problem(goal) or ''
+    @Property(str,notify=agentChanged)
+    def agentState(self):return (self._agent_run() or {}).get('state','')
+    @Property(bool,notify=agentChanged)
+    def agentActive(self):return self._agent_active()
+    @Property(str,notify=agentChanged)
+    def agentStateLabel(self):
+        run=self._agent_run()
+        if run is None:return ''
+        label=AGENT_STATE_LABELS[run['state']]
+        return f"{label} · {code_message(run['error'])}" if 'error' in run else label
+    @Property('QVariantList',notify=agentChanged)
+    def agentSteps(self):return [dict(step) for step in (self._agent_run() or {}).get('steps',[])]
+    @Property(str,notify=agentChanged)
+    def agentAnswer(self):return (self._agent_run() or {}).get('answer') or ''
+    @Property('QVariantMap',notify=agentChanged)
+    def agentBudget(self):return dict((self._agent_run() or {}).get('budget') or {})
+    @Property(str,notify=changed)
+    def agentResult(self):return self.results['agent']
     @Property('QVariantMap',notify=llmChanged)
     def llmConfig(self):return dict((self.snapshot.get('llm') or {}).get('config') or {})
     @Property('QVariantMap',notify=llmChanged)

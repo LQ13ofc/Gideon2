@@ -11,6 +11,11 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
     selftest-rolled-back fake-fail failed the selftest; the Core restored the last good model and the UI says so
     status-unavailable   fake-text (declared without tool use) reported INDISPONÍVEL, or its failed test rolled back
     custom-removed       fake-fail removed after confirmation (Cancel is the default and keeps it)
+  agent phase (C3 UI, needs a real Core with llm_engine running, the synthetic app enabled with --agent-synthetic, and an
+    agent-script.json in the plugin folder: step 1 proposes synth_counter_inc with the current epoch, step 2 answers in text):
+    agent-ready     Agente offered while the engine runs; Iniciar disabled with a blank goal, enabled with a goal
+    agent-awaiting  the run reached awaiting_approval; Autorizar is on screen with the run's proposal and Abortar is enabled
+    agent-done      after Autorizar the run reached done; the final answer is shown as PlainText and Iniciar is enabled again
 """
 import argparse,json,os,sys,time
 from pathlib import Path
@@ -19,7 +24,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -244,6 +249,35 @@ elif args.phase=='chat':
     wait(lambda:bridge.llmRevision!=revision,10)
     check('original consent value restored after the round trip',bridge.llmConfig.get('cloud_consent')==saved_consent)
     dialog.close();preferences.close()
+elif args.phase=='agent':
+    # Gate protocol (C3 UI): see the module docstring. The phase types a goal, presses Iniciar and only clicks the user's own decision.
+    wait(lambda:bridge.chatAvailable,50)
+    nav=visual_item('nav7');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:window.property('page')==7,3)
+    check('Agente section visible only while the engine runs',visual_item('agentPanel').property('visible'))
+    goal=visual_item('agentGoal');start=visual_item('agentStart');abort=visual_item('agentAbort')
+    check('Iniciar disabled with a blank goal',not start.property('enabled'))
+    goal.forceActiveFocus();QTest.keyClicks(window,'Incremente o contador uma vez')
+    check('Iniciar enabled with a goal while idle',start.property('enabled') and not abort.property('enabled'))
+    Path(args.artifacts,'agent-ready').touch()
+    start.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.agentState=='awaiting_approval',60)
+    check('banner names the approval state',visual_item('agentBanner').property('text')==bridge.agentStateLabel)
+    pending=next(p for p in bridge.toolProposals if p['state']=='pending' and 'run_id' in p)
+    pid=pending['proposal_id']
+    check('proposal carries the run and step it belongs to',pending['step']>=1 and pending['run_id']>=1)
+    check('Autorizar on screen for the run proposal and Abortar enabled',visual_item('authorize_'+pid).property('visible') and abort.property('enabled'))
+    Path(args.artifacts,'agent-awaiting').touch()
+    visual_item('authorize_'+pid).forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.agentState=='done',90)
+    answer=visual_item('agentAnswer')
+    # textFormat is a QML enum PySide cannot convert: the comparison runs inside QML.
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    expression=QQmlExpression(QQmlEngine.contextForObject(answer),answer,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+    check('final answer shown as PlainText',answer.property('visible') and answer.property('text')==bridge.agentAnswer and plain is True and not expression.hasError())
+    check('Iniciar enabled again after the run is done',start.property('enabled'))
+    Path(args.artifacts,'agent-done').touch()
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':
     # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,
     # then launches this phase. Markers written to --artifacts by this phase, in order:

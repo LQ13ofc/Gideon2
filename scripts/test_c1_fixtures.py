@@ -138,7 +138,8 @@ class HostSim:
     """Plays the Core: performs host_call over real loopback HTTP, streams host_reply."""
 
     def __init__(self, plugin, server, key=FAKE_KEY, consent=True, cap=4 * MiB,
-                 chunk_max=16384, fixed_chunk=None, seed=1):
+                 chunk_max=16384, fixed_chunk=None, seed=1, store=None):
+        self.store = store  # the plugin's settings object as the Core keeps it (None = unwritten)
         self.plugin = plugin
         self.server = server
         self.key = key
@@ -156,6 +157,11 @@ class HostSim:
         hid = msg["id"]
         self.host_calls.append(msg)
         args = msg.get("args") if isinstance(msg.get("args"), dict) else {}
+        if msg.get("service") == "settings.get" and args == {}:
+            # Core: the stored object itself, null when never written (scripted mode reads it).
+            self.plugin.write({"v": 1, "op": "host_reply", "id": hid, "done": True,
+                               "data": self.store})
+            return
         if (msg.get("service") != "llm.http" or args.get("path") != "/chat/completions"
                 or args.get("stream") is not True or not isinstance(args.get("body"), dict)):
             self.violations.append(msg)
@@ -566,6 +572,95 @@ class LlmEngineTest(unittest.TestCase):
     def test_small_output_has_no_truncated_flag(self):
         output = self.ok(invoke(self.plugin, self.sim, inp("echo:short")))
         self.assertNotIn("truncated", output)
+
+
+class ScriptedModeTest(unittest.TestCase):
+    """agent_script in the settings object: steps are consumed in order, no provider is ever
+    contacted, and the cursor lives in the plugin process (a restart begins the script again)."""
+
+    def setUp(self):
+        self.server = FakeServer()
+        self.plugins = []
+
+    def tearDown(self):
+        for plugin in self.plugins:
+            plugin.close()
+        self.server.close()
+
+    def start(self, steps=None, store=None):
+        plugin = Plugin()
+        plugin.hello()
+        self.plugins.append(plugin)
+        if store is None and steps is not None:
+            store = {"agent_script": {"steps": steps}}
+        return plugin, HostSim(plugin, self.server, store=store)
+
+    def run_chat(self, plugin, sim, content="go", **extra):
+        return invoke(plugin, sim, dict(inp(content), **extra))
+
+    def test_steps_are_consumed_in_order_and_shaped_as_chat_output(self):
+        plugin, sim = self.start([
+            {"text": "", "tool_calls": [{"id": "c1", "name": "get_time", "arguments": {}}]},
+            {"text": "done", "tool_calls": [], "tokens": 7},
+        ])
+        first = self.run_chat(plugin, sim)
+        self.assertEqual(first.reply["output"], {
+            "text": "", "finish_reason": "tool_calls",
+            "tool_calls": [{"id": "c1", "name": "get_time", "arguments": {}}],
+            "used_fallback": False})
+        second = self.run_chat(plugin, sim)
+        self.assertEqual(second.reply["output"], {
+            "text": "done", "finish_reason": "stop", "tool_calls": [],
+            "usage": {"total_tokens": 7}, "used_fallback": False})
+        self.assertEqual(second.partials, [])  # scripted output is a final-only reply
+        self.assertEqual(self.server.log(), [])  # no provider was ever contacted
+
+    def test_error_step_fails_with_its_code_and_never_falls_back(self):
+        plugin, sim = self.start([{"text": "x", "tool_calls": [], "error": "timeout"}])
+        result = invoke(plugin, sim, dict(inp("go"), fallback=True))
+        self.assertEqual(result.reply, {"id": result.reply["id"], "ok": False, "error": "timeout"})
+        self.assertEqual(self.server.log(), [])
+
+    def test_exhausted_script_returns_plain_text(self):
+        plugin, sim = self.start([])
+        for _ in range(2):
+            output = self.run_chat(plugin, sim).reply["output"]
+            self.assertEqual(output, {"text": "script exhausted", "finish_reason": "stop",
+                                      "tool_calls": [], "used_fallback": False})
+        self.assertEqual(self.server.log(), [])
+
+    def test_restart_of_the_plugin_begins_the_script_again(self):
+        steps = [{"text": "one", "tool_calls": []}, {"text": "two", "tool_calls": []}]
+        plugin, sim = self.start(steps)
+        self.assertEqual(self.run_chat(plugin, sim).reply["output"]["text"], "one")
+        self.assertEqual(self.run_chat(plugin, sim).reply["output"]["text"], "two")
+        restarted, restarted_sim = self.start(steps)
+        self.assertEqual(self.run_chat(restarted, restarted_sim).reply["output"]["text"], "one")
+
+    def test_without_script_chat_still_goes_to_the_provider(self):
+        plugin, sim = self.start(store={"customs": []})
+        output = self.run_chat(plugin, sim, "echo:plain").reply["output"]
+        self.assertEqual(output["text"], "plain")
+        self.assertEqual(len(self.server.log()), 1)
+
+    def test_malformed_scripts_are_plugin_error_before_any_provider_call(self):
+        step = {"text": "a", "tool_calls": []}
+        cases = {
+            "extra step key": {"steps": [dict(step, extra=1)]},
+            "unknown error code": {"steps": [dict(step, error="boom")]},
+            "nested arguments": {"steps": [{"text": "a", "tool_calls": [
+                {"id": "c", "name": "n", "arguments": {"a": {"b": 1}}}]}]},
+            "too many tool calls": {"steps": [{"text": "a", "tool_calls": [
+                {"id": str(i), "name": "n", "arguments": {}} for i in range(5)]}]},
+            "extra script key": {"steps": [], "x": 1},
+            "bool tokens": {"steps": [dict(step, tokens=True)]},
+        }
+        for label, script in cases.items():
+            with self.subTest(case=label):
+                plugin, sim = self.start(store={"agent_script": script})
+                result = self.run_chat(plugin, sim)
+                self.assertEqual(result.reply["error"], "plugin_error")
+        self.assertEqual(self.server.log(), [])
 
 
 class CatalogTest(unittest.TestCase):

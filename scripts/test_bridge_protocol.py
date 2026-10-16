@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
 from bridge import Bridge,CHAT_STATE_LABELS,CODE_MESSAGES,PREFS_DONE,SECTION_SIGNALS,STALE_MESSAGE,bounded_output,chat_input_size,chat_messages_for,chat_problem,llm_url_ok,text_problem,valid_key,validate_snapshot
 from bridge import CERT_BADGES,FEATURE_LABELS,MODEL_CAPABILITY,custom_form_problem,custom_model,fallback_for,model_status,target_for,valid_model,valid_models_page,valid_selftest
+from bridge import AGENT_CODES,AGENT_STATE_LABELS,AGENT_STATES,OPS,PENDING,SNAPSHOT_SECTION_KEYS,agent_goal_problem,valid_agent,valid_tools
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
@@ -714,6 +715,29 @@ def _qml_chat_checks(bridge,window,check,checks):
     check('send enabled for trimmed text',find('chatSend').property('enabled'))
     chat_input.setProperty('text','   ');QTest.qWait(20)
     check('blank text cannot be sent',not find('chatSend').property('enabled'))
+    # C3 agent section: driven only by injected Core snapshots (no Core, no LLM).
+    tool=tool_item('tool_1_9',tool='synth_counter_inc',args={'epoch':1});tool.update(run_id=7,step=1)
+    push(agent_snap(agent_run('awaiting_approval',steps=[agent_chat_step(1,1),agent_tool_step(1,2)]),tools=[tool]))
+    check('agent section visible while the engine runs',find('agentPanel').property('visible'))
+    check('agent banner names the approval state',find('agentBanner').property('visible') and find('agentBanner').property('text')=='Aguardando sua aprovação')
+    check('agent steps listed per entry',find('agentStep_1_chat').property('visible') and find('agentStep_1_tool').property('visible'))
+    check('Abortar enabled while the run is active',find('agentAbort').property('enabled'))
+    check('Iniciar disabled while the run is active',not find('agentStart').property('enabled'))
+    check('agent goal locked while the run is active',not find('agentGoal').property('enabled'))
+    push(agent_snap(agent_run('done',steps=[agent_chat_step(1,1)],answer='Feito: 1 incremento.')))
+    # textFormat is a QML enum that PySide cannot convert, so the comparison runs inside QML (Text.PlainText).
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    answer_item=find('agentAnswer');expression=QQmlExpression(QQmlEngine.contextForObject(answer_item),answer_item,'textFormat === Text.PlainText')
+    plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+    check('final answer shown as PlainText',answer_item.property('visible') and answer_item.property('text')=='Feito: 1 incremento.' and plain is True and not expression.hasError())
+    find('agentGoal').setProperty('text','nova tarefa');QTest.qWait(20)
+    check('Iniciar enabled after a finished run with a goal',find('agentStart').property('enabled') and not find('agentAbort').property('enabled'))
+    find('agentGoal').setProperty('text','   ');QTest.qWait(20)
+    check('blank agent goal cannot start',not find('agentStart').property('enabled'))
+    push(agent_snap(agent_run('failed',error='loop_blocked')))
+    check('failed banner names the Core code in Portuguese',find('agentBanner').property('text')=='Falhou · O agente repetiu a mesma ação; execução bloqueada')
+    push(chat_snapshot(tools=tools,llm=llm_state(config=LLM_CONFIG)))
+    check('no agent run: banner hidden',not find('agentBanner').property('visible') and not find('agentAnswer').property('visible'))
     print(f'qml chat checks ok: {len(checks)}');return 0
 def qml_child():
     from PySide6.QtGui import QAccessible,QGuiApplication
@@ -1338,6 +1362,140 @@ def _qml_models_checks(bridge,window,check,checks):
     check('plugin stopped: page returns to Início',window.property('page')==0)
     check('plugin stopped: nav item hidden',not find('nav8').property('visible'))
     print(f'qml models checks ok: {len(checks)}');return 0
+# ---- C3 agent runtime (docs/C3.md): snapshot block, proposal run/step fields, agentStart/agentAbort frames and messages.
+def agent_chat_step(n,inv,state='done',**extra):return {'n':n,'invocation_id':inv,'kind':'chat','state':state,**extra}
+def agent_tool_step(n,inv,tool='synth_counter_inc',risk='state_changing',state='awaiting_approval',**extra):return {'n':n,'invocation_id':inv,'kind':'tool','tool':tool,'risk':risk,'state':state,**extra}
+def agent_run(state='thinking',steps=None,answer=None,error=None,**change):
+    run={'run_id':7,'state':state,'goal_len':12,'step':1,'max_steps':6,'started_ms_ago':40,'steps':[agent_chat_step(1,1)] if steps is None else steps,'budget':{'tokens_used':10,'tokens_max':4096}}
+    if answer is not None:run['answer']=answer
+    if error is not None:run['error']=error
+    run.update(change);return run
+def agent_snap(agent,tools=None):return {**chat_snapshot(tools=tools or []),'agent':agent}
+class AgentContract(unittest.TestCase):
+    def test_agent_block_accepts_null_absent_and_exact_run_shapes(self):
+        validate_snapshot(copy.deepcopy(BASE),'r',0)
+        validate_snapshot(agent_snap(None),'r',0);self.assertTrue(valid_agent(None))
+        validate_snapshot(agent_snap(agent_run('thinking')),'r',0)
+        validate_snapshot(agent_snap(agent_run('waiting_tool',steps=[agent_chat_step(1,1),agent_tool_step(1,2,state='running')])),'r',0)
+        validate_snapshot(agent_snap(agent_run('awaiting_approval',steps=[agent_chat_step(1,1),agent_tool_step(1,2,risk='destructive')])),'r',0)
+        validate_snapshot(agent_snap(agent_run('done',answer='linha 1\nlinha\t2')),'r',0)
+        validate_snapshot(agent_snap(agent_run('done',answer='á'*2048)),'r',0)
+        validate_snapshot(agent_snap(agent_run('failed',error='http_error')),'r',0)
+        validate_snapshot(agent_snap(agent_run('aborted',error='revoked')),'r',0)
+        validate_snapshot(agent_snap(agent_run('blocked',error='stale_screen')),'r',0)
+        self.assertEqual(set(AGENT_STATES),set(AGENT_STATE_LABELS))
+    def test_agent_block_rejects_forged_leaking_or_unbounded_shapes(self):
+        def run(**change):return agent_run(**change)
+        cases=[
+            ('goal text leaks into the snapshot',run(goal='segredo')),
+            ('tool args leak into a step',run(steps=[agent_tool_step(1,2,args={'x':1})])),
+            ('observation leaks',run(observation='texto')),
+            ('run_id zero',run(run_id=0)),('run_id bool',run(run_id=True)),('run_id float',run(run_id=7.0)),
+            ('unknown state',run(state='paused')),
+            ('goal_len zero',run(goal_len=0)),('goal_len over 1024',run(goal_len=1025)),
+            ('step over max',run(step=7)),('max_steps not 6',run(max_steps=5)),
+            ('answer while thinking',run(state='thinking',answer='x')),
+            ('answer while failed',run(state='failed',error='http_error',answer='x')),
+            ('answer over 4096 bytes',run(state='done',answer='á'*2049)),
+            ('answer with control character',run(state='done',answer='a\x07b')),
+            ('answer null',{**run(state='done'),'answer':None}),
+            ('error outside allowlist',run(state='failed',error='Plugin Crashed')),
+            ('error on a done run',run(state='done',error='timeout')),
+            ('error null',{**run(state='failed'),'error':None}),
+            ('chat step carries a tool',run(steps=[{**agent_chat_step(1,1),'tool':'x'}])),
+            ('tool name over 256 bytes',run(steps=[agent_tool_step(1,2,tool='x'*257)])),
+            ('tool name with newline',run(steps=[agent_tool_step(1,2,tool='a\nb')])),
+            ('empty tool name',run(steps=[agent_tool_step(1,2,tool='')])),
+            ('unknown risk',run(steps=[agent_tool_step(1,2,risk='admin')])),
+            ('step code outside allowlist',run(steps=[agent_chat_step(1,1,state='failed',code='stack_trace')])),
+            ('step state unknown',run(steps=[agent_chat_step(1,1,state='weird')])),
+            ('step kind unknown',run(steps=[{**agent_chat_step(1,1),'kind':'shell'}])),
+            ('step n zero',run(steps=[agent_chat_step(0,1)])),('step n seven',run(steps=[agent_chat_step(7,1)])),
+            ('invocation_id negative',run(steps=[agent_chat_step(1,-1)])),
+            ('extra step key',run(steps=[{**agent_chat_step(1,1),'output':'x'}])),
+            ('seven chat steps',run(steps=[agent_chat_step(1+i%6,i+1) for i in range(7)])),
+            ('25 tool steps',run(steps=[agent_tool_step(1+i%6,i+1) for i in range(25)])),
+            ('steps not a list',run(steps={})),
+            ('budget tokens_max not 4096',run(budget={'tokens_used':1,'tokens_max':8192})),
+            ('budget tokens_used over max',run(budget={'tokens_used':4097,'tokens_max':4096})),
+            ('budget extra key',run(budget={'tokens_used':1,'tokens_max':4096,'prompt':'x'})),
+            ('missing budget',{k:v for k,v in run().items() if k!='budget'}),
+            ('agent not an object',[]),
+        ]
+        for name,agent in cases:
+            with self.subTest(case=name),self.assertRaises(ValueError):validate_snapshot(agent_snap(agent),'r',0)
+    def test_agent_goal_rule_is_trimmed_utf8_bytes(self):
+        self.assertIsNone(agent_goal_problem('  Abra o navegador  '))
+        self.assertIsNone(agent_goal_problem('x'*1024))
+        self.assertIsNone(agent_goal_problem('á'*512))
+        self.assertEqual(agent_goal_problem('á'*513),'Objetivo acima de 1024 bytes')
+        self.assertEqual(agent_goal_problem('x'*1025),'Objetivo acima de 1024 bytes')
+        self.assertEqual(agent_goal_problem('   '),'Objetivo vazio')
+        self.assertEqual(agent_goal_problem(None),'Objetivo vazio')
+        self.assertIn('controle',agent_goal_problem('a\nb'))
+    def test_tool_proposals_carry_run_and_step_together(self):
+        validate_snapshot({**BASE,'tool_proposals':[{**tool_item('tool_1_1'),'run_id':7,'step':2}]},'r',0)
+        validate_snapshot({**BASE,'tool_proposals':[tool_item('tool_1_2')]},'r',0)
+        for name,extra in [('run_id only',{'run_id':7}),('step only',{'step':2}),('run_id zero',{'run_id':0,'step':2}),('step seven',{'run_id':7,'step':7}),('step zero',{'run_id':7,'step':0}),('run_id bool',{'run_id':True,'step':1}),('step null',{'run_id':7,'step':None})]:
+            with self.subTest(case=name),self.assertRaises(ValueError):validate_snapshot({**BASE,'tool_proposals':[{**tool_item('tool_1_3'),**extra}]},'r',0)
+        self.assertTrue(valid_tools([{**tool_item('tool_1_4'),'run_id':1,'step':6}]))
+        self.assertFalse(valid_tools([{**tool_item('tool_1_5'),'authority':'model'}]))
+    def test_agent_codes_have_portuguese_messages_and_ops_exist(self):
+        for code in AGENT_CODES:
+            with self.subTest(code=code):
+                self.assertIn(code,CODE_MESSAGES);self.assertNotIn('Core recusou',CODE_MESSAGES[code])
+        for code in ('agent_busy','llm_unavailable','unknown_run','loop_blocked','stale_screen','permission_revoked','awaiting_approval'):
+            self.assertIn(code,AGENT_CODES)
+        self.assertEqual(OPS['agent_start'][0],'agent');self.assertEqual(OPS['agent_abort'][0],'agent')
+        self.assertIn('agent_start',PENDING);self.assertIn('agent_abort',PENDING)
+        self.assertIn('agent',SNAPSHOT_SECTION_KEYS)
+class AgentBridge(unittest.TestCase):
+    def test_agent_section_notifies_only_agent_consumers(self):
+        bridge=Bridge('/nonexistent-gideon-root');counts=Counter()
+        for signal in set(SECTION_SIGNALS.values()):getattr(bridge,signal).connect(lambda n=signal:counts.update([n]))
+        old=agent_snap(agent_run('thinking'))
+        def changed(mutate):
+            new=copy.deepcopy(old);mutate(new);counts.clear();bridge._publish(old,new);return dict(counts)
+        self.assertEqual(changed(lambda s:s.update(agent=agent_run('waiting_tool',steps=[agent_chat_step(1,1),agent_tool_step(1,2,state='running')]))),{'agentChanged':1})
+        self.assertEqual(changed(lambda s:s.update(sequence=2)),{'sessionChanged':1})
+        self.assertEqual(changed(lambda s:s.update(agent=None)),{'agentChanged':1})
+    def test_agent_start_is_trimmed_exact_and_refused_before_the_core(self):
+        bridge,peer=connect_bridge(self,chat_snapshot())
+        for goal in ('   ','x'*1025,'a\nb'):
+            bridge.agentStart(goal);wait_idle();self.assertFalse(peer.canReadLine())
+        self.assertEqual(bridge.agentResult,'Objetivo com quebra de linha ou controle não é aceito')
+        bridge.agentStart('  Abra o navegador  ')
+        request=next_request(peer)
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'agent_start','goal':'Abra o navegador'})
+        answer(peer,request,agent_snap(agent_run('thinking')));settle(bridge)
+        self.assertEqual((bridge.agentResult,bridge.agentState,bridge.agentActive),('Objetivo enviado ao Core','thinking',True))
+        bridge.agentStart('outra tarefa');wait_idle();self.assertFalse(peer.canReadLine())
+        self.assertEqual(bridge.agentResult,CODE_MESSAGES['agent_busy'])
+    def test_agent_abort_uses_current_run_and_refuses_without_one(self):
+        bridge,peer=connect_bridge(self,agent_snap(agent_run('awaiting_approval',steps=[agent_chat_step(1,1),agent_tool_step(1,2)])))
+        bridge.agentAbort();request=next_request(peer)
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'agent_abort','run_id':7})
+        answer(peer,request,agent_snap(agent_run('aborted',error='cancelled')));settle(bridge)
+        self.assertEqual((bridge.agentState,bridge.agentActive,bridge.agentStateLabel),('aborted',False,'Abortado · Cancelado'))
+        bridge.agentAbort();wait_idle();self.assertFalse(peer.canReadLine())
+        self.assertEqual(bridge.agentResult,CODE_MESSAGES['unknown_run'])
+    def test_agent_start_refused_without_a_running_llm_plugin(self):
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True
+        bridge._apply(validate_snapshot(chat_snapshot(state='starting'),'r',0));bridge.agentStart('oi')
+        self.assertEqual(bridge.agentResult,CODE_MESSAGES['llm_unavailable'])
+        self.assertEqual(bridge.agentGoalProblem('   '),'Objetivo vazio')
+    def test_agent_run_is_cleared_when_the_core_goes_away(self):
+        bridge,peer=connect_bridge(self,agent_snap(agent_run('thinking')))
+        self.assertEqual(bridge.agentState,'thinking')
+        bridge._offline()
+        self.assertEqual((bridge.agentState,bridge.agentStateLabel,bridge.agentSteps,bridge.agentAnswer,bridge.agentResult),('','',[],'',''))
+    def test_agent_snapshot_steps_and_budget_are_presented_without_observations(self):
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True
+        bridge._apply(validate_snapshot(agent_snap(agent_run('done',steps=[agent_chat_step(1,1),agent_tool_step(1,2,state='done',risk='read')],answer='ok')),'r',0))
+        self.assertEqual([s['kind'] for s in bridge.agentSteps],['chat','tool'])
+        self.assertEqual(bridge.agentBudget,{'tokens_used':10,'tokens_max':4096})
+        self.assertEqual((bridge.agentAnswer,bridge.agentStateLabel),('ok','Concluído'))
+        self.assertNotIn('goal',repr(bridge.agentSteps))
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())

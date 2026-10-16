@@ -33,6 +33,16 @@ Capability `llm_engine.models` (C2): actions list, describe, selftest, save_cust
 
 The plugin never holds an API key and never adds Authorization: it asks the Core for
 `llm.http` with host_call and reassembles the SSE lines that come back in host_reply chunks.
+
+Scripted mode (test fixture for the C3 gate, never a provider call): the sandbox binds only this
+payload (/plugin/main.py), so a file next to it is unreachable. The script therefore arrives
+through the plugin's own settings object, as the Core serves it to settings.get: the entry
+"agent_script" = the content of agent-script.json, {"steps": [{"text", "tool_calls", "error"?,
+"tokens"?}]}. When it is present, each llm_engine.chat call consumes the next step and returns it
+(usage.total_tokens from "tokens"; "error" fails the call with that code, no fallback). Exhausted
+steps return the text "script exhausted". The script is read once per process, at the first chat
+call (a chat with `require` reads the settings again); the cursor lives in memory, so a restart
+of the plugin begins the script again. Without the entry, nothing changes.
 """
 import json
 import os
@@ -69,6 +79,13 @@ MAX_ID = 64
 MAX_MODELS_INPUT = 8192
 MAX_SETTINGS = 8192  # settings.put data object, bytes of JSON
 MAX_SETTINGS_REPLY = 16384
+MAX_SCRIPT = 4096  # serialized agent_script entry; the whole settings object budget is 8 KiB
+MAX_SCRIPT_STEPS = 64
+SCRIPT_KEY = "agent_script"
+SCRIPT_EXHAUSTED = "script exhausted"
+STEP_KEYS = frozenset(("text", "tool_calls", "error", "tokens"))
+STEP_REQUIRED = frozenset(("text", "tool_calls"))
+CALL_KEYS = frozenset(("id", "name", "arguments"))
 MAX_CUSTOMS = 16
 MAX_PROBES = 32
 LIST_TABS = ("recommended", "custom")
@@ -83,6 +100,8 @@ HOST_ERRORS = (
     "permission_denied", "cloud_not_authorized", "provider_not_configured", "key_missing",
     "http_error", "timeout", "response_too_large", "network_unavailable", "cancelled",
 )
+SCRIPT_ERRORS = HOST_ERRORS + ("model_unsupported_feature", "plugin_error", "invalid_input",
+                               "provider_not_configured")
 RECOVERABLE_STATUS = (429, 500, 502, 503, 504)
 RECOVERABLE_ERRORS = ("network_unavailable", "timeout")
 REQUIRE_FEATURE = {"tools": "tool_use", "streaming": "streaming", "vision": "vision"}
@@ -287,6 +306,10 @@ TOOL_NAMES = frozenset(tool["function"]["name"] for tool in TOOLS)
 _buf = bytearray()
 _discarding = False
 _host_seq = 0
+_script = None  # validated steps once loaded (list), None when the settings hold no script
+_script_loaded = False
+_script_pos = 0  # cursor: steps consumed in this process
+_kept_script = None  # agent_script of the last settings read, written back by settings.put
 
 
 class _Fail(Exception):
@@ -802,19 +825,32 @@ def _check_probe(key, probe):
     return probe["source"] == "probed"
 
 
-def _load_store(req_id):
-    """(customs, probes) from settings. Any storage problem fails closed (settings_unavailable)."""
+def _read_settings(req_id):
+    """The stored settings object, None when never written. Keeps the agent_script entry so that
+    settings.put writes it back. permission_denied passes through; other failures are
+    settings_unavailable."""
+    global _kept_script
     try:
         data = _host_exchange(req_id, SETTINGS_GET, {})
     except _Fail as fail:
         if fail.code == "permission_denied":
             raise
         raise _Fail("settings_unavailable")
+    _kept_script = None if data is None else data.get(SCRIPT_KEY)
+    return data
+
+
+def _load_store(req_id):
+    """(customs, probes) from settings. Any storage problem fails closed (settings_unavailable)."""
+    return _parse_store(_read_settings(req_id))
+
+
+def _parse_store(data):
     if data is None:
         return [], {}
-    if "customs" not in data or not set(data) <= {"customs", "probes"}:
+    if not set(data) <= {"customs", "probes", SCRIPT_KEY} or not {"customs", SCRIPT_KEY} & set(data):
         raise _Fail("settings_unavailable")
-    stored = data["customs"]
+    stored = data.get("customs", [])
     if not isinstance(stored, list) or len(stored) > MAX_CUSTOMS:
         raise _Fail("settings_unavailable")
     customs = []
@@ -848,6 +884,8 @@ def _write_store(req_id, customs, probes):
         data = {"customs": [_encode_custom(model) for model in customs]}
         if kept:
             data["probes"] = kept
+        if _kept_script is not None:
+            data[SCRIPT_KEY] = _kept_script
         if _size(data) <= MAX_SETTINGS:
             break
         if not kept:
@@ -859,6 +897,86 @@ def _write_store(req_id, customs, probes):
         if fail.code == "permission_denied":
             raise
         raise _Fail("settings_unavailable")
+
+
+# -- scripted mode (agent_script in settings; see the module docstring) ----
+def _check_step(step):
+    """One validated script step (strict keys and types), or plugin_error."""
+    if not isinstance(step, dict) or not STEP_REQUIRED <= set(step) or not set(step) <= STEP_KEYS:
+        raise _Fail("plugin_error")
+    text, calls = step["text"], step["tool_calls"]
+    if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_CONTENT:
+        raise _Fail("plugin_error")
+    if not isinstance(calls, list) or len(calls) > MAX_TOOL_CALLS:
+        raise _Fail("plugin_error")
+    for call in calls:
+        if not isinstance(call, dict) or set(call) != CALL_KEYS:
+            raise _Fail("plugin_error")
+        for key in ("id", "name"):
+            value = call[key]
+            if not isinstance(value, str) or not 0 < len(value.encode("utf-8")) <= MAX_ID:
+                raise _Fail("plugin_error")
+        if not isinstance(call["arguments"], dict) or _depth(call["arguments"]) > 1:
+            raise _Fail("plugin_error")
+    if "error" in step and step["error"] not in SCRIPT_ERRORS:
+        raise _Fail("plugin_error")
+    if "tokens" in step:
+        tokens = step["tokens"]
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or not 0 <= tokens <= 10_000_000:
+            raise _Fail("plugin_error")
+    return step
+
+
+def _parse_script(raw):
+    """Validated steps of the agent_script entry, None when absent, plugin_error when malformed."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {"steps"} or _size(raw) > MAX_SCRIPT:
+        raise _Fail("plugin_error")
+    steps = raw["steps"]
+    if not isinstance(steps, list) or len(steps) > MAX_SCRIPT_STEPS:
+        raise _Fail("plugin_error")
+    return [_check_step(step) for step in steps]
+
+
+def _chat_settings(req_id, require):
+    """One settings read when the script is not known yet or the chat needs the store. Returns the
+    stored object (None when never written or when storage is not permitted and no store is
+    needed). A chat with `require` still fails on permission_denied, as before."""
+    global _script, _script_loaded
+    if _script_loaded and not require:
+        return None
+    try:
+        data = _read_settings(req_id)
+    except _Fail as fail:
+        if require or fail.code != "permission_denied":
+            raise
+        data = None  # no storage permission, so no script can be delivered
+    if not _script_loaded:
+        _script = _parse_script(None if data is None else data.get(SCRIPT_KEY))
+        _script_loaded = True
+    return data
+
+
+def _script_turn(req_id):
+    """Consume the next step: its output through the normal 8 KiB shaping, or its error code."""
+    global _script_pos
+    if _script_pos >= len(_script):
+        return {"text": SCRIPT_EXHAUSTED, "finish_reason": "stop", "tool_calls": [],
+                "used_fallback": False}
+    step = _script[_script_pos]
+    _script_pos += 1
+    if "error" in step:
+        raise _Fail(step["error"])
+    turn = _Chat(req_id, quiet=True)
+    turn.text_parts = [step["text"]]
+    turn.finish = "tool_calls" if step["tool_calls"] else "stop"
+    if "tokens" in step:
+        turn.usage = {"total_tokens": step["tokens"]}
+    turn.calls = {index: {"id": call["id"], "name": call["name"],
+                          "args": [json.dumps(call["arguments"], separators=(",", ":"))]}
+                  for index, call in enumerate(step["tool_calls"])}
+    return turn._output()
 
 
 # -- model schema validation -------------------------------------------------
@@ -993,7 +1111,10 @@ def _resolve(req_id, provider, model, url):
     """Effective feature matrix: the matched entry's features (certified | candidate | declared),
     overridden by a stored probe for streaming, tool_use and cancel. `source` is "probed" when a
     probe applies, else the matched entry's certification.state, else "unknown"."""
-    customs, probes = _load_store(req_id)
+    return _resolve_store(*_load_store(req_id), provider, model, url)
+
+
+def _resolve_store(customs, probes, provider, model, url):
     entry = _lookup(customs, provider, model, url)
     if entry is None:
         features, source = dict(UNKNOWN_FEATURES), "unknown"
@@ -1189,18 +1310,22 @@ def _handle_chat(msg, req_id):
         return
     provider, model, url = selection
     try:
+        data = _chat_settings(req_id, bool(require))
         if require:
-            features, _source = _resolve(req_id, provider, model, url)
+            features, _source = _resolve_store(*_parse_store(data), provider, model, url)
             for name in require:
                 if features[REQUIRE_FEATURE[name]] == "unsupported":
                     raise _Fail("model_unsupported_feature")
-        body = _chat_body(model, messages, max_tokens, tools)
-        try:
-            output = _run_chat(req_id, body)
-        except _Fail as first:
-            if not (fallback and _recoverable(first)):
-                raise
-            output = _run_chat(req_id, body, target="fallback", used_fallback=True)
+        if _script is not None:
+            output = _script_turn(req_id)
+        else:
+            body = _chat_body(model, messages, max_tokens, tools)
+            try:
+                output = _run_chat(req_id, body)
+            except _Fail as first:
+                if not (fallback and _recoverable(first)):
+                    raise
+                output = _run_chat(req_id, body, target="fallback", used_fallback=True)
     except _Fail as fail:
         _send({"id": req_id, "ok": False, "error": fail.code})
     except _Cancel:

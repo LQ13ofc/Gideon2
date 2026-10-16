@@ -14,8 +14,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c2-v1/llm_engine.py",
-          "sha256": "7cec0ceff99088746c27f93e76ee334e0f18dda68d883fa1dbe7f74940490d2d",
-          "size": 49472
+          "sha256": "e0e29e5ec4dc21e2c86441b900f285cb4db4aad9dfef0093604ccbd03f0de05a",
+          "size": 55382
         }
       ],
       "license": "MIT",

@@ -54,6 +54,9 @@ ApplicationWindow {
     function pluginApproved(pluginId) { var entries = core.hubEntries; for (var i=0;i<entries.length;i++) if (entries[i].plugin_id === pluginId) return entries[i].permissions_approved === true; return false; }
     function pluginCanEnable(item) { return !item.enabled && (item.state === "disabled" || item.state === "stopped" || item.state === "failed") && pluginInstalled(item.plugin_id) && pluginApproved(item.plugin_id); }
     function toolStateText(state) { switch (state) { case "pending": return "aguardando sua decisão"; case "authorized": return "autorizada; executando"; case "executed": return "executada"; case "denied": return "negada"; case "failed": return "falhou"; case "expired": return "expirada"; case "cancelled": return "cancelada"; default: return state; } }
+    // C3 agent labels: the state words live here; the Core codes go through core.codeMessage.
+    function agentStepText(state) { switch (state) { case "running": return "em execução"; case "done": return "concluído"; case "awaiting_approval": return "aguardando sua decisão"; case "denied": return "negado pelo usuário"; case "failed": return "falhou"; case "stale": return "tela desatualizada"; case "blocked": return "bloqueado"; case "cancelled": return "cancelado"; default: return state; } }
+    function agentRiskText(risk) { switch (risk) { case "read": return "leitura"; case "state_changing": return "muda estado"; case "destructive": return "destrutiva"; default: return "—"; } }
     function sendChatDraft() { var t = chatInput.text.trim(); if (t.length === 0 || core.chatTextProblem(t) !== "") return; core.sendChat(t) }
     function openLlm() { llmRevisionCaptured = core.llmRevision; llmDialog.open() }
     function filteredModels(list, filter) { var out = []; for (var i = 0; i < list.length; i++) { var m = list[i]; if (filter === 1 && m.kind !== "local") continue; if (filter === 2 && m.kind !== "cloud") continue; out.push(m); } return out; }
@@ -772,6 +775,49 @@ ApplicationWindow {
                             GlowButton { objectName: "chatCancel"; text: "Cancelar"; Accessible.name: "Cancelar resposta do motor LLM"; enabled: core.chatState === "waiting" || core.chatState === "streaming"; onClicked: core.cancelChat() }
                         }
                         Label { objectName: "chatInputProblem"; visible: chatInput.text.length > 0 && core.chatTextProblem(chatInput.text).length > 0; text: core.chatTextProblem(chatInput.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    }
+                }
+                // C3 agent: same visibility rule as the chat, only while the LLM plugin runs. Everything shown comes from the Core snapshot 'agent' block.
+                GlassCard {
+                objectName: "agentPanel"
+                theme: window.themeIndex
+                    visible: window.page === 7 && core.chatAvailable; Layout.fillWidth: true; implicitHeight: agentColumn.implicitHeight + 44
+                    ColumnLayout {
+                        id: agentColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        Label { text: "Agente"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        // Banner: the run state in words, with the Core code when the run ended on one. Hidden without a run.
+                        Label { objectName: "agentBanner"; visible: core.agentState.length > 0; text: core.agentStateLabel; textFormat: Text.PlainText; color: core.agentState === "failed" || core.agentState === "blocked" ? "#ff9a9a" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Estado do agente: " + text }
+                        Label { objectName: "agentBudget"; visible: core.agentState.length > 0; text: "Tokens: " + (core.agentBudget.tokens_used || 0) + " de " + (core.agentBudget.tokens_max || 0); textFormat: Text.PlainText; color: "#a6b9df"; font.pixelSize: 12; Layout.fillWidth: true }
+                        TextField {
+                            id: agentGoal; objectName: "agentGoal"; Layout.fillWidth: true
+                            maximumLength: 1024; placeholderText: "Objetivo para o agente"; Accessible.name: "Objetivo para o agente"
+                            enabled: !core.agentActive
+                            color: "#dce7ff"; placeholderTextColor: "#a3b6db"
+                            background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
+                            Component.onCompleted: text = window.draftValue("#agent", "goal")
+                            onTextEdited: window.setDraft("#agent", "goal", text)
+                        }
+                        Label { objectName: "agentGoalProblem"; visible: agentGoal.text.length > 0 && core.agentGoalProblem(agentGoal.text).length > 0; text: core.agentGoalProblem(agentGoal.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            GlowButton { objectName: "agentStart"; text: "Iniciar"; Accessible.name: "Iniciar agente"; enabled: core.chatAvailable && !core.agentActive && core.agentGoalProblem(agentGoal.text) === ""; onClicked: core.agentStart(agentGoal.text) }
+                            GlowButton { objectName: "agentAbort"; text: "Abortar"; Accessible.name: "Abortar agente"; enabled: core.agentActive; onClicked: core.agentAbort() }
+                        }
+                        Repeater {
+                            model: core.agentSteps
+                            delegate: Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
+                                implicitHeight: stepColumn.implicitHeight + 20
+                                ColumnLayout {
+                                    id: stepColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
+                                    Label { objectName: "agentStep_" + modelData.n + "_" + modelData.kind; text: "Passo " + modelData.n + " · " + (modelData.kind === "tool" ? "ferramenta " + (modelData.tool || "?") + " · risco " + window.agentRiskText(modelData.risk) : "modelo") + " · " + window.agentStepText(modelData.state) + (modelData.code ? " · " + core.codeMessage(modelData.code) : ""); textFormat: Text.PlainText; color: "#dce7ff"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                }
+                            }
+                        }
+                        // The final answer is model text: PlainText only, never rich text.
+                        Text { objectName: "agentAnswer"; visible: core.agentAnswer.length > 0; text: core.agentAnswer; textFormat: Text.PlainText; color: "#edf2ff"; wrapMode: Text.Wrap; Layout.fillWidth: true; Accessible.name: "Resposta final do agente" }
+                        Label { objectName: "agentResult"; visible: core.agentResult.length > 0; text: core.agentResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Aviso do agente: " + text }
                     }
                 }
             }
