@@ -1,0 +1,757 @@
+{
+  "gate": "S2_FINAL",
+  "passed": 204,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "space: at least 6 GiB free in /tmp for two packages",
+    "build: no tracked file differs from HEAD",
+    "build 0.1.0: build_package.py --version 0.1.0 exits 0",
+    "build 0.1.0: PACKAGE.json version and commit match HEAD",
+    "build 0.1.1: build_package.py --version 0.1.1 exits 0",
+    "build 0.1.1: PACKAGE.json version and commit match HEAD",
+    "identity: dirty_at_build false for both packages",
+    "1 install: gideon-install install v0.1.0 exits 0 with ok",
+    "1 install: source consumed by rename",
+    "1 install: list shows current 0.1.0, no previous, revision 1",
+    "1 profile: main created",
+    "1 profile: Hub catalog copy placed under profile STATE",
+    "2 hidden: Core runs under outer bwrap (hidden source, no repo, no uv, no network)",
+    "2 hidden: UI sandbox has no /home and no repo",
+    "2 hidden: UI sandbox network namespace exposes only lo",
+    "core-A-v010: Core process tree (5 processes) has no repo or uv path",
+    "A core v0.1.0: Core process executes packaged bin/gideon-base of 0.1.0",
+    "UI package resolves inside ROOT/versions",
+    "ui s1-A: driver s1_observe passes every assertion (rc 0)",
+    "ui s1-A: actual Core connection",
+    "ui s1-A: configuration ready",
+    "ui s1-A: base pack preflight verified",
+    "ui s1-A: wake replay finished",
+    "ui s1-A: stt ready",
+    "ui s1-A: command_success receipt verified in UI",
+    "ui s1-A: event session_started observed by UI",
+    "ui s1-A: event transcript_final observed by UI",
+    "ui s1-A: event command_success observed by UI",
+    "ui s1-A: transcript source voice",
+    "ui s1-A: subtitle non-empty in UI",
+    "ui s1-A: result receipt non-empty in UI",
+    "ui s1-A: UI observed states ['executing', 'speaking', 'transcribing']",
+    "ui s1-A: speech completed on virtual sink with samples",
+    "ui s1-A: UI process tree has no repo or uv path",
+    "A s1: UI observed S1 completed with verified result",
+    "UI package resolves inside ROOT/versions",
+    "A configure: UI approved exact manifest before gate staging",
+    "A configure: scripts/hub_import.py stages payload as external client",
+    "ui configure: driver configure passes every assertion (rc 0)",
+    "ui configure: configuration ready before changes",
+    "ui configure: object settingsButton present",
+    "ui configure: object preferencesDialog present",
+    "ui configure: object visualPreference present",
+    "ui configure: object volumePreference present",
+    "ui configure: object saveFeedbackButton present",
+    "ui configure: Qt feedback save acknowledged by Core",
+    "ui configure: Core persisted volume 50 and visual off",
+    "ui configure: object hubButton present",
+    "ui configure: object hubDialog present",
+    "ui configure: object hubReviewDialog present",
+    "ui configure: object publisherAcknowledgement present",
+    "ui configure: object approveHubButton present",
+    "ui configure: review never defaults to publisher acknowledgement",
+    "ui configure: explicit acknowledgement enables approval",
+    "ui configure: Qt approval persisted by Core",
+    "ui configure: acknowledged approval disables duplicate submit",
+    "ui configure: approval is not installation nor publisher identity",
+    "ui configure: staged payload is not installed",
+    "ui configure: object hubButton present",
+    "ui configure: object hubDialog present",
+    "ui configure: fixture installed with runtime disabled",
+    "ui configure: status label shows installed and disabled",
+    "ui configure: install control unavailable once installed",
+    "ui configure: object settingsButton present",
+    "ui configure: object preferencesDialog present",
+    "ui configure: object wakeChoice present",
+    "ui configure: object selectWakeButton present",
+    "ui configure: explicit phrase text presented",
+    "ui configure: POC phrase cannot be selected",
+    "ui configure: wake hey_gideon persisted by Core",
+    "ui configure: selection requires real restart",
+    "ui configure: UI process tree has no repo or uv path",
+    "A configure: UI wrote installed marker",
+    "A configure: Core ledger shows benign installed with runtime disabled",
+    "A configure: Core persisted volume 50, visual off and wake hey_gideon",
+    "A configure: Hub approval recorded for exact manifest (not publisher identity)",
+    "core-A-v010: no residual Core or worker processes after stop",
+    "core-A-v010: Core exit status 0 after SIGTERM",
+    "core-B-restart: Core process tree (6 processes) has no repo or uv path",
+    "B core restart: Core process executes packaged bin/gideon-base of 0.1.0",
+    "UI package resolves inside ROOT/versions",
+    "ui persisted-B: driver observe_persisted passes every assertion (rc 0)",
+    "ui persisted-B: volume 50 persisted and shown",
+    "ui persisted-B: visual feedback off persisted",
+    "ui persisted-B: wake hey_gideon persisted and active",
+    "ui persisted-B: installed plugin persisted, runtime disabled",
+    "ui persisted-B: configuration ready",
+    "ui persisted-B: base pack preflight verified",
+    "ui persisted-B: wake replay finished",
+    "ui persisted-B: stt ready",
+    "ui persisted-B: command_success receipt verified in UI",
+    "ui persisted-B: event session_started observed by UI",
+    "ui persisted-B: event transcript_final observed by UI",
+    "ui persisted-B: event command_success observed by UI",
+    "ui persisted-B: transcript source voice",
+    "ui persisted-B: subtitle non-empty in UI",
+    "ui persisted-B: result receipt non-empty in UI",
+    "ui persisted-B: UI observed states ['executing', 'speaking', 'transcribing']",
+    "ui persisted-B: speech completed on virtual sink with samples",
+    "ui persisted-B: UI process tree has no repo or uv path",
+    "B persisted: Core snapshot keeps volume 50, visual off, hey_gideon, plugin installed",
+    "C update: refused with exit 3 profile_active while Core runs",
+    "C update: refusal leaves ledger, list and links unchanged",
+    "C update: refused package not consumed",
+    "core-B-restart: no residual Core or worker processes after stop",
+    "core-B-restart: Core exit status 0 after SIGTERM",
+    "C update: update to v0.1.1 exits 0 after Core stopped",
+    "C update: source consumed by rename",
+    "C update: list shows current 0.1.1 previous 0.1.0",
+    "core-C-v011: Core process tree (5 processes) has no repo or uv path",
+    "C core v0.1.1: Core process executes packaged bin/gideon-base of 0.1.1",
+    "UI package resolves inside ROOT/versions",
+    "ui persisted-C: driver observe_persisted passes every assertion (rc 0)",
+    "ui persisted-C: volume 50 persisted and shown",
+    "ui persisted-C: visual feedback off persisted",
+    "ui persisted-C: wake hey_gideon persisted and active",
+    "ui persisted-C: installed plugin persisted, runtime disabled",
+    "ui persisted-C: configuration ready",
+    "ui persisted-C: base pack preflight verified",
+    "ui persisted-C: wake replay finished",
+    "ui persisted-C: stt ready",
+    "ui persisted-C: command_success receipt verified in UI",
+    "ui persisted-C: event session_started observed by UI",
+    "ui persisted-C: event transcript_final observed by UI",
+    "ui persisted-C: event command_success observed by UI",
+    "ui persisted-C: transcript source voice",
+    "ui persisted-C: subtitle non-empty in UI",
+    "ui persisted-C: result receipt non-empty in UI",
+    "ui persisted-C: UI observed states ['executing', 'speaking', 'transcribing']",
+    "ui persisted-C: speech completed on virtual sink with samples",
+    "ui persisted-C: UI process tree has no repo or uv path",
+    "C configure: profile re-rendered to the 0.1.1 package path",
+    "C core: base pack preflight verified after update",
+    "C core: preferences and Hub state preserved across update",
+    "core-C-v011: no residual Core or worker processes after stop",
+    "core-C-v011: Core exit status 0 after SIGTERM",
+    "identity 0.1.1: installed binary matches manifest gideon_base_sha256",
+    "D rollback: exits 0 to current 0.1.0 previous 0.1.1",
+    "D rollback: list shows current 0.1.0 previous 0.1.1",
+    "core-D-rollback: Core process tree (6 processes) has no repo or uv path",
+    "D core rollback: Core process executes packaged bin/gideon-base of 0.1.0",
+    "UI package resolves inside ROOT/versions",
+    "ui persisted-D: driver observe_persisted passes every assertion (rc 0)",
+    "ui persisted-D: volume 50 persisted and shown",
+    "ui persisted-D: visual feedback off persisted",
+    "ui persisted-D: wake hey_gideon persisted and active",
+    "ui persisted-D: installed plugin persisted, runtime disabled",
+    "ui persisted-D: configuration ready",
+    "ui persisted-D: base pack preflight verified",
+    "ui persisted-D: wake replay finished",
+    "ui persisted-D: stt ready",
+    "ui persisted-D: command_success receipt verified in UI",
+    "ui persisted-D: event session_started observed by UI",
+    "ui persisted-D: event transcript_final observed by UI",
+    "ui persisted-D: event command_success observed by UI",
+    "ui persisted-D: transcript source voice",
+    "ui persisted-D: subtitle non-empty in UI",
+    "ui persisted-D: result receipt non-empty in UI",
+    "ui persisted-D: UI observed states ['executing', 'speaking', 'transcribing']",
+    "ui persisted-D: speech completed on virtual sink with samples",
+    "ui persisted-D: UI process tree has no repo or uv path",
+    "UI package resolves inside ROOT/versions",
+    "ui remove-D: driver remove_plugin passes every assertion (rc 0)",
+    "ui remove-D: object hubButton present",
+    "ui remove-D: object hubDialog present",
+    "ui remove-D: object removeConfirm present",
+    "ui remove-D: removal waits for confirmation",
+    "ui remove-D: Core snapshot installed list empty",
+    "ui remove-D: hub result shows Plugin removido",
+    "ui remove-D: UI process tree has no repo or uv path",
+    "D remove: Core snapshot installed list empty",
+    "core-D-rollback: no residual Core or worker processes after stop",
+    "core-D-rollback: Core exit status 0 after SIGTERM",
+    "core-E-final: Core process tree (6 processes) has no repo or uv path",
+    "E final core: Core process executes packaged bin/gideon-base of 0.1.0",
+    "UI package resolves inside ROOT/versions",
+    "ui final-E: driver observe_persisted passes every assertion (rc 0)",
+    "ui final-E: volume 50 persisted and shown",
+    "ui final-E: visual feedback off persisted",
+    "ui final-E: wake hey_gideon persisted and active",
+    "ui final-E: plugin absent after removal",
+    "ui final-E: configuration ready",
+    "ui final-E: base pack preflight verified",
+    "ui final-E: wake replay finished",
+    "ui final-E: stt ready",
+    "ui final-E: command_success receipt verified in UI",
+    "ui final-E: event session_started observed by UI",
+    "ui final-E: event transcript_final observed by UI",
+    "ui final-E: event command_success observed by UI",
+    "ui final-E: transcript source voice",
+    "ui final-E: subtitle non-empty in UI",
+    "ui final-E: result receipt non-empty in UI",
+    "ui final-E: UI observed states ['executing', 'speaking', 'transcribing']",
+    "ui final-E: speech completed on virtual sink with samples",
+    "ui final-E: UI process tree has no repo or uv path",
+    "core-E-final: no residual Core or worker processes after stop",
+    "core-E-final: Core exit status 0 after SIGTERM",
+    "identity 0.1.0: installed binary matches manifest gideon_base_sha256",
+    "E retained 0.1.0-356a8b53: gideon-verify passes (package unchanged after lifecycle)",
+    "E retained 0.1.1-356a8b53: gideon-verify passes (package unchanged after lifecycle)",
+    "E identity: no Core still running",
+    "F isolation: real HOME top-level entries unchanged",
+    "F isolation: sentinel directory outside the temp parent unchanged",
+    "F isolation: no UI driver still running"
+  ],
+  "steps": [
+    {
+      "row": "0 setup and build",
+      "status": "done",
+      "passed": 7,
+      "failed": 0,
+      "runtime_seconds": 22.9
+    },
+    {
+      "row": "1 install and profile",
+      "status": "done",
+      "passed": 5,
+      "failed": 0,
+      "runtime_seconds": 10.1
+    },
+    {
+      "row": "2 hidden sandboxes",
+      "status": "done",
+      "passed": 3,
+      "failed": 0,
+      "runtime_seconds": 0.0
+    },
+    {
+      "row": "ui s1-A",
+      "step": "s1_observe",
+      "rc": 0,
+      "passed": 14,
+      "failed": 0,
+      "state_trace": [
+        "idle",
+        "capturing",
+        "transcribing",
+        "speaking"
+      ],
+      "observed": {
+        "speech": {
+          "samples": 51840,
+          "sink": "virtual",
+          "output_volume_percent": 100
+        },
+        "speech_status": "completed",
+        "states_live": [
+          "capturing",
+          "idle",
+          "speaking",
+          "transcribing"
+        ],
+        "states_derived": [
+          "executing",
+          "speaking",
+          "transcribing"
+        ]
+      },
+      "scan": {
+        "processes_max": 1,
+        "hits": []
+      },
+      "runtime_seconds": 16.1
+    },
+    {
+      "row": "ui configure",
+      "step": "configure",
+      "rc": 0,
+      "passed": 32,
+      "failed": 0,
+      "state_trace": [
+        "idle"
+      ],
+      "observed": {
+        "installed": {
+          "plugin_id": "benign_fixture",
+          "state": "installed",
+          "runtime": "disabled"
+        }
+      },
+      "scan": {
+        "processes_max": 1,
+        "hits": []
+      },
+      "runtime_seconds": 1.3
+    },
+    {
+      "row": "A v0.1.0 S1, UI configure, Hub",
+      "status": "done",
+      "passed": 61,
+      "failed": 0,
+      "runtime_seconds": 31.6
+    },
+    {
+      "row": "ui persisted-B",
+      "step": "observe_persisted",
+      "rc": 0,
+      "passed": 17,
+      "failed": 0,
+      "state_trace": [
+        "idle",
+        "capturing",
+        "transcribing",
+        "speaking"
+      ],
+      "observed": {
+        "speech": {
+          "samples": 51840,
+          "sink": "virtual",
+          "output_volume_percent": 50
+        },
+        "speech_status": "completed",
+        "states_live": [
+          "capturing",
+          "idle",
+          "speaking",
+          "transcribing"
+        ],
+        "states_derived": [
+          "executing",
+          "speaking",
+          "transcribing"
+        ]
+      },
+      "scan": {
+        "processes_max": 1,
+        "hits": []
+      },
+      "runtime_seconds": 16.0
+    },
+    {
+      "row": "B restart and UI reconnect",
+      "status": "done",
+      "passed": 25,
+      "failed": 0,
+      "runtime_seconds": 29.1
+    },
+    {
+      "row": "ui persisted-C",
+      "step": "observe_persisted",
+      "rc": 0,
+      "passed": 17,
+      "failed": 0,
+      "state_trace": [
+        "idle",
+        "capturing",
+        "executing",
+        "speaking"
+      ],
+      "observed": {
+        "speech": {
+          "samples": 51840,
+          "sink": "virtual",
+          "output_volume_percent": 50
+        },
+        "speech_status": "completed",
+        "states_live": [
+          "capturing",
+          "executing",
+          "idle",
+          "speaking"
+        ],
+        "states_derived": [
+          "executing",
+          "speaking",
+          "transcribing"
+        ]
+      },
+      "scan": {
+        "processes_max": 1,
+        "hits": []
+      },
+      "runtime_seconds": 16.0
+    },
+    {
+      "row": "C update refused then applied",
+      "status": "done",
+      "passed": 36,
+      "failed": 0,
+      "runtime_seconds": 39.5
+    },
+    {
+      "row": "ui persisted-D",
+      "step": "observe_persisted",
+      "rc": 0,
+      "passed": 17,
+      "failed": 0,
+      "state_trace": [
+        "idle",
+        "capturing",
+        "executing",
+        "speaking"
+      ],
+      "observed": {
+        "speech": {
+          "samples": 51840,
+          "sink": "virtual",
+          "output_volume_percent": 50
+        },
+        "speech_status": "completed",
+        "states_live": [
+          "capturing",
+          "executing",
+          "idle",
+          "speaking"
+        ],
+        "states_derived": [
+          "executing",
+          "speaking",
+          "transcribing"
+        ]
+      },
+      "scan": {
+        "processes_max": 1,
+        "hits": []
+      },
+      "runtime_seconds": 16.0
+    },
+    {
+      "row": "ui remove-D",
+      "step": "remove_plugin",
+      "rc": 0,
+      "passed": 6,
+      "failed": 0,
+      "state_trace": [
+        "idle"
+      ],
+      "observed": {},
+      "scan": {
+        "processes_max": 1,
+        "hits": []
+      },
+      "runtime_seconds": 1.3
+    },
+    {
+      "row": "ui final-E",
+      "step": "observe_persisted",
+      "rc": 0,
+      "passed": 17,
+      "failed": 0,
+      "state_trace": [
+        "idle",
+        "capturing",
+        "executing",
+        "speaking"
+      ],
+      "observed": {
+        "speech": {
+          "samples": 51840,
+          "sink": "virtual",
+          "output_volume_percent": 50
+        },
+        "speech_status": "completed",
+        "states_live": [
+          "capturing",
+          "executing",
+          "idle",
+          "speaking"
+        ],
+        "states_derived": [
+          "executing",
+          "speaking",
+          "transcribing"
+        ]
+      },
+      "scan": {
+        "processes_max": 1,
+        "hits": []
+      },
+      "runtime_seconds": 16.0
+    },
+    {
+      "row": "D rollback, UI remove, final S1",
+      "status": "done",
+      "passed": 61,
+      "failed": 0,
+      "runtime_seconds": 64.8
+    },
+    {
+      "row": "E identity",
+      "status": "done",
+      "passed": 3,
+      "failed": 0,
+      "runtime_seconds": 9.8
+    },
+    {
+      "row": "F isolation",
+      "status": "done",
+      "passed": 3,
+      "failed": 0,
+      "runtime_seconds": 0.0
+    }
+  ],
+  "isolation": {
+    "outer_probe_rc": 0,
+    "nested_probe_rc": 0,
+    "core_mode": "outer_bwrap",
+    "ui": {
+      "mode": "outer_bwrap_no_repo_no_uv_no_network",
+      "netns_interfaces": [
+        "lo"
+      ],
+      "binds": [
+        "packaged prefix ro",
+        "STATE rw",
+        "artifacts rw",
+        "driver ro at /driver.py"
+      ]
+    }
+  },
+  "identity": {
+    "A_hub_installed": {
+      "plugin_id": "benign_fixture",
+      "state": "installed",
+      "runtime": "disabled"
+    },
+    "ledger_revision": 3,
+    "current": "0.1.0-356a8b53",
+    "previous": "0.1.1-356a8b53",
+    "verified": [
+      "0.1.0-356a8b53",
+      "0.1.1-356a8b53"
+    ]
+  },
+  "package_binaries": {
+    "0.1.1": {
+      "installed_bin_gideon_base_sha256": "c979630e58618234b73e927b9006962e24e3e22234a6fe71720e37fe81c5f044",
+      "package_json_sha256": "34be49cdbba1e9bb076d5ff877d5f2e078836d78c07734f929526dcbf4677052",
+      "manifest_gideon_base_sha256": "c979630e58618234b73e927b9006962e24e3e22234a6fe71720e37fe81c5f044",
+      "manifest_release_gideon_base_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "manifest_commit": "356a8b533514b218c424ef1f3c7663f452a4e75f",
+      "manifest_dirty": false
+    },
+    "0.1.0": {
+      "installed_bin_gideon_base_sha256": "c979630e58618234b73e927b9006962e24e3e22234a6fe71720e37fe81c5f044",
+      "package_json_sha256": "2aa825bbb809d822e684ec95f33a81c11cfc6767f535ad9b02d11baf47a23ce3",
+      "manifest_gideon_base_sha256": "c979630e58618234b73e927b9006962e24e3e22234a6fe71720e37fe81c5f044",
+      "manifest_release_gideon_base_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "manifest_commit": "356a8b533514b218c424ef1f3c7663f452a4e75f",
+      "manifest_dirty": false
+    }
+  },
+  "binary_sha256_release_regression": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+  "package_commit": "356a8b533514b218c424ef1f3c7663f452a4e75f",
+  "package_dirty": {
+    "0.1.0": false,
+    "0.1.1": false
+  },
+  "runtime_seconds": 208.2,
+  "scope": "installed relocatable packages 0.1.0 and 0.1.1 under a versioned ROOT; Core under hidden-source bwrap; packaged Qt UI offscreen under its own bwrap (no repo, no uv, no network); virtual PCM/TTS S1; Hub approve/stage/install/remove; restart; update; rollback. No LLM, no network, no devices.",
+  "physical_validation": "NOT_PERFORMED",
+  "code_commit": "356a8b533514b218c424ef1f3c7663f452a4e75f",
+  "rust_tests": 67,
+  "python_tests": 20,
+  "package_install_unit_tests": 31,
+  "regressions": [
+    {
+      "report": "target/evidence/a0.json",
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "666e815f0c405bf0c743b3b9e09924373a924ba49c9040f1a420a74ee9f175b0"
+    },
+    {
+      "report": "target/evidence/a1-integration.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "80e0409df3b0150c7dc59488f53afc7ede4edf79dda6e2fe35579e05c515aaf3"
+    },
+    {
+      "report": "target/evidence/a2.json",
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "40277d5f56736e3ecc95d0935db050c9f9d33f7691b978522a11f6a0842a11e1"
+    },
+    {
+      "report": "target/evidence/a3-integration.json",
+      "passed": 67,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "79ce9b22aed1e278cfa608aba41a8df42045dcbc796035be30342a0f47a1af11"
+    },
+    {
+      "report": "target/evidence/a4-integration.json",
+      "passed": 138,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "670e87713ea8645fb233795eea068ff70c7a9a4923303a90ef9305064d406ddb"
+    },
+    {
+      "report": "target/evidence/a5-integration.json",
+      "passed": 93,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "694f2abf4d0c3a50e908a15a7ff8923bbfc469f3b66095ed04de15706ddedb75"
+    },
+    {
+      "report": "target/evidence/a5-soak.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "370be72e6e9a19f98c874861cd147d5441dd8e57df5af983eb06e361f4e7ba47"
+    },
+    {
+      "report": "target/evidence/a5-shutdown.json",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "659a460de075549f5322155d588937beefa2d97003a47c007dfb16292a07d2ee"
+    },
+    {
+      "report": "target/evidence/b1-ui.json",
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "12852e2d24ac84ba8f11ad7704624631e90c80bcf50b8b9fa82f6dede233c88e"
+    },
+    {
+      "report": "target/evidence/b2-preferences.json",
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "965e74f50d03ee375f86653c56708a63b0febbfb5f65901fb0a6f58b217d5433"
+    },
+    {
+      "report": "target/evidence/b2-safe-mode.json",
+      "passed": 96,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "6b1ec7efb3dc0faf79e446fadbbd2255d2bcd6790e3939a6a68d9b7b1a39d009"
+    },
+    {
+      "report": "target/evidence/b2-pack.json",
+      "passed": 36,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "e9e2e093809533947a7ab7b86ce74327bee74d0203501b66e97bd02e413052fc"
+    },
+    {
+      "report": "target/evidence/b2-feedback.json",
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "b7d46a2058d33d49004a6342a3899b34360065c9fb6ec809c29a875d204e6187"
+    },
+    {
+      "report": "target/evidence/b3-catalog.json",
+      "passed": 69,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "b4206641ecf34bca33cfdc25b18c034186abdcd992136ba4ea7b72c43f7ca092"
+    },
+    {
+      "report": "target/evidence/b3-permissions.json",
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "a35177015fbe59dbe93c55e5088594e1c51fb799c34c26e2cb63a1c3af509e19"
+    },
+    {
+      "report": "target/evidence/design.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "a148ceef07a9a3b7e12c5528ad1f2705a987d05e661e53bb24acbc478f502262"
+    },
+    {
+      "report": "target/evidence/b3-import.json",
+      "passed": 76,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "c5f4f29f9ea65735a2f06ffe3022849c62633e0ce9214ac3c5bc641f46f37024"
+    },
+    {
+      "report": "target/evidence/b3-import-timeout.json",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "8b50d20e507366666727c3a43fd98ab13f55dcf308f6a20169ab42e64c72e4ae"
+    },
+    {
+      "report": "target/evidence/b3-import-capacity.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "378e8a886a7e0b4c549cade65cf8d7466f06bbe41737aa6b647f3149e296bced"
+    },
+    {
+      "report": "target/evidence/b3-lifecycle.json",
+      "passed": 99,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "56c99b837e5432dd11b03695d946334e49213a93545b9523a96419084d4b271c"
+    }
+  ],
+  "regression_checks_total": 1020,
+  "package_gate_b4_1_checks": 66,
+  "update_gate_b4_2_checks": 126,
+  "total_process_checks": 1416,
+  "graph": {
+    "nodes": 1311,
+    "edges": 3354,
+    "scope": "AST only"
+  },
+  "deviations": [
+    "Wake selection is applied LAST in the configure step: a wake change puts the Core in restart_required, which disables Hub approve/install (by design). Contract order adjusted.",
+    "UI state trace by live polling sampled capturing/idle/speaking; transcribing/executing are derived from the Core event log, and the evidence marks which source each state came from."
+  ],
+  "limitations": [
+    "Wake is replay only (no live microphone path); S1 audio is virtual PCM/TTS. Physical audio, CPAL/PipeWire/AEC/hotplug/barge-in, real KDE/Wayland and Flatpak/portal are NOT validated.",
+    "Packaged binary differs from target/release by design (same commit, remapped paths); regressions ran on target/release, package gates on the packaged binary.",
+    "Command worker uses host /usr/bin/python3.",
+    "No signing, update channel, autostart or UI for package update; power loss during update needs manual repair.",
+    "Publisher unauthenticated; plugin runtime disabled (S3). No LLM/Model Manager/Skills/Connections.",
+    "Physical/human validation remains consolidated after S5."
+  ],
+  "source_sha256": {
+    "scripts/s2_final_driver.py": "a58974d0935c6bff68a5e58b5716652994af623148aa231ceee46792da72581d",
+    "scripts/verify_s2_final.py": "c7bee41412346d833ecc1a03a144fecca3899f76cee9599747f47c3b3d5e5381",
+    "app/Main.qml": "0eb96536dde108ff1312c846da2cfd54e83ded527a39263c65743ef55f0caee9",
+    "app/bridge.py": "3e898a4054e23298088be479721b37a03693a4eb2874dcef104a9896bacd652a",
+    "src/core.rs": "f3190797b3962d06b6604f2db624a61682636a4eee2a6e8aed20dac64237cc14",
+    "src/hub.rs": "b4fad59b363f822e5b136df9ed7e7d1afb7de0e72cd454a1c3b0dbee2f48abe9",
+    "src/transport.rs": "c4b67c00b771a2a77b3ba10b99bd3e2a26d083fe65f8b2d63435862fafaed3e0",
+    "scripts/package_tools/gideon-install": "914b9eab53e9429c9cfaf724998f9599b874c77107b756c0d20e5ba76b86cdb7",
+    "scripts/package_tools/gideon-launch": "81b18b243f7767955afc8592e41687868daf8a6abcfebd1582d3eb5c9f6b5985",
+    "scripts/build_package.py": "183521639fd136d89f18c12559ab780be691f13ad138dad715ecacf98ca48eca"
+  }
+}
