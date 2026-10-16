@@ -35,8 +35,11 @@ ApplicationWindow {
     readonly property string preferencesSuccess: "Preferências salvas pelo Core"
     readonly property bool spacious: width >= 1080 && height >= 760
     readonly property bool packAvailable: core.wakeChoices.length > 0
-    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM"]
-    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub"]
+    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM", "Percepção e ação"]
+    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub", "permissions"]
+    // C4 test buttons: reads only. Each entry is one allowlisted capability (bridge PERCEPTION_CAPABILITIES) sent with the empty object.
+    readonly property var perceptionActions: ({"screen_observe": [{capability: "screen_observe.capture", label: "Capturar"}, {capability: "screen_observe.status", label: "Estado"}], "computer_control": [{capability: "computer_control.tree", label: "Árvore"}, {capability: "computer_control.status", label: "Estado"}], "audio_advanced": [{capability: "audio_advanced.state", label: "Estado"}], "mic_advanced": [{capability: "mic_advanced.state", label: "Estado"}], "camera_gesture": [{capability: "camera_gesture.state", label: "Estado"}], "display_manipulate": [{capability: "display_manipulate.status", label: "Estado"}]})
+    function perceptionStateText(state) { return ({running: "em execução", starting: "iniciando", disabled: "desativado", failed: "falhou", stopped: "parado", quarantined: "em quarentena"})[state] || state }
     readonly property var stateLabels: ({idle:"Em espera", capturing:"Ouvindo", transcribing:"Transcrevendo", executing:"Executando", speaking:"Respondendo", offline:"Core indisponível", safe_mode:"Modo seguro", restart_required:"Reinício necessário"})
     readonly property var statusLabels: ({unavailable:"Indisponível", idle:"Em espera", ready:"Pronto", starting:"Iniciando", replaying:"Reproduzindo", replay_finished:"Replay encerrado", failed:"Falhou", completed:"Concluído", speaking:"Respondendo", muted:"Mudo", disabled:"Desligado", cancelled:"Cancelado", timed_out:"Tempo esgotado", audio_error:"Erro de áudio", stt_failed:"Falha na transcrição", stt_unavailable:"Transcrição indisponível", transcript_final:"Transcrição final", capture_completed:"Captura concluída", no_speech:"Sem fala detectada", capture_too_long:"Captura longa demais"})
     function statusText(status) { return statusLabels[status] || "Indisponível"; }
@@ -80,7 +83,7 @@ ApplicationWindow {
         function onChatSent(sent) { if (chatInput.text.trim() === sent) { chatInput.text = ""; window.setDraft("#chat", "text", "") } }
         // The captured model revision follows the user's own operations: refreshed when one settles, never on background changes.
         function onModelsStateChanged() { if (!core.modelsBusy) window.modelsRevisionCaptured = core.llmRevision }
-        function onChanged() { if (window.page === 8 && !core.modelsAvailable) window.page = 0 }
+        function onChanged() { if (window.page === 8 && !core.modelsAvailable) window.page = 0; if (window.page === 9 && !core.perceptionAvailable) window.page = 0 }
     }
     Dialog {
         id: preferences; objectName: "preferencesDialog"
@@ -379,7 +382,7 @@ ApplicationWindow {
                     text: sidebar.width > 100 ? modelData : ""
                     Accessible.name: modelData
                     image: "assets/" + window.navIcons[index] + ".png"
-                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : true
+                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : index === 9 ? core.perceptionAvailable : true
                     onClicked: window.page = index
                     ToolTip.visible: hovered && sidebar.width < 100; ToolTip.text: modelData
                 }
@@ -477,7 +480,7 @@ ApplicationWindow {
                     ColumnLayout {
                         anchors.left: parent.left; anchors.leftMargin: 26; anchors.verticalCenter: parent.verticalCenter; width: window.width > 900 ? parent.width - 260 : parent.width - 52; spacing: 10
                         Label { text: window.navigation[window.page]; color: "#f1f5ff"; font.pixelSize: window.width > 900 ? 52 : 24; font.bold: true }
-                        Label { text: window.page === 1 ? "Configure como o Gideon escuta e responde." : window.page === 3 ? "Defina o estilo visual do Gideon." : window.page === 2 ? "Sua voz, seus ajustes de áudio." : window.page === 4 ? "Cada capacidade precisa de autorização." : window.page === 5 ? "Acompanhe o estado real da Base." : window.page === 7 ? "Converse com o motor LLM opcional." : window.page === 8 ? "Escolha, teste e configure o modelo do motor LLM." : "Capacidades opcionais, em um só lugar."; color: "#b7caf3"; font.pixelSize: 17; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: window.page === 1 ? "Configure como o Gideon escuta e responde." : window.page === 3 ? "Defina o estilo visual do Gideon." : window.page === 2 ? "Sua voz, seus ajustes de áudio." : window.page === 4 ? "Cada capacidade precisa de autorização." : window.page === 5 ? "Acompanhe o estado real da Base." : window.page === 7 ? "Converse com o motor LLM opcional." : window.page === 8 ? "Escolha, teste e configure o modelo do motor LLM." : window.page === 9 ? "Teste sensores e ações simulados; nada age no seu computador." :"Capacidades opcionais, em um só lugar."; color: "#b7caf3"; font.pixelSize: 17; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
                 GlassCard {
@@ -588,6 +591,51 @@ ApplicationWindow {
                     ColumnLayout { id: hubPageColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
                         Label { text: core.hubDescription; color: "#b0c3e9"; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         GlowButton { text: "Explorar catálogo"; enabled: core.connected; onClicked: hubDialog.open() }
+                    }
+                }
+                // Percepção e ação (C4): shown only while a C4 plugin runs. Controls send reads only, through core.perceptionInvoke; the Core and the plugins decide everything else.
+                GlassCard {
+                objectName: "perceptionPanel"
+                theme: window.themeIndex
+                    visible: window.page === 9 && core.perceptionAvailable; Layout.fillWidth: true; implicitHeight: perceptionColumn.implicitHeight + 44
+                    ColumnLayout {
+                        id: perceptionColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        Label { text: "Backends simulados: nenhum hardware pessoal é acessado nesta build."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        // Privacy indicators are always on this page: they show the last state read ("não lido" until a read).
+                        Label { objectName: "micIndicator"; text: "Microfone · indicador: " + core.perceptionMicIndicator; textFormat: Text.PlainText; color: core.perceptionMicIndicator === "ligado" ? "#ffc674" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Indicador do microfone: " + core.perceptionMicIndicator }
+                        Label { objectName: "cameraIndicator"; text: "Câmera · indicador: " + core.perceptionCameraIndicator; textFormat: Text.PlainText; color: core.perceptionCameraIndicator === "ligado" ? "#ffc674" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Indicador da câmera: " + core.perceptionCameraIndicator }
+                        Repeater {
+                            model: core.perceptionPlugins
+                            delegate: Rectangle {
+                                id: perceptionCard
+                                required property var modelData
+                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
+                                implicitHeight: perceptionCardColumn.implicitHeight + 20
+                                ColumnLayout {
+                                    id: perceptionCardColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
+                                    Label { objectName: "perceptionTitle_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id + " " + perceptionCard.modelData.semver; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                                    Label { objectName: "perceptionState_" + perceptionCard.modelData.plugin_id; text: "Estado: " + window.perceptionStateText(perceptionCard.modelData.state) + (perceptionCard.modelData.last_error ? " · " + perceptionCard.modelData.last_error : ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { objectName: "perceptionBadge_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id === "display_manipulate" ? "UNSUPPORTED" : "SINTÉTICO — sem hardware real"; textFormat: Text.PlainText; font.bold: true; color: perceptionCard.modelData.plugin_id === "display_manipulate" ? "#ffc674" : "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { text: "Permissão exigida: " + (perceptionCard.modelData.permissions.join(", ") || "nenhuma") + (perceptionCard.modelData.approved ? " · concedida" : " · não concedida"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { text: "Backend real: não suportado / pendente de validação humana"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Flow {
+                                        Layout.fillWidth: true; spacing: 8
+                                        Repeater {
+                                            model: window.perceptionActions[perceptionCard.modelData.plugin_id] || []
+                                            delegate: GlowButton {
+                                                required property var modelData
+                                                objectName: "perception_" + modelData.capability
+                                                text: modelData.label
+                                                Accessible.name: modelData.label + " " + modelData.capability
+                                                enabled: core.connected && perceptionCard.modelData.state === "running" && !core.perceptionBusy
+                                                onClicked: core.perceptionInvoke(modelData.capability, "{}")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Label { objectName: "perceptionResult"; text: core.perceptionResult; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado da percepção: " + text }
                     }
                 }
                 // Modelos LLM: shown only while llm_engine runs with llm_engine.models; the Base has no models page.

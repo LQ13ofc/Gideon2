@@ -7,11 +7,12 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
 from bridge import Bridge,CHAT_STATE_LABELS,CODE_MESSAGES,PREFS_DONE,SECTION_SIGNALS,STALE_MESSAGE,bounded_output,chat_input_size,chat_messages_for,chat_problem,llm_url_ok,text_problem,valid_key,validate_snapshot
 from bridge import CERT_BADGES,FEATURE_LABELS,MODEL_CAPABILITY,custom_form_problem,custom_model,fallback_for,model_status,target_for,valid_model,valid_models_page,valid_selftest
 from bridge import AGENT_CODES,AGENT_STATE_LABELS,AGENT_STATES,OPS,PENDING,SNAPSHOT_SECTION_KEYS,agent_goal_problem,valid_agent,valid_tools
+from bridge import CAPABILITY_ERRORS,PERCEPTION_CAPABILITIES,PERCEPTION_DEADLINE_MS,PERCEPTION_INPUT_LIMIT,PERCEPTION_MESSAGES,PERCEPTION_OUTPUTS,PERCEPTION_PLUGINS,perception_code_message,perception_input_problem,perception_text
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
-QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child']
-APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD) else QCoreApplication([])
+QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child']
+APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
 EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
 BASE={'version':1,'request_id':'r','code':'ok','state':'idle','sequence':1,'session_id':None,'transcript':None,'command':None,'events':[],'text_input_available':True,'speech_samples':0,'speech_status':'idle','wake_status':'unavailable','stt_status':'unavailable','plugins':{'revision':0,'status':'ok','items':[]},'llm':EMPTY_LLM,'tool_proposals':[]}
@@ -1496,8 +1497,212 @@ class AgentBridge(unittest.TestCase):
         self.assertEqual(bridge.agentBudget,{'tokens_used':10,'tokens_max':4096})
         self.assertEqual((bridge.agentAnswer,bridge.agentStateLabel),('ok','Concluído'))
         self.assertNotIn('goal',repr(bridge.agentSteps))
+# C4 perception and action (docs/C4.md). The output samples are the documented C4 shapes; the plugins do not exist in the tree yet, so these are assumed contracts.
+PERC_OK={
+    'screen_observe.capture':{'backend':'synthetic','epoch':1,'width':1280,'height':720,'sha256':'c'*64,'regions':[{'role':'button','name':'OK','x':10,'y':20}]},
+    'screen_observe.status':{'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'},
+    'computer_control.tree':{'backend':'synthetic','epoch':1,'elements':[{'id':'b1','role':'button','name':'OK','x':10,'y':20}]},
+    'computer_control.act':{'backend':'synthetic','kind':'click','verified':True},
+    'computer_control.status':{'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'},
+    'audio_advanced.state':{'backend':'synthetic','routes':['speaker'],'apps':[{'id':'player','volume':50}],'eq':'flat','denoise':False},
+    'audio_advanced.act':{'backend':'synthetic','kind':'app_volume','verified':True},
+    'mic_advanced.state':{'backend':'synthetic','device':'virtual_mic','gain':40,'filter':False,'monitor':False,'recording':False,'indicator':False},
+    'mic_advanced.configure':{'backend':'synthetic','verified':True,'indicator':False},
+    'mic_advanced.monitor':{'backend':'synthetic','verified':True,'indicator':True},
+    'mic_advanced.record':{'backend':'synthetic','verified':True,'recording':True,'indicator':True},
+    'camera_gesture.state':{'backend':'synthetic','opt_in':False,'indicator':False,'frame_seq':0,'gesture':None},
+    'camera_gesture.optin':{'backend':'synthetic','opt_in':True,'indicator':True},
+    'camera_gesture.capture':{'backend':'synthetic','frame_seq':3,'indicator':True},
+    'camera_gesture.gestures':{'backend':'synthetic','gestures':['wave','point']},
+    'display_manipulate.status':{'supported':False,'state':'UNSUPPORTED','reason':'no_compositor_api_in_environment','note':'overlay/captura não é manipulação de saída'},
+}
+PERC_INPUT_OK=[('screen_observe.capture','{}'),('computer_control.act','{"kind":"click","epoch":1,"element":"b1"}'),('audio_advanced.act','{"kind":"eq","preset":"flat"}'),('mic_advanced.configure','{"gain":40,"filter":true}'),('mic_advanced.monitor','{"enabled":true}'),('mic_advanced.record','{"action":"start"}'),('camera_gesture.optin','{"enabled":true}')]
+PERC_INPUT_BAD=[('screen_observe.capture','{"x":1}'),('screen_observe.capture','[]'),('screen_observe.capture','null'),('screen_observe.capture','{"a":NaN}'),('screen_observe.capture','{'),('screen_observe.capture','{"a":"'+'x'*8200+'"}'),('screen_observe.capture','{"a":"'+'é'*4096+'"}'),('computer_control.act','{"kind":"drag","epoch":1}'),('computer_control.act','{"kind":"click"}'),('computer_control.act','{"kind":"click","epoch":0}'),('audio_advanced.act','{"kind":"mute"}'),('mic_advanced.configure','{"gain":101}'),('mic_advanced.configure','{"gain":true}'),('mic_advanced.record','{"action":"start","extra":1}'),('mic_advanced.record','{"action":"loop"}'),('camera_gesture.optin','{"enabled":"yes"}'),('display_manipulate.status','{"force":true}'),('os.exec','{}'),('screen_observe.capture_all','{}'),('llm_engine.chat','{"text":"x"}')]
+def perception_snapshot(plugins=(('screen_observe','running'),),result=None,approved=True):
+    """Installed, approved C4 plugins in the given states; each exposes its allowlisted capabilities only."""
+    digest='a'*64;entries=[];records=[];items=[]
+    for plugin,state in plugins:
+        caps=sorted(c for c in PERCEPTION_CAPABILITIES if c.split('.')[0]==plugin)
+        entries.append({'plugin_id':plugin,'semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[plugin],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'installed','reason':'none','manifest_sha256':digest,'permissions_approved':approved,'payload_staged':False,'runtime':'python3_script','capabilities':caps})
+        records.append({'plugin_id':plugin,'semver':'1.0.0','manifest_sha256':digest,'state':'installed','runtime':state,'previous':None})
+        items.append({'plugin_id':plugin,'semver':'1.0.0','capabilities':caps,'state':state,'enabled':state!='disabled','restarts':0,'last_error':None})
+        records[-1]['runtime']=state if state!='disabled' else 'disabled'
+    hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':1,'install_revision':1,'entries':entries,'installed':records}
+    snap={**ready(copy.deepcopy(BASE)),'hub':hub,'plugins':{'revision':1,'status':'ok','items':items}}
+    if result is not None:snap['capability_result']=result
+    return snap
+def perception_answer(capability,output=None,error=None):
+    plugin=capability.split('.')[0]
+    if error is None:return {'capability':capability,'plugin_id':plugin,'ok':True,'output':output,'elapsed_ms':3}
+    return {'capability':capability,'plugin_id':plugin,'ok':False,'error':error,'elapsed_ms':3}
+def perception_call(bridge,peer,capability,result,plugins=(('screen_observe','running'),),text='{}'):
+    """One allowlisted invoke over the real socket: ack, then the plugin answer arrives in a later snapshot."""
+    bridge.perceptionInvoke(capability,text);request=next_request(peer)
+    answer(peer,request,perception_snapshot(plugins));settle(bridge)
+    bridge.refresh();answer(peer,next_request(peer),perception_snapshot(plugins,result=result));settle(bridge)
+    return request
+class PerceptionContract(unittest.TestCase):
+    def test_allowlist_is_exactly_the_sixteen_documented_capabilities(self):
+        expected={'screen_observe.capture','screen_observe.status','computer_control.tree','computer_control.act','computer_control.status','audio_advanced.state','audio_advanced.act','mic_advanced.state','mic_advanced.configure','mic_advanced.monitor','mic_advanced.record','camera_gesture.state','camera_gesture.optin','camera_gesture.capture','camera_gesture.gestures','display_manipulate.status'}
+        self.assertEqual(PERCEPTION_CAPABILITIES,expected);self.assertEqual(set(PERCEPTION_OUTPUTS),expected);self.assertEqual(set(PERC_OK),expected)
+        self.assertEqual(PERCEPTION_PLUGINS,('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate'))
+        self.assertEqual({c.split('.')[0] for c in expected},set(PERCEPTION_PLUGINS))
+        self.assertEqual((PERCEPTION_INPUT_LIMIT,PERCEPTION_DEADLINE_MS),(8192,5000))
+    def test_input_rules_are_strict_and_bounded(self):
+        for capability,text in PERC_INPUT_OK:
+            with self.subTest(ok=capability,text=text[:40]):self.assertIsNone(perception_input_problem(capability,text))
+        for capability,text in PERC_INPUT_BAD:
+            with self.subTest(bad=capability,text=text[:40]):self.assertIsNotNone(perception_input_problem(capability,text))
+        self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"eq","a":"'+'x'*8100+'"}'),None)
+        self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"eq","a":"'+'x'*8200+'"}'),'Entrada acima de 8 KiB')
+        self.assertEqual(perception_input_problem('os.exec','{}'),'Capability de percepção desconhecida')
+        self.assertEqual(perception_input_problem('screen_observe.capture','{"x":1}'),'Esta capability não aceita entrada')
+    def test_every_output_rule_accepts_its_sample_and_refuses_forgery(self):
+        for capability,sample in PERC_OK.items():
+            with self.subTest(capability=capability):
+                self.assertTrue(PERCEPTION_OUTPUTS[capability](sample))
+                self.assertFalse(PERCEPTION_OUTPUTS[capability]({**sample,'extra':1}),'extra key')
+                self.assertFalse(PERCEPTION_OUTPUTS[capability]({k:v for k,v in sample.items() if k!=next(iter(sample))}),'missing key')
+                for key,value in sample.items():
+                    if type(value) is bool:self.assertFalse(PERCEPTION_OUTPUTS[capability]({**sample,key:1}),f'bool as int: {key}')
+                if 'backend' in sample:self.assertFalse(PERCEPTION_OUTPUTS[capability]({**sample,'backend':'real'}),'real backend claimed')
+                self.assertFalse(PERCEPTION_OUTPUTS[capability](None))
+        status=PERC_OK['screen_observe.status']
+        self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.status']({**status,'reason':'ok'}))
+        self.assertFalse(PERCEPTION_OUTPUTS['computer_control.status']({**status,'real_backend':'portal'}))
+        display=PERC_OK['display_manipulate.status']
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'supported':True}))
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'state':'OK'}))
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'note':'manipulação de saída'}))
+        self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.capture']({**PERC_OK['screen_observe.capture'],'regions':[{'role':'button','name':'OK','x':-1,'y':0}]}))
+        self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.capture']({**PERC_OK['screen_observe.capture'],'sha256':'C'*64}))
+        self.assertFalse(PERCEPTION_OUTPUTS['audio_advanced.state']({**PERC_OK['audio_advanced.state'],'apps':[{'id':'p','volume':101}]}))
+        self.assertFalse(PERCEPTION_OUTPUTS['mic_advanced.state']({**PERC_OK['mic_advanced.state'],'gain':-1}))
+        self.assertFalse(PERCEPTION_OUTPUTS['camera_gesture.gestures']({'backend':'synthetic','gestures':['x']*17}))
+    def test_perception_text_is_plain_bounded_and_portuguese(self):
+        text=perception_text(PERC_OK['screen_observe.capture'])
+        self.assertTrue(text.startswith('backend: sintético'));self.assertNotIn('\x00',text)
+        self.assertLessEqual(len(perception_text({'backend':'synthetic','elements':[{'id':'x'*60,'role':'r','name':'n'*200,'x':1,'y':1}]*64})),2048)
+        self.assertEqual(perception_text(PERC_OK['display_manipulate.status']).splitlines()[0],'suportado: não')
+    def test_perception_codes_are_allowed_and_have_portuguese_messages(self):
+        for code in ('opt_in_required','stale_screen','unsupported','unknown_service','permission_denied'):
+            with self.subTest(code=code):
+                self.assertIn(code,CAPABILITY_ERRORS)
+                message=perception_code_message(code);self.assertNotIn('Core recusou',message);self.assertTrue(message)
+        self.assertTrue(perception_code_message('permission_denied').startswith('Permissão negada'))
+        self.assertIn('opt_in_required',CAPABILITY_ERRORS);self.assertNotIn('camera_exploded',CAPABILITY_ERRORS)
+        validate_snapshot(perception_snapshot(result=perception_answer('screen_observe.capture',error='opt_in_required')),'r',0)
+        with self.assertRaises(ValueError):validate_snapshot(perception_snapshot(result=perception_answer('screen_observe.capture',error='camera_exploded')),'r',0)
+class PerceptionBridge(unittest.TestCase):
+    def test_availability_and_plugin_rows_follow_running_perception_plugins_only(self):
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True
+        bridge._apply(validate_snapshot(perception_snapshot((('screen_observe','running'),('mic_advanced','disabled'))),'r',0))
+        self.assertTrue(bridge.perceptionAvailable)
+        self.assertEqual([(p['plugin_id'],p['state'],p['approved'],p['permissions']) for p in bridge.perceptionPlugins],[('screen_observe','running',True,['screen_observe']),('mic_advanced','disabled',True,['mic_advanced'])])
+        bridge._apply(validate_snapshot(perception_snapshot((('mic_advanced','disabled'),)),'r',0));self.assertFalse(bridge.perceptionAvailable)
+        bridge._apply(validate_snapshot(perception_snapshot((('screen_observe','running'),),approved=False),'r',0));self.assertFalse(bridge.perceptionPlugins[0]['approved'])
+    def test_invoke_is_refused_before_the_core_for_every_bad_request(self):
+        bridge,peer=connect_bridge(self,perception_snapshot())
+        cases=[('os.exec','{}','Capability de percepção desconhecida'),('screen_observe.capture','{"x":1}','Esta capability não aceita entrada'),('screen_observe.capture','{',"Entrada não é JSON válido"),('computer_control.act','{"kind":"click","epoch":1}',CODE_MESSAGES['capability_unavailable'])]
+        for capability,text,message in cases:
+            with self.subTest(capability=capability,text=text):
+                bridge.perceptionInvoke(capability,text);wait_idle();self.assertFalse(peer.canReadLine());self.assertEqual(bridge.perceptionResult,message);self.assertFalse(bridge.perceptionBusy)
+    def test_invoke_sends_the_exact_request_and_shows_the_checked_result(self):
+        bridge,peer=connect_bridge(self,perception_snapshot());changes=Counter();bridge.perceptionChanged.connect(lambda:changes.update(['p']))
+        bridge.perceptionInvoke('screen_observe.capture','{}');request=next_request(peer)
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'capability_invoke','capability':'screen_observe.capture','input':{},'deadline_ms':PERCEPTION_DEADLINE_MS})
+        self.assertTrue(bridge.perceptionBusy)
+        answer(peer,request,perception_snapshot());settle(bridge)
+        self.assertEqual((bridge.perceptionResult,bridge.perceptionBusy),('Invocando capability…',True))
+        bridge.refresh();answer(peer,next_request(peer),perception_snapshot(result=perception_answer('screen_observe.capture',PERC_OK['screen_observe.capture'])));settle(bridge)
+        self.assertEqual((bridge.perceptionBusy,bridge.perceptionResult.splitlines()[0]),(False,'backend: sintético'))
+        self.assertGreaterEqual(changes['p'],3)
+    def test_second_invoke_is_refused_while_one_is_in_flight(self):
+        bridge,peer=connect_bridge(self,perception_snapshot())
+        bridge.perceptionInvoke('screen_observe.status','{}');answer(peer,next_request(peer),perception_snapshot());settle(bridge)
+        bridge.perceptionInvoke('screen_observe.capture','{}');wait_idle();self.assertFalse(peer.canReadLine())
+        self.assertEqual(bridge.perceptionResult,'Aguarde a ação de percepção anterior')
+    def test_stale_answers_are_ignored_and_forged_outputs_are_refused(self):
+        old=perception_answer('screen_observe.capture',{**PERC_OK['screen_observe.capture'],'sha256':'d'*64})
+        bridge,peer=connect_bridge(self,perception_snapshot(result=old))
+        bridge.perceptionInvoke('screen_observe.capture','{}');answer(peer,next_request(peer),perception_snapshot(result=old));settle(bridge)
+        bridge.refresh();answer(peer,next_request(peer),perception_snapshot(result=old));settle(bridge)
+        self.assertTrue(bridge.perceptionBusy);self.assertEqual(bridge.perceptionResult,'Invocando capability…')
+        bridge.refresh();answer(peer,next_request(peer),perception_snapshot(result=perception_answer('screen_observe.capture',{**PERC_OK['screen_observe.capture'],'backend':'real'})));settle(bridge)
+        self.assertFalse(bridge.perceptionBusy);self.assertEqual(bridge.perceptionResult,'Resposta do plugin recusada pelo esquema; nada exibido')
+    def test_core_error_codes_show_their_perception_wording(self):
+        bridge,peer=connect_bridge(self,perception_snapshot(plugins=(('screen_observe','running'),('camera_gesture','running'))))
+        perception_call(bridge,peer,'screen_observe.capture',perception_answer('screen_observe.capture',error='permission_denied'),plugins=(('screen_observe','running'),('camera_gesture','running')))
+        self.assertEqual(bridge.perceptionResult,PERCEPTION_MESSAGES['permission_denied'])
+        perception_call(bridge,peer,'camera_gesture.capture',perception_answer('camera_gesture.capture',error='opt_in_required'),plugins=(('screen_observe','running'),('camera_gesture','running')))
+        self.assertEqual(bridge.perceptionResult,CODE_MESSAGES['opt_in_required'])
+        self.assertEqual(bridge.perceptionCameraIndicator,'não lido')
+    def test_privacy_indicators_show_the_last_read_and_the_plugin_state(self):
+        both=(('mic_advanced','running'),('camera_gesture','running'))
+        bridge,peer=connect_bridge(self,perception_snapshot(plugins=both))
+        self.assertEqual((bridge.perceptionMicIndicator,bridge.perceptionCameraIndicator),('não lido','não lido'))
+        perception_call(bridge,peer,'mic_advanced.record',perception_answer('mic_advanced.record',{**PERC_OK['mic_advanced.record']}),plugins=both,text='{"action":"start"}')
+        self.assertEqual(bridge.perceptionMicIndicator,'ligado')
+        perception_call(bridge,peer,'camera_gesture.optin',perception_answer('camera_gesture.optin',{**PERC_OK['camera_gesture.optin'],'indicator':False}),plugins=both,text='{"enabled":false}')
+        self.assertEqual(bridge.perceptionCameraIndicator,'desligado')
+        perception_call(bridge,peer,'mic_advanced.monitor',perception_answer('mic_advanced.monitor',{**PERC_OK['mic_advanced.monitor'],'indicator':False}),plugins=both,text='{"enabled":true}')
+        self.assertEqual(bridge.perceptionMicIndicator,'desligado')
+        bridge._apply(validate_snapshot(perception_snapshot((('mic_advanced','disabled'),)),'r',0))
+        self.assertEqual(bridge.perceptionMicIndicator,'plugin inativo')
+    def test_disconnect_ends_the_invocation_in_flight(self):
+        bridge,peer=connect_bridge(self,perception_snapshot())
+        bridge.perceptionInvoke('screen_observe.capture','{}');answer(peer,next_request(peer),perception_snapshot());settle(bridge)
+        self.assertTrue(bridge.perceptionBusy)
+        bridge._offline()
+        self.assertEqual((bridge.perceptionBusy,bridge.perceptionResult,bridge.perceptionAvailable),(False,'',False))
+class PerceptionQml(unittest.TestCase):
+    def test_perception_page_follows_qml_rules(self):
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
+        proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-perception-child'],env=env,capture_output=True,text=True,timeout=240)
+        self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
+def qml_perception_child():
+    from PySide6.QtGui import QAccessible,QGuiApplication
+    from PySide6.QtCore import QCoreApplication,QEvent
+    from PySide6.QtTest import QTest
+    from main import create
+    app=QGuiApplication(sys.argv[:1]);QAccessible.setActive(True);checks=[]
+    def check(name,value):
+        if not value:raise AssertionError(name)
+        checks.append(name)
+    with tempfile.TemporaryDirectory(prefix='gideon-qml-perception-') as td:
+        bridge,engine=create(app,td);window=engine.rootObjects()[0]
+        bridge.retry.stop();bridge.online=True
+        try:
+            def items():
+                stack=[window.contentItem()];found=[]
+                while stack:
+                    current=stack.pop();found.append(current);stack.extend(current.childItems())
+                return found
+            def find(name):
+                item=next((i for i in items() if i.objectName()==name),None)
+                if item is None:raise AssertionError('missing '+name)
+                return item
+            bridge._apply(validate_snapshot(perception_snapshot((('screen_observe','running'),('mic_advanced','running'),('display_manipulate','disabled'))),'r',0))
+            check('nav9 offered while a C4 plugin runs',find('nav9').property('visible'))
+            window.setProperty('page',9);QTest.qWait(50)
+            check('perception panel visible on its page',find('perceptionPanel').property('visible'))
+            check('synthetic label on screen_observe card',find('perceptionBadge_screen_observe').property('text')=='SINTÉTICO — sem hardware real')
+            check('display card shows UNSUPPORTED badge',find('perceptionBadge_display_manipulate').property('text')=='UNSUPPORTED')
+            check('mic indicator visible before any read',find('micIndicator').property('text')=='Microfone · indicador: não lido')
+            check('capture button enabled for a running plugin',find('perception_screen_observe.capture').property('enabled'))
+            check('display status button stays disabled while its plugin is not running',find('perception_display_manipulate.status').property('enabled') is False)
+            check('result label starts empty',find('perceptionResult').property('text')=='')
+            bridge._apply(validate_snapshot(perception_snapshot((('screen_observe','disabled'),)),'r',0))
+            QTest.qWait(50);check('page falls back when no C4 plugin runs',window.property('page')==0)
+        finally:
+            for w in engine.rootObjects():w.close();w.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            del engine;del bridge
+    print(f'qml perception checks ok: {len(checks)}',flush=True)
+    return 0
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())
     if QML_MODELS_CHILD:sys.exit(qml_models_child())
+    if QML_PERCEPTION_CHILD:sys.exit(qml_perception_child())
     unittest.main()

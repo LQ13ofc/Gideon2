@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "repository": "https://github.com/LQ13ofc/Gideon2",
+  "plugins": [
+    {
+      "plugin_id": "screen_observe",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/screen_observe.py",
+          "sha256": "1874eb36dae18eb86a995394d50f076211da8269af13d52c10bc4fd0f6b94628",
+          "size": 10420
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "screen_observe"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/screen_observe.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c4-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "screen_observe.capture",
+        "screen_observe.status"
+      ]
+    },
+    {
+      "plugin_id": "computer_control",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/computer_control.py",
+          "sha256": "f410c601fbbf3cec82bc08358b0c1fdb9de07e2bdaab908a45b2ae4bf9be34bb",
+          "size": 12503
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "input_control"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/computer_control.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c4-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "computer_control.tree",
+        "computer_control.act",
+        "computer_control.status"
+      ]
+    },
+    {
+      "plugin_id": "audio_advanced",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/audio_advanced.py",
+          "sha256": "6add7e944daf07f67c97f7676ec8fa6b5d45adba870175140757ffd1868627a5",
+          "size": 10107
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "audio_route"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/audio_advanced.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c4-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "audio_advanced.state",
+        "audio_advanced.act"
+      ]
+    },
+    {
+      "plugin_id": "mic_advanced",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/mic_advanced.py",
+          "sha256": "1dc2ef7d02bb86f8754da1c46840b5a82f6fd27360248c6bd64908aa320ba0b7",
+          "size": 9805
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "mic_config"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/mic_advanced.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c4-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "mic_advanced.state",
+        "mic_advanced.configure",
+        "mic_advanced.monitor",
+        "mic_advanced.record"
+      ]
+    },
+    {
+      "plugin_id": "camera_gesture",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/camera_gesture.py",
+          "sha256": "9ddb44d8669ca1c7de96b12b339344aa5d4633c05c5707b0e723e7424718f980",
+          "size": 8946
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "camera_capture"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/camera_gesture.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c4-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "camera_gesture.state",
+        "camera_gesture.optin",
+        "camera_gesture.capture",
+        "camera_gesture.gestures"
+      ]
+    },
+    {
+      "plugin_id": "display_manipulate",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/display_manipulate.py",
+          "sha256": "6dcd31b81a17c820d04af6b0bf0cad0c07b6f9d5be6684ca5f31f5d3528bbce3",
+          "size": 3509
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "display_manipulate"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/display_manipulate.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c4-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "display_manipulate.status"
+      ]
+    }
+  ]
+}

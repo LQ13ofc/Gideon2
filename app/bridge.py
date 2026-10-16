@@ -17,7 +17,7 @@ RUNTIME_STATES=('disabled','starting','running','failed','stopped')
 # Codes Core writes to plugin last_error (src/plugins.rs runtime start, violation and crash paths).
 PLUGIN_LAST_ERRORS=frozenset({'plugin_crashed','plugin_cpu_exceeded','plugin_output_invalid','plugin_start_failed','plugin_not_runnable','plugin_quarantined','handshake_timeout','handshake_mismatch'})
 # Codes a capability_result can carry (src/plugins.rs PASS_THROUGH_ERRORS plus Core-owned results).
-CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable'})
+CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable','opt_in_required','stale_screen','unsupported','unknown_service'})  # C4 codes (docs/C4.md): plugin answers, never Core-owned
 # Tool proposal reasons (src/tools.rs and src/core.rs tool_denied/tool_failed).
 TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_failed','executor_unavailable','user_denied','invalid_args','unknown_tool','busy'})
 HUB_REASONS=('ledger_missing','ledger_invalid')
@@ -333,6 +333,70 @@ def chat_messages_for(history,text):
         turns=turns[1:]
 
 
+# C4 perception and action plugins (docs/C4.md). The allowlist is the only capability set perceptionInvoke may send. Shapes below are the
+# C4 contract: real plugins are not in the tree yet, so each output rule is an assumption until the C4.1-C4.6 gates exist (see docs/C4.md).
+PERCEPTION_PLUGINS=('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate')
+PERCEPTION_NO_INPUT=frozenset({'screen_observe.capture','screen_observe.status','computer_control.tree','computer_control.status','audio_advanced.state','mic_advanced.state','camera_gesture.state','camera_gesture.capture','camera_gesture.gestures','display_manipulate.status'})
+PERCEPTION_CAPABILITIES=PERCEPTION_NO_INPUT|frozenset({'computer_control.act','audio_advanced.act','mic_advanced.configure','mic_advanced.monitor','mic_advanced.record','camera_gesture.optin'})
+PERCEPTION_INPUT_LIMIT=8192;PERCEPTION_DEADLINE_MS=5000;PERCEPTION_GESTURES=16;PERCEPTION_ELEMENTS=64
+PERCEPTION_LABELS={'backend':'backend','real_backend':'backend real','reason':'motivo','epoch':'época','width':'largura','height':'altura','sha256':'SHA-256','regions':'regiões','elements':'elementos','kind':'ação','verified':'verificado','routes':'rotas','apps':'apps','eq':'EQ','denoise':'redução de ruído','device':'dispositivo','gain':'ganho','filter':'filtro','monitor':'monitor','recording':'gravando','indicator':'indicador','opt_in':'opt-in','frame_seq':'quadro','gesture':'gesto','gestures':'gestos','supported':'suportado','state':'estado','note':'nota','volume':'volume','id':'id','role':'papel','name':'nome','x':'x','y':'y'}
+PERCEPTION_VALUES={'synthetic':'sintético','unsupported':'não suportado','needs_human_validation':'pendente de validação humana','UNSUPPORTED':'UNSUPPORTED'}
+PERCEPTION_MESSAGES={'permission_denied':'Permissão negada: o plugin precisa da permissão aprovada no Gideon Hub','stale_screen':'A tela mudou desde a última observação; observe de novo'}
+PERCEPTION_UNREAD='não lido';PERCEPTION_ARM=object()
+def _no_constant(name):raise ValueError(name)
+def _exact(value,keys):return isinstance(value,dict) and set(value)==set(keys)
+def _synthetic(value):return value.get('backend')=='synthetic'
+def _region(item,keys,limit):return _exact(item,keys) and plain_text(item[keys[0]],limit) and all(is_int(item[k],0,16384) for k in keys[2:]) and plain_text(item[keys[1]],256)
+def _out_capture(o):return _exact(o,('backend','epoch','width','height','sha256','regions')) and _synthetic(o) and is_int(o['epoch'],0,2**32) and is_int(o['width'],1,16384) and is_int(o['height'],1,16384) and digest(o['sha256']) and isinstance(o['regions'],list) and len(o['regions'])<=64 and all(_region(r,('role','name','x','y'),64) for r in o['regions'])
+def _out_status(o):return _exact(o,('backend','real_backend','reason')) and _synthetic(o) and o['real_backend']=='unsupported' and o['reason']=='needs_human_validation'
+def _out_tree(o):
+    if not (_exact(o,('backend','epoch','elements')) and _synthetic(o) and is_int(o['epoch'],0,2**32) and isinstance(o['elements'],list) and len(o['elements'])<=PERCEPTION_ELEMENTS):return False
+    return all(_exact(e,('id','role','name','x','y')) and plain_text(e['id'],64) and plain_text(e['role'],64) and plain_text(e['name'],256) and is_int(e['x'],0,16384) and is_int(e['y'],0,16384) for e in o['elements'])
+def _out_cc_act(o):return _exact(o,('backend','kind','verified')) and _synthetic(o) and o['kind'] in ('click','type','key','focus') and type(o['verified']) is bool
+def _out_audio_act(o):return _exact(o,('backend','kind','verified')) and _synthetic(o) and o['kind'] in ('route','app_volume','eq','denoise') and type(o['verified']) is bool
+def _out_audio_state(o):
+    if not (_exact(o,('backend','routes','apps','eq','denoise')) and _synthetic(o) and isinstance(o['routes'],list) and len(o['routes'])<=8 and isinstance(o['apps'],list) and len(o['apps'])<=8):return False
+    return all(plain_text(r,64) for r in o['routes']) and all(_exact(a,('id','volume')) and plain_text(a['id'],64) and is_int(a['volume'],0,100) for a in o['apps']) and plain_text(o['eq'],64) and type(o['denoise']) is bool
+def _out_mic_state(o):return _exact(o,('backend','device','gain','filter','monitor','recording','indicator')) and _synthetic(o) and plain_text(o['device'],128) and is_int(o['gain'],0,100) and all(type(o[k]) is bool for k in ('filter','monitor','recording','indicator'))
+def _out_mic_receipt(o):return _exact(o,('backend','verified','indicator')) and _synthetic(o) and type(o['verified']) is bool and type(o['indicator']) is bool
+def _out_mic_record(o):return _exact(o,('backend','verified','recording','indicator')) and _synthetic(o) and all(type(o[k]) is bool for k in ('verified','recording','indicator'))
+def _out_cam_state(o):return _exact(o,('backend','opt_in','indicator','frame_seq','gesture')) and _synthetic(o) and type(o['opt_in']) is bool and type(o['indicator']) is bool and is_int(o['frame_seq'],0,2**32) and (o['gesture'] is None or plain_text(o['gesture'],64))
+def _out_cam_optin(o):return _exact(o,('backend','opt_in','indicator')) and _synthetic(o) and type(o['opt_in']) is bool and type(o['indicator']) is bool
+def _out_cam_capture(o):return _exact(o,('backend','frame_seq','indicator')) and _synthetic(o) and is_int(o['frame_seq'],0,2**32) and type(o['indicator']) is bool
+def _out_cam_gestures(o):return _exact(o,('backend','gestures')) and _synthetic(o) and isinstance(o['gestures'],list) and len(o['gestures'])<=PERCEPTION_GESTURES and all(plain_text(g,64) for g in o['gestures'])
+def _out_display(o):return _exact(o,('supported','state','reason','note')) and o['supported'] is False and o['state']=='UNSUPPORTED' and o['reason']=='no_compositor_api_in_environment' and o['note']=='overlay/captura não é manipulação de saída'
+# Output rule per allowlisted capability: a result that fails its rule is refused before QML sees it.
+PERCEPTION_OUTPUTS={'screen_observe.capture':_out_capture,'screen_observe.status':_out_status,'computer_control.tree':_out_tree,'computer_control.act':_out_cc_act,'computer_control.status':_out_status,'audio_advanced.state':_out_audio_state,'audio_advanced.act':_out_audio_act,'mic_advanced.state':_out_mic_state,'mic_advanced.configure':_out_mic_receipt,'mic_advanced.monitor':_out_mic_receipt,'mic_advanced.record':_out_mic_record,'camera_gesture.state':_out_cam_state,'camera_gesture.optin':_out_cam_optin,'camera_gesture.capture':_out_cam_capture,'camera_gesture.gestures':_out_cam_gestures,'display_manipulate.status':_out_display}
+def _in_act(capability,value):
+    if capability=='computer_control.act':return value.get('kind') in ('click','type','key','focus') and is_int(value.get('epoch'),1)
+    if capability=='audio_advanced.act':return value.get('kind') in ('route','app_volume','eq','denoise')
+    if capability=='mic_advanced.configure':return set(value)<={'gain','filter'} and ('gain' not in value or is_int(value['gain'],0,100)) and ('filter' not in value or type(value['filter']) is bool)
+    if capability=='mic_advanced.monitor':return set(value)=={'enabled'} and type(value['enabled']) is bool
+    if capability=='mic_advanced.record':return set(value)=={'action'} and value['action'] in ('start','stop')
+    return set(value)=={'enabled'} and type(value['enabled']) is bool
+def perception_input_problem(capability,text):
+    """Strict input rule for perceptionInvoke: an allowlisted capability, a JSON object of at most 8 KiB, exact keys for reads, checked fields for actions."""
+    if capability not in PERCEPTION_CAPABILITIES:return 'Capability de percepção desconhecida'
+    if not isinstance(text,str) or utf8_len(text)>PERCEPTION_INPUT_LIMIT:return 'Entrada acima de 8 KiB'
+    try:value=json.loads(text,parse_constant=_no_constant)
+    except (ValueError,RecursionError):return 'Entrada não é JSON válido'
+    if not (isinstance(value,dict) and bounded_output(value)):return 'Entrada deve ser um objeto JSON de até 8 KiB'
+    if capability in PERCEPTION_NO_INPUT:return None if value=={} else 'Esta capability não aceita entrada'
+    return None if _in_act(capability,value) else 'Entrada inválida para esta capability'
+def perception_text(output):
+    """PlainText summary of a validated output: one 'label: value' line per key, lists shown as their first items."""
+    lines=[]
+    for key,value in output.items():
+        if type(value) is bool:shown='sim' if value else 'não'
+        elif value is None:shown='nenhum'
+        elif isinstance(value,list):
+            shown=f'{len(value)} item(ns)'+''.join(f"\n  - {' · '.join(str(v) for v in item.values())}" for item in value[:8] if isinstance(item,dict))
+        elif isinstance(value,str):shown=PERCEPTION_VALUES.get(value,value)
+        else:shown=str(value)
+        lines.append(f'{PERCEPTION_LABELS.get(key,key)}: {shown}')
+    return '\n'.join(lines)[:2048]
+def perception_code_message(code):return PERCEPTION_MESSAGES.get(code) or code_message(code)
+
 def validate_snapshot(data,request_id,min_sequence):
     """Validate presentation data before QML sees it; no command policy lives here."""
     def require(condition):
@@ -589,6 +653,11 @@ CODE_MESSAGES={
     'denied':'Ação recusada pelo Core',
     'unknown_capability':'Capability do motor LLM desconhecida',
     'plugin_error':'Motor LLM retornou erro interno',
+    # C4: perception and action plugins (docs/C4.md). permission_denied and stale_screen read differently in the perception page (PERCEPTION_MESSAGES).
+    'opt_in_required':'Câmera desligada: ative o opt-in antes de capturar',
+    'unsupported':'Backend real não suportado neste ambiente; nada foi executado',
+    'unknown_service':'Serviço de percepção indisponível nesta build',
+    'capability_timeout':'Plugin de percepção não respondeu no prazo',
 }
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
@@ -619,15 +688,17 @@ class Bridge(QObject):
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
     preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
-    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str)
+    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
         self.models_req=None;self.models_wait=None;self.models_before=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_message=''
         # Paging (list is paginated per tab): models_page_req=(tab,offset) awaits the page answer; models_page[tab]={'total','next'} is where the next page starts.
         self.models_page_req=None;self.models_page=fresh_model_pages()
+        # C4 perception: one allowlisted capability at a time. perception_req awaits the Core ack; perception_inflight awaits the plugin result; perception_before is the capability_result seen at ack, so a stale answer is never taken for the new one.
+        self.perception_req=None;self.perception_inflight=None;self.perception_before=None;self.perception_indicators={'mic':None,'camera':None}
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
         self.poll=QTimer(self);self.poll.setInterval(1000);self.poll.timeout.connect(self.refresh)
         self.retry=QTimer(self);self.retry.setSingleShot(True);self.retry.timeout.connect(self.connect_core)
@@ -650,7 +721,7 @@ class Bridge(QObject):
         self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=dict.fromkeys(self.results,'');self.hub_target='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         # After abort(): it re-enters _offline synchronously, which clears results; the chat message must survive that.
-        self._chat_reset();self._models_reset()
+        self._chat_reset();self._models_reset();self._perception_reset()
         self._publish(old,self.snapshot)
         self.changed.emit()
         if not self.retry.isActive():self.retry.start(self._backoff);self._backoff=min(5000,self._backoff*2)
@@ -681,6 +752,11 @@ class Bridge(QObject):
             self.pending_chat=False;self._chat_accepted(code);return
         if op=='capability_cancel' and self.pending_chat_cancel:
             self.pending_chat_cancel=False;self.results['chat']='Cancelamento enviado' if code=='ok' else code_message(code);self.chatChanged.emit()
+        if op=='capability_invoke' and self.perception_req is not None:
+            req,self.perception_req=self.perception_req,None
+            if code=='ok':self.perception_inflight=req;self.perception_before=PERCEPTION_ARM;self.results['perception']=PENDING['capability_invoke']
+            else:self.results['perception']=perception_code_message(code)
+            self._perception_touch();return
         if op=='tool_decide':self.tool_inflight=None
         if op not in OPS:return
         channel,done=OPS[op]
@@ -701,7 +777,7 @@ class Bridge(QObject):
         data['session_id']=str(data['session_id']) if data.get('session_id') is not None else ''
         old=self.snapshot
         if data!=old:self.snapshot=data;self._publish(old,data)
-        if data!=old or settled:self.changed.emit()
+        if data!=old or settled:self.changed.emit();self.perceptionChanged.emit()
     def _read(self):
         # Never read more than the 64 KiB cap plus one byte; the cap check below drops the Core.
         self.buffer.extend(bytes(self.socket.read(65537-len(self.buffer))))
@@ -720,7 +796,7 @@ class Bridge(QObject):
             # The invocation result arrives later in the snapshot; the Core clears it on every new invoke.
             if self.capability_pending and data.get('capability_result'):self.capability_pending=False;self.results['plugin']=''
             self._apply(data,settled=pending_op in OPS)
-            self._chat_observe();self._models_observe()
+            self._chat_observe();self._models_observe();self._perception_observe()
             self.poll.setInterval(150 if sid is not None else 1000)
             if self.cancel_id is not None:
                 old_id=self.cancel_id;self.cancel_id=None;self._request('cancel',session_id=int(old_id))
@@ -1308,3 +1384,65 @@ class Bridge(QObject):
     def diagnostic(self):
         if not self.online:return self.error
         return self.configurationMessage or ' · '.join([self.snapshot.get('wake_status','unavailable'),self.snapshot.get('stt_status','unavailable'),self.snapshot.get('speech_status','unavailable')])
+    # ---- C4 perception and action. Only the allowlist above reaches the Core, as capability_invoke with a 5 s deadline; every answer is checked against its C4 rule before QML shows it.
+    def _perception_items(self):
+        entries={e.get('plugin_id'):e for e in (self.snapshot.get('hub') or {}).get('entries',[])}
+        rows=[]
+        for item in (self.snapshot.get('plugins') or {}).get('items',[]):
+            if item['plugin_id'] in PERCEPTION_PLUGINS:
+                entry=entries.get(item['plugin_id']) or {}
+                rows.append({**item,'permissions':list(entry.get('permissions',[])),'approved':entry.get('permissions_approved') is True})
+        return rows
+    def _perception_running(self,capability):
+        plugin=capability.split('.')[0]
+        return any(i['plugin_id']==plugin and i['state']=='running' and capability in i['capabilities'] for i in self._perception_items())
+    def _perception_busy_now(self):return self.perception_req is not None or self.perception_inflight is not None
+    def _perception_touch(self):self.changed.emit();self.perceptionChanged.emit()
+    def _perception_reset(self):
+        """Connection lost: the invocation in flight ends here; the indicators are read again after reconnecting."""
+        self.perception_req=None;self.perception_inflight=None;self.perception_before=None;self.perception_indicators={'mic':None,'camera':None}
+        self.perceptionChanged.emit()
+    def _perception_observe(self):
+        req=self.perception_inflight
+        if req is None:return
+        result=self.snapshot.get('capability_result')
+        # The first snapshot after the ack is the baseline: the Core clears the previous answer on every new invoke.
+        if self.perception_before is PERCEPTION_ARM:self.perception_before=result;return
+        if not result or result.get('capability')!=req['capability'] or result.get('plugin_id')!=req['plugin_id'] or result==self.perception_before:return
+        self.perception_inflight=None;self.perception_before=None
+        if not result['ok']:self.results['perception']=perception_code_message(result['error'])
+        elif not PERCEPTION_OUTPUTS[req['capability']](result.get('output')):self.results['perception']='Resposta do plugin recusada pelo esquema; nada exibido'
+        else:
+            output=result['output'];self.results['perception']=perception_text(output)
+            if 'indicator' in output and req['capability'].startswith('mic_advanced.'):self.perception_indicators['mic']=output['indicator']
+            if 'indicator' in output and req['capability'].startswith('camera_gesture.'):self.perception_indicators['camera']=output['indicator']
+        self._perception_touch()
+    @Property(bool,notify=changed)
+    def perceptionAvailable(self):return self.online and any(i['state']=='running' for i in self._perception_items())
+    @Property('QVariantList',notify=perceptionChanged)
+    def perceptionPlugins(self):return self._perception_items()
+    @Property(bool,notify=perceptionChanged)
+    def perceptionBusy(self):return self._perception_busy_now()
+    @Property(str,notify=perceptionChanged)
+    def perceptionResult(self):return self.results['perception']
+    def _indicator_text(self,plugin,value):
+        if not any(i['plugin_id']==plugin and i['state']=='running' for i in self._perception_items()):return 'plugin inativo'
+        return PERCEPTION_UNREAD if value is None else ('ligado' if value else 'desligado')
+    @Property(str,notify=perceptionChanged)
+    def perceptionMicIndicator(self):return self._indicator_text('mic_advanced',self.perception_indicators['mic'])
+    @Property(str,notify=perceptionChanged)
+    def perceptionCameraIndicator(self):return self._indicator_text('camera_gesture',self.perception_indicators['camera'])
+    @Slot(str,str)
+    def perceptionInvoke(self,capability,text):
+        problem=perception_input_problem(capability,text)
+        if problem is None and not self._perception_running(capability):problem=CODE_MESSAGES['capability_unavailable']
+        if problem is None and self._perception_busy_now():problem='Aguarde a ação de percepção anterior'
+        if problem is None and self.pending:problem=CODE_MESSAGES['busy']
+        if problem is None and (self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem='Aguarde a conversa terminar'
+        if problem is None and self._models_busy_now():problem='Aguarde o gerenciador de modelos'
+        if problem is None and self._agent_active():problem=CODE_MESSAGES['agent_busy']
+        if problem is not None:self.results['perception']=problem;self._perception_touch();return
+        self.perception_req={'capability':capability,'plugin_id':capability.split('.')[0]}
+        if self._request('capability_invoke',capability=capability,input=json.loads(text),deadline_ms=PERCEPTION_DEADLINE_MS):self.results['perception']=PENDING['capability_invoke']
+        else:self.perception_req=None;self.results['perception']='Core indisponível'
+        self._perception_touch()

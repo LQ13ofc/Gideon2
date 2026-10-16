@@ -17,6 +17,14 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
     agent-ready     Agente offered while the engine runs; Iniciar disabled with a blank goal, enabled with a goal
     agent-awaiting  the run reached awaiting_approval; Autorizar is on screen with the run's proposal and Abortar is enabled
     agent-done      after Autorizar the run reached done; the final answer is shown as PlainText and Iniciar is enabled again
+  perception phase (C4 UI, needs a real Core with the six C4 plugins installed, approved and enabled, started with
+    --agent-synthetic; screen_observe, computer_control, audio_advanced, mic_advanced, camera_gesture and display_manipulate).
+    Expected setup: each plugin runs its synthetic backend and display_manipulate answers its UNSUPPORTED status. C4.1-C4.6 are
+    not implemented in the tree yet, so this phase cannot pass before those plugins exist; it is not counted as passed until then.
+    perception-ready        Percepção offered; every synthetic card reads SINTÉTICO — sem hardware real, display reads UNSUPPORTED,
+                            the microphone and camera indicators are on the page
+    perception-captured     Capturar went through the Core and its result is shown as PlainText from the checked output
+    perception-unsupported  Estado of display_manipulate shows UNSUPPORTED; the page ends with ui.png
 """
 import argparse,json,os,sys,time
 from pathlib import Path
@@ -25,7 +33,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -279,6 +287,29 @@ elif args.phase=='agent':
     check('final answer shown as PlainText',answer.property('visible') and answer.property('text')==bridge.agentAnswer and plain is True and not expression.hasError())
     check('Iniciar enabled again after the run is done',start.property('enabled'))
     Path(args.artifacts,'agent-done').touch()
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
+elif args.phase=='perception':
+    # Gate protocol (C4 UI): see the module docstring. The phase only clicks the read buttons; it never types a goal, opts in a camera or starts a recording.
+    C4_PLUGINS=('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate')
+    wait(lambda:bridge.perceptionAvailable,50)
+    nav=visual_item('nav9');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:window.property('page')==9,3)
+    check('perception panel visible on its page',visual_item('perceptionPanel').property('visible'))
+    check('every synthetic card is labelled SINTÉTICO — sem hardware real',all(visual_item('perceptionBadge_'+p).property('text')=='SINTÉTICO — sem hardware real' for p in C4_PLUGINS[:-1]))
+    check('display card reads UNSUPPORTED',visual_item('perceptionBadge_display_manipulate').property('text')=='UNSUPPORTED')
+    check('privacy indicators are on the page',visual_item('micIndicator').property('visible') and visual_item('cameraIndicator').property('visible'))
+    Path(args.artifacts,'perception-ready').touch()
+    capture=visual_item('perception_screen_observe.capture');capture.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.perceptionResult.startswith('backend: sintético') and not bridge.perceptionBusy,40)
+    result=visual_item('perceptionResult')
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    expression=QQmlExpression(QQmlEngine.contextForObject(result),result,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+    check('capture result shown as PlainText from the checked output',result.property('text')==bridge.perceptionResult and plain is True and not expression.hasError())
+    Path(args.artifacts,'perception-captured').touch()
+    status=visual_item('perception_display_manipulate.status');status.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:'UNSUPPORTED' in bridge.perceptionResult and not bridge.perceptionBusy,40)
+    check('display status shows UNSUPPORTED through the Core',visual_item('perceptionResult').property('text').count('UNSUPPORTED')==1)
+    Path(args.artifacts,'perception-unsupported').touch()
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':
     # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,
