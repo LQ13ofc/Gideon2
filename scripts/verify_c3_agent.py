@@ -259,7 +259,8 @@ def app_published(home):
 
 
 def reset_app(home):
-    (Path(home) / 'synthetic' / 'app.json').unlink(missing_ok=True)
+    for name in ('world.json', 'app.json'):
+        (Path(home) / 'synthetic' / name).unlink(missing_ok=True)
 
 
 def native_check(root, label):
