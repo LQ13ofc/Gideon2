@@ -132,14 +132,15 @@ impl Snapshot {
             }
         }
         for entry in &mut self.entries {
-            entry.permissions_approved =
-                matches!(entry.status, "not_installed" | "update_available")
-                    && state.records.iter().any(|r| {
-                        Some(&r.catalog_sha256) == self.catalog_sha256.as_ref()
-                            && r.plugin_id == entry.plugin_id
-                            && r.manifest_sha256 == entry.manifest_sha256
-                            && r.permissions == entry.permissions
-                    });
+            entry.permissions_approved = matches!(
+                entry.status,
+                "not_installed" | "update_available" | "installed"
+            ) && state.records.iter().any(|r| {
+                Some(&r.catalog_sha256) == self.catalog_sha256.as_ref()
+                    && r.plugin_id == entry.plugin_id
+                    && r.manifest_sha256 == entry.manifest_sha256
+                    && r.permissions == entry.permissions
+            });
         }
         for entry in &mut self.entries {
             match staged(storage, entry) {
@@ -237,7 +238,10 @@ pub fn approve(
         .iter()
         .find(|e| e.plugin_id == plugin_id)
         .ok_or("unknown_plugin")?;
-    if !matches!(entry.status, "not_installed" | "update_available") {
+    if !matches!(
+        entry.status,
+        "not_installed" | "update_available" | "installed"
+    ) {
         return Err("plugin_incompatible");
     }
     if entry.manifest_sha256 != manifest_sha256 {

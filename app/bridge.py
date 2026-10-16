@@ -1,8 +1,18 @@
 """Thin, bounded Qt IPC adapter. Core owns all parsing, sessions and authority."""
-import json,os,stat,uuid
+import json,os,re,stat,uuid
 from pathlib import Path
 from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer
 from PySide6.QtNetwork import QLocalSocket
+CAPABILITY_ID=re.compile(r'[a-z0-9_]+(\.[a-z0-9_]+)+');PLUGIN_ID=re.compile(r'[A-Za-z0-9_-]+');SNAKE_CODE=re.compile(r'[a-z][a-z0-9_]*')
+PLUGIN_STATES=('disabled','starting','running','failed','stopped','quarantined')
+def bounded_output(value):
+    """Core output contract: JSON object, at most 8 KiB, at most 4 container levels."""
+    def shallow(item,depth=0):
+        if isinstance(item,dict):return depth<4 and all(shallow(child,depth+1) for child in item.values())
+        if isinstance(item,list):return depth<4 and all(shallow(child,depth+1) for child in item)
+        return True
+    try:return isinstance(value,dict) and shallow(value) and len(json.dumps(value,separators=(',',':'),allow_nan=False).encode('utf-8'))<=8192
+    except (TypeError,ValueError,RecursionError):return False
 
 
 def validate_snapshot(data,request_id,min_sequence):
@@ -71,7 +81,7 @@ def validate_snapshot(data,request_id,min_sequence):
             for key in ('plugin_id','semver','publisher','license','support_policy'):require(short(entry.get(key),128) and bool(entry[key]))
             if 'manifest_sha256' in entry:require(isinstance(entry['manifest_sha256'],str) and len(entry['manifest_sha256'])==64 and all(c in '0123456789abcdef' for c in entry['manifest_sha256']))
             if 'payload_staged' in entry:require(type(entry['payload_staged']) is bool and (not entry['payload_staged'] or entry.get('status') in ('not_installed','update_available')))
-            if 'permissions_approved' in entry:require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status') in ('not_installed','update_available') and 'manifest_sha256' in entry and integer(hub.get('approval_revision'),1))))
+            if 'permissions_approved' in entry:require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status') in ('not_installed','update_available','installed') and 'manifest_sha256' in entry and integer(hub.get('approval_revision'),1))))
             require(entry['plugin_id'] not in ids);ids.add(entry['plugin_id'])
             require(integer(entry.get('api_version'),0,65535) and integer(entry.get('download_size'),0,67108864))
             require(entry.get('status') in ('not_installed','incompatible','installed','update_available') and entry.get('reason') in ('none','api_version','target','dependencies_unresolved'))
@@ -83,6 +93,39 @@ def validate_snapshot(data,request_id,min_sequence):
             for key in ('targets','permissions','conflicts'):
                 require(isinstance(entry.get(key),list) and len(entry[key])<=8 and all(short(v) and bool(v) for v in entry[key]))
             deps=entry.get('dependencies');require(isinstance(deps,list) and len(deps)<=8 and all(isinstance(d,dict) and short(d.get('plugin_id')) and short(d.get('semver')) for d in deps))
+            if 'runtime' in entry:require(entry['runtime']=='python3_script')
+            if 'capabilities' in entry:
+                caps=entry['capabilities'];require(isinstance(caps,list) and 1<=len(caps)<=8 and len(set(caps))==len(caps) and all(isinstance(c,str) and len(c)<=64 and CAPABILITY_ID.fullmatch(c) and c.startswith(entry['plugin_id']+'.') for c in caps))
+                require('runtime' in entry)
+    # Plugins: Core always sends the section when a hub exists; older no-hub Cores may omit it.
+    plugins=data.get('plugins');items=[]
+    if plugins is None:require(hub is None)
+    else:
+        require(isinstance(plugins,dict) and set(plugins)=={'revision','status','items'} and integer(plugins['revision']) and plugins['status'] in ('ok','quarantined'))
+        items=plugins['items'];require(isinstance(items,list) and len(items)<=8)
+        installed={r['plugin_id']:r for r in (hub or {}).get('installed',[])};listed={e['plugin_id']:e for e in (hub or {}).get('entries',[])}
+        if hub is None or hub['status']!='verified':require(not items)
+        names=set()
+        for item in items:
+            require(isinstance(item,dict) and set(item)=={'plugin_id','semver','capabilities','state','enabled','restarts','last_error'})
+            ident=item['plugin_id'];require(isinstance(ident,str) and len(ident)<=64 and PLUGIN_ID.fullmatch(ident) and ident not in names);names.add(ident)
+            caps=item['capabilities'];require(isinstance(caps,list) and len(caps)<=8 and len(set(caps))==len(caps) and all(isinstance(c,str) and len(c)<=64 and CAPABILITY_ID.fullmatch(c) for c in caps))
+            require(short(item['semver'],128) and bool(item['semver']) and type(item['enabled']) is bool and item['state'] in PLUGIN_STATES and integer(item['restarts'],0,255))
+            require(item['last_error'] is None or (isinstance(item['last_error'],str) and len(item['last_error'])<=64 and SNAKE_CODE.fullmatch(item['last_error'])))
+            record=installed.get(ident);entry=listed.get(ident)
+            require(record is not None and record['semver']==item['semver'] and caps==(entry.get('capabilities',[]) if entry else []))
+            require((item['state']=='quarantined')==(record['state']=='quarantined'))
+            if item['enabled']:require(item['state'] in ('starting','running','failed','stopped') and record['state']=='installed' and entry is not None and entry['status']=='installed')
+            else:require(item['state'] in ('disabled','quarantined'))
+        require(names==set(installed))
+    result=data.get('capability_result')
+    if result is not None:
+        require(isinstance(result,dict) and set(result)<={'capability','plugin_id','ok','output','error','elapsed_ms'} and {'capability','plugin_id','ok','elapsed_ms'}<=set(result))
+        require(isinstance(result['capability'],str) and len(result['capability'])<=64 and CAPABILITY_ID.fullmatch(result['capability']) and isinstance(result['plugin_id'],str) and type(result['ok']) is bool and integer(result['elapsed_ms']))
+        owner=next((i for i in items if i['plugin_id']==result['plugin_id']),None)
+        require(owner is not None and result['capability'] in owner['capabilities'])
+        if result['ok']:require('output' in result and 'error' not in result and bounded_output(result['output']))
+        else:require('error' in result and 'output' not in result and isinstance(result['error'],str) and len(result['error'])<=64 and SNAKE_CODE.fullmatch(result['error']))
     pack=data.get('base_pack')
     if pack is not None:
         require(isinstance(pack,dict) and type(pack.get('version')) is int and pack['version']==1)
@@ -123,11 +166,13 @@ def validate_snapshot(data,request_id,min_sequence):
 
 HUB_PENDING={'hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core'}
 HUB_DONE={'hub_install':'Plugin instalado (desativado)','hub_rollback':'Versão revertida','hub_remove':'Plugin removido'}
+PLUGIN_PENDING={'plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…'}
+PLUGIN_DONE={'plugin_enable':'Plugin ativado','plugin_disable':'Plugin desativado','plugin_revoke':'Permissões revogadas; plugin desativado','capability_cancel':'Cancelamento enviado'}
 
 class Bridge(QObject):
     changed=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.hub_result='';self.hub_target='';self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.hub_result='';self.hub_target='';self.plugin_result='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
         self.poll=QTimer(self);self.poll.setInterval(1000);self.poll.timeout.connect(self.refresh)
         self.retry=QTimer(self);self.retry.setSingleShot(True);self.retry.timeout.connect(self.connect_core)
@@ -146,7 +191,7 @@ class Bridge(QObject):
     def _connected(self):
         self.retry.stop();self.error='';self._backoff=500;self.refresh()
     def _offline(self,*args):
-        self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.hub_result='';self.hub_target='';self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
+        self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.preferences_request=None;self.preferences_result='';self.hub_result='';self.hub_target='';self.plugin_result='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         self.changed.emit()
         if not self.retry.isActive():self.retry.start(self._backoff);self._backoff=min(5000,self._backoff*2)
@@ -182,7 +227,13 @@ class Bridge(QObject):
                 self.hub_result=(HUB_DONE[pending_op] if data.get('code')=='ok' else data.get('code','invalid_message'))
             elif pending_op in ('preferences','rollback_preferences','select_wake','feedback_preferences'):
                 self.preferences_result=('Preferências salvas pelo Core' if data.get('code')=='ok' else data.get('code','invalid_message'))
+            elif pending_op in PLUGIN_PENDING:
+                if data.get('code')!='ok':self.plugin_result=data.get('code','invalid_message');self.capability_pending=False
+                elif pending_op=='capability_invoke':self.capability_pending=True;self.plugin_result=PLUGIN_PENDING[pending_op]
+                else:self.plugin_result=PLUGIN_DONE[pending_op]
             data.pop('request_id',None)
+            # The invocation result arrives later in the snapshot; the Core clears it on every new invoke.
+            if self.capability_pending and data.get('capability_result'):self.capability_pending=False;self.plugin_result=''
             if data!=self.snapshot:self.snapshot=data;self.changed.emit()
             self.poll.setInterval(150 if sid is not None else 1000)
             if self.cancel_id is not None:
@@ -245,6 +296,7 @@ class Bridge(QObject):
         if op=='hub_approve':self.hub_result='Enviando aprovação ao Core'
         elif op=='hub_abort':self.hub_result='Enviando cancelamento ao Core'
         elif op in HUB_PENDING:self.hub_result=HUB_PENDING[op]
+        elif op in PLUGIN_PENDING:self.plugin_result=PLUGIN_PENDING[op]
         else:self.preferences_result='Enviando ao Core'
         if self.pending:self.preferences_request=(op,kw)
         else:self._request(op,**kw)
@@ -301,6 +353,36 @@ class Bridge(QObject):
     def removeHub(self,plugin):
         if self.hubLifecycleAvailable:self._preferences('hub_remove',revision=int(self.hubInstallRevision),plugin_id=plugin)
     @Property(bool,notify=changed)
+    def pluginsAvailable(self):return self.hubLifecycleAvailable and 'plugins' in self.snapshot
+    @Property('QVariantList',notify=changed)
+    def pluginItems(self):return list((self.snapshot.get('plugins') or {}).get('items',[]))
+    @Property(str,notify=changed)
+    def pluginsRevision(self):return str((self.snapshot.get('plugins') or {}).get('revision',0))
+    @Property(str,notify=changed)
+    def pluginResult(self):return self.plugin_result
+    @Property(str,notify=changed)
+    def capabilityResultText(self):
+        result=self.snapshot.get('capability_result')
+        if not result:return ''
+        if not result['ok']:return result['error']
+        output=result['output'];text=output.get('text')
+        return (text if isinstance(text,str) else json.dumps(output,ensure_ascii=False,sort_keys=True))[:512]
+    @Slot(str)
+    def enablePlugin(self,plugin):
+        if self.pluginsAvailable:self._preferences('plugin_enable',revision=int(self.pluginsRevision),plugin_id=plugin)
+    @Slot(str)
+    def disablePlugin(self,plugin):
+        if self.pluginsAvailable:self._preferences('plugin_disable',revision=int(self.pluginsRevision),plugin_id=plugin)
+    @Slot(str)
+    def revokePlugin(self,plugin):
+        if self.pluginsAvailable:self._preferences('plugin_revoke',revision=int(self.pluginsRevision),plugin_id=plugin)
+    @Slot(str,str)
+    def invokeCapability(self,capability,text):
+        if self.pluginsAvailable:self._preferences('capability_invoke',capability=capability,input={'text':text[:256]},deadline_ms=3000)
+    @Slot(str)
+    def cancelCapability(self,capability):
+        if self.pluginsAvailable:self._preferences('capability_cancel',capability=capability)
+    @Property(bool,notify=changed)
     def hubImportActive(self):return self.online and bool((self.snapshot.get('hub') or {}).get('import'))
     @Property(str,notify=changed)
     def hubImportDescription(self):
@@ -317,7 +399,7 @@ class Bridge(QObject):
         if not self.online:return 'Core offline'
         if not hub:return 'Catálogo não configurado'
         if hub['status']=='quarantined':return 'Catálogo em quarentena; Base continua disponível'
-        return 'Catálogo local com checksum verificado; publisher não autenticado. Plugins instalados ficam desativados; nenhum é executado.'
+        return 'Catálogo local com checksum verificado; publisher não autenticado. Plugins instalados ficam desativados até ativação explícita; ativos rodam em sandbox sem rede.'
     @Property(bool,notify=changed)
     def connected(self):return self.online
     @Property(str,notify=changed)

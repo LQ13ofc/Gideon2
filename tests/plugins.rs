@@ -667,6 +667,79 @@ fn fixture_plugin_enable_invoke_and_revocation_gates() {
 }
 
 #[test]
+fn revoked_installed_plugin_is_reapproved_then_reenabled_without_reinstall() {
+    let _lock = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let plugins = [Plugin {
+        id: "dummy_echo",
+        payload: ECHO_FIXTURE.to_vec(),
+        semver: "1.0.0",
+        capabilities: vec!["dummy_echo.echo"],
+        runtime: true,
+    }];
+    let (_dir, mut core, _) = setup("reapprove", &plugins);
+    assert_eq!(core.enable("dummy_echo")["code"], "ok");
+    core.wait_state("dummy_echo", "running");
+    let revoke_revision = core.revision();
+    assert_eq!(
+        core.call(
+            json!({"op": "plugin_revoke", "revision": revoke_revision, "plugin_id": "dummy_echo"})
+        )["code"],
+        "ok"
+    );
+    core.wait_no_sandboxes();
+    let snap = core.snap();
+    let entry = entry_of(&snap, "dummy_echo");
+    assert_eq!(entry["status"], "installed");
+    assert_eq!(entry["permissions_approved"], false);
+    assert_eq!(item_of(&snap, "dummy_echo")["enabled"], false);
+    assert_eq!(
+        core.enable("dummy_echo")["code"],
+        "permissions_not_approved"
+    );
+    // Re-approval of the installed, unchanged manifest and permissions is accepted.
+    let manifest_sha = entry["manifest_sha256"].as_str().unwrap().to_owned();
+    let approval = snap["hub"]["approval_revision"].as_u64().unwrap();
+    let before = approval;
+    expect_ok(&core.call(json!({
+        "op": "hub_approve",
+        "revision": approval,
+        "plugin_id": "dummy_echo",
+        "manifest_sha256": manifest_sha,
+        "permissions": entry["permissions"],
+        "publisher_unverified_ack": true,
+    })));
+    let snap = core.snap();
+    assert_eq!(
+        snap["hub"]["approval_revision"].as_u64().unwrap(),
+        before + 1
+    );
+    let entry = entry_of(&snap, "dummy_echo");
+    assert_eq!(entry["status"], "installed");
+    assert_eq!(entry["permissions_approved"], true);
+    // Approving again while already approved is refused.
+    assert_eq!(
+        core.call(json!({
+            "op": "hub_approve",
+            "revision": before + 1,
+            "plugin_id": "dummy_echo",
+            "manifest_sha256": manifest_sha,
+            "permissions": entry["permissions"],
+            "publisher_unverified_ack": true,
+        }))["code"],
+        "already_approved"
+    );
+    // Re-enable works and the capability runs through the sandbox again.
+    assert_eq!(expect_ok(&core.enable("dummy_echo"))["code"], "ok");
+    core.wait_state("dummy_echo", "running");
+    assert_eq!(
+        expect_ok(&core.invoke("dummy_echo.echo", json!({"text": "again"}), 3000))["code"],
+        "ok"
+    );
+    let result = core.result_of("dummy_echo.echo");
+    assert_eq!(result["output"]["text"], "AGAIN");
+}
+
+#[test]
 fn handshake_mismatch_fails_without_restart() {
     let _lock = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let plugins = [Plugin {

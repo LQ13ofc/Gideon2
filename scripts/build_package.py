@@ -76,6 +76,27 @@ def resolve_runtime():
     die("home not found in a1 pyvenv.cfg")
 
 
+PLUGIN_PYTHON = "runtime/python/bin/python3.13"
+
+
+def check_plugin_runtime(runtime):
+    """Plugins run `python -I /plugin/main.py` under bwrap with only this runtime dir and /usr bound.
+
+    The interpreter must be a real file (or a relative symlink that stays inside runtime), and the
+    stdlib must be present, so nothing depends on a host path outside the package.
+    """
+    python = runtime / "bin/python3.13"
+    if python.is_symlink():
+        target = os.readlink(python)
+        resolved = os.path.normpath(os.path.join(python.parent, target))
+        if os.path.isabs(target) or not resolved.startswith(str(runtime) + os.sep):
+            die(f"plugin interpreter escapes runtime: {python} -> {target}")
+    if not python.is_file() or not os.access(python, os.X_OK):
+        die(f"plugin interpreter missing or not executable: {python}")
+    if not (runtime / "lib/python3.13/os.py").is_file():
+        die(f"plugin runtime stdlib missing: {runtime / 'lib/python3.13'}")
+
+
 def copy_file(src, dst):
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst, follow_symlinks=True)
@@ -232,6 +253,7 @@ def main():
     # runtime + venvs
     runtime = resolve_runtime()
     shutil.copytree(runtime, pkg / "runtime/python", symlinks=True, ignore=ignore_pycache)
+    check_plugin_runtime(pkg / "runtime/python")
     for name in VENVS:
         copy_venv(name, pkg / "venvs" / name)
         extra = [i.name for i in (REPO / f"target/{name}-venv/bin").iterdir() if i.name not in VENV_BIN_KEEP]
@@ -346,6 +368,14 @@ def main():
             "CARGO_TARGET_DIR": "target/package-build",
             "sandbox": f"bwrap; repo bound at {SANDBOX_SRC}; CARGO_MANIFEST_DIR is {SANDBOX_SRC}",
             "remap_path_prefix": [f"<repo>={SANDBOX_SRC}", "<CARGO_HOME>=/cargo", "<RUSTUP_HOME>=/rustup"],
+        },
+        "plugin_runtime": {
+            "interpreter": f"@PREFIX@/{PLUGIN_PYTHON}",
+            "flag": "--plugin-python",
+            "set_by": "gideon-core (only when the interpreter file exists in the package)",
+            "runtime_dir": "@PREFIX@/runtime/python",
+            "invocation": "python -I /plugin/main.py",
+            "sandbox": "bwrap --unshare-all; runtime_dir and /usr bound read-only; plugins run sandboxed",
         },
         "files": entries,
     })

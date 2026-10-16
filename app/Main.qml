@@ -26,6 +26,12 @@ ApplicationWindow {
     readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub"]
     readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub"]
     function approvalDone() { if (!reviewPlugin) return false; var entries = core.hubEntries; for (var i=0;i<entries.length;i++) if (entries[i].plugin_id === reviewPlugin.plugin_id && entries[i].manifest_sha256 === reviewPlugin.manifest_sha256) return entries[i].permissions_approved === true; return false; }
+    function pluginFor(pluginId) { var items = core.pluginItems; for (var i=0;i<items.length;i++) if (items[i].plugin_id === pluginId) return items[i]; return null; }
+    function pluginEnabledFor(pluginId) { var item = pluginFor(pluginId); return !!item && item.enabled === true; }
+    function pluginStateText(item) { switch (item.state) { case "running": return "Ativo (sandbox, sem rede)"; case "starting": return "Iniciando…"; case "failed": return "Falhou: " + (item.last_error || "erro"); case "stopped": return "Parado"; case "quarantined": return "Em quarentena"; default: return "Desativado"; } }
+    function pluginInstalled(pluginId) { var entries = core.hubEntries; for (var i=0;i<entries.length;i++) if (entries[i].plugin_id === pluginId) return entries[i].status === "installed"; return false; }
+    function pluginApproved(pluginId) { var entries = core.hubEntries; for (var i=0;i<entries.length;i++) if (entries[i].plugin_id === pluginId) return entries[i].permissions_approved === true; return false; }
+    function pluginCanEnable(item) { return !item.enabled && (item.state === "disabled" || item.state === "stopped" || item.state === "failed") && pluginInstalled(item.plugin_id) && pluginApproved(item.plugin_id); }
     function wakeText() { var pack = core.snapshotPack; if (!pack.wake_phrases) return "Não configurada"; for (var i=0;i<pack.wake_phrases.length;i++) if (pack.wake_phrases[i].id === pack.active_phrase) return pack.wake_phrases[i].text; return "Não ativa"; }
     Dialog {
         id: preferences; objectName: "preferencesDialog"
@@ -87,9 +93,9 @@ ApplicationWindow {
                         required property var modelData
                         Layout.fillWidth: true
                         Label { text: modelData.plugin_id + " " + modelData.semver + " · " + modelData.publisher; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { objectName: "status_" + modelData.plugin_id; text: (modelData.status === "installed" ? "Instalado · desativado (sem execução)" : modelData.status === "update_available" ? "Atualização disponível" : modelData.status === "not_installed" ? (modelData.payload_staged ? "Pacote verificado em staging; não instalado" : "Não instalado") : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "status_" + modelData.plugin_id; text: (modelData.status === "installed" ? (window.pluginEnabledFor(modelData.plugin_id) ? "Instalado · ativo (sandbox, sem rede)" : "Instalado · desativado (sem execução)") : modelData.status === "update_available" ? "Atualização disponível" : modelData.status === "not_installed" ? (modelData.payload_staged ? "Pacote verificado em staging; não instalado" : "Não instalado") : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { text: (modelData.permissions_approved ? "Permissões aprovadas para este manifest: " : "Permissões declaradas (não aprovadas): ") + (modelData.permissions.join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        GlowButton { objectName: "review_" + modelData.plugin_id; text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"; enabled: core.hubApprovalAvailable && (modelData.status === "not_installed" || modelData.status === "update_available") && !modelData.permissions_approved; onClicked: { window.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() } }
+                        GlowButton { objectName: "review_" + modelData.plugin_id; text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"; enabled: core.hubApprovalAvailable && (modelData.status === "not_installed" || modelData.status === "update_available" || modelData.status === "installed") && !modelData.permissions_approved; onClicked: { window.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() } }
                         GlowButton { objectName: "install_" + modelData.plugin_id; text: "Instalar pacote verificado"; enabled: core.hubLifecycleAvailable && modelData.payload_staged === true && modelData.permissions_approved === true && (modelData.status === "not_installed" || modelData.status === "update_available"); onClicked: core.installHub(modelData.plugin_id, modelData.manifest_sha256) }
                     }
                 }
@@ -99,12 +105,41 @@ ApplicationWindow {
                     delegate: ColumnLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        Label { text: modelData.plugin_id + " " + modelData.semver + " · " + (modelData.state === "quarantined" ? "Em quarentena" : "Instalado · desativado (sem execução)"); textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: modelData.plugin_id + " " + modelData.semver + " · " + (modelData.state === "quarantined" ? "Em quarentena" : window.pluginEnabledFor(modelData.plugin_id) ? "Instalado · ativo" : "Instalado · desativado (sem execução)"); textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         GlowButton { objectName: "rollback_" + modelData.plugin_id; text: "Reverter versão"; enabled: core.hubLifecycleAvailable && !!modelData.previous && modelData.state === "installed"; onClicked: core.rollbackHub(modelData.plugin_id) }
                         GlowButton { objectName: "remove_" + modelData.plugin_id; text: "Remover plugin"; enabled: core.hubLifecycleAvailable; onClicked: { removeConfirm.plugin = modelData; removeConfirm.open() } }
                     }
                 }
                 Label { objectName: "hubLifecycleResult"; text: core.hubApprovalResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Label { text: "Plugins no Core"; visible: core.pluginItems.length > 0; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Repeater {
+                    model: core.pluginItems
+                    delegate: ColumnLayout {
+                        id: pluginEntry
+                        required property var modelData
+                        property string activeCapability: ""
+                        property var inputField: capabilityInput
+                        Layout.fillWidth: true
+                        Label { objectName: "pluginStatus_" + pluginEntry.modelData.plugin_id; text: pluginEntry.modelData.plugin_id + " " + pluginEntry.modelData.semver + " · " + window.pluginStateText(pluginEntry.modelData); textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: "Capacidades: " + (pluginEntry.modelData.capabilities.length ? pluginEntry.modelData.capabilities.join(", ") : "nenhuma"); textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "reapprovalHint_" + pluginEntry.modelData.plugin_id; visible: window.pluginInstalled(pluginEntry.modelData.plugin_id) && !window.pluginApproved(pluginEntry.modelData.plugin_id); text: "Aprove novamente as permissões para ativar"; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        GlowButton { objectName: "enable_" + pluginEntry.modelData.plugin_id; text: "Ativar"; enabled: core.pluginsAvailable && window.pluginCanEnable(pluginEntry.modelData); onClicked: core.enablePlugin(pluginEntry.modelData.plugin_id) }
+                        GlowButton { objectName: "disable_" + pluginEntry.modelData.plugin_id; text: "Desativar"; enabled: core.pluginsAvailable && pluginEntry.modelData.enabled === true; onClicked: core.disablePlugin(pluginEntry.modelData.plugin_id) }
+                        GlowButton { objectName: "revoke_" + pluginEntry.modelData.plugin_id; text: "Revogar permissões"; enabled: core.pluginsAvailable && pluginEntry.modelData.state !== "quarantined"; onClicked: { revokeConfirm.plugin = pluginEntry.modelData; revokeConfirm.open() } }
+                        TextField { id: capabilityInput; objectName: "capabilityInput_" + pluginEntry.modelData.plugin_id; placeholderText: "Texto para a capability"; maximumLength: 256; enabled: core.pluginsAvailable && pluginEntry.modelData.state === "running"; Layout.fillWidth: true }
+                        Repeater {
+                            model: pluginEntry.modelData.capabilities
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                GlowButton { objectName: "invoke_" + modelData; text: "Invocar"; enabled: core.pluginsAvailable && pluginEntry.modelData.state === "running"; onClicked: { pluginEntry.activeCapability = modelData; core.invokeCapability(modelData, pluginEntry.inputField.text) } }
+                                GlowButton { objectName: "cancelCapability_" + pluginEntry.modelData.plugin_id; text: "Cancelar"; enabled: core.pluginsAvailable && pluginEntry.activeCapability === modelData; onClicked: core.cancelCapability(modelData) }
+                            }
+                        }
+                    }
+                }
+                Label { objectName: "pluginLifecycleResult"; text: core.pluginResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Label { objectName: "capabilityResult"; text: core.capabilityResultText; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 Label { text: "Instalar copia o pacote verificado para o Core; nada é executado. O catálogo não concede acesso ao computador."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             }
         }
@@ -137,6 +172,16 @@ ApplicationWindow {
         background: GlassCard { theme: window.themeIndex }
         onAccepted: { if (plugin) core.removeHub(plugin.plugin_id) }
         Label { text: removeConfirm.plugin ? "Remover " + removeConfirm.plugin.plugin_id + " " + removeConfirm.plugin.semver + " do Core? Nada é executado e o catálogo não muda."  : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: removeConfirm.availableWidth }
+    }
+    Dialog {
+        id: revokeConfirm; objectName: "revokeConfirm"
+        property var plugin: null
+        title: "Revogar permissões"; modal: true; anchors.centerIn: parent
+        width: Math.min(400, window.width - 32)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        background: GlassCard { theme: window.themeIndex }
+        onAccepted: { if (plugin) core.revokePlugin(plugin.plugin_id) }
+        Label { text: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id + "? O plugin será desativado e o processo encerrado. Reativar exige nova aprovação." : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; width: revokeConfirm.availableWidth }
     }
     Rectangle {
         id: sidebar

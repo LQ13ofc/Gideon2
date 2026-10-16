@@ -1,5 +1,6 @@
 #!/bin/sh
 # gideon-core STATE_DIR [extra gideon-base args]: verify, configure, run the Core (S1 profile).
+# GIDEON_CORE_DRYRUN=1 prints the final gideon-base argv as JSON and exits before verify/configure.
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 PY="$HERE/runtime/python/bin/python3.13"
@@ -13,11 +14,34 @@ case "$STATE" in
     /*) ;;
     *) echo "gideon-core: absolute STATE_DIR required" >&2; exit 2 ;;
 esac
-"$PY" -I -B "$HERE/bin/gideon-verify" || exit 1
-"$PY" -I -B "$HERE/bin/gideon-configure" "$STATE" >/dev/null || exit 1
-exec "$HERE/bin/gideon-base" --root "$STATE/core" --home "$HERE" \
+for arg in "$@"; do
+    case "$arg" in
+        --plugin-python|--plugin-python=*)
+            echo "gideon-core: --plugin-python is set by the package; remove it from the arguments" >&2
+            exit 2 ;;
+    esac
+done
+# Plugin interpreter: only when the bundled runtime file exists in this package.
+if [ -f "$PY" ]; then
+    set -- --plugin-python "$PY" "$@"
+fi
+set -- "$HERE/bin/gideon-base" --root "$STATE/core" --home "$HERE" \
     --commands-sandbox \
     --base-pack "$STATE/profile/pack.json" \
     --tts-virtual "$HERE/venvs/tts/bin/python" "$STATE/profile/tts-manifest.json" \
     --wake-replay "$HERE/venvs/a1/bin/python" "$STATE/profile/replay-manifest.json" 0 \
     "$@"
+if [ "${GIDEON_CORE_DRYRUN:-}" = 1 ]; then
+    printf '{"argv":['
+    sep=
+    for arg in "$@"; do
+        esc=$(printf '%s' "$arg" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+        printf '%s"%s"' "$sep" "$esc"
+        sep=,
+    done
+    printf ']}\n'
+    exit 0
+fi
+"$PY" -I -B "$HERE/bin/gideon-verify" || exit 1
+"$PY" -I -B "$HERE/bin/gideon-configure" "$STATE" >/dev/null || exit 1
+exec "$@"

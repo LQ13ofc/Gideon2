@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -77,6 +77,61 @@ elif args.phase=='lifecycle':
     wait(lambda:fixture_record() is None and visual_item('hubLifecycleResult').property('text')!='Removendo no Core',15)
     check('Qt removal confirmed reaches Core ledger',fixture_record() is None)
     check('hub result label shows Plugin removido',visual_item('hubLifecycleResult').property('text')=='Plugin removido')
+elif args.phase=='plugins':
+    # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,
+    # then launches this phase. Markers written to --artifacts by this phase, in order:
+    #   ready    - dummy_echo is listed by Core as disabled and its enable control is offered
+    #   revoked    - Core confirmed disabled after revoke; enable is gated until new approval and Core refuses re-enable
+    #   reapproved - after explicit re-approval of the installed plugin, Qt enable runs dummy_echo again
+    # The phase never restarts Core and never edits the ledger; the gate may inspect plugin-state.json after `revoked`.
+    hubButton=window.findChild(QObject,'hubButton');hubButton.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    hubDialog=window.findChild(QObject,'hubDialog');wait(lambda:hubDialog.property('visible'),3)
+    def dummy():return next((p for p in bridge.pluginItems if p.get('plugin_id')=='dummy_echo'),None)
+    wait(lambda:dummy() is not None,50)
+    check('Core lists dummy_echo disabled and not enabled',dummy()['state']=='disabled' and dummy()['enabled'] is False)
+    check('status label shows Desativado',visual_item('pluginStatus_dummy_echo').property('text').endswith('Desativado'))
+    check('enable offered for installed plugin',visual_item('enable_dummy_echo').property('enabled'))
+    check('invoke unavailable while disabled',not visual_item('invoke_dummy_echo.echo').property('enabled') and not visual_item('capabilityInput_dummy_echo').property('enabled'))
+    Path(args.artifacts,'ready').touch()
+    enable=visual_item('enable_dummy_echo');enable.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:dummy() is not None and dummy()['state']=='running',30)
+    check('Qt enable reaches Core and sandbox runs dummy_echo',dummy()['enabled'] is True and bridge.pluginResult=='Plugin ativado')
+    check('status label shows sandbox running without network',visual_item('pluginStatus_dummy_echo').property('text').endswith('Ativo (sandbox, sem rede)'))
+    field=visual_item('capabilityInput_dummy_echo');field.forceActiveFocus();[QTest.keyClick(window,getattr(Qt.Key,'Key_'+c.upper())) for c in 'hello']
+    check('typed text reaches capability input',field.property('text')=='hello')
+    invoke=visual_item('invoke_dummy_echo.echo');invoke.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.capabilityResultText=='HELLO',20)
+    check('capability result from real sandbox is uppercased text',visual_item('capabilityResult').property('text')=='HELLO')
+    check('invocation pending text cleared when result arrives',bridge.pluginResult=='')
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
+    revoke=visual_item('revoke_dummy_echo');revoke.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    confirm=window.findChild(QObject,'revokeConfirm');wait(lambda:confirm.property('visible'),3)
+    check('revoke waits for confirmation',dummy()['state']=='running' and dummy()['enabled'] is True)
+    confirm.accept()
+    wait(lambda:dummy() is not None and dummy()['state']=='disabled' and dummy()['enabled'] is False,15)
+    check('confirmed revoke disables plugin in Core',dummy()['state']=='disabled')
+    check('revoke result label shown',bridge.pluginResult=='Permissões revogadas; plugin desativado')
+    check('invoke controls disabled after revoke',not visual_item('invoke_dummy_echo.echo').property('enabled') and not visual_item('capabilityInput_dummy_echo').property('enabled'))
+    check('capability result cleared after revoke',visual_item('capabilityResult').property('text')=='' and bridge.capabilityResultText=='')
+    check('UI gates enable until new approval and shows hint',not visual_item('enable_dummy_echo').property('enabled') and visual_item('reapprovalHint_dummy_echo').property('visible'))
+    bridge.enablePlugin('dummy_echo')
+    wait(lambda:bridge.pluginResult=='permissions_not_approved',10)
+    check('Core refuses re-enable until new approval',dummy()['state']=='disabled' and dummy()['enabled'] is False)
+    Path(args.artifacts,'revoked').touch()
+    review=visual_item('review_dummy_echo');check('review offered for installed unapproved plugin',review.property('enabled'));review.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'hubReviewDialog');wait(lambda:dialog.property('visible'),3)
+    ack=window.findChild(QObject,'publisherAcknowledgement');approve=window.findChild(QObject,'approveHubButton')
+    check('re-review never defaults to publisher acknowledgement',not ack.property('checked') and not approve.property('enabled'))
+    ack.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    approve.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:next((e for e in bridge.hubEntries if e.get('plugin_id')=='dummy_echo' and e.get('permissions_approved')),None) is not None,10)
+    check('re-approval keeps dummy_echo installed and not running',bridge.hubEntries and next(e for e in bridge.hubEntries if e['plugin_id']=='dummy_echo')['status']=='installed' and dummy()['state']=='disabled')
+    wait(lambda:visual_item('enable_dummy_echo').property('enabled'),5)
+    check('enable offered again after re-approval',not visual_item('reapprovalHint_dummy_echo').property('visible'))
+    enable=visual_item('enable_dummy_echo');enable.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:dummy() is not None and dummy()['state']=='running',30)
+    check('re-enabled dummy_echo runs in sandbox again',dummy()['enabled'] is True and bridge.pluginResult=='Plugin ativado')
+    Path(args.artifacts,'reapproved').touch()
 elif args.phase=='permissions':
     wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
     check('native S1 before permission review',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
