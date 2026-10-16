@@ -4,6 +4,7 @@ pub mod commands;
 pub mod core;
 pub mod hub;
 pub mod pack;
+pub mod plugins;
 pub mod protocol;
 pub mod storage;
 pub mod stt;

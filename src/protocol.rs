@@ -83,6 +83,26 @@ pub enum Operation {
         session_id: u64,
         capability: Capability,
     },
+    PluginEnable {
+        revision: u64,
+        plugin_id: String,
+    },
+    PluginDisable {
+        revision: u64,
+        plugin_id: String,
+    },
+    PluginRevoke {
+        revision: u64,
+        plugin_id: String,
+    },
+    CapabilityInvoke {
+        capability: String,
+        input: serde_json::Value,
+        deadline_ms: u64,
+    },
+    CapabilityCancel {
+        capability: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -115,6 +135,9 @@ pub struct Event {
 pub struct Response {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hub: Option<crate::hub::Snapshot>,
+    pub plugins: crate::plugins::PluginSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capability_result: Option<crate::plugins::CapabilityResult>,
     pub base_pack: Option<crate::pack::Snapshot>,
     pub configuration_status: crate::storage::ConfigurationStatus,
     pub configuration_recovery_available: bool,
@@ -255,6 +278,36 @@ enum WireRequest {
         request_id: String,
         session_id: u64,
         capability: Capability,
+    },
+    PluginEnable {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+    },
+    PluginDisable {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+    },
+    PluginRevoke {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+    },
+    CapabilityInvoke {
+        version: u16,
+        request_id: String,
+        capability: String,
+        input: serde_json::Value,
+        deadline_ms: u64,
+    },
+    CapabilityCancel {
+        version: u16,
+        request_id: String,
+        capability: String,
     },
 }
 impl<'de> Deserialize<'de> for Request {
@@ -451,6 +504,69 @@ impl<'de> Deserialize<'de> for Request {
                     session_id,
                     capability,
                 },
+            ),
+            WireRequest::PluginEnable {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+            } => (
+                version,
+                request_id,
+                Operation::PluginEnable {
+                    revision,
+                    plugin_id,
+                },
+            ),
+            WireRequest::PluginDisable {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+            } => (
+                version,
+                request_id,
+                Operation::PluginDisable {
+                    revision,
+                    plugin_id,
+                },
+            ),
+            WireRequest::PluginRevoke {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+            } => (
+                version,
+                request_id,
+                Operation::PluginRevoke {
+                    revision,
+                    plugin_id,
+                },
+            ),
+            WireRequest::CapabilityInvoke {
+                version,
+                request_id,
+                capability,
+                input,
+                deadline_ms,
+            } => (
+                version,
+                request_id,
+                Operation::CapabilityInvoke {
+                    capability,
+                    input,
+                    deadline_ms,
+                },
+            ),
+            WireRequest::CapabilityCancel {
+                version,
+                request_id,
+                capability,
+            } => (
+                version,
+                request_id,
+                Operation::CapabilityCancel { capability },
             ),
         };
         Ok(Self {

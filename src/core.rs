@@ -53,6 +53,7 @@ pub struct Core {
     speech_status: &'static str,
     speech_summary: Option<crate::tts::Summary>,
     speech_samples: usize,
+    plugins: crate::plugins::PluginView,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -89,6 +90,7 @@ impl Core {
             speech_status: "unavailable",
             speech_summary: None,
             speech_samples: 0,
+            plugins: Default::default(),
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -569,6 +571,8 @@ impl Core {
         Response {
             base_pack: self.base_pack.clone(),
             hub: self.hub.clone(),
+            plugins: self.plugins.snapshot(self.hub.as_ref()),
+            capability_result: self.plugins.last().cloned(),
             configuration_status: self.configuration_status,
             configuration_recovery_available: self.configuration_recovery_available,
             preferences: self.preferences.clone(),
@@ -610,6 +614,59 @@ impl Core {
     pub fn configure_hub(&mut self, hub: crate::hub::Snapshot) {
         self.hub = Some(hub);
     }
+    /// Loads the C0 plugin ledger; enabled plugins start only in Ready configuration.
+    pub fn configure_plugins(
+        &mut self,
+        storage: &crate::storage::Storage,
+        runtime_available: bool,
+    ) {
+        self.plugins.configure(storage, runtime_available);
+        if self.configuration_status != crate::storage::ConfigurationStatus::Ready {
+            return;
+        }
+        let hub = self.hub.clone().map(|h| h.with_approvals(storage));
+        self.plugins.boot(storage, hub.as_ref());
+        if hub.is_some() {
+            self.hub = hub;
+        }
+        self.flush_plugin_events("");
+    }
+    /// Host facts: the Core never blocks on plugin processes.
+    pub fn plugin_event(&mut self, ev: crate::plugins::Ev, now: Instant) {
+        self.plugins.event(ev, now);
+        self.flush_plugin_events("");
+    }
+    pub fn take_plugin_intents(&mut self) -> Vec<crate::plugins::Intent> {
+        self.plugins.take_intents()
+    }
+    fn flush_plugin_events(&mut self, request_id: &str) {
+        for kind in self.plugins.take_events() {
+            self.emit(request_id.to_owned(), None, kind);
+        }
+    }
+    fn plugin_result(
+        &mut self,
+        request_id: &str,
+        result: Result<(), &'static str>,
+    ) -> &'static str {
+        self.flush_plugin_events(request_id);
+        match result {
+            Ok(()) => "ok",
+            Err(code) => code,
+        }
+    }
+    /// Pruning runs at every request so a changed catalog, approval or payload disables plugins.
+    fn refresh_plugins(&mut self, storage: &crate::storage::Storage) {
+        if !self.plugins.has_enabled() {
+            return;
+        }
+        let hub = self.hub.clone().map(|h| h.with_approvals(storage));
+        self.plugins.refresh(storage, hub.as_ref());
+        if hub.is_some() {
+            self.hub = hub;
+        }
+        self.flush_plugin_events("");
+    }
     pub fn configure_pack(&mut self, pack: crate::pack::Snapshot) {
         self.base_pack = Some(pack);
     }
@@ -632,6 +689,7 @@ impl Core {
             if crate::hub::expire_import(storage, now) {
                 self.hub_import_expired(storage);
             }
+            self.refresh_plugins(storage);
         }
         if req.version != VERSION {
             return self.response(req.request_id, "version_mismatch");
@@ -691,6 +749,63 @@ impl Core {
             }
             _ if self.configuration_status != crate::storage::ConfigurationStatus::Ready => {
                 "configuration_not_ready"
+            }
+            Operation::PluginEnable { .. }
+            | Operation::PluginDisable { .. }
+            | Operation::PluginRevoke { .. }
+            | Operation::CapabilityInvoke { .. }
+            | Operation::CapabilityCancel { .. }
+                if self.session.is_some() =>
+            {
+                "busy"
+            }
+            Operation::PluginEnable {
+                revision,
+                plugin_id,
+            } => match (storage.as_deref_mut(), self.hub.clone()) {
+                (Some(storage), Some(hub)) => {
+                    let hub = hub.with_approvals(storage);
+                    let result = self.plugins.enable(storage, &hub, revision, &plugin_id);
+                    self.hub = Some(hub);
+                    self.plugin_result(&req.request_id, result)
+                }
+                _ => "hub_unavailable",
+            },
+            Operation::PluginDisable {
+                revision,
+                plugin_id,
+            } => match storage.as_deref_mut() {
+                Some(storage) => {
+                    let result = self.plugins.disable(storage, revision, &plugin_id);
+                    self.plugin_result(&req.request_id, result)
+                }
+                None => "plugin_unavailable",
+            },
+            Operation::PluginRevoke {
+                revision,
+                plugin_id,
+            } => match (storage.as_deref_mut(), self.hub.clone()) {
+                (Some(storage), Some(hub)) => {
+                    let hub = hub.with_approvals(storage);
+                    let result = self.plugins.revoke(storage, &hub, revision, &plugin_id);
+                    self.hub = Some(hub.with_approvals(storage));
+                    self.plugin_result(&req.request_id, result)
+                }
+                _ => "hub_unavailable",
+            },
+            Operation::CapabilityInvoke {
+                capability,
+                input,
+                deadline_ms,
+            } => {
+                let result =
+                    self.plugins
+                        .invoke(self.hub.as_ref(), &capability, input, deadline_ms);
+                self.plugin_result(&req.request_id, result)
+            }
+            Operation::CapabilityCancel { capability } => {
+                let result = self.plugins.cancel(&capability);
+                self.plugin_result(&req.request_id, result)
             }
 
             Operation::HubBegin { .. }
@@ -812,6 +927,8 @@ impl Core {
                     self.hub = Some(hub.clone().with_approvals(storage));
                     match result {
                         Ok(event) => {
+                            self.plugins.forget(storage, &plugin_id);
+                            self.flush_plugin_events(&req.request_id);
                             self.emit(req.request_id.clone(), None, event);
                             "ok"
                         }
@@ -830,6 +947,8 @@ impl Core {
                     self.hub = Some(hub.clone().with_approvals(storage));
                     match result {
                         Ok(event) => {
+                            self.plugins.forget(storage, &plugin_id);
+                            self.flush_plugin_events(&req.request_id);
                             self.emit(req.request_id.clone(), None, event);
                             "ok"
                         }
@@ -848,6 +967,8 @@ impl Core {
                     self.hub = Some(hub.clone().with_approvals(storage));
                     match result {
                         Ok(event) => {
+                            self.plugins.forget(storage, &plugin_id);
+                            self.flush_plugin_events(&req.request_id);
                             self.emit(req.request_id.clone(), None, event);
                             "ok"
                         }

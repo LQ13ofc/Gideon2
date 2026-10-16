@@ -35,6 +35,10 @@ struct Manifest {
     support_policy: String,
     #[serde(default)]
     signature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runtime: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    capabilities: Vec<String>,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -68,6 +72,10 @@ pub struct Entry {
     pub conflicts: Vec<String>,
     pub download_size: u64,
     pub support_policy: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
     pub status: &'static str,
     pub reason: &'static str,
 }
@@ -366,6 +374,11 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                 .len()
                 != m.dependencies.len()
             || m.signature.as_ref().is_some_and(|s| !text(s, 256))
+            || !crate::plugins::valid_declaration(
+                &m.plugin_id,
+                m.runtime.as_deref(),
+                &m.capabilities,
+            )
             || m.binaries.is_empty()
             || m.binaries.len() > 8
         {
@@ -427,6 +440,8 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                     .find(|b| b.target == target)
                     .map_or(0, |b| b.size),
                 support_policy: m.support_policy.clone(),
+                runtime: m.runtime.clone(),
+                capabilities: m.capabilities.clone(),
                 status: if reason == "none" {
                     "not_installed"
                 } else {
@@ -567,6 +582,78 @@ fn installed_summary(
 }
 fn namespace_dir(storage: &crate::storage::Storage) -> std::path::PathBuf {
     storage.root.join("hub-plugins")
+}
+/// Manifest identity of the active installed version, if any.
+pub(crate) struct Identity {
+    pub manifest_sha256: String,
+    pub payload_sha256: String,
+    pub size: u64,
+}
+pub(crate) fn installed_identity(
+    storage: &crate::storage::Storage,
+    plugin_id: &str,
+) -> io::Result<Option<Identity>> {
+    Ok(storage
+        .hub_installed()?
+        .records
+        .iter()
+        .find(|r| r.plugin_id == plugin_id)
+        .map(|r| Identity {
+            manifest_sha256: r.manifest_sha256.clone(),
+            payload_sha256: r.payload_sha256.clone(),
+            size: r.size,
+        }))
+}
+/// Exact approval for the active catalog, manifest and permissions; never inherited.
+pub(crate) fn approval_exact(
+    storage: &crate::storage::Storage,
+    hub: &Snapshot,
+    plugin_id: &str,
+    manifest_sha256: &str,
+    permissions: &[String],
+) -> bool {
+    storage.hub_approvals().is_ok_and(|state| {
+        state.records.iter().any(|r| {
+            Some(&r.catalog_sha256) == hub.catalog_sha256.as_ref()
+                && r.plugin_id == plugin_id
+                && r.manifest_sha256 == manifest_sha256
+                && r.permissions == permissions
+        })
+    })
+}
+/// Removes every approval of `plugin_id`; Ok(true) when a record existed.
+pub(crate) fn revoke_approval(
+    storage: &crate::storage::Storage,
+    plugin_id: &str,
+) -> Result<bool, &'static str> {
+    let mut state = storage.hub_approvals().map_err(|_| "hub_storage_error")?;
+    let before = state.records.len();
+    state.records.retain(|r| r.plugin_id != plugin_id);
+    if state.records.len() == before {
+        return Ok(false);
+    }
+    state.revision = state
+        .revision
+        .checked_add(1)
+        .ok_or("hub_revision_exhausted")?;
+    storage
+        .save_hub_approvals(&state)
+        .map_err(|_| "hub_storage_error")?;
+    Ok(true)
+}
+/// Re-verifies the namespace payload (0600, exact size and SHA-256) and returns its path.
+pub(crate) fn verified_payload_path(
+    root: &Path,
+    plugin_id: &str,
+    manifest_sha256: &str,
+    size: u64,
+    payload_sha256: &str,
+) -> io::Result<std::path::PathBuf> {
+    let dir = root.join("hub-plugins");
+    crate::storage::private_metadata(&dir, true)?;
+    let path = dir.join(format!("{plugin_id}-{manifest_sha256}.payload"));
+    open_verified(&path, size, payload_sha256)?;
+    Ok(path)
 }
 fn namespace_file(
     storage: &crate::storage::Storage,

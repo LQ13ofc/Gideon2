@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "repository": "https://github.com/LQ13ofc/Gideon2",
+  "plugins": [
+    {
+      "plugin_id": "dummy_echo",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c0-v1/dummy_echo.py",
+          "sha256": "b2c77499e37e9d8a6a65809d93b45f654d08badc62a41fc521868d445145468a",
+          "size": 4818
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "notifications"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/dummy_echo.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c0-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "dummy_echo.echo"
+      ]
+    },
+    {
+      "plugin_id": "dummy_evil",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c0-v1/dummy_evil.py",
+          "sha256": "8b07ee409c4702c868f9c7e4f53fd4f8bc87a2f399a3814f11e2f151e5d47557",
+          "size": 8256
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "notifications"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/dummy_evil.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c0-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "dummy_evil.probe"
+      ]
+    },
+    {
+      "plugin_id": "plain_opaque",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/fixture-v1/benign_fixture.bin",
+          "sha256": "496d47696e6691915fbe6b1f7c34c52671552d7dcad27112dd24f99e20378514",
+          "size": 15
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "notifications"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/plain_opaque",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/fixture-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null
+    }
+  ]
+}

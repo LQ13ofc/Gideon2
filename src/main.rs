@@ -6,7 +6,7 @@ async fn main() -> io::Result<()> {
     if args.next().as_deref() != Some("--root") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR]",
+            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR] [--plugin-python ABSOLUTE_PYTHON]",
         ));
     }
     let root = PathBuf::from(
@@ -20,6 +20,7 @@ async fn main() -> io::Result<()> {
     let mut base_pack = None;
     let mut hub_catalog = None;
     let mut home = None;
+    let mut plugin_python = None;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--home" if home.is_none() => {
@@ -51,6 +52,16 @@ async fn main() -> io::Result<()> {
                     return Err(io::Error::other("absolute pack path required"));
                 }
                 base_pack = Some(path);
+            }
+            "--plugin-python" if plugin_python.is_none() => {
+                let path = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| io::Error::other("plugin python required"))?,
+                );
+                if !path.is_absolute() || !path.is_file() {
+                    return Err(io::Error::other("absolute plugin python required"));
+                }
+                plugin_python = Some(path);
             }
             "--virtual-input" if !virtual_input => virtual_input = true,
             "--commands-sandbox" if !commands_sandbox => commands_sandbox = true,
@@ -107,6 +118,7 @@ async fn main() -> io::Result<()> {
         tts,
         base_pack,
         hub_catalog,
+        plugin_python,
     )
     .await
 }

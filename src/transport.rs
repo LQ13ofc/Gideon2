@@ -1,7 +1,7 @@
 use crate::{
     audio::AudioFrame,
     core::Core,
-    protocol::{Request, MAX_MESSAGE},
+    protocol::{Operation, Request, MAX_MESSAGE},
     storage::Storage,
     stt::{SttConfig, SttReply, SttRequest},
     wake::{Packet, WakeDescriptor, WakeInput},
@@ -41,11 +41,28 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     loop {
-        let line = tokio::time::timeout(Duration::from_secs(5), frame(&mut read)).await??;
+        let line = tokio::time::timeout(
+            Duration::from_secs(5),
+            bounded_frame(&mut read, MAX_INVOKE_MESSAGE),
+        )
+        .await??;
         let Some(line) = line else {
             return Ok(());
         };
-        let response = match serde_json::from_slice::<Request>(&line) {
+        let parsed = serde_json::from_slice::<Request>(&line);
+        // Only capability_invoke may carry the larger 8 KiB input contract.
+        if line.len() > MAX_MESSAGE
+            && !matches!(
+                parsed.as_ref().map(|r| &r.operation),
+                Ok(Operation::CapabilityInvoke { .. })
+            )
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "message too large",
+            ));
+        }
+        let response = match parsed {
             Ok(request) => {
                 let (reply, rx) = oneshot::channel();
                 tx.send(Call { request, reply })
@@ -62,9 +79,8 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
         .await??;
     }
 }
-async fn frame<R: tokio::io::AsyncBufRead + Unpin>(read: &mut R) -> io::Result<Option<Vec<u8>>> {
-    bounded_frame(read, MAX_MESSAGE).await
-}
+/// Raw line bound: 8 KiB capability input plus envelope; other operations stay at MAX_MESSAGE.
+const MAX_INVOKE_MESSAGE: usize = 16384;
 pub(crate) async fn bounded_frame<R: tokio::io::AsyncBufRead + Unpin>(
     read: &mut R,
     limit: usize,
@@ -286,6 +302,20 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>)
         let _ = tx.send(Err(())).await;
     }
 }
+/// Applies Core plugin intents and feeds immediate host results back to the Core.
+fn pump_plugins(
+    core: &mut Core,
+    plugins: &mut crate::plugins::Host,
+    root: &std::path::Path,
+    now: std::time::Instant,
+) {
+    for intent in core.take_plugin_intents() {
+        for event in plugins.apply(intent, root) {
+            core.plugin_event(event, now);
+        }
+    }
+}
+#[allow(clippy::too_many_arguments)]
 pub async fn serve(
     mut storage: Storage,
     virtual_input: bool,
@@ -294,6 +324,7 @@ pub async fn serve(
     mut tts: Option<crate::tts::Config>,
     base_pack_path: Option<std::path::PathBuf>,
     hub_catalog: Option<(std::path::PathBuf, String)>,
+    plugin_python: Option<std::path::PathBuf>,
 ) -> io::Result<()> {
     let mut base_pack =
         if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
@@ -344,6 +375,15 @@ pub async fn serve(
                 .with_approvals(&storage),
         );
     }
+    let (plugin_events_tx, mut plugin_events) = mpsc::unbounded_channel();
+    let mut plugins = crate::plugins::Host::new(plugin_python.clone(), plugin_events_tx);
+    core.configure_plugins(&storage, plugin_python.is_some());
+    pump_plugins(
+        &mut core,
+        &mut plugins,
+        &storage.root,
+        std::time::Instant::now(),
+    );
     if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
         replay = None;
         tts = None;
@@ -467,6 +507,12 @@ pub async fn serve(
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
+            Some(wire) = plugin_events.recv() => {
+                if let Some(event) = plugins.accept(wire) {
+                    core.plugin_event(event, std::time::Instant::now());
+                    storage.audit(core.response(String::new(), "ok").sequence)?;
+                }
+            },
             Some(call) = rx.recv() => {
                 let response = core.handle_with_storage(call.request, std::time::Instant::now(), Some(&mut storage)); storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
@@ -553,6 +599,12 @@ pub async fn serve(
                 tokio::spawn(crate::tts::speak(config, job, speech_progress.clone())),
             ));
         }
+        pump_plugins(
+            &mut core,
+            &mut plugins,
+            &storage.root,
+            std::time::Instant::now(),
+        );
         for request in core.take_stt_requests() {
             if stt_tx.try_send(request).is_err() {
                 core.stt_failed();
@@ -580,6 +632,7 @@ pub async fn serve(
         task.abort();
         let _ = task.await;
     }
+    plugins.shutdown().await;
     core.shutdown();
     storage.audit(core.response(String::new(), "ok").sequence)?;
     peers.abort_all();

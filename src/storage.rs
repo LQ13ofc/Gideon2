@@ -88,6 +88,39 @@ pub enum ConfigurationStatus {
     SafeMode,
     RestartRequired,
 }
+/// Private C0 plugin ledger: enabled ids only; authority still comes from Hub approvals.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginState {
+    pub version: u16,
+    pub revision: u64,
+    pub enabled: Vec<String>,
+}
+impl Default for PluginState {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            revision: 0,
+            enabled: vec![],
+        }
+    }
+}
+impl PluginState {
+    pub fn validate(&self) -> io::Result<()> {
+        let unique: std::collections::HashSet<_> = self.enabled.iter().collect();
+        if self.version != 1
+            || self.enabled.len() > 8
+            || unique.len() != self.enabled.len()
+            || self.enabled.iter().any(|id| !crate::protocol::valid_id(id))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid plugin state",
+            ));
+        }
+        Ok(())
+    }
+}
 pub struct Storage {
     pub root: PathBuf,
     pub config: Config,
@@ -324,6 +357,32 @@ impl Storage {
     ) -> io::Result<()> {
         ledger.validate()?;
         self.replace_json("hub-installed.json", &serde_json::to_vec(ledger)?)?;
+        File::open(&self.root)?.sync_all()
+    }
+    pub(crate) fn plugin_state(&self) -> io::Result<PluginState> {
+        let path = self.root.join("plugin-state.json");
+        let file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Default::default()),
+            Err(e) => return Err(e),
+        };
+        validate_opened_private(&file)?;
+        let mut bytes = Vec::new();
+        file.take(16385).read_to_end(&mut bytes)?;
+        if bytes.len() > 16384 {
+            return Err(io::Error::other("plugin state too large"));
+        }
+        let state: PluginState = serde_json::from_slice(&bytes)?;
+        state.validate()?;
+        Ok(state)
+    }
+    pub(crate) fn save_plugin_state(&self, state: &PluginState) -> io::Result<()> {
+        state.validate()?;
+        self.replace_json("plugin-state.json", &serde_json::to_vec(state)?)?;
         File::open(&self.root)?.sync_all()
     }
     pub fn update_preferences(
