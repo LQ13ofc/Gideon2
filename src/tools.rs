@@ -25,6 +25,8 @@ const DESKTOP_SUFFIX: &str = ".desktop";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Risk {
+    /// Serialized as `read` in agent snapshots (the bridge and the Qt labels use that name).
+    #[serde(rename = "read")]
     ReadOnly,
     StateChanging,
     /// Publication or otherwise irreversible effects: always needs explicit approval.

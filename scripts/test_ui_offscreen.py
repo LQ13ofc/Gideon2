@@ -11,8 +11,9 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
     selftest-rolled-back fake-fail failed the selftest; the Core restored the last good model and the UI says so
     status-unavailable   fake-text (declared without tool use) reported INDISPONÍVEL, or its failed test rolled back
     custom-removed       fake-fail removed after confirmation (Cancel is the default and keeps it)
-  agent phase (C3 UI, needs a real Core with llm_engine running, the synthetic app enabled with --agent-synthetic, and an
-    agent-script.json in the plugin folder: step 1 proposes synth_counter_inc with the current epoch, step 2 answers in text):
+  agent phase (C3 UI, needs a real Core with llm_engine running, started with --home and --agent-synthetic, and the
+    scripted fake LLM in the plugin settings (agent_script, written by verify_c3_agent.py): step 1 proposes
+    synth_counter_inc with epoch 1 (the app's first epoch), step 2 answers in text):
     agent-ready     Agente offered while the engine runs; Iniciar disabled with a blank goal, enabled with a goal
     agent-awaiting  the run reached awaiting_approval; Autorizar is on screen with the run's proposal and Abortar is enabled
     agent-done      after Autorizar the run reached done; the final answer is shown as PlainText and Iniciar is enabled again
@@ -257,7 +258,7 @@ elif args.phase=='agent':
     check('Agente section visible only while the engine runs',visual_item('agentPanel').property('visible'))
     goal=visual_item('agentGoal');start=visual_item('agentStart');abort=visual_item('agentAbort')
     check('Iniciar disabled with a blank goal',not start.property('enabled'))
-    goal.forceActiveFocus();QTest.keyClicks(window,'Incremente o contador uma vez')
+    goal.forceActiveFocus();goal.setProperty('text','Incremente o contador uma vez');QTest.qWait(20)
     check('Iniciar enabled with a goal while idle',start.property('enabled') and not abort.property('enabled'))
     Path(args.artifacts,'agent-ready').touch()
     start.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
@@ -265,12 +266,13 @@ elif args.phase=='agent':
     check('banner names the approval state',visual_item('agentBanner').property('text')==bridge.agentStateLabel)
     pending=next(p for p in bridge.toolProposals if p['state']=='pending' and 'run_id' in p)
     pid=pending['proposal_id']
-    check('proposal carries the run and step it belongs to',pending['step']>=1 and pending['run_id']>=1)
+    check('proposal carries the run and step it belongs to',pending['step']>=1 and isinstance(pending['run_id'],str) and pending['run_id']!='')
     check('Autorizar on screen for the run proposal and Abortar enabled',visual_item('authorize_'+pid).property('visible') and abort.property('enabled'))
     Path(args.artifacts,'agent-awaiting').touch()
     visual_item('authorize_'+pid).forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bridge.agentState=='done',90)
     answer=visual_item('agentAnswer')
+    from PySide6.QtQml import QQmlEngine as _E,QQmlExpression as _X
     # textFormat is a QML enum PySide cannot convert: the comparison runs inside QML.
     from PySide6.QtQml import QQmlEngine,QQmlExpression
     expression=QQmlExpression(QQmlEngine.contextForObject(answer),answer,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain

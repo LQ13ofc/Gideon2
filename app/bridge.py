@@ -77,12 +77,16 @@ CHAT_CAPABILITY_SUFFIX='.chat';CHAT_TEXT_LIMIT=4096;CHAT_CONTENT_LIMIT=4096;CHAT
 HTTP_STATUS_KEY='http_status'
 # C3 agent runtime (docs/C3.md). Limits and state sets mirror the Core; the codes are an explicit allowlist, anything else refuses the snapshot.
 AGENT_STATES=('thinking','waiting_tool','awaiting_approval','done','failed','aborted','blocked');AGENT_TERMINAL=('done','failed','aborted','blocked');AGENT_ERROR_STATES=('failed','aborted','blocked')
-AGENT_STEP_KINDS=('chat','tool');AGENT_RISKS=('read','state_changing','destructive');AGENT_STEP_STATES=('running','done','awaiting_approval','denied','failed','stale','blocked','cancelled')
-AGENT_CODES=frozenset({'agent_busy','llm_unavailable','unknown_run','loop_blocked','stale_screen','permission_revoked','denied_by_user','revoked','max_steps','budget_exhausted','deadline_exceeded','verification_failed','awaiting_approval','unknown_tool','invalid_args','plugin_unavailable','executor_failed','executor_unavailable','expired','cancelled','timeout','http_error','network_unavailable','response_too_large','key_missing','provider_not_configured','cloud_not_authorized','permission_denied','model_unsupported_feature','invalid_input'})
+AGENT_STEP_KINDS=('chat','tool');AGENT_RISKS=('read','state_changing','destructive');AGENT_STEP_STATES=('running','done','awaiting_approval','denied','failed','stale','blocked','cancelled','expired')
+AGENT_CODES=frozenset({'agent_busy','llm_unavailable','unknown_run','invalid_input','invalid_args','unknown_tool','too_many_calls','executor_unavailable','executor_failed','busy','denied','destructive_disabled','app_unavailable','app_write_failed','verify_failed','stale_screen','loop_blocked','max_steps','token_budget','run_deadline','capability_unavailable','unknown_capability','plugin_error','invalid_output','empty_answer','aborted','revoked','cancelled','permission_denied','cloud_not_authorized','key_missing','provider_not_configured','http_error','timeout','response_too_large','network_unavailable','model_unsupported_feature','settings_unavailable',
+ 'permission_revoked','awaiting_approval'})  # the last two are named by docs/C3.md (the Core emits them when that path exists)
+# C3: a proposal cancelled or refused by an agent run carries the run's code (or run_ended), and synthetic tools refuse with their own codes.
+TOOL_REASONS=TOOL_REASONS|AGENT_CODES|{'run_ended','denied','destructive_disabled','app_unavailable','app_write_failed','verify_failed','stale_screen','aborted','revoked'}
 AGENT_STATE_LABELS={'thinking':'Pensando','waiting_tool':'Executando ferramenta','awaiting_approval':'Aguardando sua aprovação','done':'Concluído','failed':'Falhou','aborted':'Abortado','blocked':'Bloqueado'}
-AGENT_MAX_STEPS=6;AGENT_CHAT_STEPS=6;AGENT_TOOL_STEPS=24;AGENT_TOTAL_TOKENS=4096;AGENT_GOAL_LIMIT=1024;AGENT_ANSWER_LIMIT=4096
+AGENT_MAX_STEPS=6;AGENT_CHAT_STEPS=12;AGENT_TOOL_STEPS=25;AGENT_TOTAL_TOKENS=4096;AGENT_GOAL_LIMIT=1024;AGENT_ANSWER_LIMIT=4096
 AGENT_RUN_KEYS=frozenset({'run_id','state','goal_len','step','max_steps','started_ms_ago','steps','budget'});AGENT_STEP_KEYS=frozenset({'n','invocation_id','kind','tool','risk','state','code'});AGENT_PROPOSAL_KEYS=frozenset({'run_id','step'})
 def is_int(value,minimum=0,maximum=2**64-1):return type(value) is int and minimum<=value<=maximum
+def run_id_ok(value):return isinstance(value,str) and 1<=len(value)<=64 and value.isascii() and value.isprintable()
 def plain_text(value,limit):
     """Core-independent PlainText rule: a string of at most `limit` UTF-8 bytes with no control characters."""
     try:return isinstance(value,str) and utf8_len(value)<=limit and not any(unicodedata.category(c)=='Cc' for c in value)
@@ -268,7 +272,7 @@ def valid_tools(items):
         if item['result'] is not None and not (isinstance(item['result'],str) and utf8_len(item['result'])<=RESULT_TEXT_LIMIT):return False
         # C3: a proposal made by an agent run carries its run_id and step together; a chat or tool-only proposal carries neither.
         if ('run_id' in item)!=('step' in item):return False
-        if 'run_id' in item and not (is_int(item['run_id'],1) and is_int(item['step'],1,AGENT_MAX_STEPS)):return False
+        if 'run_id' in item and not (run_id_ok(item['run_id']) and is_int(item['step'],1,AGENT_MAX_STEPS)):return False
     return True
 def agent_goal_problem(goal):
     """Rule for agentStart (docs/C3.md): trimmed, 1..=1024 UTF-8 bytes, no control characters. None means the goal may be sent (the trimmed text)."""
@@ -297,7 +301,7 @@ def valid_agent(agent):
     """Snapshot block agent (docs/C3.md): null, or the run view with exact keys, bounded steps, answer only when done, error from AGENT_CODES, budget within the Core total."""
     if agent is None:return True
     if not (isinstance(agent,dict) and AGENT_RUN_KEYS<=set(agent)<=AGENT_RUN_KEYS|{'answer','error'}):return False
-    if not (is_int(agent['run_id'],1) and agent['state'] in AGENT_STATES and is_int(agent['goal_len'],1,AGENT_GOAL_LIMIT)):return False
+    if not (run_id_ok(agent['run_id']) and agent['state'] in AGENT_STATES and is_int(agent['goal_len'],1,AGENT_GOAL_LIMIT)):return False
     if not (is_int(agent['step'],0,AGENT_MAX_STEPS) and agent['max_steps']==AGENT_MAX_STEPS and is_int(agent['started_ms_ago'])):return False
     steps=agent['steps']
     if not (isinstance(steps,list) and len(steps)<=AGENT_CHAT_STEPS+AGENT_TOOL_STEPS):return False
@@ -572,6 +576,19 @@ CODE_MESSAGES={
     'verification_failed':'Verificação após a ação falhou; efeito não confirmado',
     'awaiting_approval':'Aguardando sua aprovação na proposta de ferramenta',
     'executor_failed':'Executor da ferramenta falhou',
+    'aborted':'Execução abortada',
+    'verify_failed':'Verificação após a ação falhou; efeito não confirmado',
+    'too_many_calls':'O modelo propôs mais ferramentas do que o limite por passo; excedentes recusados',
+    'token_budget':'Limite de tokens do agente atingido',
+    'run_deadline':'Tempo limite da execução do agente atingido',
+    'empty_answer':'O modelo respondeu sem texto',
+    'invalid_output':'Resposta do modelo fora do formato esperado',
+    'destructive_disabled':'Ação destrutiva desativada nesta build; nada foi executado',
+    'app_unavailable':'Aplicativo indisponível para a ferramenta',
+    'app_write_failed':'Não foi possível gravar a alteração',
+    'denied':'Ação recusada pelo Core',
+    'unknown_capability':'Capability do motor LLM desconhecida',
+    'plugin_error':'Motor LLM retornou erro interno',
 }
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}

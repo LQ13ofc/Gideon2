@@ -11,7 +11,7 @@ validator; a single rejected snapshot fails the test (that is the UI going "Core
 Run with the UI venv (stdlib unittest; bridge imports PySide6 only for QObject):
   QT_QPA_PLATFORM=offscreen target/ui-venv/bin/python scripts/test_snapshot_contract.py
 """
-import hashlib, json, os, signal, socket, subprocess, sys, tempfile, time, unittest
+import hashlib, json, os, shutil, signal, socket, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
@@ -43,6 +43,7 @@ class Core:
         self.root, self.td, self.proc, self.counter = Path(root), Path(td), None, 0
         self.last_sequence = 0
         self.validated = []
+        self.extra = []  # extra Core flags (C3 agent run: --home, --agent-synthetic)
 
     def args(self):
         args = [str(BIN), '--root', str(self.root), '--virtual-input', '--commands-sandbox',
@@ -56,7 +57,7 @@ class Core:
         args += ['--base-pack', str(PACK), '--tts-virtual', str(BASE / 'target/tts-venv/bin/python'),
                  str(BASE / 'target/a5-assets/manifest.json'), '--wake-replay',
                  str(BASE / 'target/a1-venv/bin/python'), str(manifest), str(index)]
-        return args
+        return args + self.extra
 
     def env(self):
         home = str(self.td)
@@ -302,6 +303,62 @@ class SnapshotContract(unittest.TestCase):
         self.assertEqual(entry['staged_error'], 'staged_payload_invalid')
         self.core.stop()
 
+
+    def test_agent_run_states_validate_against_real_core(self):
+        # C3: the real agent snapshot must pass the bridge validator in every state it can show:
+        # awaiting approval, done with a tool step, unknown tool step, aborted while awaiting a
+        # destructive call (never executed in development). The scripted fake LLM is the llm_engine
+        # plugin settings entry agent_script (read once per plugin process).
+        home = self.td / 'home'
+        (home / 'scripts').mkdir(parents=True)
+        for name in ('command_worker.py', 'net_broker.py', 'wake_worker.py', 'stt_worker.py', 'tts_worker.py', 'pcm_fixture.py'):
+            shutil.copy(BASE / 'scripts' / name, home / 'scripts' / name)
+        self.core.extra = ['--home', str(home), '--agent-synthetic']
+        script = {'steps': [
+            {'text': '', 'tool_calls': [{'id': 'r1', 'name': 'synth_screen_read', 'arguments': {}}]},
+            {'text': '', 'tool_calls': [{'id': 'i1', 'name': 'synth_counter_inc', 'arguments': {'epoch': 1}}]},
+            {'text': 'Contador atualizado.', 'tool_calls': []},
+            {'text': '', 'tool_calls': [{'id': 'x1', 'name': 'shell', 'arguments': {}}]},
+            {'text': 'Nada feito.', 'tool_calls': []},
+            {'text': '', 'tool_calls': [{'id': 'p1', 'name': 'synth_publish', 'arguments': {}}]},
+        ]}
+        self.core.start()
+        settings = self.root / 'plugin-settings'
+        settings.mkdir(mode=0o700)
+        (settings / f'{PLUGIN}.json').write_text(json.dumps({'version': 1, 'data': {'agent_script': script}}))
+        (settings / f'{PLUGIN}.json').chmod(0o600)
+        self.approve_and_stage()
+        self.install_and_enable()
+        rev = self.core.req()['llm']['revision']
+        port = self.start_fake_port()
+        self.assertEqual(self.core.req('llm_configure', revision=rev, provider='local', model='gguf-local',
+                                       custom_url=None, local_port=port, fallback=None, cloud_consent=False)['code'], 'ok')
+        self.assertEqual(self.core.req('agent_start', goal='Incremente o contador')['code'], 'ok')
+        waiting = self.core.wait(lambda s: s['agent'] is not None and s['agent']['state'] == 'awaiting_approval',
+                                 20, 'awaiting approval')
+        self.core.snap('agent awaiting approval')
+        proposal = next(p for p in waiting['tool_proposals'] if p['state'] == 'pending')
+        self.assertEqual(self.core.req('tool_decide', proposal_id=proposal['proposal_id'],
+                                       decision='authorize')['code'], 'ok')
+        done = self.core.wait(lambda s: s['agent'] is not None and s['agent']['state'] == 'done', 20, 'agent done')
+        self.assertEqual(done['agent']['answer'], 'Contador atualizado.')
+        self.core.snap('agent done with read and state-changing steps')
+        self.assertEqual(self.core.req('agent_start', goal='Use uma ferramenta fora do registro')['code'], 'ok')
+        self.core.wait(lambda s: s['agent'] is not None and s['agent']['state'] == 'done'
+                       and s['agent']['goal_len'] == len('Use uma ferramenta fora do registro'), 20, 'second run')
+        self.core.snap('agent done with unknown tool step')
+        self.assertEqual(self.core.req('agent_start', goal='Publique')['code'], 'ok')
+        held = self.core.wait(lambda s: s['agent'] is not None and s['agent']['state'] == 'awaiting_approval',
+                              20, 'destructive held')
+        self.core.snap('agent awaiting approval for destructive call')
+        self.assertEqual(self.core.req('agent_abort', run_id=held['agent']['run_id'])['code'], 'ok')
+        aborted = self.core.wait(lambda s: s['agent'] is not None and s['agent']['state'] == 'aborted', 10, 'aborted')
+        self.assertEqual(aborted['agent']['error'], 'aborted')
+        self.core.snap('agent aborted after destructive hold')
+        self.core.stop()
+
+    def start_fake_port(self):
+        return int(self.start_fake().rsplit(':', 1)[1].split('/')[0])
 
     def test_wake_replay_voice_session_validates_every_snapshot(self):
         # The replay starts at boot: capture, transcript, command receipt and speech (sink, PCM hash) all appear.

@@ -716,7 +716,7 @@ def _qml_chat_checks(bridge,window,check,checks):
     chat_input.setProperty('text','   ');QTest.qWait(20)
     check('blank text cannot be sent',not find('chatSend').property('enabled'))
     # C3 agent section: driven only by injected Core snapshots (no Core, no LLM).
-    tool=tool_item('tool_1_9',tool='synth_counter_inc',args={'epoch':1});tool.update(run_id=7,step=1)
+    tool=tool_item('tool_1_9',tool='synth_counter_inc',args={'epoch':1});tool.update(run_id='run_1_7',step=1)
     push(agent_snap(agent_run('awaiting_approval',steps=[agent_chat_step(1,1),agent_tool_step(1,2)]),tools=[tool]))
     check('agent section visible while the engine runs',find('agentPanel').property('visible'))
     check('agent banner names the approval state',find('agentBanner').property('visible') and find('agentBanner').property('text')=='Aguardando sua aprovação')
@@ -1366,7 +1366,7 @@ def _qml_models_checks(bridge,window,check,checks):
 def agent_chat_step(n,inv,state='done',**extra):return {'n':n,'invocation_id':inv,'kind':'chat','state':state,**extra}
 def agent_tool_step(n,inv,tool='synth_counter_inc',risk='state_changing',state='awaiting_approval',**extra):return {'n':n,'invocation_id':inv,'kind':'tool','tool':tool,'risk':risk,'state':state,**extra}
 def agent_run(state='thinking',steps=None,answer=None,error=None,**change):
-    run={'run_id':7,'state':state,'goal_len':12,'step':1,'max_steps':6,'started_ms_ago':40,'steps':[agent_chat_step(1,1)] if steps is None else steps,'budget':{'tokens_used':10,'tokens_max':4096}}
+    run={'run_id':'run_1_7','state':state,'goal_len':12,'step':1,'max_steps':6,'started_ms_ago':40,'steps':[agent_chat_step(1,1)] if steps is None else steps,'budget':{'tokens_used':10,'tokens_max':4096}}
     if answer is not None:run['answer']=answer
     if error is not None:run['error']=error
     run.update(change);return run
@@ -1390,7 +1390,7 @@ class AgentContract(unittest.TestCase):
             ('goal text leaks into the snapshot',run(goal='segredo')),
             ('tool args leak into a step',run(steps=[agent_tool_step(1,2,args={'x':1})])),
             ('observation leaks',run(observation='texto')),
-            ('run_id zero',run(run_id=0)),('run_id bool',run(run_id=True)),('run_id float',run(run_id=7.0)),
+            ('run_id empty',run(run_id='')),('run_id integer',run(run_id=7)),('run_id bool',run(run_id=True)),('run_id non ascii',run(run_id='run_é')),
             ('unknown state',run(state='paused')),
             ('goal_len zero',run(goal_len=0)),('goal_len over 1024',run(goal_len=1025)),
             ('step over max',run(step=7)),('max_steps not 6',run(max_steps=5)),
@@ -1413,8 +1413,8 @@ class AgentContract(unittest.TestCase):
             ('step n zero',run(steps=[agent_chat_step(0,1)])),('step n seven',run(steps=[agent_chat_step(7,1)])),
             ('invocation_id negative',run(steps=[agent_chat_step(1,-1)])),
             ('extra step key',run(steps=[{**agent_chat_step(1,1),'output':'x'}])),
-            ('seven chat steps',run(steps=[agent_chat_step(1+i%6,i+1) for i in range(7)])),
-            ('25 tool steps',run(steps=[agent_tool_step(1+i%6,i+1) for i in range(25)])),
+            ('thirteen chat steps',run(steps=[agent_chat_step(1+i%6,i+1) for i in range(13)])),
+            ('26 tool steps',run(steps=[agent_tool_step(1+i%6,i+1) for i in range(26)])),
             ('steps not a list',run(steps={})),
             ('budget tokens_max not 4096',run(budget={'tokens_used':1,'tokens_max':8192})),
             ('budget tokens_used over max',run(budget={'tokens_used':4097,'tokens_max':4096})),
@@ -1434,11 +1434,11 @@ class AgentContract(unittest.TestCase):
         self.assertEqual(agent_goal_problem(None),'Objetivo vazio')
         self.assertIn('controle',agent_goal_problem('a\nb'))
     def test_tool_proposals_carry_run_and_step_together(self):
-        validate_snapshot({**BASE,'tool_proposals':[{**tool_item('tool_1_1'),'run_id':7,'step':2}]},'r',0)
+        validate_snapshot({**BASE,'tool_proposals':[{**tool_item('tool_1_1'),'run_id':'run_1_7','step':2}]},'r',0)
         validate_snapshot({**BASE,'tool_proposals':[tool_item('tool_1_2')]},'r',0)
-        for name,extra in [('run_id only',{'run_id':7}),('step only',{'step':2}),('run_id zero',{'run_id':0,'step':2}),('step seven',{'run_id':7,'step':7}),('step zero',{'run_id':7,'step':0}),('run_id bool',{'run_id':True,'step':1}),('step null',{'run_id':7,'step':None})]:
+        for name,extra in [('run_id only',{'run_id':'run_1_7'}),('step only',{'step':2}),('run_id empty',{'run_id':'','step':2}),('run_id integer',{'run_id':7,'step':2}),('step seven',{'run_id':'run_1_7','step':7}),('step zero',{'run_id':'run_1_7','step':0}),('run_id bool',{'run_id':True,'step':1}),('step null',{'run_id':'run_1_7','step':None})]:
             with self.subTest(case=name),self.assertRaises(ValueError):validate_snapshot({**BASE,'tool_proposals':[{**tool_item('tool_1_3'),**extra}]},'r',0)
-        self.assertTrue(valid_tools([{**tool_item('tool_1_4'),'run_id':1,'step':6}]))
+        self.assertTrue(valid_tools([{**tool_item('tool_1_4'),'run_id':'run_1_1','step':6}]))
         self.assertFalse(valid_tools([{**tool_item('tool_1_5'),'authority':'model'}]))
     def test_agent_codes_have_portuguese_messages_and_ops_exist(self):
         for code in AGENT_CODES:
@@ -1474,7 +1474,7 @@ class AgentBridge(unittest.TestCase):
     def test_agent_abort_uses_current_run_and_refuses_without_one(self):
         bridge,peer=connect_bridge(self,agent_snap(agent_run('awaiting_approval',steps=[agent_chat_step(1,1),agent_tool_step(1,2)])))
         bridge.agentAbort();request=next_request(peer)
-        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'agent_abort','run_id':7})
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'agent_abort','run_id':'run_1_7'})
         answer(peer,request,agent_snap(agent_run('aborted',error='cancelled')));settle(bridge)
         self.assertEqual((bridge.agentState,bridge.agentActive,bridge.agentStateLabel),('aborted',False,'Abortado · Cancelado'))
         bridge.agentAbort();wait_idle();self.assertFalse(peer.canReadLine())

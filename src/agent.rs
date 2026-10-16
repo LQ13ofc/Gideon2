@@ -183,6 +183,12 @@ impl Run {
             _ => false,
         }
     }
+
+    /// Still owns the agent slot: active, or ended in `awaiting_approval` (a destructive call
+    /// that never runs in development). Such a run can only be aborted or expire.
+    fn open(&self) -> bool {
+        self.active() || self.state == RunState::AwaitingApproval
+    }
 }
 
 /// Core-owned agent state. At most one run is kept; a new start is refused while one is active.
@@ -208,10 +214,10 @@ impl Agent {
         self.epoch = seed;
     }
     pub(crate) fn is_active(&self) -> bool {
-        self.run.as_ref().is_some_and(Run::active)
+        self.run.as_ref().is_some_and(Run::open)
     }
     pub(crate) fn deadline(&self) -> Option<Instant> {
-        self.run.as_ref().filter(|r| r.active()).map(|r| r.deadline)
+        self.run.as_ref().filter(|r| r.open()).map(|r| r.deadline)
     }
     fn next_invocation(&mut self) -> u64 {
         self.invocations += 1;
@@ -236,7 +242,8 @@ impl Agent {
                 _ => None,
             },
             budget: Budget {
-                tokens_used: run.tokens_used,
+                // Usage past the cap is the failure itself; the view never reports more than the cap.
+                tokens_used: run.tokens_used.min(MAX_TOKENS_TOTAL),
                 tokens_max: MAX_TOKENS_TOTAL,
             },
         })
@@ -650,7 +657,7 @@ impl Core {
             .agent
             .run
             .as_ref()
-            .is_some_and(|run| run.active() && run.id == run_id);
+            .is_some_and(|run| run.open() && run.id == run_id);
         if !matches {
             return "unknown_run";
         }
@@ -683,7 +690,7 @@ impl Core {
         let Some(run) = self.agent.run.as_ref() else {
             return;
         };
-        if !run.active() {
+        if !run.open() {
             return;
         }
         let plugin_id = run.plugin_id.clone();
@@ -705,7 +712,7 @@ impl Core {
         let Some(run) = self.agent.run.as_ref() else {
             return;
         };
-        if !run.active() {
+        if !run.open() {
             return;
         }
         if now >= run.deadline {
@@ -799,10 +806,12 @@ impl Core {
             return;
         };
         let state = step_state_for(&obs, view.state);
+        // A stale result carries its code, like the stale step recorded at proposal time.
+        let code = (state == "stale").then_some("stale_screen");
         let Some(run) = self.agent.run.as_mut() else {
             return;
         };
-        set_step(run, invocation, state, None);
+        set_step(run, invocation, state, code);
         run.awaiting = Awaiting::None;
         run.state = RunState::Thinking;
         self.observe(&view.tool, obs);
@@ -1233,7 +1242,7 @@ impl Core {
         let Some(run) = self.agent.run.as_mut() else {
             return;
         };
-        if !run.active() {
+        if !run.open() {
             return;
         }
         let chat = match &run.awaiting {
@@ -1242,6 +1251,17 @@ impl Core {
         };
         if let Awaiting::Tool { invocation, .. } = run.awaiting {
             set_step(run, invocation, "cancelled", code);
+        }
+        // A destructive step that waited in `awaiting_approval` ends with the run.
+        if state != RunState::AwaitingApproval {
+            for step in run
+                .steps
+                .iter_mut()
+                .filter(|s| s.state == "awaiting_approval")
+            {
+                step.state = "cancelled";
+                step.code = code;
+            }
         }
         let run_id = run.id.clone();
         run.state = state;
