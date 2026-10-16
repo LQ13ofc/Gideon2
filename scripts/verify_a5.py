@@ -5,6 +5,14 @@ from pathlib import Path
 from process_fixture import command_line,resident_bytes
 BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';WAKE=BASE/'target/a1-venv/bin/python';TTS=BASE/'target/tts-venv/bin/python';MANIFEST=BASE/'target/a3-assets/replay-manifest.json';PROFILE=BASE/'target/a5-assets/manifest.json'
 BINARY_ID=hashlib.sha256(BIN.read_bytes()).hexdigest()
+# audit.log.1 is the single rotated audit generation (src/storage.rs audit, 64 KiB cap). Audit grows per request,
+# so a long voice session can rotate it; it holds metadata lines only, like audit.log. Any other file still fails.
+def artifact_names_ok(root):
+    names=set(x.name for x in root.iterdir())
+    base={'core.sock','core.lock','config.json','audit.log'}
+    if names=={*base,'audit.log.1'}:
+        return all(set(json.loads(line))=={'version','sequence'} for line in (root/'audit.log.1').read_text().splitlines())
+    return names==base
 def run():
     checks=[];rows=[];manifest=json.loads(MANIFEST.read_text())
     def check(name,passed):
@@ -81,7 +89,7 @@ def run():
                         effect=next(e['sequence'] for e in events if e['kind']=='command_success');check('speech follows verified effect',effect<begin and snap['command']['receipt']['verified'])
                 else:check('failed/cancelled speech has no completed output',snap['speech'] is None and snap['speech_status'] in ('failed','cancelled'))
                 check('effect result remains truthful if speech fails',bool(fixture) or mode=='executor_failure' or snap['command']['code']=='command_success')
-                check('no voice or command artifacts persisted',set(x.name for x in root.iterdir())=={'core.sock','core.lock','config.json','audit.log'})
+                check('no voice or command artifacts persisted',artifact_names_ok(root))
                 check('Core remains alive after terminal speech',req()['code']=='ok')
                 rows.append({'fixture_id':name,'mode':mode,'command':snap['command'],'speech_status':snap['speech_status'],'speech':snap['speech'],'peak_recursive_owned_rss_bytes':peak_rss})
                 p.terminate();check('workers supervised on shutdown',p.wait(timeout=3)==0)

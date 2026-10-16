@@ -175,7 +175,7 @@ pub struct Storage {
     generations: Cell<Generations>,
     /// Stat-keyed cache of verified Hub payloads; a miss always re-hashes.
     pub(crate) verified: RefCell<crate::hub::VerifiedCache>,
-    /// Unreferenced Hub payloads moved to quarantine by the startup sweep.
+    /// Unreferenced Hub payloads and crashed pending writes moved to quarantine by the startup sweep.
     pub(crate) orphans: u64,
 }
 /// `hub-generation` is written after every ledger rename; a damaged marker fails closed.
@@ -394,8 +394,11 @@ impl Storage {
                 }
             }
         }
+        // Crashed pending writes are orphans too: they count once they are moved, never when they stay.
         for path in leftovers {
-            self.quarantine(&path);
+            if self.quarantine(&path) {
+                orphans += 1;
+            }
         }
         self.orphans = orphans;
     }

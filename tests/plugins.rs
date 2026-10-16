@@ -1408,3 +1408,36 @@ fn plugin_python_gate_refuses_home_and_forbidden_roots() {
     fs::write(packaged.join("python3"), b"#!/bin/sh\n").unwrap();
     assert!(plugin_runtime_check(&packaged.join("python3"), &package, Some(&home)).is_ok());
 }
+
+/// R1: a package installed under the user's HOME (real layout: ~/.local/share/...) is accepted
+/// when its interpreter sits inside the package prefix; HOME-rooted runtimes outside the prefix
+/// stay refused, and a prefix equal to HOME is refused.
+#[test]
+fn plugin_python_gate_accepts_package_under_home() {
+    use gideon_base::plugins::plugin_runtime_check;
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home/user");
+    let package = home.join(".local/share/gideon");
+    let packaged = package.join("runtime/bin");
+    fs::create_dir_all(&packaged).unwrap();
+    fs::write(packaged.join("python3.12"), b"#!/bin/sh\n").unwrap();
+    symlink("python3.12", packaged.join("python3")).unwrap();
+    assert!(plugin_runtime_check(&packaged.join("python3"), &package, Some(&home)).is_ok());
+    // Interpreter under HOME but outside the package prefix.
+    let outside = home.join("venv/bin");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("python3"), b"#!/bin/sh\n").unwrap();
+    assert_eq!(
+        plugin_runtime_check(&outside.join("python3"), &package, Some(&home)),
+        Err("plugin_python_under_home")
+    );
+    // Prefix equal to HOME: the package cannot vouch for HOME-rooted runtimes.
+    let at_home = home.join("runtime/bin");
+    fs::create_dir_all(&at_home).unwrap();
+    fs::write(at_home.join("python3"), b"#!/bin/sh\n").unwrap();
+    assert_eq!(
+        plugin_runtime_check(&at_home.join("python3"), &home, Some(&home)),
+        Err("plugin_python_under_home")
+    );
+}

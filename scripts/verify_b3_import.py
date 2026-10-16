@@ -76,7 +76,19 @@ with tempfile.TemporaryDirectory(prefix='gideon-b3-import-') as td:
         active=begin()['hub']['import']['import_id'];request('hub_chunk',import_id=active,offset=0,hex='00'*15);check('hash mismatch never published',request('hub_finish',import_id=active)['code']=='payload_hash_mismatch' and not destination.exists())
         active=begin(ident='reused_begin')['hub']['import']['import_id'];stop();core=None;check('shutdown cleans pending',not pending.exists());core=start()
         next_id=begin(ident='reused_begin')['hub']['import']['import_id'];check('boot epoch fences reused request IDs',next_id!=active and request('hub_chunk',import_id=active,offset=0,hex='00')['code']=='stale_import');request('hub_abort',import_id=next_id)
-        active=begin()['hub']['import']['import_id'];core.kill();check('forced crash leaves owned orphan unmodified',core.wait(timeout=3)==-9 and pending.exists());core.stderr.close();core=None;core=start();check('crash orphan blocks unsafe automatic reuse',request()['hub']['import'] is None and begin()['code']=='hub_storage_error');effect();stop();core=None;pending.unlink();core=start()
+        # P9 contract: the startup sweep MOVES a crash-orphan pending file into quarantine/ (0700); it is never deleted or edited,
+        # so the root no longer blocks a fresh import of the same payload.
+        active=begin()['hub']['import']['import_id'];orphan_bytes=pending.read_bytes();core.kill();check('forced crash leaves owned orphan unmodified',core.wait(timeout=3)==-9 and pending.exists());core.stderr.close();core=None;core=start()
+        quarantined=sorted((root/'quarantine').glob('.hub-'+entry['manifest_sha256']+'.pending.*'))
+        check('crash orphan left the root after restart',not pending.exists())
+        check('crash orphan quarantined with intact bytes',len(quarantined)==1 and quarantined[0].read_bytes()==orphan_bytes)
+        check('quarantine directory is private 0700',(root/'quarantine').stat().st_mode&0o777==0o700)
+        check('snapshot hub.orphans reflects the swept orphan',request()['hub']['orphans']==1)
+        check('crash orphan never resumes as an import',request()['hub']['import'] is None)
+        fresh=begin()
+        check('fresh begin of the same payload succeeds after the sweep',fresh['code']=='ok' and fresh['hub']['import']['received']==0)
+        request('hub_abort',import_id=fresh['hub']['import']['import_id']);check('abort of the fresh import leaves no pending file',not pending.exists())
+        effect();stop();core=None;core=start()
         final=upload();check('real local CLI imports verified opaque bytes',final['hub']['entries'][0]['payload_staged'] and destination.read_bytes()==source.read_bytes());check('private nonexecutable payload',destination.stat().st_mode&0o777==0o600 and destination.stat().st_nlink==1)
         check('staging never installs or authenticates',final['hub']['entries'][0]['status']=='not_installed' and not final['hub']['publisher_verified']);check('repeat cannot overwrite payload',begin()['code']=='already_staged');effect();stop();core=None;core=start();check('restart validates actual bytes',request()['hub']['entries'][0]['payload_staged']);stop();core=None
         original=destination.read_bytes()
@@ -86,7 +98,10 @@ with tempfile.TemporaryDirectory(prefix='gideon-b3-import-') as td:
             elif mode=='hardlink':os.link(sentinel,destination)
             elif mode=='fifo':os.mkfifo(destination,0o600)
             else:destination.write_bytes(b'corrupt' if mode=='corrupt' else original);destination.chmod(0o644 if mode=='permissions' else 0o700 if mode=='executable' else 0o600)
-            core=start();snap=request();check(mode+' payload quarantines only Hub',snap['hub']['status']=='quarantined' and snap['configuration_status']=='ready');effect();stop();core=None
+            core=start();snap=request()
+            # P10 contract (src/hub.rs with_approvals): an unusable staged payload is refused per entry only, never the whole Hub.
+            staged=[e for e in snap['hub']['entries'] if e.get('staged_error')]
+            check(mode+' payload refused per entry: staged_error only, Hub verified, Base ready',snap['hub']['status']=='verified' and [e['plugin_id'] for e in staged]==['benign_fixture'] and staged[0]['staged_error']=='staged_payload_invalid' and staged[0]['payload_staged'] is False and snap['configuration_status']=='ready');effect();stop();core=None
         destination.unlink();destination.write_bytes(original);destination.chmod(0o600)
         # Actual Qt cancellation and opaque CLI stage, full native S1 before/after restart.
         root=Path(td)/'native';args=[str(BIN),'--root',str(root),'--commands-sandbox','--hub-catalog',str(CAT),hashlib.sha256(CAT.read_bytes()).hexdigest(),'--base-pack',str(BASE/'target/base-pack-dev.json'),'--tts-virtual',str(BASE/'target/tts-venv/bin/python'),str(BASE/'target/a5-assets/manifest.json')]

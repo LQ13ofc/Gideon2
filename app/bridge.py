@@ -11,6 +11,36 @@ WAKE_STATES=('unavailable','starting','replaying','failed','replay_finished')
 STT_STATES=('unavailable','starting','ready','failed')
 SPEECH_STATES=('unavailable','idle','muted','disabled','speaking','completed','failed','cancelled','timed_out','audio_error','stt_failed','stt_unavailable','transcript_final','capture_completed','no_speech','capture_too_long')
 OUTPUT_LIMIT=8192;TEXT_LIMIT=512;HEX=frozenset('0123456789abcdef')
+# Runtime state of an installed plugin: `disabled` when not enabled, else the host state (src/plugins.rs runtime_of).
+# `stopped` is a host state too (a late stop event can land after a re-enable), so it is accepted.
+RUNTIME_STATES=('disabled','starting','running','failed','stopped')
+# Codes Core writes to plugin last_error (src/plugins.rs runtime start, violation and crash paths).
+PLUGIN_LAST_ERRORS=frozenset({'plugin_crashed','plugin_cpu_exceeded','plugin_output_invalid','plugin_start_failed','plugin_not_runnable','plugin_quarantined','handshake_timeout','handshake_mismatch'})
+# Codes a capability_result can carry (src/plugins.rs PASS_THROUGH_ERRORS plus Core-owned results).
+CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled'})
+# Tool proposal reasons (src/tools.rs and src/core.rs tool_denied/tool_failed).
+TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_failed','executor_unavailable','user_denied','invalid_args','unknown_tool','busy'})
+HUB_REASONS=('ledger_missing','ledger_invalid')
+STAGED_ERRORS=('staged_payload_invalid',)
+# Finish reasons of the capture session (src/core.rs finish), recorded in capture.reason.
+CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
+STT_SOURCES=('voice','user_text')
+COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture'})
+TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
+HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
+HUB_REQUIRED=HUB_KEYS-{'reason'}
+ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
+ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities'}
+PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences'})
+PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output'})
+TRANSCRIPT_KEYS=frozenset({'source','session_id','revision','audio_end_us','raw','normalized','is_final','confidence'})
+CAPTURE_KEYS=frozenset({'session_id','start_us','end_us','samples','pcm_sha256','reason'})
+SPEECH_KEYS=frozenset({'output_volume_percent','session_id','sample_rate','samples','chunks','pcm_sha256','peak','rms','first_pcm_ms','elapsed_ms','sink'})
+COMMAND_KEYS=frozenset({'session_id','code','receipt'})
+RECEIPT_KEYS=frozenset({'job','verified','scope','result'})
+JOB_KEYS=frozenset({'session_id','command'})
+EVENT_KEYS=frozenset({'sequence','request_id','session_id','kind'})
 def utf8_len(text):return len(text.encode('utf-8'))
 def digest(value):return isinstance(value,str) and len(value)==64 and all(c in HEX for c in value)
 def text_problem(text):
@@ -92,7 +122,7 @@ def valid_tools(items):
         if not (isinstance(item['call_id'],str) and utf8_len(item['call_id'])<=64 and isinstance(item['tool'],str) and utf8_len(item['tool'])<=TOOL_NAME_LIMIT):return False
         if not valid_args(item['args']) or item['state'] not in TOOL_STATES:return False
         reason=item['reason']
-        if reason is not None and not (isinstance(reason,str) and len(reason)<=64 and SNAKE_CODE.fullmatch(reason)):return False
+        if reason is not None and reason not in TOOL_REASONS:return False
         if item['result'] is not None and not (isinstance(item['result'],str) and utf8_len(item['result'])<=RESULT_TEXT_LIMIT):return False
     return True
 def chat_problem(text):
@@ -124,7 +154,7 @@ def validate_snapshot(data,request_id,min_sequence):
         return type(value) is int and minimum<=value<=maximum
     def sid(value):return integer(value,1)
     def short(value,limit=64):return isinstance(value,str) and len(value.encode('utf-8'))<=limit
-    require(isinstance(data,dict))
+    require(isinstance(data,dict) and set(data)<=TOP_KEYS and TOP_REQUIRED<=set(data))
     require(type(data.get('version')) is int and data['version']==1)
     require(data.get('request_id')==request_id and isinstance(request_id,str))
     require(data.get('state') in ('idle','capturing','transcribing','executing','speaking'))
@@ -143,11 +173,11 @@ def validate_snapshot(data,request_id,min_sequence):
         require(not data['configuration_recovery_available'] or data.get('configuration_status')=='safe_mode')
     prefs=data.get('preferences')
     if prefs is not None:
-        require(isinstance(prefs,dict) and type(prefs.get('version')) is int and prefs['version']==1)
+        require(isinstance(prefs,dict) and set(prefs)<=PREFERENCE_KEYS and {'version','session_timeout_ms','revision','audible_feedback','wake_phrase','visual_feedback','output_volume_percent'}<=set(prefs))
+        require(type(prefs.get('version')) is int and prefs['version']==1)
         require(integer(prefs.get('revision')) and integer(prefs.get('session_timeout_ms'),50,60000))
         require(type(prefs.get('audible_feedback')) is bool)
-        if 'visual_feedback' in prefs:require(type(prefs['visual_feedback']) is bool)
-        if 'output_volume_percent' in prefs:require(integer(prefs['output_volume_percent'],0,100))
+        require(type(prefs['visual_feedback']) is bool and integer(prefs['output_volume_percent'],0,100))
         previous=prefs.get('previous_preferences')
         if previous is not None:
             require(isinstance(previous,dict) and type(previous.get('audible_feedback')) is bool and integer(previous.get('session_timeout_ms'),50,60000))
@@ -158,16 +188,18 @@ def validate_snapshot(data,request_id,min_sequence):
     hub=data.get('hub')
     if hub is not None:
         require(isinstance(hub,dict) and type(hub.get('version')) is int and hub['version']==1)
+        require(set(hub)<=HUB_KEYS and HUB_REQUIRED<=set(hub))
         require(hub.get('status') in ('verified','quarantined') and hub.get('publisher_verified') is False)
-        if 'approval_revision' in hub:require(integer(hub['approval_revision']))
+        require(integer(hub['approval_revision']) and integer(hub['orphans']))
+        if 'reason' in hub:require(hub['status']=='quarantined' and hub['reason'] in HUB_REASONS)
         if hub.get('import') is not None:
-            transfer=hub['import'];require(isinstance(transfer,dict) and short(transfer.get('import_id')) and short(transfer.get('plugin_id')) and integer(transfer.get('expected'),1,67108864) and integer(transfer.get('received'),0,transfer['expected']))
-        entries=hub.get('entries');require(isinstance(entries,list) and len(entries)<=8 and all(isinstance(e,dict) for e in entries))
+            transfer=hub['import'];require(isinstance(transfer,dict) and set(transfer)=={'import_id','plugin_id','received','expected'} and short(transfer.get('import_id')) and short(transfer.get('plugin_id')) and integer(transfer.get('expected'),1,67108864) and integer(transfer.get('received'),0,transfer['expected']))
+        entries=hub.get('entries');require(isinstance(entries,list) and len(entries)<=8 and all(isinstance(e,dict) and set(e)<=ENTRY_KEYS and ENTRY_REQUIRED<=set(e) for e in entries))
         installed=hub.get('installed');require(integer(hub.get('install_revision')) and isinstance(installed,list) and len(installed)<=8 and (hub['status']=='verified' or not installed))
         records={}
         for record in installed:
             require(isinstance(record,dict) and set(record)=={'plugin_id','semver','manifest_sha256','state','runtime','previous'})
-            require(short(record['plugin_id'],128) and bool(record['plugin_id']) and short(record['semver'],128) and bool(record['semver']) and record['state'] in ('installed','quarantined') and record['runtime']=='disabled' and digest(record['manifest_sha256']))
+            require(short(record['plugin_id'],128) and bool(record['plugin_id']) and short(record['semver'],128) and bool(record['semver']) and record['state'] in ('installed','quarantined') and record['runtime'] in RUNTIME_STATES and digest(record['manifest_sha256']))
             previous=record['previous'];require(previous is None or (isinstance(previous,dict) and set(previous)=={'semver','manifest_sha256'} and short(previous['semver'],128) and bool(previous['semver']) and digest(previous['manifest_sha256'])))
             require(record['plugin_id'] not in records);records[record['plugin_id']]=record
         if hub['status']=='quarantined':require(hub.get('import') is None and not entries and hub.get('repository') is None and hub.get('catalog_sha256') is None)
@@ -180,16 +212,17 @@ def validate_snapshot(data,request_id,min_sequence):
         ids=set()
         for entry in entries:
             for key in ('plugin_id','semver','publisher','license','support_policy'):require(short(entry.get(key),128) and bool(entry[key]))
-            if 'manifest_sha256' in entry:require(digest(entry['manifest_sha256']))
-            if 'payload_staged' in entry:require(type(entry['payload_staged']) is bool and (not entry['payload_staged'] or entry.get('status') in ('not_installed','update_available')))
-            if 'permissions_approved' in entry:require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status') in ('not_installed','update_available','installed') and 'manifest_sha256' in entry and integer(hub.get('approval_revision'),1))))
+            require(digest(entry['manifest_sha256']))
+            require(type(entry['payload_staged']) is bool and (not entry['payload_staged'] or entry.get('status') in ('not_installed','update_available')))
+            require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status') in ('not_installed','update_available','installed') and integer(hub.get('approval_revision'),1))))
+            if 'staged_error' in entry:require(entry['staged_error'] in STAGED_ERRORS and entry['payload_staged'] is False)
             require(entry['plugin_id'] not in ids);ids.add(entry['plugin_id'])
             require(integer(entry.get('api_version'),0,65535) and integer(entry.get('download_size'),0,67108864))
             require(entry.get('status') in ('not_installed','incompatible','installed','update_available') and entry.get('reason') in ('none','api_version','target','dependencies_unresolved'))
             require((entry['status']=='incompatible') == (entry['reason']!='none'))
             record=records.get(entry['plugin_id'])
-            if entry['status']=='installed':require(record is not None and 'manifest_sha256' in entry and record['manifest_sha256']==entry['manifest_sha256'])
-            elif entry['status']=='update_available':require(record is not None and 'manifest_sha256' in entry and record['manifest_sha256']!=entry['manifest_sha256'])
+            if entry['status']=='installed':require(record is not None and record['manifest_sha256']==entry['manifest_sha256'])
+            elif entry['status']=='update_available':require(record is not None and record['manifest_sha256']!=entry['manifest_sha256'])
             elif entry['status']=='not_installed':require(record is None)
             for key in ('targets','permissions','conflicts'):
                 require(isinstance(entry.get(key),list) and len(entry[key])<=8 and all(short(v) and bool(v) for v in entry[key]))
@@ -212,12 +245,13 @@ def validate_snapshot(data,request_id,min_sequence):
             ident=item['plugin_id'];require(isinstance(ident,str) and len(ident)<=64 and PLUGIN_ID.fullmatch(ident) and ident not in names);names.add(ident)
             caps=item['capabilities'];require(isinstance(caps,list) and len(caps)<=8 and len(set(caps))==len(caps) and all(isinstance(c,str) and len(c)<=64 and CAPABILITY_ID.fullmatch(c) for c in caps))
             require(short(item['semver'],128) and bool(item['semver']) and type(item['enabled']) is bool and item['state'] in PLUGIN_STATES and integer(item['restarts'],0,255))
-            require(item['last_error'] is None or (isinstance(item['last_error'],str) and len(item['last_error'])<=64 and SNAKE_CODE.fullmatch(item['last_error'])))
+            require(item['last_error'] is None or item['last_error'] in PLUGIN_LAST_ERRORS)
             record=installed.get(ident);entry=listed.get(ident)
             require(record is not None and record['semver']==item['semver'] and caps==(entry.get('capabilities',[]) if entry else []))
             require((item['state']=='quarantined')==(record['state']=='quarantined'))
             if item['enabled']:require(item['state'] in ('starting','running','failed','stopped') and record['state']=='installed' and entry is not None and entry['status']=='installed')
             else:require(item['state'] in ('disabled','quarantined'))
+            if record['state']=='installed':require(record['runtime']==(item['state'] if item['enabled'] else 'disabled'))
         require(names==set(installed))
     result=data.get('capability_result')
     if result is not None:
@@ -226,7 +260,7 @@ def validate_snapshot(data,request_id,min_sequence):
         owner=next((i for i in items if i['plugin_id']==result['plugin_id']),None)
         require(owner is not None and result['capability'] in owner['capabilities'])
         if result['ok']:require('output' in result and 'error' not in result and bounded_output(result['output']))
-        else:require('error' in result and 'output' not in result and isinstance(result['error'],str) and len(result['error'])<=64 and SNAKE_CODE.fullmatch(result['error']))
+        else:require('error' in result and 'output' not in result and result['error'] in CAPABILITY_ERRORS)
         # Model text streams with newlines, so partial is only bounded here; QML shows it as PlainText.
         if 'partial' in result:require(isinstance(result['partial'],str) and utf8_len(result['partial'])<=PARTIAL_LIMIT)
         if HTTP_STATUS_KEY in result:require(result['ok'] is False and result.get('error')=='http_error' and is_int(result[HTTP_STATUS_KEY],100,599))
@@ -238,7 +272,7 @@ def validate_snapshot(data,request_id,min_sequence):
     if pack is not None:
         require(isinstance(pack,dict) and type(pack.get('version')) is int and pack['version']==1)
         require(short(pack.get('id')) and pack.get('scope')=='dev_virtual_en' and pack.get('preflight')=='verified')
-        require(isinstance(pack.get('engines'),dict) and set(pack['engines'])=={'wake','stt','tts'} and all(short(v,160) for v in pack['engines'].values()))
+        require(set(pack)==PACK_KEYS and isinstance(pack.get('engines'),dict) and set(pack['engines'])=={'wake','stt','tts'} and all(short(v,160) for v in pack['engines'].values()))
         choices=pack.get('wake_phrases');require(isinstance(choices,list) and 1<=len(choices)<=8)
         ids=set()
         for choice in choices:
@@ -250,22 +284,33 @@ def validate_snapshot(data,request_id,min_sequence):
     t=data.get('transcript')
     if t is not None:
         require(isinstance(t,dict))
-        require(short(t.get('raw'),4096) and type(t.get('is_final')) is bool and sid(t.get('session_id')))
-        require(integer(t.get('revision'),1,256))
+        require(set(t)==TRANSCRIPT_KEYS and t['source'] in STT_SOURCES and short(t.get('raw'),4096) and short(t.get('normalized'),4096) and type(t.get('is_final')) is bool and sid(t.get('session_id')))
+        require(integer(t.get('revision'),1,256) and integer(t['audio_end_us']))
+        require(t['confidence'] is None or (type(t['confidence']) in (int,float) and math.isfinite(t['confidence'])))
+    capture=data.get('capture')
+    if capture is not None:
+        require(isinstance(capture,dict) and set(capture)==CAPTURE_KEYS and sid(capture['session_id']) and integer(capture['start_us']) and integer(capture['end_us']) and integer(capture['samples'],0,2**32))
+        require(digest(capture['pcm_sha256']) and capture['reason'] in CAPTURE_REASONS)
+    speech=data.get('speech')
+    if speech is not None:
+        require(isinstance(speech,dict) and set(speech)==SPEECH_KEYS and integer(speech['output_volume_percent'],0,100) and sid(speech['session_id']) and integer(speech['sample_rate'],1,2**32))
+        require(integer(speech['samples'],0,2**32) and integer(speech['chunks'],0,2**32) and digest(speech['pcm_sha256']) and integer(speech['first_pcm_ms']) and integer(speech['elapsed_ms']))
+        require(type(speech['peak']) in (int,float) and type(speech['rms']) in (int,float) and speech['sink']=='virtual')
     command=data.get('command')
     if command is not None:
-        require(isinstance(command,dict) and sid(command.get('session_id')) and short(command.get('code')))
+        require(isinstance(command,dict) and set(command)==COMMAND_KEYS and sid(command.get('session_id')) and short(command.get('code')))
         receipt=command.get('receipt')
         if receipt is not None:
-            require(isinstance(receipt,dict))
+            require(isinstance(receipt,dict) and set(receipt)==RECEIPT_KEYS)
             require(type(receipt.get('verified')) is bool and short(receipt.get('scope')) and short(receipt.get('result'),256))
             job=receipt.get('job')
-            require(isinstance(job,dict) and job.get('session_id')==command['session_id'] and isinstance(job.get('command'),dict))
+            require(isinstance(job,dict) and set(job)==JOB_KEYS and job.get('session_id')==command['session_id'] and isinstance(job.get('command'),dict))
+            kind=job['command'].get('kind');require(kind in COMMAND_KINDS and set(job['command'])=={'kind',*COMMAND_KINDS[kind]})
     if 'events' in data:
         require(isinstance(data['events'],list) and len(data['events'])<=64)
         previous=-1
         for event in data['events']:
-            require(isinstance(event,dict))
+            require(isinstance(event,dict) and set(event)==EVENT_KEYS)
             require(integer(event.get('sequence')) and previous<event['sequence']<=data['sequence'])
             require(short(event.get('kind')) and short(event.get('request_id')))
             require('session_id' in event and (event['session_id'] is None or sid(event['session_id'])))

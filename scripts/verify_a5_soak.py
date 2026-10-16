@@ -13,6 +13,14 @@ asset=BASE/'target/a5-assets/soak.wav';sf.write(asset,source,16000,subtype='FLOA
 fixture={'id':'a5-two-cycles-emma','path':str(asset),'sha256':hashlib.sha256(asset.read_bytes()).hexdigest(),'positive':True,'expected_wake_phrase':'hey_gideon'}
 m['fixtures']=[fixture];path=BASE/'target/a5-assets/soak-replay.json';path.write_text(json.dumps(m))
 checks=[]
+# audit.log.1 is the single rotated audit generation (src/storage.rs audit, 64 KiB cap). Audit grows per request,
+# so a long voice session can rotate it; it holds metadata lines only, like audit.log. Any other file still fails.
+def artifact_names_ok(root):
+    names=set(x.name for x in root.iterdir())
+    base={'core.sock','core.lock','config.json','audit.log'}
+    if names=={*base,'audit.log.1'}:
+        return all(set(json.loads(line))=={'version','sequence'} for line in (root/'audit.log.1').read_text().splitlines())
+    return names==base
 def check(name,value):
     if not value:raise AssertionError(name)
     checks.append(name)
@@ -56,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix='gideon-a5-soak-') as td:
         ticks0,rss0=stats();start=time.monotonic();time.sleep(2);ticks1,rss1=stats();cpu=100*(ticks1-ticks0)/os.sysconf('SC_CLK_TCK')/(time.monotonic()-start)
         check('post EOF idle CPU below one percent',cpu<1.)
         check('loaded STT after speech unload below one GiB',max(rss0,rss1)<1024**3)
-        check('no runtime speech artifacts',set(x.name for x in root.iterdir())=={'core.sock','core.lock','config.json','audit.log'})
+        check('no runtime speech artifacts',artifact_names_ok(root))
         p.terminate();check('continuous pipeline shuts down',p.wait(timeout=3)==0)
         result={'gate':'A5_BOUNDED_SOAK','passed':len(checks),'failed':0,'ignored':0,'checks':checks,'fixture':fixture,'source_fixture_sha256':row['sha256'],'transformation':'two authorized PCM clips, 20s inter-cycle and 14s trailing silence; DEV interpolation from pcm_fixture helper','source_samples':len(source),'cycles':list(completed.values()),'idle_cpu_percent_one_core':cpu,'idle_sum_rss_bytes':max(rss0,rss1),'resource_scope':'recursive owned process RSS sums shared pages, post fixture EOF, STT loaded and TTS workers exited','binary_sha256':hashlib.sha256(BIN.read_bytes()).hexdigest(),'physical_validation':'NOT_PERFORMED'}
         (BASE/'target/evidence/a5-soak.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))

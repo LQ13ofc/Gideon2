@@ -25,9 +25,10 @@ def plugin_snapshot(state='running',enabled=True):
     digest='a'*64
     record={'plugin_id':'dummy_echo','semver':'0.1.0','manifest_sha256':digest,'state':'installed','runtime':'disabled','previous':None}
     entry={'plugin_id':'dummy_echo','semver':'0.1.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'installed','reason':'none','manifest_sha256':digest,'permissions_approved':False,'payload_staged':False,'runtime':'python3_script','capabilities':['dummy_echo.echo']}
-    hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'install_revision':1,'entries':[entry],'installed':[record]}
+    hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':1,'install_revision':1,'entries':[entry],'installed':[record]}
     item={'plugin_id':'dummy_echo','semver':'0.1.0','capabilities':['dummy_echo.echo'],'state':state,'enabled':enabled,'restarts':0,'last_error':None}
     cap={'capability':'dummy_echo.echo','plugin_id':'dummy_echo','ok':True,'output':{'text':'HELLO','count':1},'elapsed_ms':3}
+    record['runtime']=state if enabled else 'disabled'  # Core: installed runtime is the host state while enabled
     return {**BASE,'hub':hub,'plugins':{'revision':1,'status':'ok','items':[item]},'capability_result':cap}
 def _item(s):return s['plugins']['items'][0]
 def _result(s):return s['capability_result']
@@ -65,7 +66,7 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(BASE),'other',1)
         with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(BASE),'r',2)
     def test_preferences_presentation_rejects_bad_values(self):
-        valid={'version':1,'revision':2**64-1,'audible_feedback':False,'session_timeout_ms':60000,'wake_phrase':None}
+        valid={'version':1,'revision':2**64-1,'audible_feedback':False,'visual_feedback':True,'output_volume_percent':100,'session_timeout_ms':60000,'wake_phrase':None}
         cfg=copy.deepcopy(BASE);cfg['preferences']=valid
         validate_snapshot(cfg,'r',0)
         for key,value in [('version',True),('revision',True),('revision',-1),('revision',2**64),('audible_feedback','yes'),('visual_feedback','yes'),('output_volume_percent',True),('output_volume_percent',101),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':30000,'output_volume_percent':-1}),('session_timeout_ms',0),('session_timeout_ms',60001),('wake_phrase','../private'),('previous_preferences',[]),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':0})]:
@@ -84,13 +85,13 @@ class Tests(unittest.TestCase):
         for key,value in [('version',True),('wake_phrases',[]),('wake_phrases',[{'id':'x','text':'no grant','qualification':'certified'}]),('active_phrase',[]),('default_phrase','missing'),('audio_input','microphone')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'base_pack':{**pack,key:value}},'r',0)
     def test_hub_cannot_fake_installation_or_publisher_verification(self):
-        valid={'version':1,'status':'quarantined','repository':None,'catalog_sha256':None,'publisher_verified':False,'entries':[],'install_revision':0,'installed':[]}
+        valid={'version':1,'status':'quarantined','repository':None,'catalog_sha256':None,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':0,'entries':[],'install_revision':0,'installed':[]}
         validate_snapshot({**BASE,'hub':valid},'r',0)
         for key,value in [('version',True),('status','installed'),('publisher_verified',True),('entries',[{}]),('catalog_sha256','a'*64)]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**valid,key:value}},'r',0)
     def test_hub_approval_cannot_fake_authority_or_revision(self):
-        entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':['notifications'],'dependencies':[],'conflicts':[],'download_size':1,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True}
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':2**64-1,'entries':[entry],'install_revision':0,'installed':[]}
+        entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':['notifications'],'dependencies':[],'conflicts':[],'download_size':1,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True,'payload_staged':False}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':2**64-1,'entries':[entry],'install_revision':0,'installed':[]}
         validate_snapshot({**BASE,'hub':hub},'r',0)
         for key,value in [('approval_revision',True),('approval_revision',0),('approval_revision',2**64)]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,key:value}},'r',0)
@@ -99,7 +100,7 @@ class Tests(unittest.TestCase):
     def test_revoked_installed_plugin_can_be_reapproved_but_not_incompatible(self):
         entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True,'payload_staged':False}
         record={'plugin_id':'benign','semver':'1.0.0','manifest_sha256':'a'*64,'state':'installed','runtime':'disabled','previous':None}
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'install_revision':1,'entries':[entry],'installed':[record]}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':1,'install_revision':1,'entries':[entry],'installed':[record]}
         validate_snapshot(snap(hub),'r',0)
         with self.assertRaises(ValueError):validate_snapshot(snap({**hub,'entries':[{**entry,'manifest_sha256':'c'*64}]}),'r',0)
         incompatible={**entry,'status':'incompatible','reason':'api_version'}
@@ -107,7 +108,7 @@ class Tests(unittest.TestCase):
     def test_staging_progress_cannot_invent_payload_installation_or_bounds(self):
         entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True,'payload_staged':False}
         transfer={'import_id':'transfer','plugin_id':'benign','received':0,'expected':15}
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'entries':[entry],'import':transfer,'install_revision':0,'installed':[]}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'approval_revision':1,'entries':[entry],'import':transfer,'install_revision':0,'installed':[]}
         validate_snapshot({**BASE,'hub':hub},'r',0)
         for key,value in [('received',True),('received',16),('expected',0),('expected',16),('plugin_id','missing')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,'import':{**transfer,key:value}}},'r',0)
@@ -117,7 +118,7 @@ class Tests(unittest.TestCase):
         digest='a'*64;new='c'*64
         record={'plugin_id':'benign','semver':'1.0.0','manifest_sha256':digest,'state':'installed','runtime':'disabled','previous':None}
         entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'installed','reason':'none','manifest_sha256':digest,'permissions_approved':False,'payload_staged':False}
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'install_revision':3,'entries':[entry],'installed':[record]}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':1,'install_revision':3,'entries':[entry],'installed':[record]}
         validate_snapshot(snap(hub),'r',0)
         update={**entry,'status':'update_available','manifest_sha256':new,'payload_staged':True}
         validate_snapshot(snap({**hub,'entries':[update]}),'r',0)
@@ -147,19 +148,21 @@ class Tests(unittest.TestCase):
         failed=plugin_snapshot('failed',True);_item(failed).update(last_error='plugin_crashed');validate_snapshot(failed,'r',0)
         disabled=plugin_snapshot('disabled',False);disabled.pop('capability_result');validate_snapshot(disabled,'r',0)
         quarantined=plugin_snapshot('quarantined',False);quarantined['hub']['installed'][0]['state']='quarantined';quarantined.pop('capability_result');validate_snapshot(quarantined,'r',0)
-        absent={k:v for k,v in BASE.items() if k!='plugins'};validate_snapshot(absent,'r',0)
+        validate_snapshot({**BASE,'plugins':{'revision':0,'status':'ok','items':[]}},'r',0)
         for name,mutate in CASES:
             cfg=copy.deepcopy(plugin_snapshot());mutate(cfg)
             with self.subTest(case=name),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
         without_plugins=copy.deepcopy(plugin_snapshot());del without_plugins['plugins']
         with self.subTest(case='plugins missing with hub'),self.assertRaises(ValueError):validate_snapshot(without_plugins,'r',0)
     def test_plugins_absent_only_for_hubless_core(self):
-        old={k:v for k,v in BASE.items() if k!='plugins'};validate_snapshot(old,'r',0)
+        # Core always sends plugins (src/protocol.rs Response): an empty section is valid, an absent one is not.
+        empty={**BASE,'plugins':{'revision':0,'status':'ok','items':[]}};validate_snapshot(empty,'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({k:v for k,v in BASE.items() if k!='plugins'},'r',0)
         self.assertGreaterEqual(len(CASES),15)
-        with self.assertRaises(ValueError):validate_snapshot({**old,'plugins':{'revision':0,'status':'ok','items':[{'plugin_id':'x','semver':'1','capabilities':[],'state':'disabled','enabled':False,'restarts':0,'last_error':None}]}},'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({**empty,'plugins':{'revision':0,'status':'ok','items':[{'plugin_id':'x','semver':'1','capabilities':[],'state':'disabled','enabled':False,'restarts':0,'last_error':None}]}},'r',0)
     def test_plugin_requests_bind_revision_and_bounded_input_over_socket(self):
         def at(state,enabled,revision,result=None):
-            snap=plugin_snapshot(state,enabled);snap['plugins']['revision']=revision;snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000}
+            snap=plugin_snapshot(state,enabled);snap['plugins']['revision']=revision;snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000,'wake_phrase':None,'visual_feedback':True,'output_volume_percent':100}
             if result is None:snap.pop('capability_result',None)
             else:snap['capability_result']=result
             return snap
@@ -217,7 +220,7 @@ def answer(peer,request,snap,code='ok'):
 def settle(bridge):
     pump(lambda:bridge.pending is None);bridge.poll.stop()
 def ready(snap):
-    snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000};return snap
+    snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000,'wake_phrase':None,'visual_feedback':True,'output_volume_percent':100};return snap
 def dual_snapshot():
     """Two installed, approved, running plugins: enough to prove per-plugin state survives unrelated updates."""
     s=ready(copy.deepcopy(plugin_snapshot('running',True)))
@@ -249,7 +252,7 @@ class Regressions(unittest.TestCase):
         over=plugin_snapshot();_result(over)['output']={'text':'á'*4500}
         with self.assertRaises(ValueError):validate_snapshot(over,'r',0)
     def test_non_object_entries_are_invalid_not_exceptions(self):
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'install_revision':0,'entries':[5],'installed':[],'import':{'import_id':'t','plugin_id':'x','received':0,'expected':15}}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'approval_revision':1,'install_revision':0,'entries':[5],'installed':[],'import':{'import_id':'t','plugin_id':'x','received':0,'expected':15}}
         with self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':hub},'r',0)
     def test_status_enums_are_exact_core_sets(self):
         for key,value in [('wake_status','replay_finished'),('wake_status','replaying'),('stt_status','ready'),('speech_status','timed_out'),('speech_status','capture_completed'),('speech_status','cancelled')]:
@@ -320,7 +323,7 @@ class Regressions(unittest.TestCase):
         answer(peer,request,ready(copy.deepcopy(BASE)),'ok');settle(bridge)
         self.assertEqual(seen[-1],PREFS_DONE)
     def test_malformed_entries_and_oversize_line_take_the_offline_path(self):
-        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'install_revision':0,'entries':[5],'installed':[],'import':{'import_id':'t','plugin_id':'x','received':0,'expected':15}}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'approval_revision':1,'install_revision':0,'entries':[5],'installed':[],'import':{'import_id':'t','plugin_id':'x','received':0,'expected':15}}
         cases=[lambda rid:(json.dumps({**BASE,'hub':hub,'request_id':rid})+'\n').encode(),lambda rid:b'x'*70000]
         for index,payload in enumerate(cases):
             with self.subTest(case=index):
@@ -350,8 +353,9 @@ def chat_snapshot(state='running',enabled=True,result=None,partial=None,tools=No
     digest='a'*64
     entry={'plugin_id':'llm_engine','semver':'0.1.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':['network.llm'],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'installed','reason':'none','manifest_sha256':digest,'permissions_approved':True,'payload_staged':False,'runtime':'python3_script','capabilities':list(capabilities)}
     record={'plugin_id':'llm_engine','semver':'0.1.0','manifest_sha256':digest,'state':'installed','runtime':'disabled','previous':None}
-    hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'install_revision':1,'entries':[entry],'installed':[record]}
+    hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':1,'install_revision':1,'entries':[entry],'installed':[record]}
     item={'plugin_id':'llm_engine','semver':'0.1.0','capabilities':list(capabilities),'state':state,'enabled':enabled,'restarts':0,'last_error':None}
+    record['runtime']=state if enabled else 'disabled'
     snap={**ready(copy.deepcopy(BASE)),'hub':hub,'plugins':{'revision':1,'status':'ok','items':[item]},'llm':llm or llm_state(config=LLM_CONFIG),'tool_proposals':tools or []}
     if result is not None:snap['capability_result']=result
     if partial is not None:snap['partial']=partial
@@ -765,6 +769,96 @@ def _qml_checks(bridge,window,check,checks):
     fourth=copy.deepcopy(third);fourth['preferences']['visual_feedback']=False;push(fourth);QTest.qWait(30)
     check('preference change resyncs the visual control',find('visualPagePreference').property('checked') is False)
     print(f'qml checks ok: {len(checks)}');return 0
+class CoreContract(unittest.TestCase):
+    """R2: exact Core snapshot shapes. Each drift the Core can emit is accepted; each neighbour is refused."""
+    def _hub(self,**changes):
+        base=copy.deepcopy(plugin_snapshot('disabled',False)['hub']);base.update(changes);return base
+    def _valid(self,hub):
+        plugins=copy.deepcopy(plugin_snapshot('disabled',False)['plugins']) if hub.get('installed') else {'revision':0,'status':'ok','items':[]}
+        return {**BASE,'hub':hub,'plugins':plugins}
+    def test_installed_runtime_follows_host_state_while_enabled(self):
+        for state in ('starting','running','failed','stopped'):
+            validate_snapshot(plugin_snapshot(state,True),'r',0)
+        validate_snapshot(plugin_snapshot('disabled',False),'r',0)
+        for runtime in ('enabled','quarantined','ok',''):
+            cfg=plugin_snapshot('running',True);cfg['hub']['installed'][0]['runtime']=runtime
+            with self.subTest(runtime=runtime),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+        # Installed runtime and item state must agree while enabled, and be disabled when not enabled.
+        cfg=plugin_snapshot('running',True);cfg['hub']['installed'][0]['runtime']='starting'
+        with self.subTest(case='runtime disagrees with item'),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+        cfg=plugin_snapshot('disabled',False);cfg['hub']['installed'][0]['runtime']='running'
+        with self.subTest(case='disabled plugin reports a host state'),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+    def test_orphans_and_reason_are_exact(self):
+        hub=plugin_snapshot('disabled',False)['hub']
+        for orphans in (0,1,2**64-1):
+            validate_snapshot(self._valid({**hub,'orphans':orphans}),'r',0)
+        for orphans in (-1,True,1.0,None,2**64):
+            with self.subTest(orphans=orphans),self.assertRaises(ValueError):validate_snapshot(self._valid({**hub,'orphans':orphans}),'r',0)
+        with self.subTest(case='orphans missing'),self.assertRaises(ValueError):validate_snapshot(self._valid({k:v for k,v in hub.items() if k!='orphans'}),'r',0)
+        for reason in ('ledger_missing','ledger_invalid'):
+            quarantined={**self._valid({**hub,'status':'quarantined','reason':reason,'repository':None,'catalog_sha256':None,'entries':[],'installed':[],'import':None}),'plugins':{'revision':0,'status':'ok','items':[]}}
+            validate_snapshot(quarantined,'r',0)
+        for reason in ('ledger_corrupt','none','',None):
+            quarantined=self._valid({**hub,'status':'quarantined','reason':reason,'repository':None,'catalog_sha256':None,'entries':[],'installed':[],'import':None})
+            with self.subTest(reason=reason),self.assertRaises(ValueError):validate_snapshot(quarantined,'r',0)
+        with self.subTest(case='reason on a verified hub'),self.assertRaises(ValueError):validate_snapshot(self._valid({**hub,'reason':'ledger_invalid'}),'r',0)
+    def test_staged_error_only_for_unusable_staged_payload(self):
+        hub=plugin_snapshot('disabled',False)['hub'];entry=dict(hub['entries'][0],payload_staged=False,status='not_installed')
+        ok=self._valid({**hub,'installed':[],'entries':[{**entry,'staged_error':'staged_payload_invalid'}]});validate_snapshot(ok,'r',0)
+        bad_values=[{**entry,'staged_error':'staged_payload_invalid','payload_staged':True},{**entry,'staged_error':'corrupt'},{**entry,'staged_error':None}]
+        for item in bad_values:
+            with self.subTest(entry=item),self.assertRaises(ValueError):validate_snapshot(self._valid({**hub,'installed':[],'entries':[item]}),'r',0)
+    def test_plugin_last_error_is_the_core_code_list(self):
+        for code in ('plugin_cpu_exceeded','plugin_crashed','plugin_output_invalid','plugin_start_failed','plugin_not_runnable','handshake_timeout'):
+            cfg=plugin_snapshot('failed',True);_item(cfg).update(last_error=code);validate_snapshot(cfg,'r',0)
+        for code in ('Plugin Crashed','plugin_exploded','','plugin-crashed'):
+            cfg=plugin_snapshot('failed',True);_item(cfg).update(last_error=code)
+            with self.subTest(code=code),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+    def test_capability_error_codes_and_http_status(self):
+        for code in ('http_error','timeout','invalid_input','capability_timeout','invoke_cancelled','plugin_error','key_missing','cloud_not_authorized'):
+            cfg=plugin_snapshot();_result(cfg).pop('output');_result(cfg).update(ok=False,error=code);validate_snapshot(cfg,'r',0)
+        cfg=plugin_snapshot();_result(cfg).pop('output');_result(cfg).update(ok=False,error='http_error',http_status=503);validate_snapshot(cfg,'r',0)
+        for code in ('Plugin Crashed','unknown_capability','not_a_code','plugin_quarantined'):
+            cfg=plugin_snapshot();_result(cfg).pop('output');_result(cfg).update(ok=False,error=code)
+            with self.subTest(error=code),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+        for status in (99,600,True,'503',None):
+            cfg=plugin_snapshot();_result(cfg).pop('output');_result(cfg).update(ok=False,error='http_error',http_status=status)
+            with self.subTest(status=status),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+        cfg=plugin_snapshot();_result(cfg).pop('output');_result(cfg).update(ok=False,error='timeout',http_status=503)
+        with self.subTest(case='status without http_error'),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+    def test_tool_proposal_reasons_are_the_core_list(self):
+        proposal={'proposal_id':'p1','plugin_id':'llm_engine','call_id':'c1','tool':'open_app','args':{'desktop_id':'com.brave.Browser.desktop'},'state':'denied','reason':'user_denied','result':None}
+        for reason in ('user_denied','invalid_args','unknown_tool','superseded','expired','executor_failed','busy'):
+            validate_snapshot({**BASE,'tool_proposals':[{**proposal,'reason':reason}]},'r',0)
+        for reason in ('delete_everything','Unknown Tool','proposal_denied'):
+            with self.subTest(reason=reason),self.assertRaises(ValueError):validate_snapshot({**BASE,'tool_proposals':[{**proposal,'reason':reason}]},'r',0)
+    def test_capture_speech_transcript_and_command_shapes(self):
+        digest='a'*64
+        capture={'session_id':1,'start_us':0,'end_us':10,'samples':160,'pcm_sha256':digest,'reason':'capture_completed'}
+        validate_snapshot({**BASE,'capture':capture},'r',0)
+        for change in ({'reason':'delete_everything'},{'pcm_sha256':'x'},{'extra':1}):
+            with self.subTest(change=change),self.assertRaises(ValueError):validate_snapshot({**BASE,'capture':{**capture,**change}},'r',0)
+        transcript={'source':'voice','session_id':1,'revision':1,'audio_end_us':10,'raw':'open brave','normalized':'open brave','is_final':True,'confidence':None}
+        validate_snapshot({**BASE,'transcript':transcript},'r',0)
+        for change in ({'source':'network'},{'confidence':float('nan')},{'extra':True}):
+            with self.subTest(change=change),self.assertRaises(ValueError):validate_snapshot({**BASE,'transcript':{**transcript,**change}},'r',0)
+        command={'session_id':1,'code':'command_success','receipt':{'job':{'session_id':1,'command':{'kind':'open_app','desktop_id':'com.brave.Browser.desktop'}},'verified':True,'scope':'desktop','result':'verified'}}
+        validate_snapshot({**BASE,'command':command},'r',0)
+        for change in ({'command':{'kind':'shell'}},{'command':{'kind':'mute','level':3}}):
+            cfg=copy.deepcopy(command);cfg['receipt']['job']['command']={**cfg['receipt']['job']['command'],**change} if 'level' in change else change
+            with self.subTest(change=change),self.assertRaises(ValueError):validate_snapshot({**BASE,'command':cfg},'r',0)
+        with self.subTest(case='unknown command key'),self.assertRaises(ValueError):validate_snapshot({**BASE,'command':{**command,'extra':1}},'r',0)
+    def test_speech_summary_has_the_core_fields(self):
+        speech={'output_volume_percent':100,'session_id':7,'sample_rate':24000,'samples':51840,'chunks':27,'pcm_sha256':'a'*64,'peak':0.77,'rms':0.08,'first_pcm_ms':7934,'elapsed_ms':10438,'sink':'virtual'}
+        validate_snapshot({**BASE,'speech':speech,'speech_status':'completed'},'r',0)
+        for change in ({'sink':'hardware'},{'voice':'bm_george'},{'pcm_sha256':'short'},{'output_volume_percent':101}):
+            with self.subTest(change=change),self.assertRaises(ValueError):validate_snapshot({**BASE,'speech':{**speech,**change}},'r',0)
+        missing={k:v for k,v in speech.items() if k!='sink'}
+        with self.subTest(case='sink missing'),self.assertRaises(ValueError):validate_snapshot({**BASE,'speech':missing},'r',0)
+    def test_top_level_keys_are_exact(self):
+        validate_snapshot(copy.deepcopy(BASE),'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({**BASE,'unexpected_field':1},'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({k:v for k,v in BASE.items() if k!='wake_status'},'r',0)
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())

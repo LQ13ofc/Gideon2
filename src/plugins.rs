@@ -1323,8 +1323,16 @@ fn bwrap_supports_size() -> bool {
             })
     })
 }
-/// Result of the interpreter gate: a package-home or /usr interpreter that is not under the
-/// user's HOME and whose runtime directory is not `/`, `/home`, HOME or an ancestor of HOME.
+/// Interpreter gate for `--plugin-python`. Returns the canonical runtime directory when the
+/// interpreter may run. Rules, in order:
+/// 1. A runtime inside the package prefix is accepted regardless of HOME, unless the prefix is
+///    `/` or an ancestor-or-equal of HOME (a package prefix that covers HOME is not usable).
+/// 2. A runtime that equals or contains HOME is `plugin_python_forbidden_root`.
+/// 3. An interpreter or runtime under HOME (outside the package prefix) is
+///    `plugin_python_under_home`.
+/// 4. A runtime at `/`, `/home` is `plugin_python_forbidden_root`.
+/// 5. Otherwise the runtime must sit under `/usr`, `/usr/local` or `/opt`, else
+///    `plugin_python_not_allowed`.
 pub fn plugin_runtime_check(
     python: &Path,
     package_home: &Path,
@@ -1339,12 +1347,19 @@ pub fn plugin_runtime_check(
     let runtime = interpreter.parent().and_then(Path::parent).ok_or(refused)?;
     let runtime = fs::canonicalize(runtime).map_err(|_| refused)?;
     let package = fs::canonicalize(package_home).map_err(|_| refused)?;
-    if let Some(home) = user_home {
-        if real.starts_with(home) || runtime.starts_with(home) {
-            return Err("plugin_python_under_home");
-        }
+    // A HOME that cannot be canonicalized keeps its raw path: the HOME checks never switch off silently.
+    let home = user_home.map(|h| fs::canonicalize(h).unwrap_or_else(|_| h.to_path_buf()));
+    let home = home.as_deref();
+    let package_usable = package != Path::new("/") && home.is_none_or(|h| !h.starts_with(&package));
+    if package_usable && runtime.starts_with(&package) {
+        return Ok(runtime);
+    }
+    if let Some(home) = home {
         if home.starts_with(&runtime) {
             return Err("plugin_python_forbidden_root");
+        }
+        if real.starts_with(home) || runtime.starts_with(home) {
+            return Err("plugin_python_under_home");
         }
     }
     if runtime == Path::new("/") || runtime == Path::new("/home") {
@@ -1355,7 +1370,7 @@ pub fn plugin_runtime_check(
         Path::new("/usr/local"),
         Path::new("/opt"),
     ];
-    if allowed.iter().any(|prefix| runtime.starts_with(prefix)) || runtime.starts_with(&package) {
+    if allowed.iter().any(|prefix| runtime.starts_with(prefix)) {
         return Ok(runtime);
     }
     Err("plugin_python_not_allowed")

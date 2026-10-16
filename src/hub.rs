@@ -93,7 +93,7 @@ pub struct Snapshot {
     /// Set when the Hub is quarantined: `ledger_missing` or `ledger_invalid`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<&'static str>,
-    /// Unreferenced payloads the startup sweep moved to quarantine.
+    /// Unreferenced payloads and crashed pending writes the startup sweep moved to quarantine.
     pub orphans: u64,
     pub repository: Option<String>,
     pub catalog_sha256: Option<String>,
