@@ -91,3 +91,15 @@ Aviso de aprovação separado de preferências e identifica o plugin; não reuti
 resultado antigo ao abrir review. Screenshot target/evidence/b3-permissions.png.
 Restart privado mantém aprovação e repete fluxo wake/STT/comando/Pocket. Nenhuma
 qualificação física ou humana foi feita. Resultado: passed.
+
+
+B3.2b staging: Hub Qt real distingue pacote opaco verificado de instalado;
+progresso recebido/esperado e botão Cancelar importação vêm do Core. Cancel via
+teclado remove transação e pending no daemon real. CLI offline importa fixture
+autorizada, UI acompanha estado; restart privado revalida payload/approval e
+repete S1 nativo. Screenshot target/evidence/b3-import.png em 640x520/HiDPI,
+scroll sem controles de execução ou publisher autenticado. Browser não se aplica.
+Qualidade física/relocação continuam pendentes; cliente gráfico de seleção de
+pacotes ainda não é oferecido. Cancel exibe "Enviando cancelamento ao Core"
+(antes reutilizava texto de aprovação). Rodada final: staging 76 (UI 9), zero
+erros QML, design 44 e regressões Base no mesmo release. Resultado: passed.

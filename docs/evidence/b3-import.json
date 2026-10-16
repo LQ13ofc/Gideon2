@@ -1,0 +1,344 @@
+{
+  "gate": "B3_2B_STAGING",
+  "passed": 76,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "unapproved bytes cannot begin",
+    "explicit manifest approval",
+    "begin rejects stale_hub_revision",
+    "begin rejects unknown_plugin",
+    "begin rejects plugin_incompatible",
+    "begin rejects manifest_mismatch",
+    "begin rejects invalid_message",
+    "unsafe pending refuses creation",
+    "hub_chunk fences unknown transaction",
+    "hub_finish fences unknown transaction",
+    "hub_abort fences unknown transaction",
+    "begin while voice busy refused",
+    "begin advertises bounded zero progress",
+    "duplicate begin fenced",
+    "second import refused",
+    "approval cannot change during import",
+    "chunk rejects stale_import_offset",
+    "chunk rejects invalid_import_chunk",
+    "chunk rejects invalid_import_chunk",
+    "chunk rejects invalid_import_chunk",
+    "chunk rejects invalid_import_chunk",
+    "chunk rejects invalid_import_chunk",
+    "normal first chunk",
+    "duplicate chunk never appends twice",
+    "finish while voice busy refused",
+    "abort remains available during voice",
+    "abort removes owned pending",
+    "short payload refuses publication",
+    "oversize aborts bounded import",
+    "hash mismatch never published",
+    "clean shutdown",
+    "shutdown cleans pending",
+    "boot epoch fences reused request IDs",
+    "forced crash leaves owned orphan unmodified",
+    "crash orphan blocks unsafe automatic reuse",
+    "Base effect remains verified",
+    "clean shutdown",
+    "real local CLI imports verified opaque bytes",
+    "private nonexecutable payload",
+    "staging never installs or authenticates",
+    "repeat cannot overwrite payload",
+    "Base effect remains verified",
+    "clean shutdown",
+    "restart validates actual bytes",
+    "clean shutdown",
+    "corrupt payload quarantines only Hub",
+    "Base effect remains verified",
+    "clean shutdown",
+    "permissions payload quarantines only Hub",
+    "Base effect remains verified",
+    "clean shutdown",
+    "executable payload quarantines only Hub",
+    "Base effect remains verified",
+    "clean shutdown",
+    "symlink payload quarantines only Hub",
+    "Base effect remains verified",
+    "clean shutdown",
+    "hardlink payload quarantines only Hub",
+    "Base effect remains verified",
+    "clean shutdown",
+    "fifo payload quarantines only Hub",
+    "Base effect remains verified",
+    "clean shutdown",
+    "explicit manifest approval",
+    "Qt cancel reflected at actual daemon",
+    "clean shutdown",
+    "actual Core connection",
+    "accessible cancel name",
+    "minimum layout size respected",
+    "native S1 before payload staging",
+    "Core import progress reaches real Qt",
+    "actual Qt cancel clears Core import",
+    "verified staging is never installed",
+    "restart rechecks persisted payload and approval",
+    "native S1 after staging restart",
+    "clean shutdown"
+  ],
+  "rows": [
+    {
+      "phase": "staging",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "checks": [
+        "actual Core connection",
+        "accessible cancel name",
+        "minimum layout size respected",
+        "native S1 before payload staging",
+        "Core import progress reaches real Qt",
+        "actual Qt cancel clears Core import",
+        "verified staging is never installed",
+        "restart rechecks persisted payload and approval",
+        "native S1 after staging restart"
+      ],
+      "state_trace": [
+        "offline",
+        "idle",
+        "capturing",
+        "executing",
+        "speaking",
+        "idle",
+        "offline",
+        "idle",
+        "capturing",
+        "transcribing",
+        "speaking"
+      ],
+      "metrics": {}
+    }
+  ],
+  "deadline": {
+    "gate": "B3_2B_REAL_DEADLINE",
+    "passed": 7,
+    "checks": [
+      "deadline fixture explicitly approved",
+      "actual bounded import begins",
+      "real daemon timer expires without client polling",
+      "deadline retains Base readiness and metadata-only event",
+      "late chunk cannot resurrect expired transaction",
+      "deadline never publishes incomplete payload",
+      "deadline daemon clean shutdown"
+    ],
+    "elapsed_seconds": 120.01346878200093,
+    "daemon_cpu_ticks": 0,
+    "clock_ticks_per_second": 100
+  },
+  "capacity": {
+    "gate": "B3_2B_CAPACITY",
+    "passed": 8,
+    "checks": [
+      "upper boundary catalog accepted",
+      "explicit synthetic payload approval",
+      "real CLI maximum upload completed",
+      "maximum payload staged before absolute deadline",
+      "actual stored maximum bytes match pinned digest",
+      "Core maximum import RSS bounded below 32MiB",
+      "maximum payload remains opaque uninstalled nonexecutable",
+      "capacity daemon clean shutdown"
+    ],
+    "bytes": 67108864,
+    "upload_seconds": 7.626436626000213,
+    "peak_core_rss_bytes": 4001792,
+    "scope": "synthetic opaque zeros, isolated Core/CLI; no native inference or physical audio"
+  },
+  "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+  "scope": "opaque local payload staging through exact current approval; no install/extraction/network/plugin execution/publisher authentication",
+  "physical_validation": "NOT_PERFORMED",
+  "code_commit": "17f231f3834fbf5f37043e6bee865842595f9993",
+  "rust_tests": 52,
+  "python_tests": 19,
+  "regressions": [
+    {
+      "report": "target/evidence/a0.json",
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "5f561fe8e65de334a34789d4f9b90bde25815d77166992d8e36d86875221f6c5"
+    },
+    {
+      "report": "target/evidence/a1-integration.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "fc207ca71a699e70eee3240f3eb4520f90809df9ac32dee873044102ad6044d7"
+    },
+    {
+      "report": "target/evidence/a2.json",
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "106d18f8f001c4bbd65147dbc195cd1f2cc5e0fea1c4121138ff2a9ef037377b"
+    },
+    {
+      "report": "target/evidence/a3-integration.json",
+      "passed": 67,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "d870f17f3954a9ec0b05aecb73a06c20f1ef4cd9f6b909d9ec79f4f6c6dfa444"
+    },
+    {
+      "report": "target/evidence/a4-integration.json",
+      "passed": 138,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "bbf92905dbed7ee266da95ac3bf894a4407c3edf7c633b1a68cf02de134ff594"
+    },
+    {
+      "report": "target/evidence/a5-integration.json",
+      "passed": 93,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "b0ec041587c4f5378b6f9f95859bf180dc6fd5f29d17c23baee2b9b143c77568"
+    },
+    {
+      "report": "target/evidence/a5-soak.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "6c535332863d81dd8dd12b1d64784f22d86bc6c8be102bc64218b543583a58f3"
+    },
+    {
+      "report": "target/evidence/a5-shutdown.json",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "d6eb8d0a6f11f73deca928c52efbdae29e829de2f42b7b6d7580f87cf45276fc"
+    },
+    {
+      "report": "target/evidence/b1-ui.json",
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "0d24c36ed60f91a68f90e09dcab8f51b48d83489ced5ca8b4c9743b16994f743"
+    },
+    {
+      "report": "target/evidence/b2-preferences.json",
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "f61ef07500d71b6e841f2ee5649f87b552d7bedac1698d7b11d6b740028dda22"
+    },
+    {
+      "report": "target/evidence/b2-safe-mode.json",
+      "passed": 96,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "b5bbad4fdfa728f8402b7a534c8743e63ad2b46ea034d6771a3e890381c4c7ac"
+    },
+    {
+      "report": "target/evidence/b2-pack.json",
+      "passed": 36,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "825c43b1137ddc65a331b938322ea1f3a3f0bc2ffd044a2616b5b26e724aa20c"
+    },
+    {
+      "report": "target/evidence/b2-feedback.json",
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "005328a9c499fe4298816cef490420ae73abed488e9bb1ed88395f0d05407567"
+    },
+    {
+      "report": "target/evidence/b3-catalog.json",
+      "passed": 69,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "7a16eba955dd2387869726abee8d4323bcd9a6a683604fd8efde1da81ffacc1a"
+    },
+    {
+      "report": "target/evidence/b3-permissions.json",
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "5626c6df36902ec605dd038f319ff0b3cfe53b655160c3d67bba926b61a4bf6b"
+    },
+    {
+      "report": "target/evidence/design.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "04515959eea091c72b701e181ba4ca61f23601ad13e10b79882aa9ead88d1d85",
+      "report_sha256": "ac2ca4252cbb0e374a13c689fda3f5b754df15b08c4acd3b8e4bfd1f65b48242"
+    }
+  ],
+  "regression_checks_total": 830,
+  "new_process_checks": 91,
+  "total_process_checks": 921,
+  "build_checks": [
+    "fmt",
+    "check",
+    "test",
+    "clippy --all-targets -- -D warnings",
+    "release",
+    "diff --check"
+  ],
+  "profile_and_qualification_sha256": {
+    "target/a3-assets/replay-manifest.json": "878dc1cade183900a178a2abce9426e6d6d7a37381d6bd85d1bb9f48a6d61653",
+    "target/a3-assets/manifest.json": "3f12fa9c7d075c98f6215734e2b3e053670b58087b74db87d92c9749a88d6a07",
+    "target/a5-assets/manifest.json": "12e5510428df7486355dee526ca51ccb2fe89981f4bfb5d7efcec46279a88649",
+    "target/a1-competitive/manifest.json": "8abb349c5af1413146922e9daf40778e383c91234599c5116672e094e96c9c0c",
+    "target/evidence/a1-selectable-hey.json": "6faedf5a042d5ea6f67eee2d6fd7f6a1c76ee1c138941dec20e60df52d4b2b4b",
+    "target/evidence/a1-selectable-okay.json": "e4bef5b66c89996d0341fb830585f48c74053fb0520f524e5ead8f8c2cc89247"
+  },
+  "screenshots_sha256": {
+    "target/evidence/b3-import.png": "bd64342426bf0f09f260c1b35dc1f72d0dd6c24985e357213fd64dc33e955f6a"
+  },
+  "graph": {
+    "nodes": 860,
+    "edges": 1780,
+    "scope": "AST only; QML validated with actual Qt runtime"
+  },
+  "review_fixes": [
+    "Qt cancel status said \"Enviando aprovação ao Core\"; now \"Enviando cancelamento ao Core\"."
+  ],
+  "limitations": [
+    "Payload is opaque and only staged; nothing extracted, installed or executed. Install/update/rollback/remove/quarantine lifecycle is B3.3.",
+    "Import source is chosen only through the offline CLI scripts/hub_import.py; no graphical file picker.",
+    "Crash-orphaned pending file blocks reimport; no automatic recovery/cleanup yet (by design, unsafe to guess ownership).",
+    "with_approvals rehashes every staged payload (each <=64MiB) on begin/finish/approve/startup synchronously in the Core loop.",
+    "Publisher remains unauthenticated; approval/staging grant no Base command authority.",
+    "A1 early-worker fail-closed assertion and A3 idle-CPU<1% failed once each in earlier B3.2a/B3.2b rounds; diagnostics expanded, repeats passed without relaxing limits; causes unresolved.",
+    "Physical audio, CPAL/PipeWire/AEC/hotplug/barge-in, real Wayland and relocatable packaging require implementation; no personal devices used."
+  ],
+  "source_sha256": {
+    "app/Main.qml": "8e52aa0b0fc18c2d9bb3868319f2c1a868ff7dd1fcb6f06e64eadf5f76e36617",
+    "app/bridge.py": "f89f0a42924db4728d6f3d5eb7906325a92c781d2cdf67f4edd619342edca21f",
+    "scripts/hub_import.py": "a5326eb9f3e5b2e15bfe31ac7feea0551bc9d90a27f4c6c7231b8fb6000612c5",
+    "scripts/test_bridge_protocol.py": "e4e3cc2eeb8133498b870b40474cc9abf05f0a16257f484743596bc5e6df68a7",
+    "scripts/test_ui_offscreen.py": "5d0c5e14b20d50cdf1b9ba7ef46868c7cb356482c81b3cbdefad94d6705f4291",
+    "scripts/verify_a3.py": "1d8ed586f0aee26ff8cb482f5df43e426ec2f3c6305f0c0d690df59b409efb5e",
+    "scripts/verify_b3_import.py": "a55ac22f05284535fdd6a3b728ab7a7415968d516a79dfc10a612f9c24bf2546",
+    "scripts/verify_b3_import_timeout.py": "4003852401f0e8a81afa73f91c34b19c8631aaeecb8d2cf50e2f32ce9c800559",
+    "scripts/verify_b3_import_capacity.py": "e63c08704939ce3aceca53783506bcd46af590dec1ff58c5c356f3c2d618a0da",
+    "src/core.rs": "b73d7b554c465b608cd6e8dd5a0d0428574fbabc9d91c9395527fb7c2aad4248",
+    "src/hub.rs": "f29f308916b91d8c4046b165a435dfb8cbd6e981cd64cb201c516233cda1369e",
+    "src/protocol.rs": "9252781af5cd3598159afc9f0d73a36d6247f96c766a728afe829507fe93db34",
+    "src/storage.rs": "a72a310d48480ff33c25a31346603e52c4acfe88adc889b1a36f9ea67f88b3da",
+    "src/transport.rs": "48334d26e023b218e2bd0d29819a079783e1a25d632312e9852ec006972d483f",
+    "tests/hub.rs": "aa17d3ca2ff6be13c39032a97c62735c2a0598aee335f8aae5c5100309c6c76d",
+    "tests/fixtures/hub.json": "a920169b4a1c32bb9c2b3c82ed8b361d700f53194dc6cc94cca46d91a7de0088"
+  }
+}
