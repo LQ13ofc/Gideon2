@@ -6,8 +6,10 @@ Usage: scripts/build_package.py OUT_DIR   (OUT_DIR must exist; the package dir m
 Copies (never symlinks into the repo) runtime, venvs, pinned assets, manifest
 templates, workers, app and launchers, then writes PACKAGE.json. Stdlib only.
 """
+import fnmatch
 import hashlib
 import json
+import mmap
 import os
 import shutil
 import stat
@@ -34,6 +36,9 @@ FIXTURE_ID = "wake-hey-brave__bf_emma__clean"
 EVIDENCE = {"evidence-hey.json": "a1-selectable-hey.json", "evidence-okay.json": "a1-selectable-okay.json"}
 DEV_TTS_ROOT = str(REPO / "target/a5-assets")
 PYCACHE = "__pycache__"
+PACKAGE_TARGET = REPO / "target/package-build"
+# Only CPython's sysconfig build-prefix module is exempt from the host-path scan (documented, not read at runtime).
+LEAK_ALLOWLIST = ("runtime/python/lib/python3.13/_sysconfigdata*.py",)
 
 
 def die(message):
@@ -72,6 +77,71 @@ def resolve_runtime():
 def copy_file(src, dst):
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst, follow_symlinks=True)
+
+
+SANDBOX_SRC = "/gideon-src"
+BWRAP = "/usr/bin/bwrap"
+
+
+def build_packaged_binary():
+    """Build the packaged gideon-base with host paths removed; target/release is never touched.
+
+    The repo is bound at SANDBOX_SRC inside a bwrap namespace so that env!("CARGO_MANIFEST_DIR"),
+    which rustc --remap-path-prefix does not rewrite, is also neutral. Cargo's own home and the
+    rustup home are remapped to /cargo and /rustup in debug and panic strings.
+    """
+    if not Path(BWRAP).is_file():
+        die(f"{BWRAP} required to build the packaged binary without host paths")
+    cargo_home = Path(os.environ.get("CARGO_HOME") or Path.home() / ".cargo")
+    rustup_home = Path(os.environ.get("RUSTUP_HOME") or Path.home() / ".rustup")
+    remaps = [f"--remap-path-prefix={REPO}={SANDBOX_SRC}",
+              f"--remap-path-prefix={cargo_home}=/cargo",
+              f"--remap-path-prefix={rustup_home}=/rustup"]
+    rustflags = " ".join(filter(None, [os.environ.get("RUSTFLAGS", "")] + remaps))
+    target = f"{SANDBOX_SRC}/target/package-build"
+    argv = [BWRAP, "--unshare-all", "--die-with-parent", "--clearenv",
+            "--setenv", "PATH", f"{cargo_home}/bin:/usr/bin:/bin",
+            "--setenv", "HOME", str(Path.home()),
+            "--setenv", "CARGO_HOME", str(cargo_home),
+            "--setenv", "RUSTUP_HOME", str(rustup_home),
+            "--setenv", "CARGO_TARGET_DIR", target,
+            "--setenv", "RUSTFLAGS", rustflags,
+            "--ro-bind", "/usr", "/usr", "--ro-bind", "/etc", "/etc",
+            "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib", "/lib64",
+            "--symlink", "usr/bin", "/bin", "--symlink", "usr/bin", "/sbin",
+            "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+            "--bind", str(cargo_home), str(cargo_home),
+            "--ro-bind", str(rustup_home), str(rustup_home),
+            "--bind", str(REPO), SANDBOX_SRC,
+            "--chdir", SANDBOX_SRC, "--",
+            "cargo", "build", "--release", "--offline", "--locked",
+            "--manifest-path", f"{SANDBOX_SRC}/Cargo.toml"]
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=1800)
+    if proc.returncode != 0:
+        die(f"packaged cargo build failed: {proc.stderr[-800:]}")
+    built = PACKAGE_TARGET / "release/gideon-base"
+    if not built.is_file():
+        die(f"packaged build produced no binary: {built}")
+    return built
+
+
+def scan_host_paths(pkg):
+    """Return [(rel, mark)] for every regular file (binary or text) holding a host path mark."""
+    marks = [str(REPO).encode(), str(Path.home()).encode(), b".local/share/uv"]
+    hits = []
+    for path in sorted(pkg.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        rel = path.relative_to(pkg).as_posix()
+        if any(fnmatch.fnmatch(rel, pattern) for pattern in LEAK_ALLOWLIST):
+            continue
+        if path.stat().st_size == 0:
+            continue
+        with open(path, "rb") as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as blob:
+            for mark in marks:
+                if blob.find(mark) != -1:
+                    hits.append((rel, mark.decode()))
+    return hits
 
 
 def copy_pinned(src_dir, names, dst_dir, hashes):
@@ -142,6 +212,7 @@ def main():
     gideon_base = REPO / "target/release/gideon-base"
     if not gideon_base.is_file():
         die("target/release/gideon-base missing; build it first")
+    packaged_binary = build_packaged_binary()
     pkg.mkdir()
     dropped = []
 
@@ -208,8 +279,8 @@ def main():
     for name in ("main.py", "bridge.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
         copy_file(app_src / name, pkg / "app" / name)
     shutil.copytree(app_src / "assets", pkg / "app/assets", ignore=ignore_pycache)
-    copy_file(gideon_base, pkg / "bin/gideon-base")
-    if b"--home" not in gideon_base.read_bytes():
+    copy_file(packaged_binary, pkg / "bin/gideon-base")
+    if b"--home" not in (pkg / "bin/gideon-base").read_bytes():
         print("build_package: WARNING gideon-base has no --home; gideon-core cannot start S1 yet", file=sys.stderr)
     for tool in ("gideon-verify", "gideon-configure", "gideon-core", "gideon-app"):
         copy_file(TOOLS / tool, pkg / "bin" / tool)
@@ -217,22 +288,10 @@ def main():
         if path.is_file():
             os.chmod(path, 0o755)
 
-    # leak scan: no repository or host path may survive in text payload
-    leaks = []
-    for path in pkg.rglob("*"):
-        if path.is_symlink() or not path.is_file():
-            continue
-        rel = path.relative_to(pkg).as_posix()
-        if rel.startswith(("runtime/", "venvs/")) or path.stat().st_size > 2_000_000:
-            continue
-        data = path.read_bytes()
-        if b"\0" in data:
-            continue
-        text = data.decode("utf-8", "replace")
-        if str(REPO) in text or "/home/lucas" in text:
-            leaks.append(rel)
+    # leak scan: no repository, home, cargo, rustup or uv path may survive in any payload file (binary or text)
+    leaks = scan_host_paths(pkg)
     if leaks:
-        die(f"host path leaked into text payload: {leaks}")
+        die(f"host path leaked into payload: {leaks[:20]}")
 
     # PACKAGE.json
     entries = []
@@ -266,6 +325,15 @@ def main():
         "commit": commit,
         "dirty": dirty,
         "placeholders": ["@PREFIX@", "@PROFILE@"],
+        "gideon_base_sha256": sha256(pkg / "bin/gideon-base"),
+        "release_gideon_base_sha256": sha256(gideon_base),
+        "source_equivalence": "same commit, remapped paths",
+        "gideon_base_build": {
+            "command": "cargo build --release --offline --locked",
+            "CARGO_TARGET_DIR": "target/package-build",
+            "sandbox": f"bwrap; repo bound at {SANDBOX_SRC}; CARGO_MANIFEST_DIR is {SANDBOX_SRC}",
+            "remap_path_prefix": [f"<repo>={SANDBOX_SRC}", "<CARGO_HOME>=/cargo", "<RUSTUP_HOME>=/rustup"],
+        },
         "files": entries,
     })
     total = sum(e.get("size", 0) for e in entries)
