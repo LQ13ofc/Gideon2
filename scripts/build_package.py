@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build the relocatable gideon-base-0.1.0 package (B4) into OUT_DIR.
 
-Usage: scripts/build_package.py OUT_DIR   (OUT_DIR must exist; the package dir must not)
+Usage: scripts/build_package.py OUT_DIR [--version X]   (OUT_DIR must exist; the package dir must not)
+The package dir is gideon-base-<X> (default X = 0.1.0).
 
 Copies (never symlinks into the repo) runtime, venvs, pinned assets, manifest
 templates, workers, app and launchers, then writes PACKAGE.json. Stdlib only.
@@ -9,8 +10,10 @@ templates, workers, app and launchers, then writes PACKAGE.json. Stdlib only.
 import fnmatch
 import hashlib
 import json
+import argparse
 import mmap
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -19,7 +22,6 @@ from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[1]
 VERSION = "0.1.0"
-PKG = f"gideon-base-{VERSION}"
 TOOLS = REPO / "scripts" / "package_tools"
 VENVS = ["a1", "stt", "tts", "ui"]
 VENV_BIN_KEEP = {"python", "python3", "python3.13"}
@@ -200,13 +202,24 @@ def wake_template(manifest, fixture_row):
     return out
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Build the relocatable gideon-base package (B4) into OUT_DIR.")
+    parser.add_argument("out_dir", metavar="OUT_DIR")
+    parser.add_argument("--version", default=VERSION,
+                        help="package version; the package dir is gideon-base-<version> (default: %(default)s)")
+    return parser.parse_args()
+
+
 def main():
-    if len(sys.argv) != 2:
-        die("usage: build_package.py OUT_DIR")
-    out_root = Path(sys.argv[1]).resolve()
+    args = parse_args()
+    version = args.version
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,39}", version):
+        die(f"invalid --version: {version!r}")
+    name = f"gideon-base-{version}"
+    out_root = Path(args.out_dir).resolve()
     if not out_root.is_dir():
         die(f"OUT_DIR must exist: {out_root}")
-    pkg = out_root / PKG
+    pkg = out_root / name
     if pkg.exists():
         die(f"refusing to overwrite {pkg}")
     gideon_base = REPO / "target/release/gideon-base"
@@ -282,7 +295,7 @@ def main():
     copy_file(packaged_binary, pkg / "bin/gideon-base")
     if b"--home" not in (pkg / "bin/gideon-base").read_bytes():
         print("build_package: WARNING gideon-base has no --home; gideon-core cannot start S1 yet", file=sys.stderr)
-    for tool in ("gideon-verify", "gideon-configure", "gideon-core", "gideon-app"):
+    for tool in ("gideon-verify", "gideon-configure", "gideon-core", "gideon-app", "gideon-install", "gideon-launch"):
         copy_file(TOOLS / tool, pkg / "bin" / tool)
     for path in list((pkg / "bin").iterdir()) + [pkg / "runtime/python/bin/python3.13"]:
         if path.is_file():
@@ -319,8 +332,8 @@ def main():
         commit, dirty = "unknown", True
     write_json(pkg / "PACKAGE.json", {
         "format": 1,
-        "name": PKG,
-        "version": VERSION,
+        "name": name,
+        "version": version,
         "target": "linux_x86_64",
         "commit": commit,
         "dirty": dirty,

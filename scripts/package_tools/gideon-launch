@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""gideon-launch --install-root ROOT PERFIL [core args...]: fail-closed launcher (B4.2).
+
+Takes the exclusive lock, validates the ledger and the layout (gideon-install's rules),
+verifies the current version with its gideon-verify, creates ROOT/profiles/PERFIL (0700) if
+missing, then execs current/bin/gideon-core ROOT/profiles/PERFIL [args]. The lock fd is
+close-on-exec, so it is released atomically by exec. Any inconsistency exits non-zero with a
+message on stderr and never execs. Stdlib only; reuses gideon-install from the same directory.
+"""
+import argparse
+import importlib.machinery
+import importlib.util
+import os
+import stat
+import sys
+
+sys.dont_write_bytecode = True  # never create bin/__pycache__ inside the package
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_installer():
+    path = os.path.join(HERE, "gideon-install")
+    loader = importlib.machinery.SourceFileLoader("gideon_install", path)
+    spec = importlib.util.spec_from_loader("gideon_install", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+gi = load_installer()
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(prog="gideon-launch")
+    parser.add_argument("--install-root", required=True, metavar="ROOT")
+    parser.add_argument("profile", metavar="PERFIL")
+    parser.add_argument("core_args", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    try:
+        gi.validate_profile(args.profile)
+        root = gi.guard_root(args.install_root, create=False)
+        gi.acquire(root)  # fd kept open on purpose: released by exec (close-on-exec)
+        ledger = gi.load_state(root)
+        if ledger is None:
+            raise gi.Fail("not_installed", "nothing installed; run gideon-install install first")
+        gi.verify_pkg(os.path.join(root, "versions", ledger["current"]))
+        pdir = os.path.join(root, "profiles")
+        if not os.path.lexists(pdir):
+            os.mkdir(pdir, 0o700)
+            os.chmod(pdir, 0o700)
+        elif not gi.is_real_dir(pdir):
+            raise gi.Fail("layout_invalid", "profiles must be a real directory")
+        profile = os.path.join(pdir, args.profile)
+        if not os.path.lexists(profile):
+            os.mkdir(profile, 0o700)
+            os.chmod(profile, 0o700)
+        else:
+            gi.check_profile_dir(profile)
+        core = os.path.join(root, "current", "bin", "gideon-core")
+        st = os.stat(core)
+        if not stat.S_ISREG(st.st_mode) or not os.access(core, os.X_OK):
+            raise gi.Fail("verify_failed", "current/bin/gideon-core is not an executable file", rc=4)
+    except gi.Fail as fail:
+        sys.stderr.write(f"gideon-launch: {fail.code}: {fail.message}\n")
+        return fail.rc
+    except OSError as exc:
+        sys.stderr.write(f"gideon-launch: other: {exc}\n")
+        return 6
+    sys.stdout.flush()
+    os.execv(core, [core, profile, *args.core_args])
+    return 6  # not reached
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
