@@ -1,0 +1,314 @@
+{
+  "gate": "B4_1_RELOCATABLE_PACKAGE",
+  "passed": 66,
+  "failed": 0,
+  "ignored": 0,
+  "checks": [
+    "1 build: build_package.py exits 0",
+    "1 build: PACKAGE.json commit equals git rev-parse HEAD",
+    "1 build: no repo, home or uv path in any file (binary or text) outside the allowlist",
+    "1 build: no host path in any symlink target",
+    "1 build: strings -a on packaged bin/gideon-base shows no repo, home or uv path",
+    "1 build: PACKAGE.json pins packaged and release binary sha256, source_equivalence recorded",
+    "1 build: packaged and release gideon-base give identical usage output and exit code",
+    "1 build: no symlink is absolute, escapes the prefix or dangles",
+    "1 build: no file under assets/ matches a QA corpus (.cache/gideon or QA fixture sha)",
+    "1 build: assets/fixture contains only the kept fixture",
+    "1 build: kept fixture matches its replay pin",
+    "2 relocate: moved to a new name and different temp parent",
+    "2 relocate: gideon-verify passes at the new prefix",
+    "3 hidden: sandbox has no /home (repo and ~/.local/share/uv unreachable)",
+    "3 hidden: sandbox network namespace exposes only lo",
+    "3 hidden: Core tree (6 processes) has no repo or uv path in cmdline/environ/maps/mountinfo/cwd/fds",
+    "4 native S1: configuration_status ready",
+    "4 native S1: base_pack preflight verified",
+    "4 native S1: wake replay finished",
+    "4 native S1: command_success receipt verified",
+    "4 native S1: stt_status ready",
+    "4 native S1: speech started and finished on virtual TTS",
+    "4 native: Core process executes the packaged bin/gideon-base",
+    "4 native: STATE tts artifacts have st_nlink 1 and a different inode than packaged originals",
+    "native: no residual Core or worker processes after stop",
+    "native: Core exit status after SIGTERM",
+    "5 hub: benign fixture not installed before lifecycle",
+    "5 hub: explicit manifest approval accepted",
+    "5 hub: repo hub_import.py stages payload as external client",
+    "5 hub: payload staged and not installed",
+    "5 hub: install ok",
+    "5 hub: installed with runtime disabled",
+    "5 hub: installed payload 0600 with exact bytes",
+    "hub: no residual Core or worker processes after stop",
+    "hub: Core exit status after SIGTERM",
+    "5 hub: still installed after restart, runtime disabled",
+    "5 hub: remove ok",
+    "5 hub: remove unlinks payload and empties installed",
+    "hub-restart: no residual Core or worker processes after stop",
+    "hub-restart: Core exit status after SIGTERM",
+    "6 restart: gideon-configure re-run exits 0",
+    "6 restart: STATE tts artifacts have st_nlink 1 and a different inode than packaged originals",
+    "6 restart: rendered profile file hashes identical after re-configure",
+    "6 restart: native S1 passes again: configuration_status ready",
+    "6 restart: native S1 passes again: base_pack preflight verified",
+    "6 restart: native S1 passes again: wake replay finished",
+    "6 restart: native S1 passes again: command_success receipt verified",
+    "6 restart: native S1 passes again: stt_status ready",
+    "6 restart: native S1 passes again: speech started and finished on virtual TTS",
+    "restart: no residual Core or worker processes after stop",
+    "restart: Core exit status after SIGTERM",
+    "7 tamper: gideon-verify exits non-zero after one appended byte",
+    "7 tamper: gideon-core exits non-zero and never creates core.sock",
+    "7 tamper: restoring the byte makes gideon-verify pass again",
+    "7 tamper: extra packaged-tree file makes gideon-verify fail",
+    "7 tamper: removing the extra file makes gideon-verify pass again",
+    "8 guards: relative STATE refused",
+    "8 guards: STATE with 0755 perms refused, nothing written",
+    "8 guards: STATE over the 108-byte socket limit refused, nothing written",
+    "8 guards: clean STATE configure exits 0",
+    "8 guards: configure leaves package tree unchanged",
+    "8 guards: configure leaves sentinel and HOME unchanged",
+    "8 guards: clean STATE is 0700",
+    "8 guards: gideon-core refuses relative STATE without starting",
+    "9 network: Core sandbox exposes only loopback",
+    "9 network: launchers and worker scripts contain no download or network client code"
+  ],
+  "scenarios": {
+    "1 build": "done",
+    "2 relocate": "done",
+    "3 hidden": "done",
+    "4 native": "done",
+    "5 hub": "done",
+    "6 restart": "done",
+    "7 tamper": "done",
+    "8 guards": "done",
+    "9 network": "done"
+  },
+  "isolation": "outer_bwrap",
+  "network": "unshared: outer bwrap --unshare-all, sandbox netns exposes only lo",
+  "allowlisted_host_paths": [
+    "runtime/python/lib/python3.13/_sysconfigdata__linux_x86_64-linux-gnu.py"
+  ],
+  "binary_sha256_packaged": "c979630e58618234b73e927b9006962e24e3e22234a6fe71720e37fe81c5f044",
+  "binary_sha256_release_regression": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+  "package_commit": "4b17d99de8a07ee59deb18e46f6757868c80b04a",
+  "package_dirty": false,
+  "package_entries": {
+    "entries": 28684,
+    "symlinks": 1063
+  },
+  "runtime_seconds": 106.3,
+  "scope": "offline relocatable package directory: Core (--home), app, worker scripts, bundled CPython, venvs, runtime assets only; hash-pinned; fail-closed verify; S1 via wake replay + virtual PCM/TTS; no install on host, no autostart, no Flatpak",
+  "physical_validation": "NOT_PERFORMED",
+  "code_commit": "4b17d99de8a07ee59deb18e46f6757868c80b04a",
+  "rust_tests": 67,
+  "python_tests": 20,
+  "regressions": [
+    {
+      "report": "target/evidence/a0.json",
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "666e815f0c405bf0c743b3b9e09924373a924ba49c9040f1a420a74ee9f175b0"
+    },
+    {
+      "report": "target/evidence/a1-integration.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "80e0409df3b0150c7dc59488f53afc7ede4edf79dda6e2fe35579e05c515aaf3"
+    },
+    {
+      "report": "target/evidence/a2.json",
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "40277d5f56736e3ecc95d0935db050c9f9d33f7691b978522a11f6a0842a11e1"
+    },
+    {
+      "report": "target/evidence/a3-integration.json",
+      "passed": 67,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "79ce9b22aed1e278cfa608aba41a8df42045dcbc796035be30342a0f47a1af11"
+    },
+    {
+      "report": "target/evidence/a4-integration.json",
+      "passed": 138,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "670e87713ea8645fb233795eea068ff70c7a9a4923303a90ef9305064d406ddb"
+    },
+    {
+      "report": "target/evidence/a5-integration.json",
+      "passed": 93,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "694f2abf4d0c3a50e908a15a7ff8923bbfc469f3b66095ed04de15706ddedb75"
+    },
+    {
+      "report": "target/evidence/a5-soak.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "370be72e6e9a19f98c874861cd147d5441dd8e57df5af983eb06e361f4e7ba47"
+    },
+    {
+      "report": "target/evidence/a5-shutdown.json",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "659a460de075549f5322155d588937beefa2d97003a47c007dfb16292a07d2ee"
+    },
+    {
+      "report": "target/evidence/b1-ui.json",
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "12852e2d24ac84ba8f11ad7704624631e90c80bcf50b8b9fa82f6dede233c88e"
+    },
+    {
+      "report": "target/evidence/b2-preferences.json",
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "965e74f50d03ee375f86653c56708a63b0febbfb5f65901fb0a6f58b217d5433"
+    },
+    {
+      "report": "target/evidence/b2-safe-mode.json",
+      "passed": 96,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "6b1ec7efb3dc0faf79e446fadbbd2255d2bcd6790e3939a6a68d9b7b1a39d009"
+    },
+    {
+      "report": "target/evidence/b2-pack.json",
+      "passed": 36,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "e9e2e093809533947a7ab7b86ce74327bee74d0203501b66e97bd02e413052fc"
+    },
+    {
+      "report": "target/evidence/b2-feedback.json",
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "b7d46a2058d33d49004a6342a3899b34360065c9fb6ec809c29a875d204e6187"
+    },
+    {
+      "report": "target/evidence/b3-catalog.json",
+      "passed": 69,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "b4206641ecf34bca33cfdc25b18c034186abdcd992136ba4ea7b72c43f7ca092"
+    },
+    {
+      "report": "target/evidence/b3-permissions.json",
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "a35177015fbe59dbe93c55e5088594e1c51fb799c34c26e2cb63a1c3af509e19"
+    },
+    {
+      "report": "target/evidence/design.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "a148ceef07a9a3b7e12c5528ad1f2705a987d05e661e53bb24acbc478f502262"
+    },
+    {
+      "report": "target/evidence/b3-import.json",
+      "passed": 76,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "c5f4f29f9ea65735a2f06ffe3022849c62633e0ce9214ac3c5bc641f46f37024"
+    },
+    {
+      "report": "target/evidence/b3-import-timeout.json",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "8b50d20e507366666727c3a43fd98ab13f55dcf308f6a20169ab42e64c72e4ae"
+    },
+    {
+      "report": "target/evidence/b3-import-capacity.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "378e8a886a7e0b4c549cade65cf8d7466f06bbe41737aa6b647f3149e296bced"
+    },
+    {
+      "report": "target/evidence/b3-lifecycle.json",
+      "passed": 99,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b",
+      "report_sha256": "56c99b837e5432dd11b03695d946334e49213a93545b9523a96419084d4b271c"
+    }
+  ],
+  "regression_checks_total": 1020,
+  "total_process_checks": 1086,
+  "build_checks": [
+    "fmt",
+    "check",
+    "test",
+    "clippy --all-targets -- -D warnings",
+    "release",
+    "diff --check"
+  ],
+  "profile_and_qualification_sha256": {
+    "target/a3-assets/replay-manifest.json": "878dc1cade183900a178a2abce9426e6d6d7a37381d6bd85d1bb9f48a6d61653",
+    "target/a3-assets/manifest.json": "3f12fa9c7d075c98f6215734e2b3e053670b58087b74db87d92c9749a88d6a07",
+    "target/a5-assets/manifest.json": "12e5510428df7486355dee526ca51ccb2fe89981f4bfb5d7efcec46279a88649",
+    "target/a1-competitive/manifest.json": "8abb349c5af1413146922e9daf40778e383c91234599c5116672e094e96c9c0c",
+    "target/evidence/a1-selectable-hey.json": "6faedf5a042d5ea6f67eee2d6fd7f6a1c76ee1c138941dec20e60df52d4b2b4b",
+    "target/evidence/a1-selectable-okay.json": "e4bef5b66c89996d0341fb830585f48c74053fb0520f524e5ead8f8c2cc89247"
+  },
+  "graph": {
+    "nodes": 1053,
+    "edges": 2370,
+    "scope": "AST only"
+  },
+  "review_fixes": [
+    "Packaged binary leaked build-host paths (cargo registry, repo src); now built in a bwrap with remapped paths, scan covers binaries, strings check in gate.",
+    "TTS artifacts hard-linked into STATE could alias package inodes; now independent 0600 copies (nlink 1, different inode).",
+    "Gate harness sent SIGTERM to the whole process group; now only the Core."
+  ],
+  "limitations": [
+    "Packaged binary is built separately from target/release (same commit, remapped paths): hashes differ by design; regressions run on target/release, package gate runs the packaged binary.",
+    "Command worker still uses host /usr/bin/python3 (commands.rs); package depends on host /usr for that step.",
+    "Package runs wake in replay mode only; no live wake/mic path exists yet. Physical audio, CPAL/PipeWire/AEC/hotplug/barge-in, real Wayland: implementation pending.",
+    "~1.8 GiB package; tts venv dominates. runtime/python _sysconfigdata keeps uv build paths (allowlisted, inert).",
+    "App launcher gideon-app not exercised (no display session used).",
+    "No signing, update channel, autostart, multi-user profiles or Flatpak/portal decision yet (B4.2+).",
+    "Publisher unauthenticated; no personal devices used."
+  ],
+  "source_sha256": {
+    "src/main.rs": "a71d7c49d103f1face06b6183a7ad9797614d2371da84a108f9067924bbc7ca8",
+    "src/transport.rs": "c4b67c00b771a2a77b3ba10b99bd3e2a26d083fe65f8b2d63435862fafaed3e0",
+    "tests/home.rs": "e527e91e28ff177051b33152c7afec3579f2f6ba44bf8e2e1e8a6ef433f0d3cb",
+    "scripts/build_package.py": "4020a189fe2b50f01f9cc473058328455a38c049b081519bd9a49c100fb49153",
+    "scripts/verify_b4_package.py": "c19d308ac78c35d45fefdcd5f1daf5bd78f04b0b05b57c0dcaa82dc5d955cfc5",
+    "scripts/package_tools/gideon-configure": "57835735df3e3a16a0e0c3596ed53b2c84fa31f782f64f3d66609c7816399c9f",
+    "scripts/package_tools/gideon-core": "776143ac47d81d0342d55fa755f3334179e175cfec916c509920861f16d528e3",
+    "scripts/package_tools/gideon-verify": "84ea0df6a7c77bd10b79e92950738461ae4a5bf3223052d7ae6b43a68576fd09",
+    "scripts/package_tools/gideon-app": "0015b376160497029d72fac9b10b36ddc7c08af8db996d604ddfdc338c38056e"
+  }
+}
