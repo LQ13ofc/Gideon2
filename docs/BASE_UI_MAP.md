@@ -1,7 +1,7 @@
 # Mapa da Base para S2
 
 Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b feedback/ganho B2.3 e descoberta/aprovação Hub B3.1/B3.2a/B3.2b/B3.3.
-Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json, docs/evidence/b3-catalog.json, docs/evidence/b3-permissions.json e docs/evidence/b3-import.json e docs/evidence/b3-lifecycle.json e docs/evidence/b4-package.json.
+Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json, docs/evidence/b3-catalog.json, docs/evidence/b3-permissions.json e docs/evidence/b3-import.json e docs/evidence/b3-lifecycle.json e docs/evidence/b4-package.json e docs/evidence/b4-update.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
 
@@ -203,3 +203,10 @@ Pacote é diretório autocontido (docs/B4.md); a UI continua cliente fino do Cor
 por --root. gideon-app usa o runtime e app/ do pacote; não foi exercido sem
 display. Nenhum controle de UI muda: instalar/atualizar pacote, autostart e
 Flatpak/portal ainda não existem.
+
+## Instalação versionada B4.2
+
+Core e UI não mudam: a UI continua cliente fino por --root; perfis são STATE
+separados escolhidos por gideon-launch. Update/rollback do pacote são feitos fora
+da UI (gideon-install) e recusados com Core ativo; a UI não oferece update de
+pacote ainda. Nada instalado no host, sem autostart.
