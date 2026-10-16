@@ -833,16 +833,25 @@ def scenario_recover_and_update_refused():
           == {"text": "RECOVERED", "count": 1}, result)
     pids = plugin_pids()
     check("recover: plugin process running while Core active", len(pids) >= 2, pids)
-    # Update must be refused while this plugin-running Core is active. Only ONE package exists: use a
-    # hardlinked copy (no extra space) of the installed tree as the update source; it is never consumed.
+    # Update must be refused while this plugin-running Core is active. Only ONE package exists, so the update
+    # source is a REAL copy of the installed tree (hardlink aliases are rejected by gideon-verify). It must
+    # stay intact through every refusal.
     update_src = S["work"] / "upd-src"
-    proc = run(["cp", "-al", str(installed_dir()), str(update_src)], timeout=300)
-    check("update: hardlinked copy of installed tree made (no extra data)", proc.returncode == 0,
-          proc.stderr.decode()[-300:])
+    need = sum(f.stat().st_size for f in installed_dir().rglob("*") if f.is_file() and not f.is_symlink())
+    free = shutil.disk_usage(S["work"]).free
+    check("update: enough free space for a real copy of the installed tree", free > need + 512 * 1024 ** 2,
+          {"free": free, "need": need})
+    shutil.copytree(installed_dir(), update_src, symlinks=True)
+    check("update: real copy of installed tree made", update_src.is_dir())
+    ledger_before = lst()
     rc, obj, err = inst("update", str(update_src))
     check("update: refused with exit 3 profile_active while plugin-running Core is active",
           rc == 3 and obj and obj.get("error") == "profile_active" and obj.get("profile") == PROFILE, err or obj)
     check("update: refused source not consumed", update_src.is_dir())
+    rc_v = run([str(update_src / "runtime/python/bin/python3.13"), "-I", "-B", str(update_src / "bin/gideon-verify")],
+               timeout=900)
+    check("update: refused source still verifies after profile_active refusal", rc_v.returncode == 0,
+          rc_v.stderr.decode()[-400:])
     check("update: plugin still running after refused update",
           plugin_item(snapshot(PROFILE), ECHO)["state"] == "running", plugin_item(snapshot(PROFILE), ECHO))
     core_stop(PROFILE)
@@ -852,7 +861,14 @@ def scenario_recover_and_update_refused():
     st = lst()
     check("update: ledger still current only 0.1.0 with no orphans", st["current"] == S["ident"]
           and st["previous"] is None and st["orphans"] == [], st)
+    check("update: ledger, links and versions unchanged by refused updates", st == ledger_before,
+          {"before": ledger_before, "after": st})
+    rc_v = run([str(update_src / "runtime/python/bin/python3.13"), "-I", "-B", str(update_src / "bin/gideon-verify")],
+               timeout=900)
+    check("update: refused source still verifies after same-id refusal", rc_v.returncode == 0,
+          rc_v.stderr.decode()[-400:])
     shutil.rmtree(update_src, ignore_errors=True)
+    check("update: source copy removed", not update_src.exists())
 
 
 def scenario_final():
