@@ -11,6 +11,7 @@ pub mod protocol;
 pub mod secrets;
 pub mod storage;
 pub mod stt;
+pub mod tools;
 pub mod transport;
 pub mod tts;
 pub mod wake;

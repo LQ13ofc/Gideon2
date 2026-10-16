@@ -117,6 +117,18 @@ pub enum Operation {
         custom_url: Option<String>,
         cloud_consent: bool,
     },
+    ToolDecide {
+        proposal_id: String,
+        decision: ToolDecision,
+    },
+}
+
+/// User decision on a tool proposal. Only a client request can carry it; plugins cannot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolDecision {
+    Authorize,
+    Deny,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -160,6 +172,7 @@ pub struct Response {
     pub configuration_recovery_available: bool,
     pub preferences: crate::storage::Config,
     pub command: Option<crate::commands::Outcome>,
+    pub tool_proposals: Vec<crate::tools::View>,
     pub text_input_available: bool,
     pub speech_samples: usize,
     pub speech_status: &'static str,
@@ -346,6 +359,12 @@ enum WireRequest {
         #[serde(default)]
         custom_url: Option<String>,
         cloud_consent: bool,
+    },
+    ToolDecide {
+        version: u16,
+        request_id: String,
+        proposal_id: String,
+        decision: ToolDecision,
     },
 }
 impl<'de> Deserialize<'de> for Request {
@@ -634,6 +653,19 @@ impl<'de> Deserialize<'de> for Request {
                     model,
                     custom_url,
                     cloud_consent,
+                },
+            ),
+            WireRequest::ToolDecide {
+                version,
+                request_id,
+                proposal_id,
+                decision,
+            } => (
+                version,
+                request_id,
+                Operation::ToolDecide {
+                    proposal_id,
+                    decision,
                 },
             ),
         };

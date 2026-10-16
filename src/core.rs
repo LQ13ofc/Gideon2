@@ -55,6 +55,9 @@ pub struct Core {
     speech_samples: usize,
     plugins: crate::plugins::PluginView,
     llm: crate::llmcfg::LlmState,
+    tools: crate::tools::Ledger,
+    /// Set by an accepted capability_invoke; cleared only when its matching result lands.
+    tool_source: bool,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -93,10 +96,175 @@ impl Core {
             speech_samples: 0,
             plugins: Default::default(),
             llm: Default::default(),
+            tools: Default::default(),
+            tool_source: false,
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
         self.next_session = seed;
+        self.tools.set_epoch(seed);
+    }
+    /// Enables the tool executor (same sandbox as Base commands) and sets the proposal TTL.
+    pub fn configure_tools(&mut self, ttl: Duration, executor: bool) {
+        self.tools.configure(ttl, executor);
+    }
+    pub fn tool_deadline(&self) -> Option<Instant> {
+        self.tools.deadline()
+    }
+    pub fn expire_tools(&mut self, now: Instant) {
+        self.tools.expire(now);
+    }
+    pub fn take_tool_job(&mut self) -> Option<crate::commands::Job> {
+        self.tools.start()
+    }
+    /// Executor result for the single running tool job; a stale or mismatched job is ignored.
+    pub fn tool_reply(&mut self, job: Job, receipt: Option<Receipt>, now: Instant) {
+        self.expire_tools(now);
+        let Some(id) = self.tools.finish(&job) else {
+            return;
+        };
+        match receipt.filter(|r| commands::verify(&job, r)) {
+            Some(receipt) => {
+                self.tools.set(
+                    &id,
+                    crate::tools::State::Executed,
+                    None,
+                    Some(receipt.result),
+                );
+                self.emit(String::new(), None, "tool_executed");
+            }
+            None => self.tool_failed(String::new(), &id, "executor_failed"),
+        }
+    }
+    fn tool_denied(&mut self, request_id: String, id: &str, code: &'static str) {
+        self.tools
+            .set(id, crate::tools::State::Denied, Some(code), None);
+        self.emit(request_id, None, "tool_denied");
+    }
+    fn tool_failed(&mut self, request_id: String, id: &str, code: &'static str) {
+        self.tools
+            .set(id, crate::tools::State::Failed, Some(code), None);
+        self.emit(request_id, None, "tool_failed");
+    }
+    /// Converts one accepted plugin result into proposals. Malformed or extra items are bounded.
+    fn propose_tool(
+        &mut self,
+        plugin_id: &str,
+        call_id: String,
+        tool: String,
+        args: serde_json::Value,
+        shape_ok: bool,
+        now: Instant,
+    ) {
+        let id = self
+            .tools
+            .propose(plugin_id, call_id, tool.clone(), args.clone(), now);
+        self.emit(String::new(), None, "tool_proposed");
+        let verdict = if shape_ok {
+            crate::tools::command(&tool, &args)
+        } else {
+            Err("invalid_args")
+        };
+        let verdict = match verdict {
+            Ok(_) if !self.tools.enabled() => Err("executor_unavailable"),
+            other => other,
+        };
+        match verdict {
+            Err(code) => self.tool_denied(String::new(), &id, code),
+            Ok((command, risk)) => {
+                // Read-only runs at once unless a voice session is active; state changes wait.
+                if risk == crate::tools::Risk::ReadOnly && self.session.is_none() {
+                    if self.tools.queue(&id, command) {
+                        self.emit(String::new(), None, "tool_authorized");
+                    } else {
+                        self.tool_failed(String::new(), &id, "busy");
+                    }
+                }
+            }
+        }
+    }
+    fn ingest_result(&mut self, plugin_id: &str, now: Instant) {
+        if !self.tool_source {
+            return;
+        }
+        // The plugin view clears `last` at invoke and sets it only for the matching result.
+        let Some(result) = self.plugins.last().cloned() else {
+            return;
+        };
+        self.tool_source = false;
+        if result.plugin_id != plugin_id || !result.ok {
+            return;
+        }
+        let Some(calls) = result
+            .output
+            .as_ref()
+            .and_then(|o| o.get("tool_calls"))
+            .and_then(|c| c.as_array())
+        else {
+            return;
+        };
+        for item in calls.iter().take(crate::tools::MAX_CALLS) {
+            let (call_id, tool, args, shape_ok) = crate::tools::read_call(item);
+            self.propose_tool(plugin_id, call_id, tool, args, shape_ok, now);
+        }
+    }
+    /// Revoked, disabled or failed plugins lose their pending proposals.
+    fn sweep_tools(&mut self) {
+        if !self.tools.has_pending() {
+            return;
+        }
+        let running: std::collections::HashSet<String> = self
+            .plugins
+            .snapshot(self.hub.as_ref())
+            .items
+            .iter()
+            .filter(|i| i.enabled && i.state == "running")
+            .map(|i| i.plugin_id.clone())
+            .collect();
+        self.tools.cancel_unavailable(&running);
+    }
+    fn tool_decide(
+        &mut self,
+        request_id: String,
+        proposal_id: &str,
+        decision: ToolDecision,
+    ) -> &'static str {
+        use crate::tools::State;
+        let Some(view) = self.tools.view(proposal_id).cloned() else {
+            return "unknown_proposal";
+        };
+        match view.state {
+            State::Pending => {}
+            State::Expired => return "proposal_expired",
+            State::Cancelled => return "unknown_proposal",
+            State::Denied if decision == ToolDecision::Authorize => return "proposal_denied",
+            _ => return "already_decided",
+        }
+        match decision {
+            ToolDecision::Deny => {
+                self.tools
+                    .set(proposal_id, State::Denied, Some("user_denied"), None);
+                self.emit(request_id, None, "tool_denied");
+                "ok"
+            }
+            ToolDecision::Authorize => {
+                if self.tools.busy() {
+                    return "busy";
+                }
+                // Arguments are validated again at authorize time, not only at proposal time.
+                match crate::tools::command(&view.tool, &view.args) {
+                    Ok((command, _)) => {
+                        if self.tools.queue(proposal_id, command) {
+                            self.emit(request_id, None, "tool_authorized");
+                        } else {
+                            return "busy";
+                        }
+                    }
+                    Err(code) => self.tool_denied(request_id, proposal_id, code),
+                }
+                "ok"
+            }
+        }
     }
     fn start_session(&mut self, request_id: String, now: Instant) {
         self.completed_audio = None;
@@ -476,6 +644,7 @@ impl Core {
             .map(|s| s.audio_deadline.map_or(s.deadline, |a| a.min(s.deadline)))
     }
     pub fn expire(&mut self, now: Instant) {
+        self.expire_tools(now);
         if self.deadline().is_some_and(|d| now >= d) {
             let kind = if self
                 .session
@@ -603,6 +772,7 @@ impl Core {
             session_id: self.session.as_ref().map(|s| s.id),
             sequence: self.sequence,
             events: self.events.iter().cloned().collect(),
+            tool_proposals: self.tools.snapshot(),
         }
     }
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
@@ -637,7 +807,15 @@ impl Core {
     }
     /// Host facts: the Core never blocks on plugin processes.
     pub fn plugin_event(&mut self, ev: crate::plugins::Ev, now: Instant) {
+        let result_of = match &ev {
+            crate::plugins::Ev::Result { plugin_id, .. } => Some(plugin_id.clone()),
+            _ => None,
+        };
         self.plugins.event(ev, now);
+        if let Some(plugin_id) = result_of {
+            self.ingest_result(&plugin_id, now);
+        }
+        self.sweep_tools();
         self.flush_plugin_events("");
     }
     /// Loads the C1 ledgers (LLM config and vault presence); `allow_loopback` is test-only.
@@ -699,6 +877,7 @@ impl Core {
             }
             self.refresh_plugins(storage);
         }
+        self.sweep_tools();
         if req.version != VERSION {
             return self.response(req.request_id, "version_mismatch");
         }
@@ -813,6 +992,9 @@ impl Core {
                     deadline_ms,
                     &self.llm,
                 );
+                if result.is_ok() {
+                    self.tool_source = true;
+                }
                 self.plugin_result(&req.request_id, result)
             }
             Operation::CapabilityCancel { capability } => {
@@ -1207,8 +1389,14 @@ impl Core {
                     "stale_session"
                 }
             }
+            Operation::ToolDecide { .. } if self.session.is_some() => "busy",
+            Operation::ToolDecide {
+                proposal_id,
+                decision,
+            } => self.tool_decide(req.request_id.clone(), &proposal_id, decision),
             Operation::Snapshot => unreachable!(),
         };
+        self.sweep_tools();
         self.response(req.request_id, code)
     }
 }

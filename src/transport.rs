@@ -500,7 +500,22 @@ pub async fn serve(
     if commands_sandbox {
         core.configure_commands(command_wake_text);
     }
+    // Test/dev only: shortens the 120 s proposal TTL (100..=120000 ms). Unset means production.
+    let tool_ttl = match std::env::var("GIDEON_TOOL_PROPOSAL_TTL_MS") {
+        Ok(raw) => Duration::from_millis(
+            raw.parse::<u64>()
+                .ok()
+                .filter(|ms| (100..=120_000).contains(ms))
+                .ok_or_else(|| io::Error::other("invalid tool proposal ttl"))?,
+        ),
+        Err(_) => crate::tools::DEFAULT_TTL,
+    };
+    core.configure_tools(tool_ttl, commands_sandbox);
     let mut command_task: Option<(
+        crate::commands::Job,
+        tokio::task::JoinHandle<io::Result<crate::commands::Receipt>>,
+    )> = None;
+    let mut tool_task: Option<(
         crate::commands::Job,
         tokio::task::JoinHandle<io::Result<crate::commands::Receipt>>,
     )> = None;
@@ -536,6 +551,7 @@ pub async fn serve(
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
         let deadline = core.deadline();
+        let tool_deadline = core.tool_deadline();
         let import_deadline = crate::hub::import_deadline(&storage);
         tokio::select! {
             _ = shutdown.recv() => break,
@@ -547,6 +563,15 @@ pub async fn serve(
             result = async { (&mut command_task.as_mut().expect("active task").1).await }, if command_task.is_some() => {
                 let (job, _) = command_task.take().expect("active task");
                 core.command_reply(job,result.ok().and_then(Result::ok),std::time::Instant::now());
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
+            _ = async { match tool_deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => {
+                core.expire_tools(std::time::Instant::now());
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
+            result = async { (&mut tool_task.as_mut().expect("active tool task").1).await }, if tool_task.is_some() => {
+                let (job, _) = tool_task.take().expect("active tool task");
+                core.tool_reply(job, result.ok().and_then(Result::ok), std::time::Instant::now());
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             result = async { (&mut speech_task.as_mut().expect("active speech task").1).await }, if speech_task.is_some() => {
@@ -631,6 +656,10 @@ pub async fn serve(
             let pending = job.clone();
             command_task = Some((job, tokio::spawn(crate::commands::execute(pending))));
         }
+        if let Some(job) = core.take_tool_job() {
+            let pending = job.clone();
+            tool_task = Some((job, tokio::spawn(crate::commands::execute(pending))));
+        }
         if speech_task
             .as_ref()
             .is_some_and(|(id, _)| !core.speech_is_active(*id))
@@ -669,6 +698,10 @@ pub async fn serve(
         let _ = task.await;
     }
     if let Some((_, task)) = command_task.take() {
+        task.abort();
+        let _ = task.await;
+    }
+    if let Some((_, task)) = tool_task.take() {
         task.abort();
         let _ = task.await;
     }
