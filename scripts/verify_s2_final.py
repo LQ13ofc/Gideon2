@@ -12,6 +12,7 @@ gideon-install under a short ROOT, creates profile `main` and runs:
   E) identity: commit, PACKAGE.json hashes, binary hashes, ledger revision, gideon-verify of retained versions.
 Writes target/evidence/s2-final.json. Exit 0 only when every check passes.
 """
+import errno
 import hashlib
 import json
 import os
@@ -41,8 +42,19 @@ BENIGN_BYTES = b"benign fixture\n"
 MIN_FREE = 6 * 1024 ** 3
 CORE_START_TIMEOUT = 90
 UI_TIMEOUT = 420
+S2_UI_REQUIRED = {
+    "s1-A": ["driver s1_observe passes every assertion (rc 0)", "actual Core connection", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples", "UI process tree has no repo or uv path"],
+    "configure": ["driver configure passes every assertion (rc 0)", "configuration ready before changes", "object settingsButton present", "object preferencesDialog present", "object visualPreference present", "object volumePreference present", "object saveFeedbackButton present", "Qt feedback save acknowledged by Core", "Core persisted volume 50 and visual off", "object hubButton present", "object hubDialog present", "object hubReviewDialog present", "object publisherAcknowledgement present", "object approveHubButton present", "review never defaults to publisher acknowledgement", "explicit acknowledgement enables approval", "Qt approval persisted by Core", "acknowledged approval disables duplicate submit", "approval is not installation nor publisher identity", "staged payload is not installed", "object hubButton present", "object hubDialog present", "fixture installed with runtime disabled", "status label shows installed and disabled", "install control unavailable once installed", "object settingsButton present", "object preferencesDialog present", "object wakeChoice present", "object selectWakeButton present", "explicit phrase text presented", "POC phrase cannot be selected", "wake hey_gideon persisted by Core", "selection requires real restart", "UI process tree has no repo or uv path"],
+    "persisted-B": ["driver observe_persisted passes every assertion (rc 0)", "volume 50 persisted and shown", "visual feedback off persisted", "wake hey_gideon persisted and active", "installed plugin persisted, runtime disabled", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples", "UI process tree has no repo or uv path"],
+    "persisted-C": ["driver observe_persisted passes every assertion (rc 0)", "volume 50 persisted and shown", "visual feedback off persisted", "wake hey_gideon persisted and active", "installed plugin persisted, runtime disabled", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples", "UI process tree has no repo or uv path"],
+    "persisted-D": ["driver observe_persisted passes every assertion (rc 0)", "volume 50 persisted and shown", "visual feedback off persisted", "wake hey_gideon persisted and active", "installed plugin persisted, runtime disabled", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples", "UI process tree has no repo or uv path"],
+    "remove-D": ["driver remove_plugin passes every assertion (rc 0)", "object hubButton present", "object hubDialog present", "object removeConfirm present", "removal waits for confirmation", "Core snapshot installed list empty", "hub result shows Plugin removido", "UI process tree has no repo or uv path"],
+    "final-E": ["driver observe_persisted passes every assertion (rc 0)", "volume 50 persisted and shown", "visual feedback off persisted", "wake hey_gideon persisted and active", "plugin absent after removal", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples", "UI process tree has no repo or uv path"],
+}
 
 CHECKS, FAILS, ROWS = [], [], []
+UNREADABLE = []  # /proc entries of live processes that could not be read (a vanished process is not an entry here)
+IGNORED = []  # nothing is skipped in this gate; kept so "ignored" is derived, never a literal
 RESULT = {"steps": None, "isolation": {}, "binary_sha256": {}, "identity": {}, "build": {}, "notes": []}
 S = {"core": None, "uis": {}}
 
@@ -54,6 +66,12 @@ def check(name, ok, detail=""):
         text = detail if isinstance(detail, str) else json.dumps(detail, default=str, ensure_ascii=False)
         FAILS.append({"name": name, "detail": text[:3000]})
         print(f"FAIL {name}: {text[:800]}", file=sys.stderr)
+
+
+def note_unreadable(pid, entry, exc):
+    code = getattr(exc, "errno", None)
+    if code not in (errno.ENOENT, errno.ESRCH):
+        UNREADABLE.append({"pid": pid, "entry": entry, "errno": code, "error": str(exc)})
 
 
 def scenario(label, fn):
@@ -227,7 +245,11 @@ def tree_pids(root_pid):
             continue
         try:
             fields = Path(f"/proc/{entry}/stat").read_text().rsplit(")", 1)[1].split()
-        except (OSError, IndexError):
+        except OSError as exc:
+            note_unreadable(int(entry), "stat", exc)
+            continue
+        except IndexError as exc:
+            note_unreadable(int(entry), "stat", exc)
             continue
         kids.setdefault(int(fields[1]), []).append(int(entry))
     seen, stack = [root_pid], [root_pid]
@@ -246,7 +268,8 @@ def sandboxed_pids(wrapper_pid):
         try:
             if Path(f"/proc/{pid}/cmdline").read_bytes().startswith(b"/usr/bin/bwrap"):
                 continue
-        except OSError:
+        except OSError as exc:
+            note_unreadable(pid, "cmdline", exc)
             continue
         out.append(pid)
     return out
@@ -259,21 +282,23 @@ def scan_pids(pids):
         for name in ("cmdline", "environ", "maps", "mountinfo"):
             try:
                 blobs.append(Path(f"/proc/{pid}/{name}").read_bytes())
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, name, exc)
         for link in ("cwd", "root"):
             try:
                 blobs.append(os.readlink(f"/proc/{pid}/{link}").encode())
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, link, exc)
         try:
-            for fd in os.listdir(f"/proc/{pid}/fd"):
-                try:
-                    blobs.append(os.readlink(f"/proc/{pid}/fd/{fd}").encode())
-                except OSError:
-                    pass
-        except OSError:
-            pass
+            fds = os.listdir(f"/proc/{pid}/fd")
+        except OSError as exc:
+            note_unreadable(pid, "fd", exc)
+            fds = []
+        for fd in fds:
+            try:
+                blobs.append(os.readlink(f"/proc/{pid}/fd/{fd}").encode())
+            except OSError as exc:
+                note_unreadable(pid, f"fd{fd}", exc)
         for mark in (REPO_PATH, UV_MARK):
             if any(mark in blob for blob in blobs):
                 hits.append({"pid": pid, "mark": mark.decode()})
@@ -304,9 +329,11 @@ def core_start(label, core_args=()):
         if time.monotonic() > deadline:
             raise TimeoutError(f"{label} socket not ready: {tail(S['work'] / f'{label}.log')}")
         time.sleep(0.05)
+    mark = len(UNREADABLE)
     scanned = tree_pids(proc.pid)
     hits = scan_pids(scanned)
     check(f"{label}: Core process tree ({len(scanned)} processes) has no repo or uv path", not hits, hits[:10])
+    check(f"{label}: every /proc entry of the Core process tree readable", len(UNREADABLE) == mark, UNREADABLE[mark:][:10])
     return proc
 
 
@@ -414,6 +441,7 @@ def ui_popen(step, label, extra=()):
 def ui_finish(proc, label, timeout=UI_TIMEOUT):
     """Waits for a UI driver; returns (rc, parsed last JSON line, isolation scan of its processes)."""
     scan = {"processes_max": 0, "hits": []}
+    mark = len(UNREADABLE)
     deadline = time.monotonic() + timeout
     while True:
         kids = sandboxed_pids(proc.pid)
@@ -433,6 +461,7 @@ def ui_finish(proc, label, timeout=UI_TIMEOUT):
             raise TimeoutError(f"UI {label} did not finish in {timeout}s: {tail(S['work'] / f'ui-{label}.err')}")
         time.sleep(0.2)
     S["uis"].pop(label, None)
+    scan["unreadable"] = UNREADABLE[mark:]
     text = (S["work"] / f"ui-{label}.out").read_text(encoding="utf-8", errors="replace").strip()
     try:
         obj = json.loads(text.splitlines()[-1]) if text else None
@@ -452,10 +481,17 @@ def ui_record(label, step, rc, obj, scan, started):
     ok = rc == 0 and bool(obj) and obj.get("failed") == 0 and obj.get("passed", 0) > 0
     check(f"ui {label}: driver {step} passes every assertion (rc {rc})", ok,
           {"rc": rc, "failure": (obj or {}).get("failure"), "stderr": tail(S["work"] / f"ui-{label}.err")})
-    if obj:
-        for name in obj.get("checks", []):
-            CHECKS.append(f"ui {label}: {name}")
+    names = (obj or {}).get("checks") or []
+    required = S2_UI_REQUIRED.get(label) or []
+    missing = sorted(set(required) - set(names))
+    accepted = bool(required) and bool(names) and (obj or {}).get("passed") == len(names) and not missing
+    check(f"ui {label}: self-report accepted (passed equals listed, every required check present)", accepted,
+          {"missing": missing, "listed": len(names), "passed": (obj or {}).get("passed")})
+    if accepted:
+        CHECKS.extend(f"ui {label}: {name}" for name in names)
     check(f"ui {label}: UI process tree has no repo or uv path", scan["processes_max"] >= 1 and not scan["hits"], scan)
+    check(f"ui {label}: every /proc entry of the UI process tree readable", not scan.get("unreadable"),
+          (scan.get("unreadable") or [])[:10])
     ROWS.append({"row": f"ui {label}", "step": step, "rc": rc, "passed": (obj or {}).get("passed"),
                  "failed": (obj or {}).get("failed"), "state_trace": (obj or {}).get("state_trace"),
                  "observed": (obj or {}).get("observed"), "scan": scan,
@@ -736,7 +772,7 @@ def main():
         "gate": GATE,
         "passed": len(CHECKS),
         "failed": len(FAILS),
-        "ignored": 0,
+        "ignored": len(IGNORED),
         "checks": CHECKS,
         "failures": FAILS,
         "steps": ROWS,

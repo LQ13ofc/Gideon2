@@ -10,6 +10,8 @@ is nested inside it. Clients (scripts/hub_import.py and raw IPC) run outside the
 Writes target/evidence/c0-package.json. Exit 0 only when every check passes.
 """
 import hashlib
+import errno
+import importlib.util
 import json
 import os
 import shutil
@@ -39,6 +41,48 @@ ECHO, EVIL = "dummy_echo", "dummy_evil"
 ECHO_CAP, EVIL_CAP = "dummy_echo.echo", "dummy_evil.probe"
 PROBES = ["network", "read_home", "read_repo", "write_root", "env", "mem"]
 PLUGIN_MARK = b"/plugin/main.py"
+CANARY = "GIDEON_CANARY"  # set in the outer sandbox environment of every Core; plugins must not see it
+UNREADABLE, IGNORED = [], []
+
+
+def note_unreadable(pid, entry, exc):
+    """An unreadable /proc entry fails the gate; an entry of a process that already exited does not."""
+    code = getattr(exc, "errno", None)
+    if code not in (errno.ENOENT, errno.ESRCH):
+        UNREADABLE.append({"pid": pid, "entry": entry, "errno": code, "error": str(exc)})
+
+
+def evil_input(probe):
+    data = {"probe": probe}
+    if probe == "read_repo":
+        data["path"] = str(REPO / "Cargo.toml")
+    if probe == "env":
+        data["names"] = [CANARY]
+    return data
+
+
+def load_evil():
+    spec = importlib.util.spec_from_file_location("dummy_evil_proof", EVIL_FIXTURE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def unsandboxed_proof(port):
+    """Same fixture functions, run in-process with no sandbox: each target must be reachable."""
+    evil = load_evil()
+    out = {"network": evil.probe_network({"listener": ["127.0.0.1", port]})["result"],
+           "read_repo": evil.probe_read_repo({"path": str(REPO / "Cargo.toml")})["result"]}
+    previous = os.environ.get(CANARY)
+    os.environ[CANARY] = "1"
+    try:
+        out["env"] = evil.probe_env({"names": [CANARY]})["result"]
+    finally:
+        if previous is None:
+            os.environ.pop(CANARY, None)
+        else:
+            os.environ[CANARY] = previous
+    return out
 
 CHECKS, FAILS = [], []
 RESULT = {"scenarios": {}, "isolation": {}, "identity": {}, "notes": [], "probe_results": {}}
@@ -113,7 +157,7 @@ def installed_dir():
     return S["root"] / "versions" / S["ident"]
 
 
-def bwrap_argv(argv):
+def bwrap_argv(argv, setenv=()):
     """Outer sandbox: only ROOT (rw), /usr and the loader cache; no repo, no uv, no network (--unshare-all)."""
     rootp = str(S["root"])
     args = ["/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--clearenv",
@@ -124,6 +168,8 @@ def bwrap_argv(argv):
             "--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache",
             "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
             "--bind", rootp, rootp]
+    for name, value in setenv:
+        args += ["--setenv", name, value]
     return args + ["--chdir", "/", "--", *argv]
 
 
@@ -196,14 +242,18 @@ def python_pids():
 def ppid_of(pid):
     try:
         return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
-    except (OSError, IndexError, ValueError):
-        return None
+    except OSError as exc:
+        note_unreadable(pid, "stat", exc)
+    except (IndexError, ValueError) as exc:
+        note_unreadable(pid, "stat", exc)
+    return None
 
 
 def cmdline_of(pid):
     try:
         return Path(f"/proc/{pid}/cmdline").read_bytes()
-    except OSError:
+    except OSError as exc:
+        note_unreadable(pid, "cmdline", exc)
         return b""
 
 
@@ -232,21 +282,23 @@ def scan_pids(pids):
         for name in ("cmdline", "environ", "maps", "mountinfo"):
             try:
                 blobs.append((name, Path(f"/proc/{pid}/{name}").read_bytes()))
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, name, exc)
         for link in ("cwd", "root", "exe"):
             try:
                 blobs.append((link, os.readlink(f"/proc/{pid}/{link}").encode()))
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, link, exc)
         try:
-            for fd in os.listdir(f"/proc/{pid}/fd"):
-                try:
-                    blobs.append((f"fd{fd}", os.readlink(f"/proc/{pid}/fd/{fd}").encode()))
-                except OSError:
-                    pass
-        except OSError:
-            pass
+            fds = os.listdir(f"/proc/{pid}/fd")
+        except OSError as exc:
+            note_unreadable(pid, "fd", exc)
+            fds = []
+        for fd in fds:
+            try:
+                blobs.append((f"fd{fd}", os.readlink(f"/proc/{pid}/fd/{fd}").encode()))
+            except OSError as exc:
+                note_unreadable(pid, f"fd{fd}", exc)
         for mark in (REPO_PATH, UV_MARK, REAL_HOME_MARK):
             for source, blob in blobs:
                 if mark in blob:
@@ -271,7 +323,7 @@ def core_start(profile, label, core_args=()):
         raise RuntimeError(f"{profile} Core already running")
     if S.get("isolation_ok") is not True:
         raise RuntimeError("outer bwrap isolation not available; refusing to run a Core unisolated")
-    argv = bwrap_argv(launcher_argv(profile, core_args))
+    argv = bwrap_argv(launcher_argv(profile, core_args), setenv=((CANARY, "1"),))
     log = S["work"] / f"{label}.log"
     with open(log, "wb") as handle:
         proc = subprocess.Popen(argv, env=host_env(), cwd="/", stdin=subprocess.DEVNULL,
@@ -624,7 +676,7 @@ def scenario_core1():
     wait_item(PROFILE, EVIL, lambda i: i["state"] == "running" and i["enabled"], 30, "evil running")
     repo_markers = (str(REPO), "Documentos", "Gideon/base", "/home/")
     for probe in PROBES:
-        response, prior = invoke(PROFILE, EVIL_CAP, {"probe": probe}, deadline_ms=9000)
+        response, prior = invoke(PROFILE, EVIL_CAP, evil_input(probe), deadline_ms=9000)
         check(f"evil {probe}: invoke accepted", response.get("code") == "ok", response)
         result = wait_result(PROFILE, EVIL_CAP, prior, timeout=25)
         output = result.get("output") or {}
@@ -635,9 +687,27 @@ def scenario_core1():
         text = json.dumps(result, ensure_ascii=False)
         check(f"evil {probe}: plugin answer carries no repo or home path",
               not any(marker in text for marker in repo_markers), text[:400])
+    # Loopback listener owned by the gate (host netns): the sandboxed plugin must not reach it.
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    port = listener.getsockname()[1]
+    response, prior = invoke(PROFILE, EVIL_CAP, {"probe": "network", "listener": ["127.0.0.1", port]}, deadline_ms=9000)
+    result = wait_result(PROFILE, EVIL_CAP, prior, timeout=25)
+    check("evil network to gate loopback listener denied inside packaged sandbox",
+          result.get("ok") is True and (result.get("output") or {}).get("result") == "denied", result)
+    check("evil env probe saw no GIDEON_CANARY (Core env carries it, plugin must not)",
+          RESULT["probe_results"]["env"]["result"] == "denied"
+          and CANARY not in str(RESULT["probe_results"]["env"]["detail"]))
+    for name, value in unsandboxed_proof(port).items():
+        check(f"unsandboxed proof: dummy_evil {name} probe succeeds outside the sandbox (sandbox denials not vacuous)",
+              value == "allowed", value)
+    listener.close()
     pids = plugin_pids()
     check("evil: plugin processes still alive after probes (no crash from probes)", len(pids) >= 4, pids)
+    mark = len(UNREADABLE)
     hits = scan_pids(pids)
+    check("evil: every /proc entry of the plugin processes readable", len(UNREADABLE) == mark, UNREADABLE[mark:][:10])
     check("evil: no repo, uv or real-home path in any plugin cmdline, environ, maps, mountinfo, cwd, root or fd",
           not hits, hits[:10])
     py = python_pids()
@@ -647,13 +717,30 @@ def scenario_core1():
     check("isolation: every plugin python process is a descendant of a nested bwrap (sandbox used)",
           RESULT["isolation"]["nested_bwrap_ancestor"] is True, describe_pids(py))
     interpreters = {}
+    bundled_runtime = os.path.realpath(installed_dir() / "runtime/python")
+    host_python = os.path.realpath("/usr/bin/python3")
     for pid in py:
-        exe = os.readlink(f"/proc/{pid}/exe") if os.path.exists(f"/proc/{pid}/exe") else "?"
+        try:
+            exe = os.path.realpath(f"/proc/{pid}/exe")
+        except OSError as exc:
+            note_unreadable(pid, "exe", exc)
+            exe = "?"
         interpreters[str(pid)] = {"exe": exe, "argv0": cmdline_of(pid).split(b"\0")[0].decode("utf-8", "replace")}
     RESULT["isolation"]["plugin_interpreters"] = interpreters
-    bundled = str(installed_dir() / "runtime/python").encode()
-    check("isolation: plugin python is the bundled runtime of the installed package (not host /usr/bin)",
-          bool(py) and all(cmdline_of(p).split(b"\0")[0].startswith(bundled) for p in py), interpreters)
+    RESULT["isolation"]["bundled_runtime"] = bundled_runtime
+    RESULT["isolation"]["host_python"] = host_python
+
+    def under(path, root):
+        try:
+            return os.path.commonpath([path, root]) == root
+        except ValueError:
+            return False
+
+    check("isolation: plugin python executable realpath lies under the bundled runtime of the installed package",
+          bool(py) and all(under(i["exe"], bundled_runtime) for i in interpreters.values()), interpreters)
+    check("isolation: plugin python executable is not host /usr/bin/python3 (realpath)",
+          bool(py) and all(i["exe"] != host_python and not under(i["exe"], host_python) for i in interpreters.values()),
+          interpreters)
     core_stop(PROFILE)
 
 
@@ -677,7 +764,9 @@ def scenario_restart_running():
           == "denied", result)
     pids = plugin_pids()
     check("restart: plugin processes are present before Core stop", len(pids) >= 4, pids)
+    mark = len(UNREADABLE)
     hits = scan_pids(pids)
+    check("restart: every /proc entry of the plugin processes readable", len(UNREADABLE) == mark, UNREADABLE[mark:][:10])
     check("restart: no repo, uv or real-home path in plugin processes", not hits,
           {"hits": hits[:10], "processes": describe_pids(pids)})
     response = plugin_op(PROFILE, "plugin_disable", EVIL)
@@ -805,7 +894,7 @@ def main():
         "gate": GATE,
         "passed": len(CHECKS),
         "failed": len(FAILS),
-        "ignored": 0,
+        "ignored": len(IGNORED),
         "checks": CHECKS,
         "failures": FAILS,
         "commit": head,

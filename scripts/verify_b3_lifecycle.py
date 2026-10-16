@@ -4,10 +4,18 @@ import hashlib,json,os,socket,stat,subprocess,tempfile,time
 from pathlib import Path
 from hub_import import upload as stage_upload
 from ui_fixture import offscreen_command
-BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';CAT1=BASE/'tests/fixtures/hub.json';CAT2=BASE/'tests/fixtures/hub-v2.json';BENIGN='benign_fixture';checks=[]
+BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';CAT1=BASE/'tests/fixtures/hub.json';CAT2=BASE/'tests/fixtures/hub-v2.json';BENIGN='benign_fixture';checks=[];FAILURES=[];IGNORED=[]
+B3_UI_REQUIRED = ["actual Core connection", "accessible cancel name", "minimum layout size respected", "Core ledger shows fixture installed with runtime disabled", "status label shows installed and disabled", "install control unavailable once installed", "rollback unavailable without previous version", "remove control available for installed plugin", "restart preserves installed disabled record", "restarted UI keeps disabled status", "remove requires confirmation and does not act yet", "cancelled removal keeps installed record", "Qt removal confirmed reaches Core ledger", "hub result label shows Plugin removido"]
 def check(name,value):
-    assert value,name
+    if not value:
+        FAILURES.append(name);raise AssertionError(name)
     checks.append(name)
+def accept_ui_row(row):
+    names=(row or {}).get('checks') or []
+    missing=sorted(set(B3_UI_REQUIRED)-set(names))
+    ok=bool(row) and row.get('failed')==0 and row.get('passed')==len(names) and bool(names) and not missing
+    check('B3 UI self-report accepted (zero failures, passed equals listed, every required check present; missing '+str(missing)+')',ok)
+    checks.extend(names)
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 def base_args(root,catalog,extra=()):return [str(BIN),'--root',str(root),*extra,'--commands-sandbox','--hub-catalog',str(catalog),sha(catalog)]
 def entry_of(h,pid=BENIGN):return next(e for e in h['entries'] if e['plugin_id']==pid)
@@ -168,7 +176,7 @@ with tempfile.TemporaryDirectory(prefix='gideon-b3-lifecycle-') as td:
             marker('ready');approve(native);stage_upload(str(native),BENIGN,str(source));check('native lifecycle install ok',install(native)['code']=='ok');marker('installed')
             stop(core);marker('offline');core=start(nargs,native,env);out,err=ui.communicate(timeout=55)
             if ui.returncode:raise RuntimeError(err.decode()+out.decode())
-            row=json.loads(out);checks.extend(row['checks']);(BASE/'target/evidence/b3-lifecycle.png').write_bytes((artifacts/'ui.png').read_bytes())
+            row=json.loads(out);accept_ui_row(row);(BASE/'target/evidence/b3-lifecycle.png').write_bytes((artifacts/'ui.png').read_bytes())
             check('Qt removal persisted at daemon',record(hub(native)) is None)
             check('Qt removal unlinked namespace payload',not any((native/'hub-plugins').glob(f'{BENIGN}-*.payload')))
             native_effect(native,'native S1 after lifecycle and restart');stop(core);core=None
@@ -176,5 +184,5 @@ with tempfile.TemporaryDirectory(prefix='gideon-b3-lifecycle-') as td:
             if ui.poll() is None:ui.kill();ui.wait(timeout=3)
     finally:
         if core is not None and core.poll() is None:core.terminate();core.wait(timeout=3);core.stderr.close()
-result={'gate':'B3_3_LIFECYCLE','passed':len(checks),'failed':0,'ignored':0,'checks':checks,'ui':row,'binary_sha256':sha(BIN),'scope':'local opaque install/update/rollback/remove only; no extraction, loading, execution, network or plugin runtime; runtime disabled','physical_validation':'NOT_PERFORMED'}
+result={'gate':'B3_3_LIFECYCLE','passed':len(checks),'failed':len(FAILURES),'ignored':len(IGNORED),'checks':checks,'ui':row,'binary_sha256':sha(BIN),'scope':'local opaque install/update/rollback/remove only; no extraction, loading, execution, network or plugin runtime; runtime disabled','physical_validation':'NOT_PERFORMED'}
 (BASE/'target/evidence/b3-lifecycle.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))

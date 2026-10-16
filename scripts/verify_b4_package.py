@@ -8,6 +8,7 @@ If nested user namespaces fail, falls back to a cleared environment plus a /proc
 Writes target/evidence/b4-package.json. Exit 0 only when every check passes.
 """
 import fnmatch
+import errno
 import hashlib
 import json
 import mmap
@@ -41,6 +42,9 @@ NETWORK_TOKENS = [b"curl", b"wget", b"urllib", b"http.client", b"urlopen", b"req
 
 CHECKS = []
 FAILS = []
+UNREADABLE = []  # /proc entries of live processes that could not be read (a vanished process is not an entry here)
+IGNORED = []  # items the gate could not check; only recorded when GIDEON_ALLOW_NO_ISOLATION=1
+ALLOW_NO_ISOLATION = os.environ.get("GIDEON_ALLOW_NO_ISOLATION") == "1"
 RESULT = {"scenarios": {}, "isolation": None, "allowlisted": {}, "network": None}
 S = {}
 
@@ -51,6 +55,21 @@ def check(name, ok, detail=""):
     else:
         FAILS.append({"name": name, "detail": str(detail)[:3000]})
         print(f"FAIL {name}: {str(detail)[:800]}", file=sys.stderr)
+
+
+def note_unreadable(pid, entry, exc):
+    code = getattr(exc, "errno", None)
+    if code not in (errno.ENOENT, errno.ESRCH):
+        UNREADABLE.append({"pid": pid, "entry": entry, "errno": code, "error": str(exc)})
+
+
+def isolation_unavailable(reason):
+    """Hidden-source isolation missing: a failure, unless GIDEON_ALLOW_NO_ISOLATION=1 records it as ignored."""
+    if ALLOW_NO_ISOLATION:
+        IGNORED.append({"item": "hidden-source isolation", "reason": str(reason)[-300:]})
+    else:
+        check("3 hidden: outer bwrap isolation available (or set GIDEON_ALLOW_NO_ISOLATION=1 to record it as ignored)",
+              False, reason)
 
 
 def scenario(label, fn):
@@ -158,7 +177,11 @@ def tree_pids(root_pid):
             continue
         try:
             fields = Path(f"/proc/{entry}/stat").read_text().rsplit(")", 1)[1].split()
-        except (OSError, IndexError):
+        except OSError as exc:
+            note_unreadable(int(entry), "stat", exc)
+            continue
+        except IndexError as exc:
+            note_unreadable(int(entry), "stat", exc)
             continue
         kids.setdefault(int(fields[1]), []).append(int(entry))
     seen, stack = [root_pid], [root_pid]
@@ -177,21 +200,23 @@ def scan_tree(root_pid):
         for name in ("cmdline", "environ", "maps", "mountinfo"):
             try:
                 blobs.append(Path(f"/proc/{pid}/{name}").read_bytes())
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, name, exc)
         for link in ("cwd", "root"):
             try:
                 blobs.append(os.readlink(f"/proc/{pid}/{link}").encode())
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, link, exc)
         try:
-            for fd in os.listdir(f"/proc/{pid}/fd"):
-                try:
-                    blobs.append(os.readlink(f"/proc/{pid}/fd/{fd}").encode())
-                except OSError:
-                    pass
-        except OSError:
-            pass
+            fds = os.listdir(f"/proc/{pid}/fd")
+        except OSError as exc:
+            note_unreadable(pid, "fd", exc)
+            fds = []
+        for fd in fds:
+            try:
+                blobs.append(os.readlink(f"/proc/{pid}/fd/{fd}").encode())
+            except OSError as exc:
+                note_unreadable(pid, f"fd{fd}", exc)
         for mark in (REPO_PATH, UV_MARK):
             if any(mark in blob for blob in blobs):
                 hits.append({"pid": pid, "mark": mark.decode()})
@@ -206,6 +231,8 @@ def tail(label):
 def core_start(label, extra=(), extra_ro=()):
     if "core" in S:
         raise RuntimeError("a Core is already running")
+    if S.get("isolation") != "outer_bwrap" and not ALLOW_NO_ISOLATION:
+        raise RuntimeError("outer bwrap isolation not available; refusing to run a Core unisolated")
     cmd, env = launch([str(S["prefix"] / "bin/gideon-core"), str(S["state"]), *extra], extra_ro)
     with open(S["work"] / f"{label}.log", "wb") as log:
         proc = subprocess.Popen(cmd, env=env, cwd="/", stdin=subprocess.DEVNULL, stdout=log, stderr=log,
@@ -503,10 +530,14 @@ def scenario_hidden_run():
         check("3 hidden: sandbox network namespace exposes only lo", ifaces == ["lo"], ifaces)
     else:
         RESULT["fallback_reason"] = RESULT.get("nested_probe_error") or f"nested bwrap rc={RESULT.get('nested_probe_rc')}"
+        isolation_unavailable(RESULT["fallback_reason"])
+    mark = len(UNREADABLE)
     core_start("native", ())
     scanned, hits = scan_tree(S["core"].pid)
     check(f"3 hidden: Core tree ({scanned} processes) has no repo or uv path in cmdline/environ/maps/mountinfo/cwd/fds",
           scanned >= 1 and not hits, json.dumps(hits[:10]))
+    check("3 hidden: every /proc entry of the Core tree readable (none unreadable)", len(UNREADABLE) == mark,
+          UNREADABLE[mark:][:10])
 
 
 def core_exe_check(label):
@@ -687,7 +718,9 @@ def scenario_network():
         RESULT["network"] = "unshared: outer bwrap --unshare-all, sandbox netns exposes only lo"
         check("9 network: Core sandbox exposes only loopback", S.get("netcheck") == ["lo"], S.get("netcheck"))
     else:
-        RESULT["network"] = "SKIPPED for hidden-source run: " + str(RESULT.get("fallback_reason"))
+        RESULT["network"] = "not checked for hidden-source run: " + str(RESULT.get("fallback_reason"))
+        if ALLOW_NO_ISOLATION:
+            IGNORED.append({"item": "network namespace check", "reason": RESULT["network"][-300:]})
     hits = []
     for name in ("gideon-core", "gideon-configure", "gideon-verify", "gideon-app"):
         text = (prefix / "bin" / name).read_bytes()
@@ -734,7 +767,8 @@ def main():
         "gate": "B4_PACKAGE",
         "passed": len(CHECKS),
         "failed": len(FAILS),
-        "ignored": 0,
+        "ignored": len(IGNORED),
+        "ignored_items": IGNORED,
         "checks": CHECKS,
         "failures": FAILS,
         "commit": S.get("commit"),

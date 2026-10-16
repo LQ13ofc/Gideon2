@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Private real Core C0 plugin runtime gate: dummy_echo/dummy_evil in bwrap, Qt plugins phase, native S1 regressions."""
-import hashlib,json,os,socket,stat,subprocess,sys,tempfile,time,traceback
+import hashlib,importlib.util,json,os,re,socket,stat,subprocess,sys,tempfile,time,traceback
 from pathlib import Path
 from hub_import import upload as stage_upload
 from ui_fixture import offscreen_command
@@ -8,12 +8,41 @@ BASE=Path(__file__).resolve().parents[1];BIN=BASE/'target/release/gideon-base';C
 ECHO_SRC=BASE/'tests/fixtures/dummy_echo.py';EVIL_SRC=BASE/'tests/fixtures/dummy_evil.py';EVIDENCE=BASE/'target/evidence'
 ECHO='dummy_echo';EVIL='dummy_evil';OPAQUE='plain_opaque';ECHO_CAP='dummy_echo.echo';EVIL_CAP='dummy_evil.probe'
 PYTHON='/usr/bin/python3';OPAQUE_PAYLOAD=b'benign fixture\n';PLUGIN_MARK=b'/plugin/main.py';CLK=os.sysconf('SC_CLK_TCK')
-PROBE_EXPECT={'network':'denied','read_home':'denied','read_repo':'denied','write_root':'denied','fork_bomb_limited':'denied','env':'denied','mem':'denied'}
+# fork_bomb_limited is not here: RLIMIT_NPROC is uid tasks+256, so its 64 forks are allowed and bounded (checked separately).
+PROBE_EXPECT={'network':'denied','read_home':'denied','read_repo':'denied','write_root':'denied','env':'denied','mem':'denied'}
 ARGV_MODES=['ignore_cancel','crash','bad_json','oversize','dup_id','log_flood']
-checks=[];ignored=[];details={};counter=[0];live=[]
+checks=[];FAILURES=[];ignored=[];details={};counter=[0];live=[]
+CANARY='GIDEON_CANARY';REPO_CARGO=BASE/'Cargo.toml'
+C0_UI_REQUIRED = ["actual Core connection", "accessible cancel name", "minimum layout size respected", "Core lists dummy_echo disabled and not enabled", "status label shows Desativado", "enable offered for installed plugin", "invoke unavailable while disabled", "Qt enable reaches Core and sandbox runs dummy_echo", "status label shows sandbox running without network", "typed text reaches capability input", "capability result from real sandbox is uppercased text", "invocation pending text cleared when result arrives", "revoke waits for confirmation", "confirmed revoke disables plugin in Core", "revoke result label shown", "invoke controls disabled after revoke", "capability result cleared after revoke", "UI gates enable until new approval and shows hint", "Core refuses re-enable until new approval", "review offered for installed unapproved plugin", "re-review never defaults to publisher acknowledgement", "re-approval keeps dummy_echo installed and not running", "enable offered again after re-approval", "re-enabled dummy_echo runs in sandbox again"]
 def check(name,value):
-    assert value,name
+    if not value:
+        FAILURES.append(name);raise AssertionError(name)
     checks.append(name)
+def accept_ui_row(row,label):
+    names=(row or {}).get('checks') or []
+    missing=sorted(set(C0_UI_REQUIRED)-set(names))
+    ok=bool(row) and row.get('failed')==0 and row.get('passed')==len(names) and bool(names) and not missing
+    check(label+' UI self-report accepted (zero failures, passed equals listed, every required check present; missing '+str(missing)+')',ok)
+    checks.extend(names)
+def evil_input(name):
+    data={'probe':name}
+    if name=='read_repo':data['path']=str(REPO_CARGO)
+    if name=='env':data['names']=[CANARY]
+    return data
+def load_evil():
+    spec=importlib.util.spec_from_file_location('dummy_evil_proof',EVIL_SRC)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+def unsandboxed_proof(port):
+    """Same fixture functions, run in-process with no sandbox: every target must be reachable, so sandboxed denials are not vacuous."""
+    evil=load_evil();out={}
+    out['network']=evil.probe_network({'listener':['127.0.0.1',port]})['result']
+    out['read_repo']=evil.probe_read_repo({'path':str(REPO_CARGO)})['result']
+    previous=os.environ.get(CANARY);os.environ[CANARY]='1'
+    try:out['env']=evil.probe_env({'names':[CANARY]})['result']
+    finally:
+        if previous is None:os.environ.pop(CANARY,None)
+        else:os.environ[CANARY]=previous
+    return out
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 def base_args(root,catalog,extra=()):return [str(BIN),'--root',str(root),*extra,'--commands-sandbox','--hub-catalog',str(catalog),sha(catalog)]
 def core_args(root):
@@ -104,12 +133,14 @@ def start(args,root,env):
         if time.monotonic()>until:p.terminate();p.wait();raise TimeoutError('startup')
         time.sleep(.01)
     return p
-def stop(p,label):
-    workers=plugin_workers(p.pid)+plugin_refs(p.pid);p.terminate();rc=p.wait(timeout=10);p.stderr.close();live.remove(p)
-    check(f'{label} Core clean shutdown rc 0 with {len(set(plugin_refs_in(workers)))} plugin-related processes',rc==0)
-    wait_plugins_gone(set(workers),label+' leftover plugin processes')
-    check(f'{label} no plugin processes left after Core shutdown',not any(alive_plugin(w) for w in workers))
-    return set(workers)
+def stop(p,label,expected):
+    workers=set(plugin_workers(p.pid));refs=set(plugin_refs(p.pid))
+    check(f'{label} precondition: {len(workers)} plugin worker(s) running, expected {expected}',len(workers)==expected and bool(refs)==bool(expected))
+    p.terminate();rc=p.wait(timeout=10);p.stderr.close();live.remove(p)
+    check(f'{label} Core clean shutdown rc 0',rc==0)
+    wait_plugins_gone(workers|refs,label+' leftover plugin processes')
+    check(f'{label} no plugin processes left after Core shutdown',not any(alive_plugin(w) for w in workers|refs))
+    return workers|refs
 def native_effect(root,name):
     until=time.monotonic()+30
     while True:
@@ -138,7 +169,7 @@ def run_ui(root,td):
         return row
     finally:
         if ui.poll() is None:ui.kill();ui.wait(timeout=3)
-def gate(td,env,record_out):
+def gate(td,env,record_out,listener_port):
     td=Path(td);root1=td/'core1';root=root1;row=None;core=None
     plain=td/'plain_opaque.bin';plain.write_bytes(OPAQUE_PAYLOAD)
     try:
@@ -167,7 +198,7 @@ def gate(td,env,record_out):
         check('deadline_ms 0 => invalid_input (Core)',req(root,'capability_invoke',capability=ECHO_CAP,input={'text':'x'},deadline_ms=0)['code']=='invalid_input')
         check('oversize input 9000 bytes => invalid_input (Core)',req(root,'capability_invoke',capability=ECHO_CAP,input={'text':'a'*9000},deadline_ms=1000)['code']=='invalid_input')
         code,cr=invoke(root,ECHO_CAP,{'text':'a'*257})
-        check('plugin-side invalid input reported as plugin_error in capability_result (C0 mapping)',code=='ok' and cr['ok'] is False and cr['error']=='plugin_error')
+        check('plugin-side invalid input passes through as invalid_input in capability_result (allowlisted code)',code=='ok' and cr['ok'] is False and cr['error']=='invalid_input')
         code,cr=invoke(root,ECHO_CAP,{'text':'slow','sleep_ms':500},deadline_ms=1)
         check('deadline 1 ms on sleep_ms=500 => capability_timeout',code=='ok' and cr['error']=='capability_timeout')
         time.sleep(.5)
@@ -177,21 +208,26 @@ def gate(td,env,record_out):
         time.sleep(.3);check('capability_cancel ok',req(root,'capability_cancel',capability=ECHO_CAP)['code']=='ok')
         cr=result(root,5);check('cancel during sleep => invoke_cancelled',cr['error']=='invoke_cancelled' and cr['ok'] is False)
         time.sleep(.5)
+        running=set(plugin_workers(core.pid))
+        check('precondition: one dummy_echo worker running before disable',len(running)==1)
         check('dummy_echo disable ok',plugin_op(root,'plugin_disable',ECHO)['code']=='ok')
         wait_state(root,ECHO,'disabled')
-        wait_plugins_gone(set(plugin_refs(core.pid)),'disable leaves plugin process')
-        check('disable stops dummy_echo process',not plugin_refs(core.pid))
+        wait_plugins_gone(running,'disable leaves plugin process')
+        check('disable stops dummy_echo process (its pid gone, no /plugin/main.py descendant)',
+              bool(running) and not any(alive_plugin(p) for p in running) and not plugin_refs(core.pid))
         # Qt phase: enable/invoke/revoke/re-approve/re-enable driven by the real UI.
         row=run_ui(root,td);record_out['ui']=row
         check('Qt plugins phase reports zero failures',row['failed']==0)
-        checks.extend(row['checks'])
+        accept_ui_row(row,'Qt plugins phase')
         wait_state(root,ECHO,'running')
         check('UI re-approval leaves dummy_echo enabled and running',plugin_item(req(root),ECHO)['enabled'] is True)
         # Scenario 3: IPC revoke, re-enable refusal, re-approve without reinstall.
         workers=set(plugin_workers(core.pid))
+        check('precondition: one dummy_echo worker running before revoke',len(workers)==1)
         check('revoke ok',plugin_op(root,'plugin_revoke',ECHO)['code']=='ok')
         wait_plugins_gone(workers,'revoke leaves plugin process')
-        check('revoke removes plugin process (no /plugin/main.py descendant)',not plugin_refs(core.pid))
+        check('revoke removes plugin process (its pid gone, no /plugin/main.py descendant)',
+              bool(workers) and not any(alive_plugin(p) for p in workers) and not plugin_refs(core.pid))
         check('invoke after revoke => capability_unavailable',req(root,'capability_invoke',capability=ECHO_CAP,input={'text':'x'},deadline_ms=1000)['code']=='capability_unavailable')
         check('capability_result cleared by revoke',req(root).get('capability_result') is None)
         check('approval record gone from hub-approvals.json',all(r['plugin_id']!=ECHO for r in ledger(root,'hub-approvals.json')['records']))
@@ -208,11 +244,23 @@ def gate(td,env,record_out):
         check('dummy_evil enable ok',plugin_op(root,'plugin_enable',EVIL)['code']=='ok')
         wait_state(root,EVIL,'running')
         for name in ['network','read_home','read_repo','write_root','exec','fork_bomb_limited','env','mem']:
-            code,cr=invoke(root,EVIL_CAP,{'probe':name},deadline_ms=8000)
+            code,cr=invoke(root,EVIL_CAP,evil_input(name),deadline_ms=8000)
             ok=code=='ok' and cr is not None and cr['ok'] and cr['output']['result'] in ('denied','allowed')
             check(f'dummy_evil probe {name} answered',ok)
             details[name]={'result':cr['output']['result'],'detail':cr['output']['detail']}
             if name in PROBE_EXPECT:check(f'dummy_evil {name} {PROBE_EXPECT[name]}',cr['output']['result']==PROBE_EXPECT[name])
+            if name=='fork_bomb_limited':
+                # Allowed but bounded: the probe makes 64 attempts; every attempt either forks or is refused, and the plugin lives on.
+                forks=re.fullmatch(r'forked=(\d+) failed=(\d+)',cr['output']['detail'])
+                check('dummy_evil fork_bomb_limited allowed and bounded (forked + refused == 64 attempts)',cr['output']['result']=='allowed' and forks is not None and int(forks[1])+int(forks[2])==64 and int(forks[1])<=64)
+        code,cr=invoke(root,EVIL_CAP,{'probe':'network','listener':['127.0.0.1',listener_port]},deadline_ms=8000)
+        check('dummy_evil network to gate loopback listener denied inside sandbox',
+              code=='ok' and cr is not None and cr['ok'] and cr['output']['result']=='denied')
+        check('dummy_evil env probe with GIDEON_CANARY in Core env: canary not visible inside sandbox',
+              details['env']['result']=='denied' and CANARY not in details['env']['detail'])
+        for name,value in unsandboxed_proof(listener_port).items():
+            check(f'unsandboxed proof: dummy_evil {name} probe succeeds outside the sandbox (sandbox denials not vacuous)',value=='allowed')
+            details.setdefault('unsandboxed',{})[name]=value
         details['exec_note']='C0 leaves exec open (documented); the observed exec result is recorded above, not asserted'
         code,cr=invoke(root,ECHO_CAP,{'text':'still'})
         check('dummy_echo still answers after evil probes',code=='ok' and cr['output']['text']=='STILL')
@@ -231,7 +279,7 @@ def gate(td,env,record_out):
         check('remove stops dummy_evil process (its pid gone), dummy_echo process kept',len(gone)==1 and not any(alive_plugin(p) for p in gone) and len(after)==1)
         check('remove leaves dummy_echo running',plugin_item(req(root),ECHO)['state']=='running')
         # Scenario 6: restart with dummy_echo enabled.
-        stop(core,'Core1 with running dummy_echo');core=None
+        stop(core,'Core1 with running dummy_echo',1);core=None
         core=start(core_args(root),root,env);t0=time.monotonic();s=req(root);elapsed=time.monotonic()-t0
         check('restart: snapshot answers within 1 s of socket',elapsed<1.0)
         check('restart: enabled dummy_echo restored from plugin-state.json',(ledger(root,'plugin-state.json') or {}).get('enabled')==[ECHO])
@@ -247,16 +295,16 @@ def gate(td,env,record_out):
         check('plugin still running after idle window',plugin_item(req(root),ECHO)['state']=='running')
         check('dummy_echo disable after idle ok',plugin_op(root,'plugin_disable',ECHO)['code']=='ok')
         wait_state(root,ECHO,'disabled')
-        stop(core,'Core2 after dummy_echo disable');core=None
+        stop(core,'Core2 after dummy_echo disable',0);core=None
         # Scenario 7 continued: native S1 after disable, then after remove, each on a fresh boot.
         core=start(core_args(root),root,env);native_effect(root,'native S1 after dummy_echo disable')
         check('dummy_echo remove ok',op(root,'hub_remove',ECHO)['code']=='ok')
         check('remove leaves no dummy_echo in snapshot',plugin_item(req(root),ECHO) is None and record(hub(root),ECHO) is None)
-        stop(core,'Core3 after disable and remove');core=None
+        stop(core,'Core3 after disable and remove',0);core=None
         core=start(core_args(root),root,env);native_effect(root,'native S1 after dummy_echo remove on fresh boot')
         check('fresh boot after remove has no plugin processes',not plugin_refs(core.pid))
         # Scenario 9: shutdown with a running plugin proves no leftover children; here none remain.
-        stop(core,'Core4 final');core=None
+        stop(core,'Core4 final',0);core=None
     finally:
         for p in list(live):
             if p.poll() is not None:details['core_exit']={'rc':p.returncode,'stderr_tail':p.stderr.read().decode(errors='replace')[-1200:]}
@@ -265,14 +313,17 @@ def main():
     commit=subprocess.run(['git','rev-parse','HEAD'],cwd=BASE,capture_output=True,text=True,check=True).stdout.strip()
     status_before=subprocess.run(['git','status','--porcelain'],cwd=BASE,capture_output=True,text=True,check=True).stdout
     EVIDENCE.mkdir(parents=True,exist_ok=True);out={}
+    listener=socket.socket(socket.AF_INET,socket.SOCK_STREAM);listener.bind(('127.0.0.1',0));listener.listen(8)
     with tempfile.TemporaryDirectory(prefix='gideon-c0-plugins-') as td:
-        env={'PATH':'/usr/bin:/bin','HOME':td,'XDG_CONFIG_HOME':td,'XDG_DATA_HOME':td,'XDG_CACHE_HOME':td,'XDG_RUNTIME_DIR':td}
+        # GIDEON_CANARY is a canary: the plugin must never see it (see the env probe checks).
+        env={'PATH':'/usr/bin:/bin','HOME':td,'XDG_CONFIG_HOME':td,'XDG_DATA_HOME':td,'XDG_CACHE_HOME':td,'XDG_RUNTIME_DIR':td,CANARY:'1'}
         error=None
-        try:gate(td,env,out)
+        try:gate(td,env,out,listener.getsockname()[1])
         except Exception as exc:error=f'{type(exc).__name__}: {exc} | '+' / '.join(traceback.format_exc().strip().splitlines()[-6:-1])[-1500:]
+        finally:listener.close()
     status_after=subprocess.run(['git','status','--porcelain'],cwd=BASE,capture_output=True,text=True,check=True).stdout
     if status_before!=status_after:error=(error or '')+' repo status changed'
-    result={'gate':'C0_PLUGINS','passed':len(checks),'failed':1 if error else 0,'ignored':len(ignored),'checks':checks,'ignored_items':ignored,'error':error,'ui':out.get('ui'),'evil_probes':details,'binary_sha256':sha(BIN),'commit':commit,'scope':'local fixture plugins dummy_echo and dummy_evil through real Core and bwrap sandbox; plain_opaque refusal; no network, no LLM, no real HOME; argv-only dummy_evil modes ignored; exec probe recorded','physical_validation':'NOT_PERFORMED'}
+    result={'gate':'C0_PLUGINS','passed':len(checks),'failed':max(len(FAILURES),1 if error else 0),'ignored':len(ignored),'checks':checks,'ignored_items':ignored,'error':error,'ui':out.get('ui'),'evil_probes':details,'binary_sha256':sha(BIN),'commit':commit,'scope':'local fixture plugins dummy_echo and dummy_evil through real Core and bwrap sandbox; plain_opaque refusal; no network, no LLM, no real HOME; argv-only dummy_evil modes ignored; exec probe recorded','physical_validation':'NOT_PERFORMED'}
     (EVIDENCE/'c0-plugins.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
     if error:sys.exit(1)
 if __name__=='__main__':main()

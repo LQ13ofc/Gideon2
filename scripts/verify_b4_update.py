@@ -7,6 +7,7 @@ committed tree with build_package.py, installs them with gideon-install under a 
 and runs every profile's Core inside an outer bwrap that mounts only ROOT, /usr and the loader cache.
 Writes target/evidence/b4-update.json. Exit 0 only when every check passes.
 """
+import errno
 import hashlib
 import json
 import os
@@ -34,6 +35,9 @@ MIN_FREE_FOR_THIRD = int(2.5 * 1024 ** 3)
 HUB_FIXTURE = REPO / "tests/fixtures/hub.json"
 
 CHECKS, FAILS = [], []
+UNREADABLE = []  # /proc entries of live processes that could not be read (a vanished process is not an entry here)
+IGNORED = []  # items the gate could not check; only recorded when GIDEON_ALLOW_NO_ISOLATION=1
+ALLOW_NO_ISOLATION = os.environ.get("GIDEON_ALLOW_NO_ISOLATION") == "1"
 RESULT = {"scenarios": {}, "isolation": None, "binary_sha256": {}, "release_binary_sha256": None,
           "build": {}, "skipped": {}, "notes": []}
 S = {"cores": {}}
@@ -46,6 +50,21 @@ def check(name, ok, detail=""):
         text = detail if isinstance(detail, str) else json.dumps(detail, default=str, ensure_ascii=False)
         FAILS.append({"name": name, "detail": text[:3000]})
         print(f"FAIL {name}: {text[:800]}", file=sys.stderr)
+
+
+def note_unreadable(pid, entry, exc):
+    code = getattr(exc, "errno", None)
+    if code not in (errno.ENOENT, errno.ESRCH):
+        UNREADABLE.append({"pid": pid, "entry": entry, "errno": code, "error": str(exc)})
+
+
+def isolation_unavailable(reason):
+    """Hidden-source isolation missing: a failure, unless GIDEON_ALLOW_NO_ISOLATION=1 records it as ignored."""
+    if ALLOW_NO_ISOLATION:
+        IGNORED.append({"item": "hidden-source isolation", "reason": str(reason)[-300:]})
+    else:
+        check("2 hidden: outer bwrap isolation available (or set GIDEON_ALLOW_NO_ISOLATION=1 to record it as ignored)",
+              False, reason)
 
 
 def scenario(label, fn):
@@ -195,7 +214,11 @@ def tree_pids(root_pid):
             continue
         try:
             fields = Path(f"/proc/{entry}/stat").read_text().rsplit(")", 1)[1].split()
-        except (OSError, IndexError):
+        except OSError as exc:
+            note_unreadable(int(entry), "stat", exc)
+            continue
+        except IndexError as exc:
+            note_unreadable(int(entry), "stat", exc)
             continue
         kids.setdefault(int(fields[1]), []).append(int(entry))
     seen, stack = [root_pid], [root_pid]
@@ -213,21 +236,23 @@ def scan_tree(root_pid):
         for name in ("cmdline", "environ", "maps", "mountinfo"):
             try:
                 blobs.append(Path(f"/proc/{pid}/{name}").read_bytes())
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, name, exc)
         for link in ("cwd", "root"):
             try:
                 blobs.append(os.readlink(f"/proc/{pid}/{link}").encode())
-            except OSError:
-                pass
+            except OSError as exc:
+                note_unreadable(pid, link, exc)
         try:
-            for fd in os.listdir(f"/proc/{pid}/fd"):
-                try:
-                    blobs.append(os.readlink(f"/proc/{pid}/fd/{fd}").encode())
-                except OSError:
-                    pass
-        except OSError:
-            pass
+            fds = os.listdir(f"/proc/{pid}/fd")
+        except OSError as exc:
+            note_unreadable(pid, "fd", exc)
+            fds = []
+        for fd in fds:
+            try:
+                blobs.append(os.readlink(f"/proc/{pid}/fd/{fd}").encode())
+            except OSError as exc:
+                note_unreadable(pid, f"fd{fd}", exc)
         for mark in (REPO_PATH, UV_MARK):
             if any(mark in blob for blob in blobs):
                 hits.append({"pid": pid, "mark": mark.decode()})
@@ -237,6 +262,8 @@ def scan_tree(root_pid):
 def core_start(profile, label, core_args=(), extra_ro=()):
     if profile in S["cores"]:
         raise RuntimeError(f"{profile} Core already running")
+    if S.get("isolation") != "outer_bwrap" and not ALLOW_NO_ISOLATION:
+        raise RuntimeError("outer bwrap isolation not available; refusing to run a Core unisolated")
     argv = launcher_argv(profile, core_args)
     if S.get("isolation") == "outer_bwrap":
         argv = bwrap_argv(argv, extra_ro)
@@ -524,14 +551,17 @@ def scenario_install():
     check("1 install: ROOT is 0700 and owned by this user", stat.S_IMODE(os.lstat(S["root"]).st_mode) == 0o700)
     S["home_names"] = sorted(os.listdir(Path.home()))
     S["sentinel_pre"] = tree_state(S["sentinel"])
+    S["home_state"] = tree_state(S["home"])  # fake HOME of every Core and install: recursive stat-state
 
 
 def scenario_hidden():
     S["isolation"] = probe_isolation()
     RESULT["isolation"] = {"mode": S["isolation"]}
     if S["isolation"] != "outer_bwrap":
-        RESULT["notes"].append("outer bwrap unavailable; Cores run without hidden-source isolation")
+        isolation_unavailable(RESULT.get("fallback_reason") or RESULT.get("outer_probe_error") or "outer bwrap probe failed")
         return
+    check("2 hidden: nested bwrap probe exits 0 (nested namespaces available)", RESULT.get("nested_probe_rc") == 0,
+          {"nested_probe_rc": RESULT.get("nested_probe_rc"), "error": RESULT.get("nested_probe_error")})
     probe = run(bwrap_argv(["/bin/sh", "-c", "[ ! -e /home ] && echo NOHOME; cat /proc/net/dev"]), timeout=60)
     text = probe.stdout.decode("utf-8", "replace")
     check("2 hidden: outer sandbox has no /home (repo and ~/.local/share/uv unreachable)",
@@ -545,9 +575,11 @@ def scenario_alice_v1():
     S["catalog"] = S["cat"] / "hub.json"
     shutil.copyfile(HUB_FIXTURE, S["catalog"])
     core_start(ALICE, "alice-v010", hub_args(), tts_extra())
+    mark = len(UNREADABLE)
     scanned, hits = scan_tree(S["cores"][ALICE]["proc"].pid)
     check(f"2 hidden: alice Core tree ({scanned} processes) has no repo or uv path", scanned >= 1 and not hits,
           hits[:10])
+    check("2 hidden: every /proc entry of the alice Core tree readable", len(UNREADABLE) == mark, UNREADABLE[mark:][:10])
     core_exe_check(ALICE, V1, "2 alice v0.1.0")
     s1_check(ALICE, "2 alice v0.1.0 S1")
     hub_install_benign(ALICE)
@@ -715,7 +747,8 @@ def scenario_fail_closed():
     lst()  # sync S["cur"] from the ledger before breaking anything
 
     def launch_fail(label, expect):
-        assert not S["cores"], "no Core may be running for the fail-closed launch"
+        if S["cores"]:
+            raise RuntimeError("no Core may be running for the fail-closed launch")
         stale = [p for p in S["root"].rglob("core.sock")]
         for path in stale:
             path.unlink()
@@ -768,8 +801,13 @@ def scenario_fail_closed():
 def scenario_isolation():
     check("9 isolation: real HOME top-level entries unchanged after install, Cores and fail-closed runs",
           sorted(os.listdir(Path.home())) == S["home_names"], "HOME entries changed")
-    check("9 isolation: sentinel directory outside the temp parent unchanged",
+    check("9 isolation: sentinel directory outside the temp parent unchanged (recursive stat-state)",
           tree_state(S["sentinel"]) == S["sentinel_pre"])
+    now_home = tree_state(S["home"])
+    check("9 isolation: fake HOME recursive stat-state (names, sizes, mtimes, inodes) unchanged",
+          now_home == S["home_state"],
+          sorted(set(now_home.keys()) ^ set(S["home_state"].keys()))[:10]
+          or sorted(k for k in now_home if now_home.get(k) != S["home_state"].get(k))[:10])
     st = lst()
     for ident in (st["current"], st["previous"]):
         if ident is None:
@@ -818,7 +856,8 @@ def main():
         "gate": GATE,
         "passed": len(CHECKS),
         "failed": len(FAILS),
-        "ignored": 0,
+        "ignored": len(IGNORED),
+        "ignored_items": IGNORED,
         "checks": CHECKS,
         "failures": FAILS,
         "commit": S.get("commit"),
