@@ -389,7 +389,7 @@ def run_provider(spec, keys, workdir, bin_path, loopback, require_certified=True
                     break
             budget -= SELFTEST_COST
             row['provider_requests'] += SELFTEST_COST
-            _, st = invoke(root, MODELS, {'action': 'selftest'}, 10000)
+            _, st = invoke(root, MODELS, {'action': 'selftest'}, 30000)
             st_ok, st_reason = selftest_verdict(st)
             row['selftest'] = {'ok': st_ok, 'reason': st_reason, 'error': (st or {}).get('error')}
             if st_ok:

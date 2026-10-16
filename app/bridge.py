@@ -119,7 +119,7 @@ MODEL_KEYS=frozenset({'id','label','kind','provider','model','tier','license','q
 FEATURE_KEYS=('streaming','tool_use','vision','cancel');FEATURE_STATES=('supported','unsupported','unknown');CERT_STATES=('certified','candidate','declared','probed')
 CERT_BADGES={'certified':'Certificado','candidate':'Candidato','declared':'Declarado','probed':'Testado'}
 FEATURE_LABELS={'supported':'Suportado','unsupported':'Não suportado','unknown':'Desconhecido'}
-SELFTEST_DEADLINE_MS=10000;MODELS_DEADLINE_MS=5000
+SELFTEST_DEADLINE_MS=30000;MODELS_DEADLINE_MS=5000
 PENDING_MODELS={'list':'Carregando modelos…','selftest':'Testando modelo…','save_custom':'Salvando modelo personalizado…','delete_custom':'Removendo modelo personalizado…'}
 def finite_number(value,limit):return value is None or (type(value) in (int,float) and math.isfinite(value) and 0<=value<=limit)
 def feature_ok(features):

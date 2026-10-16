@@ -567,7 +567,7 @@ impl PluginView {
         }
         let object_ok = input.is_object();
         let size_ok = serde_json::to_vec(&input).is_ok_and(|b| b.len() <= MAX_INPUT);
-        if !object_ok || !size_ok || !depth_ok(&input, 0) || !(1..=10000).contains(&deadline_ms) {
+        if !object_ok || !size_ok || !depth_ok(&input, 0) || !(1..=30000).contains(&deadline_ms) {
             return Err("invalid_input");
         }
         if self.active.is_some() {

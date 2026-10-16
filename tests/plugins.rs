@@ -649,7 +649,7 @@ fn fixture_plugin_enable_invoke_and_revocation_gates() {
         "invalid_input"
     );
     assert_eq!(
-        core.invoke("dummy_echo.echo", json!({"text": "x"}), 10001)["code"],
+        core.invoke("dummy_echo.echo", json!({"text": "x"}), 30001)["code"],
         "invalid_input"
     );
     assert_eq!(

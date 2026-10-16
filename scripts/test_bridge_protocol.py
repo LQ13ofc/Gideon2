@@ -1126,7 +1126,7 @@ class ModelsBridge(unittest.TestCase):
         self.assertEqual(configure,{'version':1,'request_id':configure['request_id'],'op':'llm_configure','revision':1,'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True})
         ack(bridge,peer,configure,models_snapshot(revision=2,config=LLM_CONFIG))
         probe=next_request(peer)
-        self.assertEqual((probe['op'],probe['capability'],probe['input'],probe['deadline_ms']),('capability_invoke','llm_engine.models',{'action':'selftest'},10000))
+        self.assertEqual((probe['op'],probe['capability'],probe['input'],probe['deadline_ms']),('capability_invoke','llm_engine.models',{'action':'selftest'},30000))
         ack(bridge,peer,probe,models_snapshot(revision=2,config=LLM_CONFIG))
         bridge.refresh();serve(bridge,peer,with_result(models_snapshot(revision=2,config=LLM_CONFIG),models_result(SELFTEST_OK)))
         mark=next_request(peer);self.assertEqual((mark['op'],mark['revision']),('llm_mark_good',2))
