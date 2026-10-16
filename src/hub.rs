@@ -54,6 +54,9 @@ pub struct Dependency {
 pub struct Entry {
     pub manifest_sha256: String,
     pub permissions_approved: bool,
+    pub payload_staged: bool,
+    #[serde(skip)]
+    pub(crate) payload_sha256: String,
     pub plugin_id: String,
     pub semver: String,
     pub publisher: String,
@@ -71,6 +74,7 @@ pub struct Entry {
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub approval_revision: u64,
+    pub import: Option<ImportSummary>,
     pub version: u16,
     pub status: &'static str,
     pub repository: Option<String>,
@@ -96,11 +100,19 @@ impl Snapshot {
                     && entry.status == "not_installed"
             });
         }
+        for entry in &mut self.entries {
+            match staged(storage, entry) {
+                Ok(present) => entry.payload_staged = present,
+                Err(_) => return Self::quarantined(),
+            }
+        }
+        self.import = storage.hub_import.as_ref().map(Import::summary);
         self
     }
     pub fn quarantined() -> Self {
         Self {
             approval_revision: 0,
+            import: None,
             version: 1,
             status: "quarantined",
             repository: None,
@@ -359,6 +371,12 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                     Sha256::digest(serde_json::to_vec(m).expect("serializable manifest"))
                 ),
                 permissions_approved: false,
+                payload_staged: false,
+                payload_sha256: m
+                    .binaries
+                    .iter()
+                    .find(|b| b.target == target)
+                    .map_or_else(String::new, |b| b.sha256.clone()),
                 plugin_id: m.plugin_id.clone(),
                 semver: m.semver.clone(),
                 publisher: m.publisher.clone(),
@@ -385,6 +403,7 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         .collect();
     Ok(Snapshot {
         approval_revision: 0,
+        import: None,
         version: 1,
         status: "verified",
         repository: Some(catalog.repository),
@@ -392,4 +411,323 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         publisher_verified: false,
         entries,
     })
+}
+
+/// Opaque verified payload only; never extracted, executable, or installed.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportSummary {
+    pub import_id: String,
+    pub plugin_id: String,
+    pub received: u64,
+    pub expected: u64,
+}
+pub(crate) struct Import {
+    summary: ImportSummary,
+    file: std::fs::File,
+    pending: Option<std::path::PathBuf>,
+    destination: std::path::PathBuf,
+    hash: Sha256,
+    expected_hash: String,
+    pub deadline: std::time::Instant,
+}
+impl Import {
+    fn summary(&self) -> ImportSummary {
+        self.summary.clone()
+    }
+}
+impl Drop for Import {
+    fn drop(&mut self) {
+        if let Some(path) = self.pending.take() {
+            use std::os::unix::fs::MetadataExt;
+            if let (Ok(m), Ok(fd)) = (std::fs::symlink_metadata(&path), self.file.metadata()) {
+                if m.dev() == fd.dev() && m.ino() == fd.ino() {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+    }
+}
+fn payload_path(storage: &crate::storage::Storage, entry: &Entry) -> std::path::PathBuf {
+    storage
+        .root
+        .join(format!("hub-{}.payload", entry.manifest_sha256))
+}
+fn staged(storage: &crate::storage::Storage, entry: &Entry) -> io::Result<bool> {
+    let mut file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(payload_path(storage, entry))
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    crate::storage::validate_opened_private(&file)?;
+    use std::os::unix::fs::MetadataExt;
+    if file.metadata()?.mode() & 0o777 != 0o600 || file.metadata()?.len() != entry.download_size {
+        return Err(fail());
+    }
+    let mut hash = Sha256::new();
+    let mut remaining = entry.download_size;
+    let mut buffer = [0; 8192];
+    while remaining > 0 {
+        let n = file.read(&mut buffer[..remaining.min(8192) as usize])?;
+        if n == 0 {
+            return Err(fail());
+        }
+        hash.update(&buffer[..n]);
+        remaining -= n as u64;
+    }
+    if file.read(&mut buffer[..1])? != 0 || format!("{:x}", hash.finalize()) != entry.payload_sha256
+    {
+        return Err(fail());
+    }
+    Ok(true)
+}
+pub fn begin_import(
+    storage: &mut crate::storage::Storage,
+    hub: &Snapshot,
+    revision: u64,
+    plugin_id: &str,
+    manifest: &str,
+    import_id: &str,
+    now: std::time::Instant,
+) -> Result<(), &'static str> {
+    if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
+        return Err("configuration_not_ready");
+    }
+    if hub.status != "verified" {
+        return Err("hub_unavailable");
+    }
+    if storage.hub_import.is_some() {
+        return Err("hub_import_busy");
+    }
+    if revision != hub.approval_revision {
+        return Err("stale_hub_revision");
+    }
+    if !crate::protocol::valid_id(import_id) {
+        return Err("invalid_import_id");
+    }
+    let entry = hub
+        .entries
+        .iter()
+        .find(|e| e.plugin_id == plugin_id)
+        .ok_or("unknown_plugin")?;
+    if entry.status != "not_installed" {
+        return Err("plugin_incompatible");
+    }
+    if entry.manifest_sha256 != manifest {
+        return Err("manifest_mismatch");
+    }
+    let refreshed = hub.clone().with_approvals(storage);
+    if refreshed.status != "verified" {
+        return Err("hub_unavailable");
+    }
+    if refreshed.approval_revision != revision {
+        return Err("stale_hub_revision");
+    }
+    let current = refreshed
+        .entries
+        .iter()
+        .find(|e| e.plugin_id == plugin_id)
+        .ok_or("unknown_plugin")?;
+    if !current.permissions_approved {
+        return Err("permissions_not_approved");
+    }
+    if current.payload_staged {
+        return Err("already_staged");
+    }
+    let destination = payload_path(storage, entry);
+    let pending = storage.root.join(format!(".hub-{manifest}.pending"));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&pending)
+        .map_err(|_| "hub_storage_error")?;
+    storage.hub_import = Some(Import {
+        summary: ImportSummary {
+            import_id: import_id.to_owned(),
+            plugin_id: plugin_id.to_owned(),
+            received: 0,
+            expected: entry.download_size,
+        },
+        file,
+        pending: Some(pending),
+        destination,
+        hash: Sha256::new(),
+        expected_hash: entry.payload_sha256.clone(),
+        deadline: now + std::time::Duration::from_secs(120),
+    });
+    Ok(())
+}
+pub fn import_deadline(storage: &crate::storage::Storage) -> Option<std::time::Instant> {
+    storage.hub_import.as_ref().map(|s| s.deadline)
+}
+pub fn expire_import(storage: &mut crate::storage::Storage, now: std::time::Instant) -> bool {
+    if import_deadline(storage).is_some_and(|d| now >= d) {
+        storage.hub_import.take();
+        return true;
+    }
+    false
+}
+pub fn abort_import(storage: &mut crate::storage::Storage, id: &str) -> Result<(), &'static str> {
+    if storage
+        .hub_import
+        .as_ref()
+        .is_none_or(|s| s.summary.import_id != id)
+    {
+        return Err("stale_import");
+    }
+    storage.hub_import.take();
+    Ok(())
+}
+pub fn chunk_import(
+    storage: &mut crate::storage::Storage,
+    id: &str,
+    offset: u64,
+    hex: &str,
+) -> Result<(), &'static str> {
+    use std::io::Write;
+    let s = storage
+        .hub_import
+        .as_mut()
+        .filter(|s| s.summary.import_id == id)
+        .ok_or("stale_import")?;
+    // Reject without consuming bytes; caller can retry the same offset or abort.
+    if offset != s.summary.received {
+        return Err("stale_import_offset");
+    }
+    if hex.is_empty()
+        || hex.len() > 2048
+        || hex.len() % 2 != 0
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("invalid_import_chunk");
+    }
+    let bytes: Vec<u8> = hex
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let digit = |b: u8| if b <= b'9' { b - b'0' } else { b - b'a' + 10 };
+            digit(pair[0]) * 16 + digit(pair[1])
+        })
+        .collect();
+    if s.summary.received + bytes.len() as u64 > s.summary.expected {
+        storage.hub_import.take();
+        return Err("payload_size_mismatch");
+    }
+    if s.file.write_all(&bytes).is_err() {
+        storage.hub_import.take();
+        return Err("hub_storage_error");
+    }
+    s.hash.update(&bytes);
+    s.summary.received += bytes.len() as u64;
+    Ok(())
+}
+pub fn finish_import(
+    storage: &mut crate::storage::Storage,
+    hub: &Snapshot,
+    id: &str,
+) -> Result<(), &'static str> {
+    use std::os::unix::fs::MetadataExt;
+    if storage
+        .hub_import
+        .as_ref()
+        .is_none_or(|s| s.summary.import_id != id)
+    {
+        return Err("stale_import");
+    }
+    let mut s = storage.hub_import.take().expect("checked import");
+    let current = hub.clone().with_approvals(storage);
+    if current.status != "verified"
+        || !current.entries.iter().any(|e| {
+            e.plugin_id == s.summary.plugin_id
+                && e.permissions_approved
+                && payload_path(storage, e) == s.destination
+        })
+    {
+        return Err("permissions_not_approved");
+    }
+    if s.summary.received != s.summary.expected {
+        return Err("payload_size_mismatch");
+    }
+    if format!("{:x}", s.hash.clone().finalize()) != s.expected_hash {
+        return Err("payload_hash_mismatch");
+    }
+    let result = (|| {
+        crate::storage::validate_opened_private(&s.file)?;
+        let pending = s.pending.as_ref().expect("owned pending");
+        let path_meta = std::fs::symlink_metadata(pending)?;
+        let fd_meta = s.file.metadata()?;
+        if fd_meta.mode() & 0o777 != 0o600 {
+            return Err(fail());
+        }
+        if path_meta.dev() != fd_meta.dev() || path_meta.ino() != fd_meta.ino() {
+            return Err(fail());
+        }
+        s.file.sync_all()?;
+        // Hash the actual descriptor again: observed progress is not a file integrity proof.
+        use std::io::{Seek, SeekFrom};
+        s.file.seek(SeekFrom::Start(0))?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0u8; 8192];
+        let mut total = 0u64;
+        loop {
+            let n = s.file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            total += n as u64;
+            if total > s.summary.expected {
+                return Err(fail());
+            }
+            hash.update(&buffer[..n]);
+        }
+        if total != s.summary.expected || format!("{:x}", hash.finalize()) != s.expected_hash {
+            return Err(fail());
+        }
+        // No replacement of an existing destination; atomic no-clobber publication.
+        publish_no_replace(pending, &s.destination)?;
+        s.pending = None;
+        std::fs::File::open(&storage.root)?.sync_all()
+    })();
+    result.map_err(|_| "hub_storage_error")
+}
+
+pub(crate) fn import_progress(mut hub: Snapshot, storage: &crate::storage::Storage) -> Snapshot {
+    hub.import = storage.hub_import.as_ref().map(Import::summary);
+    hub
+}
+
+#[cfg(target_os = "linux")]
+fn publish_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+    let source = CString::new(source.as_os_str().as_bytes()).map_err(|_| fail())?;
+    let destination = CString::new(destination.as_os_str().as_bytes()).map_err(|_| fail())?;
+    // SAFETY: NUL-terminated valid paths; atomic same-directory no-clobber rename.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+#[cfg(not(target_os = "linux"))]
+fn publish_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+    std::fs::hard_link(source, destination)?;
+    std::fs::remove_file(source)
 }

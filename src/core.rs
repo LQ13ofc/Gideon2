@@ -601,6 +601,12 @@ impl Core {
         self.preferences = config.clone();
         self.timeout = Duration::from_millis(config.session_timeout_ms);
     }
+    pub fn hub_import_expired(&mut self, storage: &crate::storage::Storage) {
+        if let Some(hub) = self.hub.take() {
+            self.hub = Some(crate::hub::import_progress(hub, storage));
+        }
+        self.emit(String::new(), None, "hub_import_timeout");
+    }
     pub fn configure_hub(&mut self, hub: crate::hub::Snapshot) {
         self.hub = Some(hub);
     }
@@ -619,9 +625,14 @@ impl Core {
         &mut self,
         req: Request,
         now: Instant,
-        storage: Option<&mut crate::storage::Storage>,
+        mut storage: Option<&mut crate::storage::Storage>,
     ) -> Response {
         self.expire(now);
+        if let Some(storage) = storage.as_deref_mut() {
+            if crate::hub::expire_import(storage, now) {
+                self.hub_import_expired(storage);
+            }
+        }
         if req.version != VERSION {
             return self.response(req.request_id, "version_mismatch");
         }
@@ -663,10 +674,96 @@ impl Core {
                     "recovery_unavailable"
                 }
             }
+            Operation::HubAbort { import_id } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::abort_import(storage, &import_id);
+                    self.hub = Some(crate::hub::import_progress(hub.clone(), storage));
+                    match result {
+                        Ok(()) => {
+                            self.emit(req.request_id.clone(), None, "hub_import_cancelled");
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
             _ if self.configuration_status != crate::storage::ConfigurationStatus::Ready => {
                 "configuration_not_ready"
             }
 
+            Operation::HubBegin { .. }
+            | Operation::HubChunk { .. }
+            | Operation::HubFinish { .. }
+                if self.session.is_some() =>
+            {
+                "busy"
+            }
+            Operation::HubApprove { .. }
+                if storage.as_ref().is_some_and(|s| s.hub_import.is_some()) =>
+            {
+                "hub_import_busy"
+            }
+            Operation::HubBegin {
+                revision,
+                plugin_id,
+                manifest_sha256,
+            } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::begin_import(
+                        storage,
+                        hub,
+                        revision,
+                        &plugin_id,
+                        &manifest_sha256,
+                        &format!("hub_{}_{}", self.next_session, self.sequence),
+                        now,
+                    );
+                    self.hub = Some(hub.clone().with_approvals(storage));
+                    match result {
+                        Ok(()) => {
+                            self.emit(req.request_id.clone(), None, "hub_import_started");
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
+            Operation::HubChunk {
+                import_id,
+                offset,
+                hex,
+            } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::chunk_import(storage, &import_id, offset, &hex);
+                    // Progress must not rehash all staged payloads on every small chunk.
+                    self.hub = Some(crate::hub::import_progress(hub.clone(), storage));
+                    match result {
+                        Ok(()) => "ok",
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
+            Operation::HubFinish { import_id } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::finish_import(storage, hub, &import_id);
+                    self.hub = Some(hub.clone().with_approvals(storage));
+                    match result {
+                        Ok(()) => {
+                            self.emit(req.request_id.clone(), None, "hub_payload_staged");
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
+            }
             Operation::HubApprove { .. } if self.session.is_some() => "busy",
             Operation::HubApprove {
                 revision,

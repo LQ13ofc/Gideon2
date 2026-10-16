@@ -14,6 +14,23 @@ pub struct Request {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    HubBegin {
+        revision: u64,
+        plugin_id: String,
+        manifest_sha256: String,
+    },
+    HubChunk {
+        import_id: String,
+        offset: u64,
+        hex: String,
+    },
+    HubFinish {
+        import_id: String,
+    },
+    HubAbort {
+        import_id: String,
+    },
+
     HubApprove {
         revision: u64,
         plugin_id: String,
@@ -119,6 +136,31 @@ pub fn valid_id(id: &str) -> bool {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum WireRequest {
+    HubBegin {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+        manifest_sha256: String,
+    },
+    HubChunk {
+        version: u16,
+        request_id: String,
+        import_id: String,
+        offset: u64,
+        hex: String,
+    },
+    HubFinish {
+        version: u16,
+        request_id: String,
+        import_id: String,
+    },
+    HubAbort {
+        version: u16,
+        request_id: String,
+        import_id: String,
+    },
+
     HubApprove {
         version: u16,
         request_id: String,
@@ -186,6 +228,46 @@ enum WireRequest {
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let (version, request_id, operation) = match WireRequest::deserialize(d)? {
+            WireRequest::HubBegin {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+                manifest_sha256,
+            } => (
+                version,
+                request_id,
+                Operation::HubBegin {
+                    revision,
+                    plugin_id,
+                    manifest_sha256,
+                },
+            ),
+            WireRequest::HubChunk {
+                version,
+                request_id,
+                import_id,
+                offset,
+                hex,
+            } => (
+                version,
+                request_id,
+                Operation::HubChunk {
+                    import_id,
+                    offset,
+                    hex,
+                },
+            ),
+            WireRequest::HubFinish {
+                version,
+                request_id,
+                import_id,
+            } => (version, request_id, Operation::HubFinish { import_id }),
+            WireRequest::HubAbort {
+                version,
+                request_id,
+                import_id,
+            } => (version, request_id, Operation::HubAbort { import_id }),
             WireRequest::HubApprove {
                 version,
                 request_id,

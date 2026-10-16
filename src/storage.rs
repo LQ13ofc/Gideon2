@@ -94,6 +94,7 @@ pub struct Storage {
     pub configuration_status: ConfigurationStatus,
     invalid_config: Option<Vec<u8>>,
     _lock: File,
+    pub(crate) hub_import: Option<crate::hub::Import>,
 }
 fn private_metadata(path: &Path, directory: bool) -> io::Result<()> {
     let m = fs::symlink_metadata(path)?;
@@ -124,7 +125,7 @@ fn open_private(path: &Path) -> io::Result<File> {
     validate_opened_private(&file)?;
     Ok(file)
 }
-fn validate_opened_private(file: &File) -> io::Result<()> {
+pub(crate) fn validate_opened_private(file: &File) -> io::Result<()> {
     let m = file.metadata()?;
     // Validate the opened inode, not just a potentially replaced directory entry.
     // SAFETY: getuid is a read-only process identity query.
@@ -240,6 +241,7 @@ impl Storage {
             configuration_status,
             invalid_config,
             _lock: lock,
+            hub_import: None,
         })
     }
     /// Same-directory atomic replacement; no client paths or retained speech data.
@@ -473,5 +475,11 @@ impl Storage {
         use std::io::{Seek, SeekFrom};
         f.seek(SeekFrom::End(0))?;
         writeln!(f, "{{\"version\":1,\"sequence\":{sequence}}}")
+    }
+}
+
+impl Drop for Storage {
+    fn drop(&mut self) {
+        self.hub_import.take();
     }
 }

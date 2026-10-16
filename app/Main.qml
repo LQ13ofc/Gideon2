@@ -79,13 +79,15 @@ ApplicationWindow {
             ColumnLayout {
                 id: hubColumn; width: hubDialog.availableWidth
                 Label { objectName: "hubDescription"; text: core.hubDescription; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Label { text: core.hubImportDescription; visible: core.hubImportActive; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                GlowButton { objectName: "abortHubImportButton"; text: "Cancelar importação"; visible: core.hubImportActive; enabled: core.hubImportActive; onClicked: core.abortHubImport() }
                 Repeater {
                     model: core.hubEntries
                     delegate: ColumnLayout {
                         required property var modelData
                         Layout.fillWidth: true
                         Label { text: modelData.plugin_id + " " + modelData.semver + " · " + modelData.publisher; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { text: (modelData.status === "not_installed" ? "Não instalado" : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: (modelData.status === "not_installed" ? (modelData.payload_staged ? "Pacote verificado em staging; não instalado" : "Não instalado") : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { text: (modelData.permissions_approved ? "Permissões aprovadas para este manifest: " : "Permissões declaradas (não aprovadas): ") + (modelData.permissions.join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         GlowButton { objectName: "review_" + modelData.plugin_id; text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"; enabled: core.hubApprovalAvailable && modelData.status === "not_installed" && !modelData.permissions_approved; onClicked: { window.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() } }
                     }

@@ -9,8 +9,8 @@ BINARY_ID=hashlib.sha256(BINARY.read_bytes()).hexdigest()
 
 def run():
     m=json.loads(MANIFEST.read_text());checks=[];rows=[]
-    def check(name,value):
-        if not value:raise AssertionError(name)
+    def check(name,value,context=None):
+        if not value:raise AssertionError(name+(" "+json.dumps(context,sort_keys=True) if context is not None else ""))
         checks.append(name)
     def scenario(cancel=False,bad_model=False,kill_worker=False,name="wake-hey-brave__bf_emma__clean"):
         index=next(i for i,r in enumerate(m['fixtures']) if r['id']==name)
@@ -91,7 +91,7 @@ def run():
                     pids=owned_pids();ticks0,rss0=stats(pids);start=time.monotonic();time.sleep(2);ticks1,rss1=stats(pids)
                     idle=100*(ticks1-ticks0)/os.sysconf('SC_CLK_TCK')/(time.monotonic()-start)
                     resource={'idle_cpu_percent_one_core':idle,'sum_rss_bytes':max(rss0,rss1),'scope':'owned process tree after fixture EOF; STT loaded, wake fixture worker exited; RSS sums shared pages'}
-                    check('loaded STT idle CPU below one percent',idle<1.)
+                    check('loaded STT idle CPU below one percent',idle<1.,{'fixture_id':name,'resource':resource,'ticks0':ticks0,'ticks1':ticks1,'owned_pids':sorted(pids),'snapshot':snap})
                     check('loaded STT process RSS below one GiB',resource['sum_rss_bytes']<1024**3)
                 rows.append({'fixture_id':name,'cancel':cancel,'partials':partials,'final':final,'resource':resource})
                 p.terminate();check('both workers shutdown',p.wait(timeout=3)==0)

@@ -53,6 +53,15 @@ class Tests(unittest.TestCase):
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,key:value}},'r',0)
         for key,value in [('manifest_sha256','false'),('permissions_approved','yes'),('status','installed')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,'entries':[{**entry,key:value}]}},'r',0)
+    def test_staging_progress_cannot_invent_payload_installation_or_bounds(self):
+        entry={'plugin_id':'benign','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':'a'*64,'permissions_approved':True,'payload_staged':False}
+        transfer={'import_id':'transfer','plugin_id':'benign','received':0,'expected':15}
+        hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'approval_revision':1,'entries':[entry],'import':transfer}
+        validate_snapshot({**BASE,'hub':hub},'r',0)
+        for key,value in [('received',True),('received',16),('expected',0),('expected',16),('plugin_id','missing')]:
+            with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,'import':{**transfer,key:value}}},'r',0)
+        for key,value in [('payload_staged','yes'),('status','installed'),('permissions_approved',False)]:
+            with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'hub':{**hub,'entries':[{**entry,key:value}]}},'r',0)
     def test_real_socket_malformed_nested_data_and_deep_json_clear_stale_state(self):
         for deep in (False,True,"preferences","hub"):
             with self.subTest(deep=deep),tempfile.TemporaryDirectory(prefix='gideon-ipc-audit-') as td:

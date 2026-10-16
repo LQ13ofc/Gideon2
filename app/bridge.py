@@ -48,16 +48,22 @@ def validate_snapshot(data,request_id,min_sequence):
         require(isinstance(hub,dict) and type(hub.get('version')) is int and hub['version']==1)
         require(hub.get('status') in ('verified','quarantined') and hub.get('publisher_verified') is False)
         if 'approval_revision' in hub:require(integer(hub['approval_revision']))
+        if hub.get('import') is not None:
+            transfer=hub['import'];require(isinstance(transfer,dict) and short(transfer.get('import_id')) and short(transfer.get('plugin_id')) and integer(transfer.get('expected'),1,67108864) and integer(transfer.get('received'),0,transfer['expected']))
         entries=hub.get('entries');require(isinstance(entries,list) and len(entries)<=8)
-        if hub['status']=='quarantined':require(not entries and hub.get('repository') is None and hub.get('catalog_sha256') is None)
+        if hub['status']=='quarantined':require(hub.get('import') is None and not entries and hub.get('repository') is None and hub.get('catalog_sha256') is None)
         else:
             require(short(hub.get('repository'),256) and hub['repository'].startswith('https://github.com/'))
             digest=hub.get('catalog_sha256');require(isinstance(digest,str) and len(digest)==64 and all(c in '0123456789abcdef' for c in digest))
+        if hub.get('import') is not None:
+            transfer=hub['import'];matching=[e for e in entries if e.get('plugin_id')==transfer['plugin_id']]
+            require(len(matching)==1 and matching[0].get('status')=='not_installed' and matching[0].get('permissions_approved') is True and transfer['expected']==matching[0].get('download_size'))
         ids=set()
         for entry in entries:
             require(isinstance(entry,dict))
             for key in ('plugin_id','semver','publisher','license','support_policy'):require(short(entry.get(key),128) and bool(entry[key]))
             if 'manifest_sha256' in entry:require(isinstance(entry['manifest_sha256'],str) and len(entry['manifest_sha256'])==64 and all(c in '0123456789abcdef' for c in entry['manifest_sha256']))
+            if 'payload_staged' in entry:require(type(entry['payload_staged']) is bool and (not entry['payload_staged'] or entry.get('status')=='not_installed'))
             if 'permissions_approved' in entry:require(type(entry['permissions_approved']) is bool and (not entry['permissions_approved'] or (entry.get('status')=='not_installed' and 'manifest_sha256' in entry and integer(hub.get('approval_revision'),1))))
             require(entry['plugin_id'] not in ids);ids.add(entry['plugin_id'])
             require(integer(entry.get('api_version'),0,65535) and integer(entry.get('download_size'),0,67108864))
@@ -154,6 +160,8 @@ class Bridge(QObject):
             data['session_id']=str(sid) if sid is not None else ''
             if pending_op=='recover_configuration':
                 self.preferences_result=('Configuração recuperada; reinício necessário' if data.get('code')=='ok' else data.get('code','invalid_message'))
+            elif pending_op=='hub_abort':
+                self.hub_result=('Importação cancelada' if data.get('code')=='ok' else data.get('code','invalid_message'))
             elif pending_op=='hub_approve':
                 self.hub_result=(f'Permissões aprovadas: {self.hub_target}' if data.get('code')=='ok' else data.get('code','invalid_message'))
             elif pending_op in ('preferences','rollback_preferences','select_wake','feedback_preferences'):
@@ -219,6 +227,7 @@ class Bridge(QObject):
         if self.preferencesAvailable:self._preferences('rollback_preferences',revision=int(self.preferencesRevision))
     def _preferences(self,op,**kw):
         if op=='hub_approve':self.hub_result='Enviando aprovação ao Core'
+        elif op=='hub_abort':self.hub_result='Enviando cancelamento ao Core'
         else:self.preferences_result='Enviando ao Core'
         if self.pending:self.preferences_request=(op,kw)
         else:self._request(op,**kw)
@@ -255,10 +264,19 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def hubApprovalRevision(self):return str((self.snapshot.get('hub') or {}).get('approval_revision',0))
     @Property(bool,notify=changed)
-    def hubApprovalAvailable(self):return self.preferencesAvailable and (self.snapshot.get('hub') or {}).get('status')=='verified' and 'approval_revision' in self.snapshot['hub']
+    def hubApprovalAvailable(self):return self.preferencesAvailable and (self.snapshot.get('hub') or {}).get('status')=='verified' and 'approval_revision' in self.snapshot['hub'] and self.snapshot['hub'].get('import') is None
     @Slot(str,str,'QVariantList',bool)
     def approveHub(self,plugin,manifest,permissions,acknowledged):
         if self.hubApprovalAvailable:self._preferences('hub_approve',revision=int(self.hubApprovalRevision),plugin_id=plugin,manifest_sha256=manifest,permissions=list(permissions),publisher_unverified_ack=acknowledged)
+    @Property(bool,notify=changed)
+    def hubImportActive(self):return self.online and bool((self.snapshot.get('hub') or {}).get('import'))
+    @Property(str,notify=changed)
+    def hubImportDescription(self):
+        transfer=(self.snapshot.get('hub') or {}).get('import')
+        return f"Preparando {transfer['plugin_id']}: {transfer['received']}/{transfer['expected']} bytes" if transfer else ''
+    @Slot()
+    def abortHubImport(self):
+        if self.hubImportActive:self._preferences('hub_abort',import_id=self.snapshot['hub']['import']['import_id'])
     @Property('QVariantList',notify=changed)
     def hubEntries(self):return (self.snapshot.get('hub') or {}).get('entries',[])
     @Property(str,notify=changed)

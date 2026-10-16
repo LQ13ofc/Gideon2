@@ -404,8 +404,12 @@ pub async fn serve(
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
         let deadline = core.deadline();
+        let import_deadline = crate::hub::import_deadline(&storage);
         tokio::select! {
             _ = shutdown.recv() => break,
+            _ = async { match import_deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => {
+                if crate::hub::expire_import(&mut storage, std::time::Instant::now()) { core.hub_import_expired(&storage); storage.audit(core.response(String::new(), "ok").sequence)?; }
+            },
             _ = tokio::signal::ctrl_c() => break,
             _ = async { match deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => { core.expire(std::time::Instant::now()); storage.audit(core.response(String::new(), "ok").sequence)?; },
             result = async { (&mut command_task.as_mut().expect("active task").1).await }, if command_task.is_some() => {

@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -32,7 +32,24 @@ def visual_item(name):
         if current.objectName()==name:return current
         stack.extend(current.childItems())
     raise AssertionError('missing visual item '+name)
-if args.phase=='permissions':
+if args.phase=='staging':
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('native S1 before payload staging',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
+    hubButton=window.findChild(QObject,'hubButton');hubButton.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    hubDialog=window.findChild(QObject,'hubDialog');wait(lambda:hubDialog.property('visible'),3)
+    Path(args.artifacts,'ready').touch();wait(lambda:bridge.hubImportActive,10)
+    check('Core import progress reaches real Qt',bridge.hubImportDescription.startswith('Preparando benign_fixture:'))
+    abort=visual_item('abortHubImportButton');abort.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:not bridge.hubImportActive,5)
+    check('actual Qt cancel clears Core import',bridge.hubApprovalResult=='Importação cancelada')
+    Path(args.artifacts,'cancelled').touch();wait(lambda:bridge.hubEntries[0].get('payload_staged'),10)
+    check('verified staging is never installed',bridge.hubEntries[0]['status']=='not_installed' and not bridge.snapshot['hub']['publisher_verified'])
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'));Path(args.artifacts,'staged').touch()
+    wait(lambda:not bridge.connected,10);Path(args.artifacts,'offline').touch()
+    wait(lambda:bridge.connected,10);wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
+    check('restart rechecks persisted payload and approval',bridge.hubEntries[0]['payload_staged'] and bridge.hubEntries[0]['permissions_approved'])
+    check('native S1 after staging restart',bridge.resultVerified and bridge.snapshot['transcript']['source']=='voice' and bridge.snapshot['speech']['samples']>0)
+elif args.phase=='permissions':
     wait(lambda:bridge.snapshot.get('speech_status')=='completed',40)
     check('native S1 before permission review',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
     hubButton=window.findChild(QObject,'hubButton');hubButton.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)

@@ -228,3 +228,218 @@ fn unsafe_or_invalid_approval_content_quarantines_only_hub() {
         "quarantined"
     );
 }
+
+fn approved_import() -> (
+    tempfile::TempDir,
+    gideon_base::storage::Storage,
+    hub::Snapshot,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let snap = load(FIXTURE.as_bytes()).unwrap();
+    let e = &snap.entries[0];
+    hub::approve(
+        &storage,
+        &snap,
+        0,
+        &e.plugin_id,
+        &e.manifest_sha256,
+        &e.permissions,
+        true,
+    )
+    .unwrap();
+    let snap = snap.with_approvals(&storage);
+    (dir, storage, snap)
+}
+fn begin(storage: &mut gideon_base::storage::Storage, snap: &hub::Snapshot, id: &str) {
+    let e = &snap.entries[0];
+    hub::begin_import(
+        storage,
+        snap,
+        snap.approval_revision,
+        &e.plugin_id,
+        &e.manifest_sha256,
+        id,
+        std::time::Instant::now(),
+    )
+    .unwrap();
+}
+const PAYLOAD_HEX: &str = "62656e69676e20666978747572650a";
+#[test]
+fn actual_payload_is_verified_private_atomic_and_restartable() {
+    let (dir, mut storage, snap) = approved_import();
+    begin(&mut storage, &snap, "upload");
+    assert_eq!(
+        hub::chunk_import(&mut storage, "upload", 1, PAYLOAD_HEX),
+        Err("stale_import_offset")
+    );
+    assert_eq!(
+        hub::chunk_import(&mut storage, "upload", 0, "XX"),
+        Err("invalid_import_chunk")
+    );
+    hub::chunk_import(&mut storage, "upload", 0, PAYLOAD_HEX).unwrap();
+    hub::finish_import(&mut storage, &snap, "upload").unwrap();
+    let present = snap.clone().with_approvals(&storage);
+    assert!(present.entries[0].payload_staged);
+    assert_eq!(present.entries[0].status, "not_installed");
+    let path = storage
+        .root
+        .join(format!("hub-{}.payload", snap.entries[0].manifest_sha256));
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    assert_eq!(fs::read(&path).unwrap(), b"benign fixture\n");
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(fs::metadata(&path).unwrap().nlink(), 1);
+    drop(storage);
+    let storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    assert!(snap.with_approvals(&storage).entries[0].payload_staged);
+}
+#[test]
+fn import_failures_cancel_timeout_and_shutdown_remove_only_owned_pending() {
+    let (_dir, mut storage, snap) = approved_import();
+    let pending = storage
+        .root
+        .join(format!(".hub-{}.pending", snap.entries[0].manifest_sha256));
+    begin(&mut storage, &snap, "first");
+    assert_eq!(
+        hub::chunk_import(&mut storage, "wrong", 0, PAYLOAD_HEX),
+        Err("stale_import")
+    );
+    assert_eq!(
+        hub::finish_import(&mut storage, &snap, "first"),
+        Err("payload_size_mismatch")
+    );
+    assert!(!pending.exists());
+    begin(&mut storage, &snap, "hash");
+    hub::chunk_import(&mut storage, "hash", 0, &"00".repeat(15)).unwrap();
+    assert_eq!(
+        hub::finish_import(&mut storage, &snap, "hash"),
+        Err("payload_hash_mismatch")
+    );
+    assert!(!pending.exists());
+    begin(&mut storage, &snap, "cancel");
+    hub::abort_import(&mut storage, "cancel").unwrap();
+    assert!(!pending.exists());
+    begin(&mut storage, &snap, "timeout");
+    assert!(hub::expire_import(
+        &mut storage,
+        std::time::Instant::now() + std::time::Duration::from_secs(121)
+    ));
+    assert!(!pending.exists());
+    begin(&mut storage, &snap, "shutdown");
+    drop(storage);
+    assert!(!pending.exists());
+}
+#[test]
+fn import_guard_preserves_foreign_pending_and_existing_payload() {
+    let (_dir, mut storage, snap) = approved_import();
+    let e = &snap.entries[0];
+    let pending = storage
+        .root
+        .join(format!(".hub-{}.pending", e.manifest_sha256));
+    let sentinel = storage.root.join("sentinel");
+    fs::write(&sentinel, b"preserved").unwrap();
+    symlink(&sentinel, &pending).unwrap();
+    assert_eq!(
+        hub::begin_import(
+            &mut storage,
+            &snap,
+            1,
+            &e.plugin_id,
+            &e.manifest_sha256,
+            "bad",
+            std::time::Instant::now()
+        ),
+        Err("hub_storage_error")
+    );
+    assert_eq!(fs::read(&sentinel).unwrap(), b"preserved");
+    fs::remove_file(&pending).unwrap();
+    begin(&mut storage, &snap, "replacement");
+    fs::remove_file(&pending).unwrap();
+    fs::write(&pending, b"foreign").unwrap();
+    hub::abort_import(&mut storage, "replacement").unwrap();
+    assert_eq!(fs::read(&pending).unwrap(), b"foreign");
+    fs::remove_file(&pending).unwrap();
+    begin(&mut storage, &snap, "clobber");
+    hub::chunk_import(&mut storage, "clobber", 0, PAYLOAD_HEX).unwrap();
+    let destination = storage
+        .root
+        .join(format!("hub-{}.payload", e.manifest_sha256));
+    fs::write(&destination, b"foreign").unwrap();
+    assert!(hub::finish_import(&mut storage, &snap, "clobber").is_err());
+    assert_eq!(fs::read(&destination).unwrap(), b"foreign");
+    assert!(!pending.exists());
+}
+#[test]
+fn import_rechecks_approval_and_descriptor_bytes_before_publish() {
+    let (_dir, mut storage, snap) = approved_import();
+    let e = &snap.entries[0];
+    let pending = storage
+        .root
+        .join(format!(".hub-{}.pending", e.manifest_sha256));
+    begin(&mut storage, &snap, "tamper");
+    hub::chunk_import(&mut storage, "tamper", 0, PAYLOAD_HEX).unwrap();
+    fs::write(&pending, b"corrupt bytes!\n!").unwrap();
+    assert!(hub::finish_import(&mut storage, &snap, "tamper").is_err());
+    assert!(!pending.exists());
+    begin(&mut storage, &snap, "revoked");
+    hub::chunk_import(&mut storage, "revoked", 0, PAYLOAD_HEX).unwrap();
+    fs::write(
+        storage.root.join("hub-approvals.json"),
+        br#"{"version":1,"revision":2,"records":[]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        hub::finish_import(&mut storage, &snap, "revoked"),
+        Err("permissions_not_approved")
+    );
+    assert!(!pending.exists());
+}
+
+#[test]
+fn real_core_can_cancel_import_when_configuration_requires_restart() {
+    use gideon_base::{
+        core::Core,
+        protocol::{Operation, Request, VERSION},
+        storage::ConfigurationStatus,
+    };
+    let (_dir, mut storage, snap) = approved_import();
+    let mut core = Core::new(std::time::Duration::from_secs(10), false);
+    core.configure_storage(&storage);
+    core.configure_hub(snap.clone());
+    let entry = &snap.entries[0];
+    let started = core.handle_with_storage(
+        Request {
+            version: VERSION,
+            request_id: "begin".into(),
+            operation: Operation::HubBegin {
+                revision: 1,
+                plugin_id: entry.plugin_id.clone(),
+                manifest_sha256: entry.manifest_sha256.clone(),
+            },
+        },
+        std::time::Instant::now(),
+        Some(&mut storage),
+    );
+    assert_eq!(started.code, "ok");
+    let id = started.hub.unwrap().import.unwrap().import_id;
+    storage.configuration_status = ConfigurationStatus::RestartRequired;
+    core.configure_storage(&storage);
+    let cancelled = core.handle_with_storage(
+        Request {
+            version: VERSION,
+            request_id: "cancel".into(),
+            operation: Operation::HubAbort { import_id: id },
+        },
+        std::time::Instant::now(),
+        Some(&mut storage),
+    );
+    assert_eq!(cancelled.code, "ok");
+    assert!(cancelled.hub.unwrap().import.is_none());
+    assert!(!storage
+        .root
+        .join(format!(".hub-{}.pending", entry.manifest_sha256))
+        .exists());
+}
