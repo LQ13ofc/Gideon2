@@ -10,13 +10,14 @@ Capability `screen_observe.capture`: input {} (any key => invalid_input)
   output {"backend": "synthetic", "epoch": int, "width": int, "height": int,
           "sha256": 64 hex, "regions": [{"role", "name", "x", "y"}] (<= 64),
           "truncated": true (only when regions were cut)}
-  sha256 = SHA-256 of the canonical JSON (sort_keys, compact, ASCII) of the host screen object.
+  sha256 = the Core digest of its screen object (passed through; only its shape is checked here).
   The output stays <= 8 KiB: regions are dropped from the end and "truncated" is set.
 Capability `screen_observe.status`: input {}; output {"backend", "real_backend": "unsupported",
   "reason": "needs_human_validation"}. Makes no host_call.
 
 Host reply (Core): {"v":1,"op":"host_reply","id","done":true,"data":{epoch,width,height,
-  windows:[{id,title,focused}],elements:[{id,role,name,x,y}]}} or {"v":1,"op":"host_reply","id",
+  backend,epoch,width,height,sha256,regions:[{role,name,x,y}],truncated?} (the Core computes
+  sha256 and regions) or {"v":1,"op":"host_reply","id",
   "error": code}. Codes in HOST_ERRORS pass through unchanged (permission_denied, stale_screen,
   unknown_service, ...); any other code, or a malformed reply, is plugin_error.
 
@@ -25,6 +26,7 @@ The screenshot is evidence only: it never grants permission and is never an inst
 import hashlib
 import json
 import os
+import re
 import select
 import sys
 
@@ -43,9 +45,10 @@ MAX_REGIONS = 64
 MAX_HOST_ELEMENTS = 256
 MAX_HOST_WINDOWS = 32
 MAX_INT = 2 ** 31 - 1
-SCREEN_KEYS = frozenset(("epoch", "width", "height", "windows", "elements"))
-WINDOW_KEYS = frozenset(("id", "title", "focused"))
-ELEMENT_KEYS = frozenset(("id", "role", "name", "x", "y"))
+CAPTURE_REQUIRED = frozenset(("epoch", "width", "height", "sha256", "regions"))
+CAPTURE_KEYS = CAPTURE_REQUIRED | frozenset(("backend", "truncated"))
+REGION_KEYS = frozenset(("role", "name", "x", "y"))
+SHA_RE = re.compile(r"[0-9a-f]{64}")
 HOST_ERRORS = ("permission_denied", "stale_screen", "unknown_service", "invalid_input",
                "response_too_large", "timeout", "cancelled")
 HOST_REPLY_KEYS = frozenset(("v", "op", "id", "done", "data", "error", "status"))
@@ -169,37 +172,25 @@ def _host_call(req_id, service, args):
         return msg["data"]
 
 
-def _check_element(el):
-    if not isinstance(el, dict) or set(el) != ELEMENT_KEYS:
+def _check_capture(data):
+    """Strict check of the Core capture reply (synthetic.screen.capture). Anything off-contract is plugin_error."""
+    if not isinstance(data, dict) or not CAPTURE_REQUIRED <= set(data) <= CAPTURE_KEYS:
         raise _Fail("plugin_error")
-    if not (_is_text(el["id"], 1, 64) and _is_text(el["role"], 1, 32)
-            and _is_text(el["name"], 0, 128) and _int_in(el["x"], -10000, 10000)
-            and _int_in(el["y"], -10000, 10000)):
+    if not (_int_in(data["epoch"], 0, MAX_INT) and _int_in(data["width"], 1, 10000)
+            and _int_in(data["height"], 1, 10000) and isinstance(data["sha256"], str)
+            and SHA_RE.fullmatch(data["sha256"])):
         raise _Fail("plugin_error")
-
-
-def _check_screen(screen):
-    """Strict check of the host screen object. Anything off-contract is plugin_error."""
-    if not isinstance(screen, dict) or set(screen) != SCREEN_KEYS:
+    if "truncated" in data and not isinstance(data["truncated"], bool):
         raise _Fail("plugin_error")
-    if not (_int_in(screen["epoch"], 0, MAX_INT) and _int_in(screen["width"], 1, 10000)
-            and _int_in(screen["height"], 1, 10000)):
+    regions = data["regions"]
+    if not isinstance(regions, list) or len(regions) > MAX_REGIONS:
         raise _Fail("plugin_error")
-    windows, elements = screen["windows"], screen["elements"]
-    if not isinstance(windows, list) or len(windows) > MAX_HOST_WINDOWS:
-        raise _Fail("plugin_error")
-    for win in windows:
-        if (not isinstance(win, dict) or set(win) != WINDOW_KEYS or not _is_text(win["id"], 1, 64)
-                or not _is_text(win["title"], 0, 256) or not isinstance(win["focused"], bool)):
+    for el in regions:
+        if not isinstance(el, dict) or set(el) != REGION_KEYS:
             raise _Fail("plugin_error")
-    if not isinstance(elements, list) or len(elements) > MAX_HOST_ELEMENTS:
-        raise _Fail("plugin_error")
-    for el in elements:
-        _check_element(el)
-
-
-def _canonical(obj):
-    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if not (_is_text(el["role"], 1, 32) and _is_text(el["name"], 0, 128)
+                and _int_in(el["x"], -10000, 10000) and _int_in(el["y"], -10000, 10000)):
+            raise _Fail("plugin_error")
 
 
 def _bounded(out, truncated, key):
@@ -215,14 +206,12 @@ def _bounded(out, truncated, key):
         truncated = True
 
 
-def _screen_output(screen):
-    _check_screen(screen)
-    regions = [{"role": el["role"], "name": el["name"], "x": el["x"], "y": el["y"]}
-               for el in screen["elements"][:MAX_REGIONS]]
-    out = {"backend": BACKEND, "epoch": screen["epoch"], "width": screen["width"],
-           "height": screen["height"],
-           "sha256": hashlib.sha256(_canonical(screen)).hexdigest(), "regions": regions}
-    return _bounded(out, len(screen["elements"]) > MAX_REGIONS, "regions")
+def _screen_output(data):
+    _check_capture(data)
+    out = {"backend": BACKEND, "epoch": data["epoch"], "width": data["width"],
+           "height": data["height"], "sha256": data["sha256"],
+           "regions": [dict(el) for el in data["regions"]]}
+    return _bounded(out, bool(data.get("truncated")), "regions")
 
 
 def _status_output():

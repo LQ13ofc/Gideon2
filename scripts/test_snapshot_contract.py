@@ -17,11 +17,12 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / 'app'))
 sys.path.insert(0, str(BASE / 'scripts'))
-from bridge import validate_snapshot  # noqa: E402
+from bridge import PERCEPTION_OUTPUTS, perception_input_problem, validate_snapshot  # noqa: E402
 from hub_import import upload as stage_upload  # noqa: E402
 
 BIN = BASE / 'target/release/gideon-base'
 CATALOG = BASE / 'tests/fixtures/hub-c1.json'
+C4_CATALOG = BASE / 'tests/fixtures/hub-c4.json'
 PLUGIN_SRC = BASE / 'tests/fixtures/llm_engine.py'
 FAKE_SRC = BASE / 'tests/fixtures/fake_llm_server.py'
 PYTHON = '/usr/bin/python3'
@@ -44,11 +45,12 @@ class Core:
         self.last_sequence = 0
         self.validated = []
         self.extra = []  # extra Core flags (C3 agent run: --home, --agent-synthetic)
+        self.catalog = CATALOG  # C4 contract: a merged catalog of llm_engine and the six C4 plugins
 
     def args(self):
         args = [str(BIN), '--root', str(self.root), '--virtual-input', '--commands-sandbox',
                 '--plugin-python', PYTHON, '--net-allow-loopback',
-                '--hub-catalog', str(CATALOG), sha(CATALOG)]
+                '--hub-catalog', str(self.catalog), sha(self.catalog)]
         # Base pack needs its wake replay and TTS profile (same inputs as the C0/C1 gates); they add the
         # pack, speech and transcript sections to what the contract covers.
         manifest = BASE / 'target/a3-assets/replay-manifest.json'
@@ -359,6 +361,85 @@ class SnapshotContract(unittest.TestCase):
 
     def start_fake_port(self):
         return int(self.start_fake().rsplit(':', 1)[1].split('/')[0])
+
+    def test_c4_plugin_outputs_validate_against_real_core(self):
+        # Every allowlisted C4 capability is invoked on the real Core (six plugins, synthetic world under a private
+        # home) and each output must pass the bridge rule of its capability; the inputs pass perception_input_problem.
+        home = self.td / 'home'
+        home.mkdir()
+        catalog = self.td / 'catalog-c4.json'
+        c1 = json.loads(CATALOG.read_text(encoding='utf-8'))
+        c4 = json.loads(C4_CATALOG.read_text(encoding='utf-8'))
+        catalog.write_text(json.dumps({'version': c4['version'], 'repository': c4['repository'],
+                                       'plugins': c1['plugins'] + c4['plugins']}), encoding='utf-8')
+        self.core.catalog = catalog
+        self.core.extra = ['--agent-synthetic', '--home', str(home)]
+        self.core.start()
+        C4_PLUGINS = ['screen_observe', 'computer_control', 'audio_advanced', 'mic_advanced', 'camera_gesture',
+                      'display_manipulate']
+        for pid in C4_PLUGINS:
+            hub = self.core.req()['hub']
+            entry = next(e for e in hub['entries'] if e['plugin_id'] == pid)
+            ack = self.core.req('hub_approve', revision=hub['approval_revision'], plugin_id=pid,
+                                manifest_sha256=entry['manifest_sha256'], permissions=entry['permissions'],
+                                publisher_unverified_ack=True)
+            self.assertEqual(ack['code'], 'ok', pid)
+            stage_upload(str(self.root), pid, str(BASE / 'tests/fixtures/c4' / f'{pid}.py'))
+            hub = self.core.req()['hub']
+            install = self.core.req('hub_install', revision=hub['install_revision'], plugin_id=pid,
+                                    manifest_sha256=entry['manifest_sha256'])
+            self.assertEqual(install['code'], 'ok', pid)
+            enable = self.core.req('plugin_enable', revision=self.core.req()['plugins']['revision'], plugin_id=pid)
+            self.assertEqual(enable['code'], 'ok', pid)
+            self.core.wait(lambda s, p=pid: plugin_item(s, p) is not None and plugin_item(s, p)['state'] == 'running',
+                           20, f'{pid} running')
+        calls = [
+            ('screen_observe.status', {}), ('screen_observe.capture', {}),
+            ('computer_control.status', {}), ('computer_control.tree', {}),
+            ('computer_control.act', {'kind': 'click', 'epoch': 1, 'element': 'apply'}),
+            ('computer_control.act', {'kind': 'focus', 'epoch': 2, 'element': 'field'}),
+            ('computer_control.act', {'kind': 'type', 'epoch': 3, 'text': 'ola'}),
+            ('computer_control.act', {'kind': 'key', 'epoch': 4, 'key': 'enter'}),
+            ('audio_advanced.state', {}),
+            ('audio_advanced.act', {'kind': 'route', 'route': 'headphones'}),
+            ('audio_advanced.act', {'kind': 'app_volume', 'app': 'player', 'volume': 80}),
+            ('audio_advanced.act', {'kind': 'eq', 'preset': 'music'}),
+            ('audio_advanced.act', {'kind': 'denoise', 'enabled': True}),
+            ('mic_advanced.state', {}), ('mic_advanced.configure', {'gain': 70, 'filter': 'voice'}),
+            ('mic_advanced.monitor', {'enabled': True}), ('mic_advanced.record', {'action': 'start'}),
+            ('mic_advanced.record', {'action': 'stop'}),
+            ('camera_gesture.state', {}), ('camera_gesture.optin', {'enabled': True}),
+            ('camera_gesture.capture', {}), ('camera_gesture.gestures', {}),
+            ('camera_gesture.optin', {'enabled': False}),
+            ('display_manipulate.status', {}),
+        ]
+        covered = set()
+        for cap, inp in calls:
+            self.assertIsNone(perception_input_problem(cap, json.dumps(inp)), (cap, inp))
+            reply = self.core.req('capability_invoke', capability=cap, input=inp, deadline_ms=5000)
+            self.assertEqual(reply['code'], 'ok', (cap, reply))
+            self.core.wait(lambda s, c=cap: s.get('capability_result') is not None
+                           and s['capability_result']['capability'] == c, 15, f'result {cap}')
+            snap = self.core.snap(f'after {cap}')
+            result = snap['capability_result']
+            self.assertTrue(result['ok'], (cap, result))
+            self.assertTrue(PERCEPTION_OUTPUTS[cap](result['output']), (cap, result['output']))
+            covered.add(cap)
+        self.assertEqual(covered, set(PERCEPTION_OUTPUTS), 'every allowlisted C4 capability was checked')
+        # Negative controls: the rules refuse a near miss (extra key, wrong backend, missing focus flag).
+        good = dict(result['output'])
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status'](dict(good, extra=1)))
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({'supported': True}))
+        tree = self.core.req('capability_invoke', capability='computer_control.tree', input={}, deadline_ms=5000)
+        self.assertEqual(tree['code'], 'ok')
+        self.core.wait(lambda s: s.get('capability_result') is not None
+                       and s['capability_result']['capability'] == 'computer_control.tree', 15, 'tree result')
+        tree_out = self.core.req()['capability_result']['output']
+        self.assertTrue(PERCEPTION_OUTPUTS['computer_control.tree'](tree_out))
+        bad_tree = json.loads(json.dumps(tree_out))
+        del bad_tree['elements'][0]['focused']
+        self.assertFalse(PERCEPTION_OUTPUTS['computer_control.tree'](bad_tree))
+        self.core.stop()
 
     def test_wake_replay_voice_session_validates_every_snapshot(self):
         # The replay starts at boot: capture, transcript, command receipt and speech (sink, PCM hash) all appear.

@@ -1497,27 +1497,32 @@ class AgentBridge(unittest.TestCase):
         self.assertEqual(bridge.agentBudget,{'tokens_used':10,'tokens_max':4096})
         self.assertEqual((bridge.agentAnswer,bridge.agentStateLabel),('ok','Concluído'))
         self.assertNotIn('goal',repr(bridge.agentSteps))
-# C4 perception and action (docs/C4.md). The output samples are the documented C4 shapes; the plugins do not exist in the tree yet, so these are assumed contracts.
+# C4 perception and action (docs/C4.md). The output samples are the real C4 plugin shapes that test_snapshot_contract.py captures from the real Core.
+# Samples are the real C4 plugin output shapes (captured from the real Core by test_snapshot_contract.py).
+_REAL={'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'}
+_MIC={**_REAL,'device':'synthetic-mic','gain':40,'filter':'off','monitor':False,'recording':False,'indicator':False}
+_CAM={**_REAL,'opt_in':False,'indicator':False,'frame_seq':0}
+_AUDIO={**_REAL,'routes':[{'id':'speakers','active':True},{'id':'headphones','active':False}],'apps':[{'id':'player','volume':50}],'eq':'flat','denoise':False}
 PERC_OK={
     'screen_observe.capture':{'backend':'synthetic','epoch':1,'width':1280,'height':720,'sha256':'c'*64,'regions':[{'role':'button','name':'OK','x':10,'y':20}]},
     'screen_observe.status':{'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'},
-    'computer_control.tree':{'backend':'synthetic','epoch':1,'elements':[{'id':'b1','role':'button','name':'OK','x':10,'y':20}]},
-    'computer_control.act':{'backend':'synthetic','kind':'click','verified':True},
+    'computer_control.tree':{'backend':'synthetic','epoch':1,'elements':[{'id':'b1','role':'button','name':'OK','x':10,'y':20,'focused':False}]},
+    'computer_control.act':{'backend':'synthetic','kind':'click','epoch':2,'verified':True,'element':'b1'},
     'computer_control.status':{'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'},
-    'audio_advanced.state':{'backend':'synthetic','routes':['speaker'],'apps':[{'id':'player','volume':50}],'eq':'flat','denoise':False},
-    'audio_advanced.act':{'backend':'synthetic','kind':'app_volume','verified':True},
-    'mic_advanced.state':{'backend':'synthetic','device':'virtual_mic','gain':40,'filter':False,'monitor':False,'recording':False,'indicator':False},
-    'mic_advanced.configure':{'backend':'synthetic','verified':True,'indicator':False},
-    'mic_advanced.monitor':{'backend':'synthetic','verified':True,'indicator':True},
-    'mic_advanced.record':{'backend':'synthetic','verified':True,'recording':True,'indicator':True},
-    'camera_gesture.state':{'backend':'synthetic','opt_in':False,'indicator':False,'frame_seq':0,'gesture':None},
-    'camera_gesture.optin':{'backend':'synthetic','opt_in':True,'indicator':True},
-    'camera_gesture.capture':{'backend':'synthetic','frame_seq':3,'indicator':True},
-    'camera_gesture.gestures':{'backend':'synthetic','gestures':['wave','point']},
+    'audio_advanced.state':dict(_AUDIO),
+    'audio_advanced.act':{**_AUDIO,'kind':'app_volume','verified':True},
+    'mic_advanced.state':dict(_MIC),
+    'mic_advanced.configure':{**_MIC,'verified':True},
+    'mic_advanced.monitor':{**_MIC,'monitor':True,'indicator':True,'verified':True},
+    'mic_advanced.record':{**_MIC,'recording':True,'indicator':True,'action':'start','verified':True},
+    'camera_gesture.state':{**_CAM,'gesture':None},
+    'camera_gesture.optin':{**_CAM,'opt_in':True,'indicator':True,'verified':True},
+    'camera_gesture.capture':{**_CAM,'opt_in':True,'indicator':True,'frame_seq':3},
+    'camera_gesture.gestures':{**_REAL,'gestures':['wave','thumbs_up']},
     'display_manipulate.status':{'supported':False,'state':'UNSUPPORTED','reason':'no_compositor_api_in_environment','note':'overlay/captura não é manipulação de saída'},
 }
-PERC_INPUT_OK=[('screen_observe.capture','{}'),('computer_control.act','{"kind":"click","epoch":1,"element":"b1"}'),('audio_advanced.act','{"kind":"eq","preset":"flat"}'),('mic_advanced.configure','{"gain":40,"filter":true}'),('mic_advanced.monitor','{"enabled":true}'),('mic_advanced.record','{"action":"start"}'),('camera_gesture.optin','{"enabled":true}')]
-PERC_INPUT_BAD=[('screen_observe.capture','{"x":1}'),('screen_observe.capture','[]'),('screen_observe.capture','null'),('screen_observe.capture','{"a":NaN}'),('screen_observe.capture','{'),('screen_observe.capture','{"a":"'+'x'*8200+'"}'),('screen_observe.capture','{"a":"'+'é'*4096+'"}'),('computer_control.act','{"kind":"drag","epoch":1}'),('computer_control.act','{"kind":"click"}'),('computer_control.act','{"kind":"click","epoch":0}'),('audio_advanced.act','{"kind":"mute"}'),('mic_advanced.configure','{"gain":101}'),('mic_advanced.configure','{"gain":true}'),('mic_advanced.record','{"action":"start","extra":1}'),('mic_advanced.record','{"action":"loop"}'),('camera_gesture.optin','{"enabled":"yes"}'),('display_manipulate.status','{"force":true}'),('os.exec','{}'),('screen_observe.capture_all','{}'),('llm_engine.chat','{"text":"x"}')]
+PERC_INPUT_OK=[('screen_observe.capture','{}'),('computer_control.act','{"kind":"click","epoch":1,"element":"b1"}'),('audio_advanced.act','{"kind":"eq","preset":"flat"}'),('mic_advanced.configure','{"gain":40,"filter":"voice"}'),('mic_advanced.monitor','{"enabled":true}'),('mic_advanced.record','{"action":"start"}'),('camera_gesture.optin','{"enabled":true}')]
+PERC_INPUT_BAD=[('screen_observe.capture','{"x":1}'),('screen_observe.capture','[]'),('screen_observe.capture','null'),('screen_observe.capture','{"a":NaN}'),('screen_observe.capture','{'),('screen_observe.capture','{"a":"'+'x'*8200+'"}'),('screen_observe.capture','{"a":"'+'é'*4096+'"}'),('computer_control.act','{"kind":"drag","epoch":1}'),('computer_control.act','{"kind":"click"}'),('computer_control.act','{"kind":"click","epoch":0}'),('audio_advanced.act','{"kind":"mute"}'),('mic_advanced.configure','{"gain":101}'),('mic_advanced.configure','{"gain":true}'),('mic_advanced.record','{"action":"start","extra":1}'),('mic_advanced.record','{"action":"loop"}'),('mic_advanced.configure','{"filter":true}'),('mic_advanced.configure','{"filter":"noise_gate"}'),('audio_advanced.act','{"kind":"eq","preset":"treble"}'),('camera_gesture.optin','{"enabled":"yes"}'),('display_manipulate.status','{"force":true}'),('os.exec','{}'),('screen_observe.capture_all','{}'),('llm_engine.chat','{"text":"x"}')]
 def perception_snapshot(plugins=(('screen_observe','running'),),result=None,approved=True):
     """Installed, approved C4 plugins in the given states; each exposes its allowlisted capabilities only."""
     digest='a'*64;entries=[];records=[];items=[]
@@ -1553,8 +1558,8 @@ class PerceptionContract(unittest.TestCase):
             with self.subTest(ok=capability,text=text[:40]):self.assertIsNone(perception_input_problem(capability,text))
         for capability,text in PERC_INPUT_BAD:
             with self.subTest(bad=capability,text=text[:40]):self.assertIsNotNone(perception_input_problem(capability,text))
-        self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"eq","a":"'+'x'*8100+'"}'),None)
-        self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"eq","a":"'+'x'*8200+'"}'),'Entrada acima de 8 KiB')
+        self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"denoise","a":"'+'x'*8100+'"}'),None)
+        self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"denoise","a":"'+'x'*8200+'"}'),'Entrada acima de 8 KiB')
         self.assertEqual(perception_input_problem('os.exec','{}'),'Capability de percepção desconhecida')
         self.assertEqual(perception_input_problem('screen_observe.capture','{"x":1}'),'Esta capability não aceita entrada')
     def test_every_output_rule_accepts_its_sample_and_refuses_forgery(self):
@@ -1578,7 +1583,9 @@ class PerceptionContract(unittest.TestCase):
         self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.capture']({**PERC_OK['screen_observe.capture'],'sha256':'C'*64}))
         self.assertFalse(PERCEPTION_OUTPUTS['audio_advanced.state']({**PERC_OK['audio_advanced.state'],'apps':[{'id':'p','volume':101}]}))
         self.assertFalse(PERCEPTION_OUTPUTS['mic_advanced.state']({**PERC_OK['mic_advanced.state'],'gain':-1}))
-        self.assertFalse(PERCEPTION_OUTPUTS['camera_gesture.gestures']({'backend':'synthetic','gestures':['x']*17}))
+        self.assertFalse(PERCEPTION_OUTPUTS['camera_gesture.gestures']({**PERC_OK['camera_gesture.gestures'],'gestures':['x']*17}))
+        self.assertFalse(PERCEPTION_OUTPUTS['mic_advanced.monitor']({**PERC_OK['mic_advanced.monitor'],'indicator':False}),'indicator must follow monitor')
+        self.assertFalse(PERCEPTION_OUTPUTS['camera_gesture.optin']({**PERC_OK['camera_gesture.optin'],'indicator':False}),'indicator must equal opt-in')
     def test_perception_text_is_plain_bounded_and_portuguese(self):
         text=perception_text(PERC_OK['screen_observe.capture'])
         self.assertTrue(text.startswith('backend: sintético'));self.assertNotIn('\x00',text)
@@ -1643,9 +1650,9 @@ class PerceptionBridge(unittest.TestCase):
         self.assertEqual((bridge.perceptionMicIndicator,bridge.perceptionCameraIndicator),('não lido','não lido'))
         perception_call(bridge,peer,'mic_advanced.record',perception_answer('mic_advanced.record',{**PERC_OK['mic_advanced.record']}),plugins=both,text='{"action":"start"}')
         self.assertEqual(bridge.perceptionMicIndicator,'ligado')
-        perception_call(bridge,peer,'camera_gesture.optin',perception_answer('camera_gesture.optin',{**PERC_OK['camera_gesture.optin'],'indicator':False}),plugins=both,text='{"enabled":false}')
+        perception_call(bridge,peer,'camera_gesture.optin',perception_answer('camera_gesture.optin',{**PERC_OK['camera_gesture.optin'],'opt_in':False,'indicator':False}),plugins=both,text='{"enabled":false}')
         self.assertEqual(bridge.perceptionCameraIndicator,'desligado')
-        perception_call(bridge,peer,'mic_advanced.monitor',perception_answer('mic_advanced.monitor',{**PERC_OK['mic_advanced.monitor'],'indicator':False}),plugins=both,text='{"enabled":true}')
+        perception_call(bridge,peer,'mic_advanced.monitor',perception_answer('mic_advanced.monitor',{**PERC_OK['mic_advanced.monitor'],'monitor':False,'indicator':False}),plugins=both,text='{"enabled":false}')
         self.assertEqual(bridge.perceptionMicIndicator,'desligado')
         bridge._apply(validate_snapshot(perception_snapshot((('mic_advanced','disabled'),)),'r',0))
         self.assertEqual(bridge.perceptionMicIndicator,'plugin inativo')

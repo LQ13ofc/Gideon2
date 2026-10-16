@@ -19,8 +19,8 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
     agent-done      after Autorizar the run reached done; the final answer is shown as PlainText and Iniciar is enabled again
   perception phase (C4 UI, needs a real Core with the six C4 plugins installed, approved and enabled, started with
     --agent-synthetic; screen_observe, computer_control, audio_advanced, mic_advanced, camera_gesture and display_manipulate).
-    Expected setup: each plugin runs its synthetic backend and display_manipulate answers its UNSUPPORTED status. C4.1-C4.6 are
-    not implemented in the tree yet, so this phase cannot pass before those plugins exist; it is not counted as passed until then.
+    Expected setup: each plugin runs its synthetic backend and display_manipulate answers its UNSUPPORTED status. scripts/verify_c4.py
+    starts this phase on a Core with the six plugins installed, approved and enabled.
     perception-ready        Percepção offered; every synthetic card reads SINTÉTICO — sem hardware real, display reads UNSUPPORTED,
                             the microphone and camera indicators are on the page
     perception-captured     Capturar went through the Core and its result is shown as PlainText from the checked output

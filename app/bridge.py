@@ -334,7 +334,7 @@ def chat_messages_for(history,text):
 
 
 # C4 perception and action plugins (docs/C4.md). The allowlist is the only capability set perceptionInvoke may send. Shapes below are the
-# C4 contract: real plugins are not in the tree yet, so each output rule is an assumption until the C4.1-C4.6 gates exist (see docs/C4.md).
+# C4 contract (docs/C4.md): each rule matches the real output of its plugin, captured from the real Core by test_snapshot_contract.py (test_c4_plugin_outputs_validate_against_real_core).
 PERCEPTION_PLUGINS=('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate')
 PERCEPTION_NO_INPUT=frozenset({'screen_observe.capture','screen_observe.status','computer_control.tree','computer_control.status','audio_advanced.state','mic_advanced.state','camera_gesture.state','camera_gesture.capture','camera_gesture.gestures','display_manipulate.status'})
 PERCEPTION_CAPABILITIES=PERCEPTION_NO_INPUT|frozenset({'computer_control.act','audio_advanced.act','mic_advanced.configure','mic_advanced.monitor','mic_advanced.record','camera_gesture.optin'})
@@ -347,30 +347,42 @@ def _no_constant(name):raise ValueError(name)
 def _exact(value,keys):return isinstance(value,dict) and set(value)==set(keys)
 def _synthetic(value):return value.get('backend')=='synthetic'
 def _region(item,keys,limit):return _exact(item,keys) and plain_text(item[keys[0]],limit) and all(is_int(item[k],0,16384) for k in keys[2:]) and plain_text(item[keys[1]],256)
-def _out_capture(o):return _exact(o,('backend','epoch','width','height','sha256','regions')) and _synthetic(o) and is_int(o['epoch'],0,2**32) and is_int(o['width'],1,16384) and is_int(o['height'],1,16384) and digest(o['sha256']) and isinstance(o['regions'],list) and len(o['regions'])<=64 and all(_region(r,('role','name','x','y'),64) for r in o['regions'])
-def _out_status(o):return _exact(o,('backend','real_backend','reason')) and _synthetic(o) and o['real_backend']=='unsupported' and o['reason']=='needs_human_validation'
+def _keys_ok(o,required,optional=()):return isinstance(o,dict) and set(required)<=set(o)<=set(required)|set(optional)
+def _real_ok(o):return _synthetic(o) and o['real_backend']=='unsupported' and o['reason']=='needs_human_validation'
+REAL_KEYS=('backend','real_backend','reason')
+MIC_KEYS=REAL_KEYS+('device','gain','filter','monitor','recording','indicator')
+CAM_KEYS=REAL_KEYS+('opt_in','indicator','frame_seq')
+AUDIO_KEYS=REAL_KEYS+('routes','apps','eq','denoise')
+AUDIO_PRESETS=('flat','voice','music','bass')
+MIC_FILTERS=('off','low_cut','voice')
+def _mic_fields(o):return _real_ok(o) and plain_text(o['device'],128) and is_int(o['gain'],0,100) and o['filter'] in MIC_FILTERS and all(type(o[k]) is bool for k in ('monitor','recording','indicator')) and o['indicator']==(o['monitor'] or o['recording'])
+def _cam_fields(o):return _real_ok(o) and type(o['opt_in']) is bool and type(o['indicator']) is bool and o['indicator']==o['opt_in'] and is_int(o['frame_seq'],0,2**32)
+def _audio_fields(o):
+    if not (_real_ok(o) and isinstance(o['routes'],list) and len(o['routes'])<=8 and isinstance(o['apps'],list) and len(o['apps'])<=8):return False
+    return all(_keys_ok(r,('id','active')) and plain_text(r['id'],64) and type(r['active']) is bool for r in o['routes']) and all(_keys_ok(a,('id','volume')) and plain_text(a['id'],64) and is_int(a['volume'],0,100) for a in o['apps']) and o['eq'] in AUDIO_PRESETS and type(o['denoise']) is bool
+def _out_capture(o):return _keys_ok(o,('backend','epoch','width','height','sha256','regions'),('truncated',)) and _synthetic(o) and is_int(o['epoch'],0,2**32) and is_int(o['width'],1,16384) and is_int(o['height'],1,16384) and digest(o['sha256']) and isinstance(o['regions'],list) and len(o['regions'])<=64 and all(_region(r,('role','name','x','y'),64) for r in o['regions']) and ('truncated' not in o or type(o['truncated']) is bool)
+def _region(item,keys,limit):return _exact(item,keys) and plain_text(item[keys[0]],limit) and all(is_int(item[k],0,16384) for k in keys[2:]) and plain_text(item[keys[1]],256)
+def _out_status(o):return _keys_ok(o,REAL_KEYS) and _real_ok(o)
 def _out_tree(o):
-    if not (_exact(o,('backend','epoch','elements')) and _synthetic(o) and is_int(o['epoch'],0,2**32) and isinstance(o['elements'],list) and len(o['elements'])<=PERCEPTION_ELEMENTS):return False
-    return all(_exact(e,('id','role','name','x','y')) and plain_text(e['id'],64) and plain_text(e['role'],64) and plain_text(e['name'],256) and is_int(e['x'],0,16384) and is_int(e['y'],0,16384) for e in o['elements'])
-def _out_cc_act(o):return _exact(o,('backend','kind','verified')) and _synthetic(o) and o['kind'] in ('click','type','key','focus') and type(o['verified']) is bool
-def _out_audio_act(o):return _exact(o,('backend','kind','verified')) and _synthetic(o) and o['kind'] in ('route','app_volume','eq','denoise') and type(o['verified']) is bool
-def _out_audio_state(o):
-    if not (_exact(o,('backend','routes','apps','eq','denoise')) and _synthetic(o) and isinstance(o['routes'],list) and len(o['routes'])<=8 and isinstance(o['apps'],list) and len(o['apps'])<=8):return False
-    return all(plain_text(r,64) for r in o['routes']) and all(_exact(a,('id','volume')) and plain_text(a['id'],64) and is_int(a['volume'],0,100) for a in o['apps']) and plain_text(o['eq'],64) and type(o['denoise']) is bool
-def _out_mic_state(o):return _exact(o,('backend','device','gain','filter','monitor','recording','indicator')) and _synthetic(o) and plain_text(o['device'],128) and is_int(o['gain'],0,100) and all(type(o[k]) is bool for k in ('filter','monitor','recording','indicator'))
-def _out_mic_receipt(o):return _exact(o,('backend','verified','indicator')) and _synthetic(o) and type(o['verified']) is bool and type(o['indicator']) is bool
-def _out_mic_record(o):return _exact(o,('backend','verified','recording','indicator')) and _synthetic(o) and all(type(o[k]) is bool for k in ('verified','recording','indicator'))
-def _out_cam_state(o):return _exact(o,('backend','opt_in','indicator','frame_seq','gesture')) and _synthetic(o) and type(o['opt_in']) is bool and type(o['indicator']) is bool and is_int(o['frame_seq'],0,2**32) and (o['gesture'] is None or plain_text(o['gesture'],64))
-def _out_cam_optin(o):return _exact(o,('backend','opt_in','indicator')) and _synthetic(o) and type(o['opt_in']) is bool and type(o['indicator']) is bool
-def _out_cam_capture(o):return _exact(o,('backend','frame_seq','indicator')) and _synthetic(o) and is_int(o['frame_seq'],0,2**32) and type(o['indicator']) is bool
-def _out_cam_gestures(o):return _exact(o,('backend','gestures')) and _synthetic(o) and isinstance(o['gestures'],list) and len(o['gestures'])<=PERCEPTION_GESTURES and all(plain_text(g,64) for g in o['gestures'])
-def _out_display(o):return _exact(o,('supported','state','reason','note')) and o['supported'] is False and o['state']=='UNSUPPORTED' and o['reason']=='no_compositor_api_in_environment' and o['note']=='overlay/captura não é manipulação de saída'
+    if not (_keys_ok(o,('backend','epoch','elements'),('truncated',)) and _synthetic(o) and is_int(o['epoch'],0,2**32) and isinstance(o['elements'],list) and len(o['elements'])<=PERCEPTION_ELEMENTS and ('truncated' not in o or type(o['truncated']) is bool)):return False
+    return all(_keys_ok(e,('id','role','name','x','y','focused')) and plain_text(e['id'],64) and plain_text(e['role'],64) and plain_text(e['name'],256) and is_int(e['x'],0,16384) and is_int(e['y'],0,16384) and type(e['focused']) is bool for e in o['elements'])
+def _out_cc_act(o):return _keys_ok(o,('backend','kind','epoch','verified'),('element',)) and _synthetic(o) and o['kind'] in ('click','type','key','focus') and is_int(o['epoch'],0,2**32) and type(o['verified']) is bool and ('element' not in o or plain_text(o['element'],64))
+def _out_audio_state(o):return _keys_ok(o,AUDIO_KEYS) and _audio_fields(o)
+def _out_audio_act(o):return _keys_ok(o,AUDIO_KEYS+('kind','verified')) and _audio_fields(o) and o['kind'] in ('route','app_volume','eq','denoise') and type(o['verified']) is bool
+def _out_mic_state(o):return _keys_ok(o,MIC_KEYS) and _mic_fields(o)
+def _out_mic_receipt(o):return _keys_ok(o,MIC_KEYS+('verified',)) and _mic_fields(o) and type(o['verified']) is bool
+def _out_mic_record(o):return _keys_ok(o,MIC_KEYS+('verified','action')) and _mic_fields(o) and o['action'] in ('start','stop') and type(o['verified']) is bool
+def _out_cam_state(o):return _keys_ok(o,CAM_KEYS+('gesture',)) and _cam_fields(o) and (o['gesture'] is None or plain_text(o['gesture'],64))
+def _out_cam_optin(o):return _keys_ok(o,CAM_KEYS+('verified',)) and _cam_fields(o) and type(o['verified']) is bool
+def _out_cam_capture(o):return _keys_ok(o,CAM_KEYS) and _cam_fields(o)
+def _out_cam_gestures(o):return _keys_ok(o,REAL_KEYS+('gestures',)) and _real_ok(o) and isinstance(o['gestures'],list) and len(o['gestures'])<=PERCEPTION_GESTURES and all(plain_text(g,64) for g in o['gestures'])
+def _out_display(o):return _keys_ok(o,('supported','state','reason','note')) and o['supported'] is False and o['state']=='UNSUPPORTED' and o['reason']=='no_compositor_api_in_environment' and o['note']=='overlay/captura não é manipulação de saída'
 # Output rule per allowlisted capability: a result that fails its rule is refused before QML sees it.
 PERCEPTION_OUTPUTS={'screen_observe.capture':_out_capture,'screen_observe.status':_out_status,'computer_control.tree':_out_tree,'computer_control.act':_out_cc_act,'computer_control.status':_out_status,'audio_advanced.state':_out_audio_state,'audio_advanced.act':_out_audio_act,'mic_advanced.state':_out_mic_state,'mic_advanced.configure':_out_mic_receipt,'mic_advanced.monitor':_out_mic_receipt,'mic_advanced.record':_out_mic_record,'camera_gesture.state':_out_cam_state,'camera_gesture.optin':_out_cam_optin,'camera_gesture.capture':_out_cam_capture,'camera_gesture.gestures':_out_cam_gestures,'display_manipulate.status':_out_display}
 def _in_act(capability,value):
     if capability=='computer_control.act':return value.get('kind') in ('click','type','key','focus') and is_int(value.get('epoch'),1)
-    if capability=='audio_advanced.act':return value.get('kind') in ('route','app_volume','eq','denoise')
-    if capability=='mic_advanced.configure':return set(value)<={'gain','filter'} and ('gain' not in value or is_int(value['gain'],0,100)) and ('filter' not in value or type(value['filter']) is bool)
+    if capability=='audio_advanced.act':return value.get('kind') in ('route','app_volume','eq','denoise') and (value.get('kind')!='eq' or value.get('preset') in AUDIO_PRESETS)
+    if capability=='mic_advanced.configure':return set(value)<={'gain','filter'} and ('gain' not in value or is_int(value['gain'],0,100)) and ('filter' not in value or value['filter'] in MIC_FILTERS)
     if capability=='mic_advanced.monitor':return set(value)=={'enabled'} and type(value['enabled']) is bool
     if capability=='mic_advanced.record':return set(value)=={'action'} and value['action'] in ('start','stop')
     return set(value)=={'enabled'} and type(value['enabled']) is bool

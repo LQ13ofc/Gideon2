@@ -2194,8 +2194,8 @@ fn bounded_object(output: Value) -> Option<Value> {
         && serde_json::to_vec(&output).is_ok_and(|b| b.len() <= MAX_OUTPUT);
     fits.then_some(output)
 }
-/// Plugin error codes that reach clients unchanged (C1). Any other plugin code reads `plugin_error`.
-const PASS_THROUGH_ERRORS: [&str; 18] = [
+/// Plugin error codes that reach clients unchanged (C1, C4 host codes of docs/C4.md). Any other plugin code reads `plugin_error`.
+const PASS_THROUGH_ERRORS: [&str; 29] = [
     "key_missing",
     "cloud_not_authorized",
     "provider_not_configured",
@@ -2214,6 +2214,17 @@ const PASS_THROUGH_ERRORS: [&str; 18] = [
     "model_not_found",
     "model_selftest_failed",
     "settings_unavailable",
+    "stale_screen",
+    "opt_in_required",
+    "unknown_service",
+    "unknown_element",
+    "no_focus",
+    "unknown_route",
+    "unknown_app",
+    "indicator_off",
+    "already_recording",
+    "not_recording",
+    "world_unavailable",
 ];
 fn pass_through(code: &str) -> &'static str {
     PASS_THROUGH_ERRORS

@@ -129,7 +129,16 @@ class World:
 
     def tree(self):
         return {"epoch": self.epoch,
-                "elements": [dict(e, focused=(e["id"] == self.focused)) for e in self.elements]}
+                "elements": [dict(e, focused=(e["id"] == self.focused)) for e in self.elements],
+                "truncated": False, "backend": "synthetic"}
+
+    def capture(self):
+        """Core reply of synthetic.screen.capture: sha256 of the screen object, at most 16 regions."""
+        return {"epoch": self.epoch, "width": self.width, "height": self.height,
+                "sha256": sha256_of(self.screen()),
+                "regions": [{"role": e["role"], "name": e["name"], "x": e["x"], "y": e["y"]}
+                            for e in self.elements[:16]],
+                "truncated": len(self.elements) > 16, "backend": "synthetic"}
 
     def state(self):
         return (self.epoch, self.focused, self.typed, list(self.keys), self.elements)
@@ -185,7 +194,7 @@ class CoreSim:
     def _dispatch(self, service, args):
         w = self.world
         if service == "synthetic.screen.capture":
-            return w.screen()
+            return w.capture()
         if service == "synthetic.input.a11y_tree":
             return w.tree()
         if args["epoch"] != w.epoch:
@@ -194,7 +203,7 @@ class CoreSim:
             return {}
         if service in ("synthetic.input.click", "synthetic.input.focus"):
             if not any(e["id"] == args["element"] for e in w.elements):
-                raise SimError("invalid_input")
+                raise SimError("unknown_element")
             w.focused = args["element"]
         elif service == "synthetic.input.type":
             w.typed += args["text"]
@@ -352,14 +361,14 @@ class ScreenObserveTest(PluginTestMixin, unittest.TestCase):
         self.sim.raw_reply = None
 
     def test_screen_contract_violations_are_plugin_error(self):
-        good = self.sim.world.screen()
+        good = self.sim.world.capture()
         bad_epoch = dict(good, epoch=-1)
         bad_extra = dict(good, extra=1)
-        bad_name = dict(good, elements=[dict(good["elements"][0], name="a\tb")])
-        too_many = dict(good, elements=[dict(good["elements"][0], id="e%d" % i)
-                                        for i in range(300)])
-        for label, override in {"epoch": bad_epoch, "extra key": bad_extra,
-                                "control char": bad_name, "too many": too_many}.items():
+        bad_name = dict(good, regions=[dict(good["regions"][0], name="a\tb")])
+        too_many = dict(good, regions=[dict(good["regions"][0], x=i) for i in range(65)])
+        bad_sha = dict(good, sha256="ABC")
+        for label, override in {"epoch": bad_epoch, "extra key": bad_extra, "control char": bad_name,
+                                "too many": too_many, "sha256 shape": bad_sha}.items():
             with self.subTest(case=label):
                 self.sim.override = override
                 self.err(self.run_invoke(self.CAP, {}), "plugin_error")
@@ -368,22 +377,21 @@ class ScreenObserveTest(PluginTestMixin, unittest.TestCase):
     def test_output_stays_within_8_kib_and_flags_truncation(self):
         # ASCII names: the host reply must stay under the plugin line limit (64 KiB) while the
         # regions still overflow 8 KiB, which exercises the shrink-and-flag path.
-        elements = [{"id": "e%03d" % i, "role": "button", "name": "n" * 120 + str(i),
-                     "x": i, "y": i} for i in range(200)]
-        screen = dict(self.sim.world.screen(), elements=elements)
-        self.sim.override = screen
+        good = self.sim.world.capture()
+        # names up to the 128-byte plugin limit: 64 regions overflow 8 KiB, so the output is shrunk and flagged
+        regions = [{"role": "button", "name": "n" * 120 + str(i), "x": i, "y": i} for i in range(64)]
+        self.sim.override = dict(good, regions=regions, truncated=False)
         out = self.ok(self.run_invoke(self.CAP, {}))
         self.assertIs(out["truncated"], True)
         self.assertGreater(len(out["regions"]), 0)
         self.assertLess(len(out["regions"]), 64)
         self.assertLessEqual(len(json.dumps(out, separators=(",", ":"))), MAX_OUTPUT)
-        self.assertEqual(out["sha256"], sha256_of(screen))
+        self.assertEqual(out["sha256"], good["sha256"])
         self.sim.override = None
 
     def test_64_regions_without_truncation_when_small(self):
-        elements = [{"id": "e%02d" % i, "role": "button", "name": "b%d" % i, "x": i, "y": i}
-                    for i in range(64)]
-        self.sim.override = dict(self.sim.world.screen(), elements=elements)
+        regions = [{"role": "button", "name": "b%d" % i, "x": i, "y": i} for i in range(64)]
+        self.sim.override = dict(self.sim.world.capture(), regions=regions, truncated=False)
         out = self.ok(self.run_invoke(self.CAP, {}))
         self.assertEqual(len(out["regions"]), 64)
         self.assertNotIn("truncated", out)
@@ -472,12 +480,12 @@ class ComputerControlTest(PluginTestMixin, unittest.TestCase):
         self.assertEqual(self.sim.world.typed, "Ana" + boundary)
 
     def test_key_happy_path(self):
-        out = self.ok(self.act({"kind": "key", "epoch": 1, "key": "Enter"}))
+        out = self.ok(self.act({"kind": "key", "epoch": 1, "key": "enter"}))
         self.assertEqual(out, {"backend": "synthetic", "kind": "key", "epoch": 2,
                                "verified": True})
-        self.assertEqual(self.sim.world.keys, ["Enter"])
+        self.assertEqual(self.sim.world.keys, ["enter"])
         self.assertEqual(self.sim.calls[0]["service"], "synthetic.input.key")
-        self.assertEqual(self.sim.calls[0]["args"], {"key": "Enter", "epoch": 1})
+        self.assertEqual(self.sim.calls[0]["args"], {"key": "enter", "epoch": 1})
 
     # -- freshness and verification ---------------------------------------------
     def test_stale_epoch_has_no_effect(self):
@@ -521,7 +529,7 @@ class ComputerControlTest(PluginTestMixin, unittest.TestCase):
             "type missing text": {"kind": "type", "epoch": 1},
             "type with element": {"kind": "type", "epoch": 1, "text": "a", "element": "btn-ok"},
             "key not in list": {"kind": "key", "epoch": 1, "key": "F12"},
-            "key lowercase": {"kind": "key", "epoch": 1, "key": "enter"},
+            "key uppercase": {"kind": "key", "epoch": 1, "key": "Enter"},
             "key not string": {"kind": "key", "epoch": 1, "key": ["Enter"]},
             "key missing": {"kind": "key", "epoch": 1},
         }
@@ -556,15 +564,15 @@ class ComputerControlTest(PluginTestMixin, unittest.TestCase):
     def test_permission_denied_without_input_control_grant(self):
         self.sim.grants["input_control"] = False
         self.err(self.run_invoke(self.TREE, {}), "permission_denied")
-        self.err(self.act({"kind": "key", "epoch": 1, "key": "Tab"}), "permission_denied")
+        self.err(self.act({"kind": "key", "epoch": 1, "key": "tab"}), "permission_denied")
         self.assertEqual(self.sim.world.keys, [])
 
     def test_no_synthetic_flag_gives_unknown_service(self):
         self.sim.synthetic = False
         self.err(self.act({"kind": "click", "epoch": 1, "element": "btn-ok"}), "unknown_service")
 
-    def test_unknown_element_passes_host_invalid_input(self):
-        self.err(self.act({"kind": "click", "epoch": 1, "element": "nope"}), "invalid_input")
+    def test_unknown_element_passes_through_as_unknown_element(self):
+        self.err(self.act({"kind": "click", "epoch": 1, "element": "nope"}), "unknown_element")
 
     def test_unknown_host_code_becomes_plugin_error(self):
         self.sim.fault = "weird_code"

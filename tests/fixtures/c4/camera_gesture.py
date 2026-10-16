@@ -196,16 +196,18 @@ def _optin(req_id, inp):
 
 def _capture(req_id, inp):
     _no_input(inp)
-    view = _view(_host_call(req_id, "synthetic.camera.capture", {}))
-    if not view["opt_in"]:
-        raise _Fail("opt_in_required")
-    return view
+    data = _host_call(req_id, "synthetic.camera.capture", {})
+    frame_seq = data.get("frame_seq")
+    if isinstance(frame_seq, bool) or not isinstance(frame_seq, int):
+        raise _Fail("plugin_error")
+    # The Core refuses a capture without opt-in (opt_in_required); the frame counter is then read back as the view.
+    return _read(req_id)
 
 
 def _gestures(req_id, inp):
     _no_input(inp)
     data = _host_call(req_id, "synthetic.camera.gestures", {})
-    items = data.get("gestures")
+    items = data.get("supported")
     if not isinstance(items, list) or len(items) > MAX_GESTURES:
         raise _Fail("plugin_error")
     if not all(_valid_id(item) for item in items):

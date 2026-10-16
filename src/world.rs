@@ -674,10 +674,26 @@ fn run(dir: &Path, op: &Op) -> Result<Value, &'static str> {
             }))
         }),
         Op::Tree => read(dir, |w| {
-            let elements: Vec<&Element> = w.screen.elements.iter().take(REGION_MAX).collect();
+            // `focused` is part of the a11y tree contract: the element the next `type` or `key` lands on.
+            let elements: Vec<Value> = w
+                .screen
+                .elements
+                .iter()
+                .take(REGION_MAX)
+                .map(|e| {
+                    json!({
+                        "id": e.id,
+                        "role": e.role,
+                        "name": e.name,
+                        "x": e.x,
+                        "y": e.y,
+                        "focused": w.screen.focus.as_deref() == Some(e.id.as_str()),
+                    })
+                })
+                .collect();
             Ok(json!({
                 "epoch": w.screen.epoch,
-                "elements": value(&elements)?,
+                "elements": elements,
                 "truncated": w.screen.elements.len() > REGION_MAX,
             }))
         }),

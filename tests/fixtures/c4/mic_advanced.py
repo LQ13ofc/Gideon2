@@ -35,11 +35,12 @@ REASON = "needs_human_validation"
 MAX_LINE = 65536
 MAX_OUTPUT = 8192
 MAX_HOST_REPLY = 4096
-MIC_FILTERS = ("off", "noise_gate", "highpass")
+MIC_FILTERS = ("off", "low_cut", "voice")
 CONFIGURE_KEYS = frozenset(("gain", "filter"))
 RECORD_SERVICES = {"start": "synthetic.mic.record_start", "stop": "synthetic.mic.record_stop"}
 HOST_ERRORS = ("permission_denied", "opt_in_required", "invalid_input", "unknown_service",
-                "world_unavailable")
+                "world_unavailable", "indicator_off", "already_recording",
+                "not_recording")
 ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 
 _buf = bytearray()

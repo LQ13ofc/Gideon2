@@ -91,7 +91,8 @@ class World:
 
     def __init__(self):
         self.audio = {
-            "routes": [{"id": "speakers", "active": True}, {"id": "headset", "active": False}],
+            "routes": ["speakers", "headset"],
+            "route": "speakers",
             "apps": [{"id": "music", "volume": 50}, {"id": "video", "volume": 20}],
             "eq": "flat",
             "denoise": False,
@@ -140,32 +141,31 @@ class World:
         return copy.deepcopy(self.audio)
 
     def _audio_set_route(self, args):
-        if args.get("route") not in [route["id"] for route in self.audio["routes"]]:
-            raise HostFault("invalid_input")
+        if args.get("route") not in self.audio["routes"]:
+            raise HostFault("unknown_route")
         if not self.stuck:
-            for route in self.audio["routes"]:
-                route["active"] = route["id"] == args["route"]
-        return copy.deepcopy(self.audio)
+            self.audio["route"] = args["route"]
+        return {"route": args["route"]}
 
     def _audio_app_volume(self, args):
         for app in self.audio["apps"]:
             if app["id"] == args.get("app"):
                 if not self.stuck:
                     app["volume"] = args["volume"]
-                return copy.deepcopy(self.audio)
-        raise HostFault("invalid_input")
+                return {"app": app["id"], "volume": app["volume"]}
+        raise HostFault("unknown_app")
 
     def _audio_eq(self, args):
-        if args.get("preset") not in ("flat", "voice", "bass", "treble"):
+        if args.get("preset") not in ("flat", "voice", "music", "bass"):
             raise HostFault("invalid_input")
         if not self.stuck:
             self.audio["eq"] = args["preset"]
-        return copy.deepcopy(self.audio)
+        return {"eq": args["preset"]}
 
     def _audio_denoise(self, args):
         if not self.stuck:
             self.audio["denoise"] = args["enabled"]
-        return copy.deepcopy(self.audio)
+        return {"denoise": args["enabled"]}
 
     def _mic_state(self, args):
         return copy.deepcopy(self.mic)
@@ -205,12 +205,13 @@ class World:
         if not self.camera["opt_in"]:
             raise HostFault("opt_in_required")
         self.camera["frame_seq"] += 1
-        return copy.deepcopy(self.camera)
+        return {"frame_seq": self.camera["frame_seq"], "width": 640, "height": 480,
+                "sha256": "0" * 64, "indicator": True}
 
     def _camera_gestures(self, args):
         if not self.camera["opt_in"]:
             raise HostFault("opt_in_required")
-        return {"gestures": list(self.gestures)}
+        return {"supported": list(self.gestures), "current": self.camera["gesture"]}
 
 
 class HostSim:
@@ -418,7 +419,8 @@ class AudioTest(HostChecks, FixtureCase):
         self.assertEqual(out["backend"], "synthetic")
         self.assertEqual(out["real_backend"], "unsupported")
         self.assertEqual(out["reason"], "needs_human_validation")
-        self.assertEqual(out["routes"], self.world.audio["routes"])
+        self.assertEqual(out["routes"], [{"id": r, "active": r == self.world.audio["route"]}
+                                         for r in self.world.audio["routes"]])
         self.assertEqual(out["apps"], self.world.audio["apps"])
         self.assertEqual(out["eq"], "flat")
         self.assertIs(out["denoise"], False)
@@ -440,7 +442,7 @@ class AudioTest(HostChecks, FixtureCase):
                 self.assertEqual(out["apps"][0], {"id": "music", "volume": volume})
 
     def test_eq_presets_are_the_fixed_list(self):
-        for preset in ("flat", "voice", "bass", "treble"):
+        for preset in ("flat", "voice", "music", "bass"):
             with self.subTest(preset=preset):
                 out = self.assertOutput(self.call(self.ACT_CAP, {"kind": "eq", "preset": preset}))
                 self.assertEqual(out["eq"], preset)
@@ -462,7 +464,7 @@ class AudioTest(HostChecks, FixtureCase):
     def test_act_without_grant_is_permission_denied(self):
         self.sim = HostSim(self.plugin, self.world, self.AREA, grants=())
         before = self.world.snapshot()
-        self.assertError(self.call(self.ACT_CAP, {"kind": "eq", "preset": "treble"}),
+        self.assertError(self.call(self.ACT_CAP, {"kind": "eq", "preset": "music"}),
                          "permission_denied")
         self.assertEqual(self.world.snapshot(), before)
 
@@ -473,7 +475,7 @@ class AudioTest(HostChecks, FixtureCase):
 
     def test_unknown_route_is_refused_by_the_host(self):
         self.assertError(self.call(self.ACT_CAP, {"kind": "route", "route": "ghost"}),
-                         "invalid_input")
+                         "unknown_route")
 
 
 class MicTest(HostChecks, FixtureCase):
@@ -536,14 +538,14 @@ class MicTest(HostChecks, FixtureCase):
                 self.assertEqual(out["gain"], gain)
 
     def test_configure_each_filter_and_both_keys(self):
-        for filt in ("off", "noise_gate", "highpass"):
+        for filt in ("off", "low_cut", "voice"):
             with self.subTest(filter=filt):
                 out = self.assertOutput(self.call(self.CONFIGURE_CAP, {"filter": filt}))
                 self.assertEqual(out["filter"], filt)
                 self.assertIs(out["verified"], True)
         out = self.assertOutput(self.call(self.CONFIGURE_CAP,
-                                          {"gain": 30, "filter": "noise_gate"}))
-        self.assertEqual((out["gain"], out["filter"]), (30, "noise_gate"))
+                                          {"gain": 30, "filter": "low_cut"}))
+        self.assertEqual((out["gain"], out["filter"]), (30, "low_cut"))
         self.assertIs(out["verified"], True)
 
     def test_configure_unverified_reports_false(self):

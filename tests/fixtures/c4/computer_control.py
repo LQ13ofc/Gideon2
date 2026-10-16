@@ -55,7 +55,7 @@ ACT_SERVICE = {
 BACKEND = "synthetic"
 REAL_BACKEND = "unsupported"
 REASON = "needs_human_validation"
-KEYS = ("Enter", "Escape", "Tab", "Backspace", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight")
+KEYS = ("enter", "escape", "tab")
 MAX_LINE = 65536
 MAX_OUTPUT = 8192
 MAX_ELEMENTS = 64
@@ -63,7 +63,7 @@ MAX_HOST_ELEMENTS = 256
 MAX_INT = 2 ** 31 - 1
 TEXT_MAX = 64
 ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
-TREE_KEYS = frozenset(("epoch", "elements"))
+TREE_KEYS = frozenset(("epoch", "elements", "truncated", "backend"))  # the Core adds backend to every reply
 ELEMENT_KEYS = frozenset(("id", "role", "name", "x", "y", "focused"))
 ACT_KEYS = {
     "click": frozenset(("kind", "epoch", "element")),
@@ -72,7 +72,8 @@ ACT_KEYS = {
     "key": frozenset(("kind", "epoch", "key")),
 }
 HOST_ERRORS = ("permission_denied", "stale_screen", "unknown_service", "invalid_input",
-               "response_too_large", "timeout", "cancelled")
+               "response_too_large", "timeout", "cancelled",
+               "unknown_element", "no_focus")
 HOST_REPLY_KEYS = frozenset(("v", "op", "id", "done", "data", "error", "status"))
 
 _buf = bytearray()
@@ -205,7 +206,7 @@ def _check_element(el):
 
 def _check_tree(tree):
     """Strict check of the host a11y tree. Anything off-contract is plugin_error."""
-    if not isinstance(tree, dict) or set(tree) != TREE_KEYS:
+    if not isinstance(tree, dict) or not {"epoch", "elements"} <= set(tree) <= TREE_KEYS:
         raise _Fail("plugin_error")
     if not _int_in(tree["epoch"], 0, MAX_INT):
         raise _Fail("plugin_error")
@@ -272,8 +273,11 @@ def _act_output(req_id, inp):
     kind, epoch, element, args = _valid_act(inp)
     _host_call(req_id, ACT_SERVICE[kind], args)
     post = _check_tree(_host_call(req_id, TREE_SERVICE, {}))
-    if kind in ("click", "focus"):
+    if kind == "focus":
         verified = any(el["id"] == element and el["focused"] for el in post["elements"])
+    elif kind == "click":
+        # The Core click moves no focus: verified means the epoch advanced and the element is still there.
+        verified = post["epoch"] > epoch and any(el["id"] == element for el in post["elements"])
     else:
         verified = post["epoch"] > epoch
     out = {"backend": BACKEND, "kind": kind, "epoch": post["epoch"], "verified": verified}

@@ -34,9 +34,9 @@ MAX_LINE = 65536
 MAX_OUTPUT = 8192
 MAX_HOST_REPLY = 4096
 MAX_ITEMS = 8
-EQ_PRESETS = ("flat", "voice", "bass", "treble")
+EQ_PRESETS = ("flat", "voice", "music", "bass")
 HOST_ERRORS = ("permission_denied", "opt_in_required", "invalid_input", "unknown_service",
-                "world_unavailable")
+                "world_unavailable", "unknown_route", "unknown_app")
 ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 ACT_KEYS = {
     "route": frozenset(("kind", "route")),
@@ -166,22 +166,18 @@ def _no_input(inp):
 
 
 def _view(data):
-    """Validated synthetic.audio.state reply as output fields (base.* and extra keys dropped)."""
-    routes, apps = data.get("routes"), data.get("apps")
+    """Validated synthetic.audio.state reply (Core shape: route names, the current route, apps, eq, denoise)
+    as output fields. base.* and extra keys are dropped."""
+    routes, route, apps = data.get("routes"), data.get("route"), data.get("apps")
     eq, denoise = data.get("eq"), data.get("denoise")
-    if not isinstance(routes, list) or len(routes) > MAX_ITEMS:
+    if not isinstance(routes, list) or len(routes) > MAX_ITEMS or not all(_valid_id(r) for r in routes):
+        raise _Fail("plugin_error")
+    if not _valid_id(route) or route not in routes:
         raise _Fail("plugin_error")
     if not isinstance(apps, list) or len(apps) > MAX_ITEMS:
         raise _Fail("plugin_error")
     if not isinstance(eq, str) or eq not in EQ_PRESETS or not isinstance(denoise, bool):
         raise _Fail("plugin_error")
-    clean_routes = []
-    for route in routes:
-        if not isinstance(route, dict) or not _valid_id(route.get("id")):
-            raise _Fail("plugin_error")
-        if not isinstance(route.get("active"), bool):
-            raise _Fail("plugin_error")
-        clean_routes.append({"id": route["id"], "active": route["active"]})
     clean_apps = []
     for app in apps:
         if not isinstance(app, dict) or not _valid_id(app.get("id")):
@@ -189,6 +185,7 @@ def _view(data):
         if not _int_in(app.get("volume"), 0, 100):
             raise _Fail("plugin_error")
         clean_apps.append({"id": app["id"], "volume": app["volume"]})
+    clean_routes = [{"id": name, "active": name == route} for name in routes]
     return dict(_status(), routes=clean_routes, apps=clean_apps, eq=eq, denoise=denoise)
 
 

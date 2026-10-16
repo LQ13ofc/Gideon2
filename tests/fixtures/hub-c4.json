@@ -14,8 +14,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/screen_observe.py",
-          "sha256": "1874eb36dae18eb86a995394d50f076211da8269af13d52c10bc4fd0f6b94628",
-          "size": 10420
+          "sha256": "6ca7f9dad4a48b648aabf8a175d2715c357d93d73922de391f968e3205457a6b",
+          "size": 10014
         }
       ],
       "license": "MIT",
@@ -46,8 +46,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/computer_control.py",
-          "sha256": "f410c601fbbf3cec82bc08358b0c1fdb9de07e2bdaab908a45b2ae4bf9be34bb",
-          "size": 12503
+          "sha256": "a3b96f6da352b5b075dae6fa2b790b3573b4b2baeb454c0f2c12aa08191706b7",
+          "size": 12797
         }
       ],
       "license": "MIT",
@@ -79,8 +79,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/audio_advanced.py",
-          "sha256": "6add7e944daf07f67c97f7676ec8fa6b5d45adba870175140757ffd1868627a5",
-          "size": 10107
+          "sha256": "f7b8c424be174ed2256b2ae8f7d54580051d0fd2374e012b04d8f6ee425201fb",
+          "size": 10111
         }
       ],
       "license": "MIT",
@@ -111,8 +111,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/mic_advanced.py",
-          "sha256": "1dc2ef7d02bb86f8754da1c46840b5a82f6fd27360248c6bd64908aa320ba0b7",
-          "size": 9805
+          "sha256": "0b461e5652b49a8fc0abc1d17639ff94100c78c73e2242d28357475e70c35e2e",
+          "size": 9870
         }
       ],
       "license": "MIT",
@@ -145,8 +145,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c4-v1/camera_gesture.py",
-          "sha256": "9ddb44d8669ca1c7de96b12b339344aa5d4633c05c5707b0e723e7424718f980",
-          "size": 8946
+          "sha256": "c434a902d1aa77bb4e3a98153d73ee0c36fd7f2f060fd1cd37552c2f2e480d06",
+          "size": 9143
         }
       ],
       "license": "MIT",
