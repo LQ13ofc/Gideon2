@@ -73,7 +73,7 @@ def chat(rid, inp, msg):
         if m is None:
             return
         if m.get("op") == "cancel" and m.get("id") == rid:
-            send({"id": rid, "ok": False, "error": "cancelled"})
+            send({"v": 1, "id": rid, "ok": False, "error": "cancelled"})
             return
         if m.get("op") != "host_reply" or m.get("id") != 1:
             continue
@@ -83,7 +83,11 @@ def chat(rid, inp, msg):
                 parts.append(piece)
                 send({"event": "partial", "id": rid, "text": piece})
             continue
-        send({"id": rid, "ok": True, "output": {
+        # P12: `as_error` makes the plugin report the broker error as its own error code.
+        if inp.get("as_error") and m.get("error"):
+            send({"v": 1, "id": rid, "ok": False, "error": m["error"]})
+            return
+        send({"v": 1, "id": rid, "ok": True, "output": {
             "text": "".join(parts), "done": bool(m.get("done")),
             "status": m.get("status"), "host_error": m.get("error"),
             "host_status": m.get("status") if m.get("error") else None,
@@ -102,16 +106,16 @@ def double(rid, msg):
             done[m["id"]] = m
     first = done.get(1, {})
     second = done.get(2, {})
-    send({"id": rid, "ok": True, "output": {
+    send({"v": 1, "id": rid, "ok": True, "output": {
         "first_status": first.get("status"), "first_error": first.get("error"),
         "second_error": second.get("error")}})
 def direct(rid, inp):
     try:
         s = socket.create_connection(("127.0.0.1", int(inp["port"])), timeout=1)
         s.close()
-        send({"id": rid, "ok": True, "output": {"connected": True}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"connected": True}})
     except Exception as error:
-        send({"id": rid, "ok": True, "output": {"connected": False, "error": type(error).__name__}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"connected": False, "error": type(error).__name__}})
 def dispatch(msg):
     rid = msg["id"]
     cap = msg.get("capability", "")
@@ -124,7 +128,7 @@ def dispatch(msg):
     elif kind == "direct":
         direct(rid, inp)
     else:
-        send({"id": rid, "ok": False, "error": "unknown_capability"})
+        send({"v": 1, "id": rid, "ok": False, "error": "unknown_capability"})
 def main():
     while True:
         msg = next_msg()
@@ -1226,4 +1230,28 @@ fn shipped_llm_fixture_catalog_loads_with_the_network_llm_grant() {
         .as_array()
         .unwrap()
         .contains(&json!("llm_engine.chat")));
+}
+
+/// P12: an upstream error arrives as `http_error` with the Core-side `http_status`; the body and
+/// headers never appear in the client view.
+#[test]
+fn http_error_code_and_status_reach_clients_without_provider_body() {
+    let _lock = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut lab = lab("httpcode");
+    let url = lab.server.url("/v1");
+    let key = lab.key.clone();
+    expect_ok(&lab.core.set_secret("custom", &key));
+    expect_ok(&lab.core.configure("custom", "mode-401", Some(&url), false));
+    expect_ok(&lab.core.invoke(
+        "stubllm.chat",
+        json!({"text": "hi", "as_error": true}),
+        5000,
+    ));
+    let result = settled(&mut lab.core, "stubllm.chat");
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["error"], "http_error", "{result}");
+    assert_eq!(result["http_status"], 401, "{result}");
+    assert!(!result.to_string().contains("SECRET-PROVIDER-BODY"));
+    assert!(!lab.core.snap().to_string().contains("SECRET-PROVIDER-BODY"));
+    lab.core.assert_no_key_on_disk();
 }

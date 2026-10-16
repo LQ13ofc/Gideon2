@@ -51,6 +51,11 @@ pub enum Operation {
         revision: u64,
         plugin_id: String,
     },
+    /// Drops only the staged (not yet installed) payload; CAS on the approval revision.
+    HubDiscardStaged {
+        revision: u64,
+        plugin_id: String,
+    },
     Snapshot,
     FeedbackPreferences {
         revision: u64,
@@ -94,6 +99,8 @@ pub enum Operation {
     PluginRevoke {
         revision: u64,
         plugin_id: String,
+        /// Optional CAS on the Hub approval revision the caller saw; absent means unchecked.
+        approval_revision: Option<u64>,
     },
     CapabilityInvoke {
         capability: String,
@@ -255,6 +262,12 @@ enum WireRequest {
         revision: u64,
         plugin_id: String,
     },
+    HubDiscardStaged {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        plugin_id: String,
+    },
     FeedbackPreferences {
         version: u16,
         request_id: String,
@@ -326,6 +339,8 @@ enum WireRequest {
         request_id: String,
         revision: u64,
         plugin_id: String,
+        #[serde(default)]
+        approval_revision: Option<u64>,
     },
     CapabilityInvoke {
         version: u16,
@@ -470,6 +485,19 @@ impl<'de> Deserialize<'de> for Request {
                     plugin_id,
                 },
             ),
+            WireRequest::HubDiscardStaged {
+                version,
+                request_id,
+                revision,
+                plugin_id,
+            } => (
+                version,
+                request_id,
+                Operation::HubDiscardStaged {
+                    revision,
+                    plugin_id,
+                },
+            ),
             WireRequest::FeedbackPreferences {
                 version,
                 request_id,
@@ -593,12 +621,14 @@ impl<'de> Deserialize<'de> for Request {
                 request_id,
                 revision,
                 plugin_id,
+                approval_revision,
             } => (
                 version,
                 request_id,
                 Operation::PluginRevoke {
                     revision,
                     plugin_id,
+                    approval_revision,
                 },
             ),
             WireRequest::CapabilityInvoke {

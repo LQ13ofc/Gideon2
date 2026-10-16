@@ -48,6 +48,15 @@ fn bounded_logging_and_config_validation() {
         store.audit(n).unwrap();
     }
     assert!(fs::metadata(root.join("audit.log")).unwrap().len() <= 65580);
+    // Rotation keeps one private previous generation instead of truncating in place.
+    assert_eq!(
+        fs::metadata(root.join("audit.log.1"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
     assert!(Config {
         version: 2,
         wake_phrase: None,
@@ -186,4 +195,46 @@ fn feedback_preferences_are_bounded_atomic_and_survive_restart_rollback() {
     assert!(store.config.visual_feedback);
     assert_eq!(store.config.output_volume_percent, 100);
     assert_eq!(store.config.revision, 2);
+}
+
+#[test]
+fn startup_sweep_quarantines_leftovers_and_orphans_without_deleting() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    drop(Storage::open(&root).unwrap());
+    let leftover = root.join(".hub-deadbeef.pending");
+    fs::write(&leftover, b"partial").unwrap();
+    fs::set_permissions(&leftover, fs::Permissions::from_mode(0o600)).unwrap();
+    let namespace = root.join("hub-plugins");
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&namespace)
+            .unwrap();
+    }
+    let orphan = namespace.join("ghost-0000.payload");
+    fs::write(&orphan, b"orphan").unwrap();
+    fs::set_permissions(&orphan, fs::Permissions::from_mode(0o600)).unwrap();
+    // Held for the lock; the sweep ran inside open().
+    let _store = Storage::open(&root).unwrap();
+    assert!(!leftover.exists() && !orphan.exists());
+    let mut names: Vec<String> = fs::read_dir(root.join("quarantine"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names
+        .iter()
+        .any(|n| n.starts_with(".hub-deadbeef.pending.")));
+    assert!(names.iter().any(|n| n.starts_with("ghost-0000.payload.")));
+    assert_eq!(
+        fs::metadata(root.join("quarantine"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
 }

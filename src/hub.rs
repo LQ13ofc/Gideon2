@@ -2,11 +2,11 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
-    fs::OpenOptions,
+    collections::{HashMap, HashSet},
+    fs::{self, File, OpenOptions},
     io::{self, Read},
-    os::unix::fs::OpenOptionsExt,
-    path::{Component, Path},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    path::{Component, Path, PathBuf},
 };
 
 const MAX_CATALOG: u64 = 65536;
@@ -59,6 +59,9 @@ pub struct Entry {
     pub manifest_sha256: String,
     pub permissions_approved: bool,
     pub payload_staged: bool,
+    /// Why a staged payload is unusable; only this entry is affected, never the whole Hub.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged_error: Option<&'static str>,
     #[serde(skip)]
     pub(crate) payload_sha256: String,
     pub plugin_id: String,
@@ -87,22 +90,80 @@ pub struct Snapshot {
     pub import: Option<ImportSummary>,
     pub version: u16,
     pub status: &'static str,
+    /// Set when the Hub is quarantined: `ledger_missing` or `ledger_invalid`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<&'static str>,
+    /// Unreferenced payloads the startup sweep moved to quarantine.
+    pub orphans: u64,
     pub repository: Option<String>,
     pub catalog_sha256: Option<String>,
     pub publisher_verified: bool,
     pub entries: Vec<Entry>,
+}
+/// Stat identity of a verified payload. ctime moves on every write, chmod and rename, so a
+/// same-size, same-mtime replacement or bit flip cannot match a cached verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FileSignature {
+    dev: u64,
+    ino: u64,
+    size: u64,
+    mode: u32,
+    mtime: (i64, i64),
+    ctime: (i64, i64),
+}
+impl FileSignature {
+    fn of(meta: &std::fs::Metadata) -> Self {
+        Self {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            size: meta.len(),
+            mode: meta.mode(),
+            mtime: (meta.mtime(), meta.mtime_nsec()),
+            ctime: (meta.ctime(), meta.ctime_nsec()),
+        }
+    }
+}
+/// Verified payloads keyed by (path, size, expected SHA-256). Bounded; cleared when full.
+pub(crate) type VerifiedCache = HashMap<(PathBuf, u64, String), FileSignature>;
+const VERIFIED_CACHE_LIMIT: usize = 64;
+/// Payload file names named by an installed ledger (active and previous versions).
+pub(crate) fn referenced_payload_names(ledger: &InstalledLedger) -> HashSet<String> {
+    ledger
+        .records
+        .iter()
+        .flat_map(|r| {
+            std::iter::once((&r.plugin_id, &r.manifest_sha256)).chain(
+                r.previous
+                    .iter()
+                    .map(|p| (&r.plugin_id, &p.manifest_sha256)),
+            )
+        })
+        .map(|(id, manifest)| format!("{id}-{manifest}.payload"))
+        .collect()
+}
+/// True when the installed ledger names `manifest` as an active or retained version.
+fn ledger_references(ledger: &InstalledLedger, manifest: &str) -> bool {
+    ledger.records.iter().any(|r| {
+        r.manifest_sha256 == manifest
+            || r.previous
+                .as_ref()
+                .is_some_and(|p| p.manifest_sha256 == manifest)
+    })
 }
 impl Snapshot {
     pub fn with_approvals(mut self, storage: &crate::storage::Storage) -> Self {
         if self.status != "verified" {
             return self;
         }
-        let Ok(state) = storage.hub_approvals() else {
-            return Self::quarantined();
+        let state = match storage.hub_approvals() {
+            Ok(state) => state,
+            Err(error) => return Self::quarantined_by(&error),
         };
-        let Ok(ledger) = storage.hub_installed() else {
-            return Self::quarantined();
+        let ledger = match storage.hub_installed() {
+            Ok(ledger) => ledger,
+            Err(error) => return Self::quarantined_by(&error),
         };
+        self.orphans = storage.orphans;
         self.approval_revision = state.revision;
         self.install_revision = ledger.revision;
         self.installed = ledger
@@ -145,7 +206,11 @@ impl Snapshot {
         for entry in &mut self.entries {
             match staged(storage, entry) {
                 Ok(present) => entry.payload_staged = present,
-                Err(_) => return Self::quarantined(),
+                // Only this entry is unusable; discard_staged can remove it.
+                Err(_) => {
+                    entry.payload_staged = false;
+                    entry.staged_error = Some("staged_payload_invalid");
+                }
             }
         }
         self.import = storage.hub_import.as_ref().map(Import::summary);
@@ -159,11 +224,23 @@ impl Snapshot {
             import: None,
             version: 1,
             status: "quarantined",
+            reason: None,
+            orphans: 0,
             repository: None,
             catalog_sha256: None,
             publisher_verified: false,
             entries: vec![],
         }
+    }
+    /// A missing ledger that was written before is a loss, not an empty ledger.
+    fn quarantined_by(error: &io::Error) -> Self {
+        let mut hub = Self::quarantined();
+        hub.reason = Some(if error.kind() == io::ErrorKind::NotFound {
+            "ledger_missing"
+        } else {
+            "ledger_invalid"
+        });
+        hub
     }
 }
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -424,6 +501,7 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                 ),
                 permissions_approved: false,
                 payload_staged: false,
+                staged_error: None,
                 payload_sha256: m
                     .binaries
                     .iter()
@@ -462,6 +540,8 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         import: None,
         version: 1,
         status: "verified",
+        reason: None,
+        orphans: 0,
         repository: Some(catalog.repository),
         catalog_sha256: Some(expected.to_owned()),
         publisher_verified: false,
@@ -674,7 +754,8 @@ fn installed_file(
     payload_sha256: &str,
 ) -> io::Result<()> {
     crate::storage::private_metadata(&namespace_dir(storage), true)?;
-    open_verified(
+    open_verified_cached(
+        storage,
         &namespace_file(storage, plugin_id, manifest_sha256),
         size,
         payload_sha256,
@@ -794,8 +875,28 @@ pub fn install(
     });
     ledger.revision = next_revision;
     if storage.save_hub_installed(&ledger).is_err() {
-        let _ = std::fs::remove_file(&destination);
-        return Err("hub_storage_error");
+        // A failure after the rename may still have committed the new ledger: trust the disk.
+        let committed = match storage.hub_installed() {
+            Ok(on_disk) => {
+                if on_disk
+                    .records
+                    .iter()
+                    .any(|r| r.plugin_id == plugin_id && r.manifest_sha256 == manifest)
+                {
+                    true
+                } else {
+                    if !ledger_references(&on_disk, manifest) {
+                        let _ = std::fs::remove_file(&destination);
+                    }
+                    false
+                }
+            }
+            // Unknown disk state: keep the payload; the next boot sweep quarantines it if unused.
+            Err(_) => false,
+        };
+        if !committed {
+            return Err("hub_storage_error");
+        }
     }
     if let Some(old) = dropped {
         if crate::storage::private_metadata(&namespace_dir(storage), true).is_ok() {
@@ -906,13 +1007,57 @@ impl Drop for Import {
         }
     }
 }
+/// Removes only the staged payload of one plugin (CAS on the approval revision). Installed
+/// versions live in `hub-plugins/` and are never touched here.
+pub fn discard_staged(
+    storage: &crate::storage::Storage,
+    hub: &Snapshot,
+    revision: u64,
+    plugin_id: &str,
+) -> Result<&'static str, &'static str> {
+    if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
+        return Err("configuration_not_ready");
+    }
+    if hub.status != "verified" {
+        return Err("hub_unavailable");
+    }
+    if storage.hub_import.is_some() {
+        return Err("hub_import_busy");
+    }
+    let refreshed = hub.clone().with_approvals(storage);
+    if refreshed.status != "verified" {
+        return Err("hub_unavailable");
+    }
+    if revision != refreshed.approval_revision {
+        return Err("stale_hub_revision");
+    }
+    let entry = refreshed
+        .entries
+        .iter()
+        .find(|e| e.plugin_id == plugin_id)
+        .ok_or("unknown_plugin")?;
+    let path = payload_path(storage, entry);
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if !meta.is_dir() => {}
+        Ok(_) => return Err("hub_storage_error"),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err("not_staged"),
+        Err(_) => return Err("hub_storage_error"),
+    }
+    fs::remove_file(&path).map_err(|_| "hub_storage_error")?;
+    File::open(&storage.root)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|_| "hub_storage_error")?;
+    Ok("hub_staged_discarded")
+}
+
 fn payload_path(storage: &crate::storage::Storage, entry: &Entry) -> std::path::PathBuf {
     storage
         .root
         .join(format!("hub-{}.payload", entry.manifest_sha256))
 }
 fn staged(storage: &crate::storage::Storage, entry: &Entry) -> io::Result<bool> {
-    match open_verified(
+    match open_verified_cached(
+        storage,
         &payload_path(storage, entry),
         entry.download_size,
         &entry.payload_sha256,
@@ -923,13 +1068,21 @@ fn staged(storage: &crate::storage::Storage, entry: &Entry) -> io::Result<bool> 
     }
 }
 /// Private 0600 regular file, exact size, exact SHA-256; opened without following links.
+/// Always hashes: used at mutation points and before every spawn, never served from cache.
 fn open_verified(path: &Path, size: u64, sha256: &str) -> io::Result<()> {
-    use std::os::unix::fs::MetadataExt;
-    let mut file = OpenOptions::new()
+    let mut file = open_payload(path)?;
+    verify_handle(&mut file, size, sha256)
+}
+fn open_payload(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
     crate::storage::validate_opened_private(&file)?;
+    Ok(file)
+}
+/// Metadata gate, then a full hash of the opened descriptor.
+fn verify_handle(file: &mut File, size: u64, sha256: &str) -> io::Result<()> {
     let meta = file.metadata()?;
     if meta.mode() & 0o777 != 0o600 || meta.len() != size {
         return Err(fail());
@@ -947,6 +1100,34 @@ fn open_verified(path: &Path, size: u64, sha256: &str) -> io::Result<()> {
     }
     if file.read(&mut buffer[..1])? != 0 || format!("{:x}", hash.finalize()) != sha256 {
         return Err(fail());
+    }
+    Ok(())
+}
+/// Stat-first verification for Snapshot refreshes: an identical signature skips the hash.
+/// The signature is taken from the opened descriptor, and only a stable one is cached.
+fn open_verified_cached(
+    storage: &crate::storage::Storage,
+    path: &Path,
+    size: u64,
+    sha256: &str,
+) -> io::Result<()> {
+    let mut file = open_payload(path)?;
+    let before = file.metadata()?;
+    if before.mode() & 0o777 != 0o600 || before.len() != size {
+        return Err(fail());
+    }
+    let signature = FileSignature::of(&before);
+    let key = (path.to_path_buf(), size, sha256.to_owned());
+    if storage.verified.borrow().get(&key) == Some(&signature) {
+        return Ok(());
+    }
+    verify_handle(&mut file, size, sha256)?;
+    if FileSignature::of(&file.metadata()?) == signature {
+        let mut cache = storage.verified.borrow_mut();
+        if cache.len() >= VERIFIED_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, signature);
     }
     Ok(())
 }
@@ -1002,6 +1183,15 @@ pub fn begin_import(
     }
     if current.payload_staged {
         return Err("already_staged");
+    }
+    let installed = storage.hub_installed().map_err(|_| "hub_storage_error")?;
+    if installed.records.iter().any(|r| {
+        r.plugin_id == plugin_id
+            && r.previous
+                .as_ref()
+                .is_some_and(|p| p.manifest_sha256 == manifest)
+    }) {
+        return Err("version_retained_use_rollback");
     }
     let destination = payload_path(storage, entry);
     let pending = storage.root.join(format!(".hub-{manifest}.pending"));

@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    cell::{Cell, RefCell},
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     os::unix::{
-        fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+        fs::{FileTypeExt, MetadataExt, OpenOptionsExt},
         io::AsRawFd,
     },
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -121,6 +123,27 @@ impl PluginState {
         Ok(())
     }
 }
+/// Write counters of the ledgers, kept in `hub-generation`. A ledger whose counter is non-zero
+/// must still exist: a missing file then means loss or tampering, never a fresh empty ledger
+/// with revision 0. Deleting `hub-generation` by hand is the explicit operator reset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Generations {
+    version: u16,
+    approvals: u64,
+    installed: u64,
+    plugin_state: u64,
+}
+impl Default for Generations {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            approvals: 0,
+            installed: 0,
+            plugin_state: 0,
+        }
+    }
+}
 /// Private C1 ledgers: bounded, strict and 0600, read through the same guards as plugin state.
 fn read_private_bounded(root: &Path, name: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
     let path = root.join(name);
@@ -148,6 +171,43 @@ pub struct Storage {
     invalid_config: Option<Vec<u8>>,
     _lock: File,
     pub(crate) hub_import: Option<crate::hub::Import>,
+    /// Ledger write counters; see `Generations`.
+    generations: Cell<Generations>,
+    /// Stat-keyed cache of verified Hub payloads; a miss always re-hashes.
+    pub(crate) verified: RefCell<crate::hub::VerifiedCache>,
+    /// Unreferenced Hub payloads moved to quarantine by the startup sweep.
+    pub(crate) orphans: u64,
+}
+/// `hub-generation` is written after every ledger rename; a damaged marker fails closed.
+fn read_generations(root: &Path) -> Generations {
+    match read_private_bounded(root, "hub-generation", 512) {
+        Ok(None) => Generations::default(),
+        Ok(Some(bytes)) => serde_json::from_slice(&bytes)
+            .ok()
+            .filter(|g: &Generations| g.version == 1)
+            .unwrap_or(Generations {
+                version: 1,
+                approvals: 1,
+                installed: 1,
+                plugin_state: 1,
+            }),
+        Err(_) => Generations {
+            version: 1,
+            approvals: 1,
+            installed: 1,
+            plugin_state: 1,
+        },
+    }
+}
+/// A leftover writer file: regular, single link, owned by us and private.
+fn private_leftover(path: &Path) -> bool {
+    // SAFETY: getuid is a read-only process identity query.
+    let uid = unsafe { libc::getuid() };
+    fs::symlink_metadata(path)
+        .is_ok_and(|m| m.is_file() && m.nlink() == 1 && m.uid() == uid && m.mode() & 0o777 == 0o600)
+}
+fn missing_ledger(name: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::NotFound, format!("{name} ledger missing"))
 }
 pub(crate) fn private_metadata(path: &Path, directory: bool) -> io::Result<()> {
     let m = fs::symlink_metadata(path)?;
@@ -231,8 +291,9 @@ impl Storage {
             ));
         }
         if !root.exists() {
-            fs::DirBuilder::new().create(root)?;
-            fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
+            // Created 0700 at once: there is no window with the default umask mode.
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().mode(0o700).create(root)?;
         }
         private_metadata(root, true)?;
         let root = root.canonicalize()?;
@@ -245,6 +306,8 @@ impl Storage {
                 "core already running",
             ));
         }
+        // Read before any ledger access, under the lock, so a deleted ledger is detected.
+        let generations = Cell::new(read_generations(&root));
         let path = root.join("config.json");
         let mut invalid_config = None;
         let mut configuration_status = ConfigurationStatus::Ready;
@@ -288,14 +351,90 @@ impl Storage {
             }
             Err(error) => return Err(error),
         };
-        Ok(Self {
+        let mut storage = Self {
             root,
             config,
             configuration_status,
             invalid_config,
             _lock: lock,
             hub_import: None,
-        })
+            generations,
+            verified: RefCell::new(Default::default()),
+            orphans: 0,
+        };
+        storage.sweep();
+        Ok(storage)
+    }
+    /// Startup sweep under the core lock. Crashed `.*.pending` writers and Hub payloads that the
+    /// installed ledger does not name are MOVED to `quarantine/` (0700, timestamp suffix), never
+    /// deleted. Skipped when the installed ledger cannot be read: no file is guessed to be garbage.
+    fn sweep(&mut self) {
+        let mut leftovers = vec![];
+        if let Ok(entries) = fs::read_dir(&self.root) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') && name.ends_with(".pending") {
+                    let path = entry.path();
+                    if private_leftover(&path) {
+                        leftovers.push(path);
+                    }
+                }
+            }
+        }
+        let mut orphans = 0;
+        if let Ok(ledger) = self.hub_installed() {
+            let namespace = self.root.join("hub-plugins");
+            let referenced = crate::hub::referenced_payload_names(&ledger);
+            if let Ok(entries) = fs::read_dir(&namespace) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if !referenced.contains(&name) && self.quarantine(&entry.path()) {
+                        orphans += 1;
+                    }
+                }
+            }
+        }
+        for path in leftovers {
+            self.quarantine(&path);
+        }
+        self.orphans = orphans;
+    }
+    /// Moves `path` into `quarantine/` under a timestamped name. Returns true when moved.
+    fn quarantine(&self, path: &Path) -> bool {
+        use std::os::unix::fs::DirBuilderExt;
+        let dir = self.root.join("quarantine");
+        if fs::symlink_metadata(&dir).is_err()
+            && fs::DirBuilder::new().mode(0o700).create(&dir).is_err()
+        {
+            return false;
+        }
+        if private_metadata(&dir, true).is_err() {
+            return false;
+        }
+        let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            return false;
+        };
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        for index in 0..1000 {
+            let destination = dir.join(format!("{name}.{stamp}.{index}"));
+            if fs::symlink_metadata(&destination).is_ok() {
+                continue;
+            }
+            return fs::rename(path, &destination).is_ok();
+        }
+        false
+    }
+    /// Advances one ledger counter after its rename, then fsyncs the marker and the root.
+    fn bump(&self, field: fn(&mut Generations) -> &mut u64) -> io::Result<()> {
+        let mut next = self.generations.get();
+        let counter = field(&mut next);
+        *counter = counter.saturating_add(1);
+        self.replace_json("hub-generation", &serde_json::to_vec(&next)?)?;
+        File::open(&self.root)?.sync_all()?;
+        self.generations.set(next);
+        Ok(())
     }
     /// Same-directory atomic replacement; no client paths or retained speech data.
     fn replace(&self, name: &str, config: &Config) -> io::Result<()> {
@@ -332,7 +471,12 @@ impl Storage {
             .open(&path)
         {
             Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Default::default()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if self.generations.get().approvals > 0 {
+                    return Err(missing_ledger("approvals"));
+                }
+                return Ok(Default::default());
+            }
             Err(e) => return Err(e),
         };
         validate_opened_private(&file)?;
@@ -348,7 +492,8 @@ impl Storage {
     pub(crate) fn save_hub_approvals(&self, state: &crate::hub::Approvals) -> io::Result<()> {
         state.validate()?;
         self.replace_json("hub-approvals.json", &serde_json::to_vec(state)?)?;
-        File::open(&self.root)?.sync_all()
+        File::open(&self.root)?.sync_all()?;
+        self.bump(|g| &mut g.approvals)
     }
     pub(crate) fn hub_installed(&self) -> io::Result<crate::hub::InstalledLedger> {
         let path = self.root.join("hub-installed.json");
@@ -358,7 +503,12 @@ impl Storage {
             .open(&path)
         {
             Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Default::default()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if self.generations.get().installed > 0 {
+                    return Err(missing_ledger("installed"));
+                }
+                return Ok(Default::default());
+            }
             Err(e) => return Err(e),
         };
         validate_opened_private(&file)?;
@@ -377,7 +527,8 @@ impl Storage {
     ) -> io::Result<()> {
         ledger.validate()?;
         self.replace_json("hub-installed.json", &serde_json::to_vec(ledger)?)?;
-        File::open(&self.root)?.sync_all()
+        File::open(&self.root)?.sync_all()?;
+        self.bump(|g| &mut g.installed)
     }
     pub(crate) fn plugin_state(&self) -> io::Result<PluginState> {
         let path = self.root.join("plugin-state.json");
@@ -387,7 +538,12 @@ impl Storage {
             .open(&path)
         {
             Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Default::default()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if self.generations.get().plugin_state > 0 {
+                    return Err(missing_ledger("plugin state"));
+                }
+                return Ok(Default::default());
+            }
             Err(e) => return Err(e),
         };
         validate_opened_private(&file)?;
@@ -403,7 +559,8 @@ impl Storage {
     pub(crate) fn save_plugin_state(&self, state: &PluginState) -> io::Result<()> {
         state.validate()?;
         self.replace_json("plugin-state.json", &serde_json::to_vec(state)?)?;
-        File::open(&self.root)?.sync_all()
+        File::open(&self.root)?.sync_all()?;
+        self.bump(|g| &mut g.plugin_state)
     }
     pub(crate) fn llm_ledger(&self) -> io::Result<crate::llmcfg::LlmLedger> {
         match read_private_bounded(&self.root, "llm-config.json", 4096)? {
@@ -460,11 +617,13 @@ impl Storage {
         });
         let changed_wake = next.wake_phrase != self.config.wake_phrase;
         self.replace("config.json", &next)?;
+        // Durable before the in-memory commit: a failed fsync leaves the old state visible.
+        File::open(&self.root)?.sync_all()?;
         self.config = next;
         if changed_wake {
             self.configuration_status = ConfigurationStatus::RestartRequired;
         }
-        File::open(&self.root)?.sync_all()
+        Ok(())
     }
     pub fn update_feedback(&mut self, revision: u64, visual: bool, volume: u8) -> io::Result<()> {
         if self.configuration_status != ConfigurationStatus::Ready
@@ -575,10 +734,11 @@ impl Storage {
         // Make preservation durable before replacing the invalid config.
         File::open(&self.root)?.sync_all()?;
         self.replace("config.json", &next)?;
+        File::open(&self.root)?.sync_all()?;
         self.config = next;
         self.configuration_status = ConfigurationStatus::RestartRequired;
         self.invalid_config = None;
-        File::open(&self.root)?.sync_all()
+        Ok(())
     }
     pub fn socket_path(&self) -> PathBuf {
         self.root.join("core.sock")
@@ -602,7 +762,11 @@ impl Storage {
         let mut f = open_private(&path)?;
         private_metadata(&path, false)?;
         if f.metadata()?.len() >= 65536 {
-            f.set_len(0)?;
+            // Keep exactly one previous generation: atomic rename replaces it, nothing is truncated.
+            drop(f);
+            fs::rename(&path, self.root.join("audit.log.1"))?;
+            f = open_private(&path)?;
+            private_metadata(&path, false)?;
         }
         use std::io::{Seek, SeekFrom};
         f.seek(SeekFrom::End(0))?;

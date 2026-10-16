@@ -54,19 +54,19 @@ def invoke(msg):
     cap = msg["capability"]
     inp = msg.get("input") or {}
     if cap.endswith(".echo"):
-        send({"id": rid, "ok": True, "output": {"text": str(inp.get("text", "")).upper()}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"text": str(inp.get("text", "")).upper()}})
     elif cap.endswith(".sleep"):
         end = time.monotonic() + inp.get("sleep_ms", 5000) / 1000
         while time.monotonic() < end:
             if rid in CANCELLED:
-                send({"id": rid, "ok": False, "error": "cancelled"})
+                send({"v": 1, "id": rid, "ok": False, "error": "cancelled"})
                 return True
             if not pump(0.02):
                 return False
-        send({"id": rid, "ok": True, "output": {"slept": True}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"slept": True}})
     elif cap.endswith(".stubborn"):
         time.sleep(2.5)
-        send({"id": rid, "ok": True, "output": {"late": True}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"late": True}})
     elif cap.endswith(".garbage"):
         sys.stdout.write("not json at all\n")
         sys.stdout.flush()
@@ -74,19 +74,26 @@ def invoke(msg):
         sys.stdout.write("x" * 100000 + "\n")
         sys.stdout.flush()
     elif cap.endswith(".dup"):
-        reply = {"id": rid, "ok": True, "output": {"dup": True}}
+        reply = {"v": 1, "id": rid, "ok": True, "output": {"dup": True}}
         send(reply)
         send(reply)
+    elif cap.endswith(".spin"):
+        end = time.monotonic() + 30
+        while time.monotonic() < end:
+            pass
+        send({"v": 1, "id": rid, "ok": True, "output": {"spun": True}})
+    elif cap.endswith(".fail"):
+        send({"v": 1, "id": rid, "ok": False, "error": inp.get("code", "plugin_error")})
     elif cap.endswith(".crash"):
         os._exit(3)
     elif cap.endswith(".flood"):
         for index in range(200):
             send({"event": "log", "level": "info", "text": "flood " + str(index)})
-        send({"id": rid, "ok": True, "output": {"flood": 200}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"flood": 200}})
     elif cap.endswith(".bigout"):
-        send({"id": rid, "ok": True, "output": {"blob": "y" * 9000}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"blob": "y" * 9000}})
     elif cap.endswith(".limits"):
-        send({"id": rid, "ok": True, "output": {"limits": open("/proc/self/limits").read()}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"limits": open("/proc/self/limits").read()}})
     elif cap.endswith(".paths"):
         readable = []
         for path in inp.get("paths", []):
@@ -102,9 +109,9 @@ def invoke(msg):
                 writes.append(True)
             except Exception:
                 writes.append(False)
-        send({"id": rid, "ok": True, "output": {"readable": readable, "writes": writes}})
+        send({"v": 1, "id": rid, "ok": True, "output": {"readable": readable, "writes": writes}})
     else:
-        send({"id": rid, "ok": False, "error": "unknown_capability"})
+        send({"v": 1, "id": rid, "ok": False, "error": "unknown_capability"})
     return True
 def main():
     while True:
@@ -227,6 +234,17 @@ fn misbehave_plugins() -> Vec<Plugin> {
             runtime: true,
         },
     ]
+}
+
+/// Separate plugin: keeps `misbehave` within the 8-capability manifest limit.
+fn spinner_plugins() -> Vec<Plugin> {
+    vec![Plugin {
+        id: "spinner",
+        payload: misbehave("spinner", &["spinner.spin", "spinner.fail"]),
+        semver: "1.0.0",
+        capabilities: vec!["spinner.spin", "spinner.fail"],
+        runtime: true,
+    }]
 }
 
 fn expect_ok(response: &Value) -> &Value {
@@ -1102,7 +1120,13 @@ fn sandbox_denies_network_filesystem_writes_and_fork_bombs() {
         );
         let result = core.result_of("dummy_evil.probe");
         assert_eq!(result["ok"], true, "{probe}: {result}");
-        assert_eq!(result["output"]["result"], "denied", "{probe}: {result}");
+        if probe == "fork_bomb_limited" {
+            // RLIMIT_NPROC is uid count + 256 (P1 headroom): 64 forks fit under it, and the bomb
+            // stays bounded by that cap instead of being denied at +16.
+            assert_eq!(result["output"]["result"], "allowed", "{probe}: {result}");
+        } else {
+            assert_eq!(result["output"]["result"], "denied", "{probe}: {result}");
+        }
         // Each probe ends with the plugin still alive; a crash here would fail the gate.
         core.wait_state("dummy_evil", "running");
     }
@@ -1166,7 +1190,7 @@ fn sandbox_limits_are_applied_to_the_real_child() {
             .unwrap_or_else(|| panic!("no limit line {name}: {host}"))
     };
     assert_eq!(soft("Max address space"), "536870912");
-    assert_eq!(soft("Max cpu time"), "30");
+    assert_eq!(soft("Max cpu time"), "3600");
     assert_eq!(soft("Max open files"), "32");
     assert_ne!(soft("Max processes"), "unlimited");
     // The plugin itself reports the limits it runs under; they match the host view.
@@ -1256,4 +1280,131 @@ fn only_capability_invoke_lines_may_exceed_the_four_kib_request_bound() {
         core.try_snapshot().is_some(),
         "Core must survive both peers"
     );
+}
+
+/// P4: the CPU budget is per invocation (host-side, sandbox tree), not the lifetime RLIMIT_CPU.
+#[test]
+fn per_invocation_cpu_budget_stops_a_spinning_invocation() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // Test-only override; set before the Core starts so it inherits the variable.
+    std::env::set_var("GIDEON_PLUGIN_CPU_BUDGET_MS", "300");
+    let (_dir, mut core, _) = setup("cpu", &spinner_plugins());
+    std::env::remove_var("GIDEON_PLUGIN_CPU_BUDGET_MS");
+    assert_eq!(core.enable("spinner")["code"], "ok");
+    core.wait_state("spinner", "running");
+    assert_eq!(core.invoke("spinner.spin", json!({}), 10000)["code"], "ok");
+    let failed = core.wait_state("spinner", "failed");
+    assert_eq!(failed["last_error"], "plugin_cpu_exceeded");
+    assert_eq!(
+        core.result_of("spinner.spin")["error"],
+        "plugin_cpu_exceeded"
+    );
+    core.wait_no_sandboxes();
+}
+
+/// P12: allowlisted plugin codes reach clients unchanged; any other code reads plugin_error.
+#[test]
+fn plugin_error_codes_pass_through_only_when_allowlisted() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (_dir, mut core, _) = setup("codes", &spinner_plugins());
+    assert_eq!(core.enable("spinner")["code"], "ok");
+    core.wait_state("spinner", "running");
+    for (code, expected) in [
+        ("key_missing", "key_missing"),
+        ("surprise_code", "plugin_error"),
+    ] {
+        assert_eq!(
+            core.invoke("spinner.fail", json!({"code": code}), 2000)["code"],
+            "ok"
+        );
+        let result = core.result_of("spinner.fail");
+        assert_eq!(result["ok"], false, "{code}: {result}");
+        assert_eq!(result["error"], expected, "{code}: {result}");
+        assert!(result.get("http_status").is_none(), "{result}");
+        core.wait_state("spinner", "running");
+    }
+}
+
+/// P10: an optional approval_revision CAS refuses stale revoke; the snapshot runtime follows the
+/// host state of an enabled python3_script plugin instead of a constant.
+#[test]
+fn revoke_cas_and_snapshot_runtime_follow_host_state() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let (_dir, mut core, _) = setup("runtime-cas", &misbehave_plugins());
+    assert_eq!(core.enable("misbehave")["code"], "ok");
+    core.wait_state("misbehave", "running");
+    let snap = core.snap();
+    let installed = snap["hub"]["installed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["plugin_id"] == "misbehave")
+        .unwrap()
+        .clone();
+    assert_eq!(installed["runtime"], "running", "{snap}");
+    let revision = core.revision();
+    let approval = snap["hub"]["approval_revision"].as_u64().unwrap();
+    assert_eq!(
+        core.call(json!({
+            "op": "plugin_revoke",
+            "revision": revision,
+            "plugin_id": "misbehave",
+            "approval_revision": approval + 7,
+        }))["code"],
+        "stale_hub_revision"
+    );
+    // Still enabled: the stale request changed nothing.
+    assert_eq!(core.item("misbehave")["enabled"], true);
+    // Without the optional field the existing behaviour holds.
+    assert_eq!(
+        core.call(json!({"op": "plugin_revoke", "revision": revision, "plugin_id": "misbehave"}))
+            ["code"],
+        "ok"
+    );
+}
+
+/// P2: the interpreter gate refuses HOME-rooted and forbidden runtimes, accepts /usr and the
+/// package prefix. Symlink layouts are built in a temp directory.
+#[test]
+fn plugin_python_gate_refuses_home_and_forbidden_roots() {
+    use gideon_base::plugins::plugin_runtime_check;
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path();
+    let package = base.join("package");
+    fs::create_dir_all(&package).unwrap();
+    let home = base.join("home/user");
+    fs::create_dir_all(&home).unwrap();
+    assert!(plugin_runtime_check(Path::new(PYTHON), &package, Some(&home)).is_ok());
+    // Interpreter under HOME (symlink to a real binary elsewhere in HOME's runtime).
+    let inside = home.join("runtime/bin");
+    fs::create_dir_all(&inside).unwrap();
+    fs::write(inside.join("python3.12"), b"#!/bin/sh\n").unwrap();
+    symlink("python3.12", inside.join("python3")).unwrap();
+    assert_eq!(
+        plugin_runtime_check(&inside.join("python3"), &package, Some(&home)),
+        Err("plugin_python_under_home")
+    );
+    // Runtime is an ancestor of HOME: its bin/ sits above the user's home.
+    let root_bin = base.join("bin");
+    fs::create_dir_all(&root_bin).unwrap();
+    fs::write(root_bin.join("python3.12"), b"#!/bin/sh\n").unwrap();
+    symlink("python3.12", root_bin.join("python3")).unwrap();
+    assert_eq!(
+        plugin_runtime_check(&root_bin.join("python3"), &package, Some(&home)),
+        Err("plugin_python_forbidden_root")
+    );
+    // Outside the allowlist and not the package prefix.
+    let stray = base.join("stray/bin");
+    fs::create_dir_all(&stray).unwrap();
+    fs::write(stray.join("python3"), b"#!/bin/sh\n").unwrap();
+    assert_eq!(
+        plugin_runtime_check(&stray.join("python3"), &package, Some(&home)),
+        Err("plugin_python_not_allowed")
+    );
+    // Inside the package prefix: accepted.
+    let packaged = package.join("runtime/bin");
+    fs::create_dir_all(&packaged).unwrap();
+    fs::write(packaged.join("python3"), b"#!/bin/sh\n").unwrap();
+    assert!(plugin_runtime_check(&packaged.join("python3"), &package, Some(&home)).is_ok());
 }

@@ -28,8 +28,12 @@ LOOPBACK = ("127.0.0.1", "::1")
 BIG_TOTAL = 5 * 1024 * 1024
 DELTA = 4
 
+BRAVE_DESKTOP_ID = "com.brave.Browser.desktop"  # the only desktop id the Core accepts for open_app
 PREFIXES = [
     ("tool:open_app", "tool_open_app"),
+    ("tool:get_time", "tool_get_time"),
+    ("tool:mute", "tool_mute"),
+    ("tool:set_volume", "tool_set_volume"),
     ("tool:rm", "tool_rm"),
     ("tool:badargs", "tool_badargs"),
     ("tool:malformed", "tool_malformed"),
@@ -39,13 +43,16 @@ PREFIXES = [
     ("big:", "big"),
     ("e401:", "error401"),
     ("e402:", "error402"),
+    ("e403:", "error403"),
     ("e429:", "error429"),
     ("e500:", "error500"),
+    ("e503:", "error503"),
     ("redirect:", "redirect"),
     ("leak:", "leak"),
 ]
 SCENARIOS = {name for _, name in PREFIXES} | {"echo"}
-ERROR_STATUS = {"error401": 401, "error402": 402, "error429": 429, "error500": 500}
+ERROR_STATUS = {"error401": 401, "error402": 402, "error403": 403, "error429": 429,
+                "error500": 500, "error503": 503}
 
 
 class ClientGone(Exception):
@@ -150,7 +157,19 @@ def sc_echo(handler, model, tools, rest, ctx):
 
 
 def sc_tool_open_app(handler, model, tools, rest, ctx):
-    stream_tool(handler, model, tools, "open_app", json.dumps({"desktop_id": "terminal"}))
+    stream_tool(handler, model, tools, "open_app", json.dumps({"desktop_id": BRAVE_DESKTOP_ID}))
+
+
+def sc_tool_get_time(handler, model, tools, rest, ctx):
+    stream_tool(handler, model, tools, "get_time", json.dumps({}))
+
+
+def sc_tool_mute(handler, model, tools, rest, ctx):
+    stream_tool(handler, model, tools, "mute", json.dumps({}))
+
+
+def sc_tool_set_volume(handler, model, tools, rest, ctx):
+    stream_tool(handler, model, tools, "set_volume", json.dumps({"level": 40}))
 
 
 def sc_tool_rm(handler, model, tools, rest, ctx):
@@ -212,6 +231,9 @@ def sc_redirect(handler, model, tools, rest, ctx):
 SCENARIO_FUNCS = {
     "echo": sc_echo,
     "tool_open_app": sc_tool_open_app,
+    "tool_get_time": sc_tool_get_time,
+    "tool_mute": sc_tool_mute,
+    "tool_set_volume": sc_tool_set_volume,
     "tool_rm": sc_tool_rm,
     "tool_badargs": sc_tool_badargs,
     "tool_malformed": sc_tool_malformed,

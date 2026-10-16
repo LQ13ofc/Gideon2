@@ -39,7 +39,7 @@ for line in sys.stdin:
         output = inp.get("output")
         if output is None:
             output = {"text": str(inp.get("text", ""))[:200], "finish_reason": "tool_calls", "tool_calls": inp.get("calls", [])}
-        send({"id": msg["id"], "ok": True, "output": output})
+        send({"v": 1, "id": msg["id"], "ok": True, "output": output})
     elif op == "shutdown":
         break
 "#;

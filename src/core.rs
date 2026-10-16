@@ -741,7 +741,7 @@ impl Core {
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
             base_pack: self.base_pack.clone(),
-            hub: self.hub.clone(),
+            hub: self.hub.clone().map(|hub| self.plugins.annotate(hub)),
             plugins: self.plugins.snapshot(self.hub.as_ref()),
             capability_result: self.plugins.last().cloned(),
             partial: self.plugins.partial(),
@@ -971,12 +971,19 @@ impl Core {
             Operation::PluginRevoke {
                 revision,
                 plugin_id,
+                approval_revision,
             } => match (storage.as_deref_mut(), self.hub.clone()) {
                 (Some(storage), Some(hub)) => {
                     let hub = hub.with_approvals(storage);
-                    let result = self.plugins.revoke(storage, &hub, revision, &plugin_id);
-                    self.hub = Some(hub.with_approvals(storage));
-                    self.plugin_result(&req.request_id, result)
+                    // Optional CAS: a caller that saw an older approval state must re-read first.
+                    if approval_revision.is_some_and(|seen| seen != hub.approval_revision) {
+                        self.hub = Some(hub);
+                        "stale_hub_revision"
+                    } else {
+                        let result = self.plugins.revoke(storage, &hub, revision, &plugin_id);
+                        self.hub = Some(hub.with_approvals(storage));
+                        self.plugin_result(&req.request_id, result)
+                    }
                 }
                 _ => "hub_unavailable",
             },
@@ -1156,9 +1163,28 @@ impl Core {
             Operation::HubInstall { .. }
             | Operation::HubRollback { .. }
             | Operation::HubRemove { .. }
+            | Operation::HubDiscardStaged { .. }
                 if self.session.is_some() =>
             {
                 "busy"
+            }
+            Operation::HubDiscardStaged {
+                revision,
+                plugin_id,
+            } => {
+                if let (Some(storage), Some(hub)) = (storage, self.hub.as_ref()) {
+                    let result = crate::hub::discard_staged(storage, hub, revision, &plugin_id);
+                    self.hub = Some(hub.clone().with_approvals(storage));
+                    match result {
+                        Ok(event) => {
+                            self.emit(req.request_id.clone(), None, event);
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                } else {
+                    "hub_unavailable"
+                }
             }
             Operation::HubInstall {
                 revision,

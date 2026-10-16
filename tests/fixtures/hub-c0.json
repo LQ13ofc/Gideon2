@@ -45,8 +45,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c0-v1/dummy_evil.py",
-          "sha256": "8b07ee409c4702c868f9c7e4f53fd4f8bc87a2f399a3814f11e2f151e5d47557",
-          "size": 8256
+          "sha256": "3a8b587e68b2ca195a34eb3d9abe3b694043c44d91a351eec56f7e0bd45b65f2",
+          "size": 9735
         }
       ],
       "license": "MIT",

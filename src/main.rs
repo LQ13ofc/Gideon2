@@ -110,6 +110,12 @@ async fn main() -> io::Result<()> {
     if let Some(path) = home {
         transport::set_home(path)?;
     }
+    // Refuse at startup an interpreter that lives under the user's HOME or in a forbidden root.
+    if let Some(python) = plugin_python.as_deref() {
+        let user_home = std::env::var_os("HOME").map(PathBuf::from);
+        gideon_base::plugins::plugin_runtime_check(python, transport::home(), user_home.as_deref())
+            .map_err(|code| io::Error::other(format!("--plugin-python refused: {code}")))?;
+    }
     if tts.is_some() && !commands_sandbox {
         return Err(io::Error::other("TTS requires command profile"));
     }

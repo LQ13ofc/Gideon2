@@ -796,19 +796,29 @@ fn retained_previous_version_cannot_reinstall_via_install() {
     assert_eq!(back.installed[0].semver, "1.0.0");
     assert_eq!(back.installed[0].previous.clone().unwrap().semver, "1.1.0");
     assert_eq!(back.entries[0].status, "update_available");
-    stage(&mut storage, &back, "again");
+    // A retained previous version is refused before staging (P8): nothing is staged or installed.
+    let refused = hub::begin_import(
+        &mut storage,
+        &back,
+        back.approval_revision,
+        PLUGIN,
+        &v2_manifest,
+        "again",
+        std::time::Instant::now(),
+    );
+    assert_eq!(refused, Err("version_retained_use_rollback"));
     let staged = load(&v2_bytes).unwrap().with_approvals(&storage);
-    assert!(staged.entries[0].payload_staged);
+    assert!(!staged.entries[0].payload_staged);
     assert_eq!(staged.entries[0].manifest_sha256, v2_manifest);
     assert_eq!(
         hub::install(&storage, &staged, 3, PLUGIN, &v2_manifest),
-        Err("version_retained_use_rollback")
+        Err("payload_not_staged")
     );
     let after = load(&v2_bytes).unwrap().with_approvals(&storage);
     assert_eq!(after.install_revision, 3);
     assert_eq!(after.installed[0].semver, "1.0.0");
     assert_eq!(after.entries[0].status, "update_available");
-    assert!(after.entries[0].payload_staged);
+    assert!(!after.entries[0].payload_staged);
     assert_eq!(
         fs::read(namespace_file(&storage, &v1_manifest)).unwrap(),
         b"benign fixture\n"
@@ -817,7 +827,8 @@ fn retained_previous_version_cannot_reinstall_via_install() {
         fs::read(namespace_file(&storage, &v2_manifest)).unwrap(),
         b"benign fixture\n"
     );
-    assert!(storage
+    // Refused staging leaves no staged payload behind.
+    assert!(!storage
         .root
         .join(format!("hub-{v2_manifest}.payload"))
         .exists());
@@ -947,4 +958,72 @@ fn remove_never_unlinks_through_replaced_namespace_symlink() {
     assert!(after.installed.is_empty());
     assert_eq!(after.install_revision, 2);
     assert_eq!(fs::read(&target).unwrap(), b"outside");
+}
+
+/// P9: a deleted approvals ledger that was written before is a loss, never an empty Hub.
+#[test]
+fn deleted_ledger_is_quarantined_not_reset_to_revision_zero() {
+    let (_dir, storage, _snap) = approved_import();
+    fs::remove_file(storage.root.join("hub-approvals.json")).unwrap();
+    let hub = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(hub.status, "quarantined");
+    assert_eq!(hub.reason, Some("ledger_missing"));
+}
+
+/// P8: an unreadable staged payload hides only its entry; discard_staged removes it under CAS.
+#[test]
+fn unreadable_staged_payload_is_per_entry_and_discardable() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    let snap = approve_and_stage(&mut storage, FIXTURE.as_bytes(), "discard-1");
+    let plugin = snap.entries[0].plugin_id.clone();
+    assert!(snap.entries[0].payload_staged);
+    let staged = storage
+        .root
+        .join(format!("hub-{}.payload", snap.entries[0].manifest_sha256));
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o644)).unwrap();
+    let hub = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(hub.status, "verified");
+    assert!(!hub.entries[0].payload_staged);
+    assert_eq!(hub.entries[0].staged_error, Some("staged_payload_invalid"));
+    assert_eq!(
+        hub::discard_staged(&storage, &hub, hub.approval_revision + 1, &plugin),
+        Err("stale_hub_revision")
+    );
+    assert!(staged.exists());
+    assert_eq!(
+        hub::discard_staged(&storage, &hub, hub.approval_revision, &plugin),
+        Ok("hub_staged_discarded")
+    );
+    assert!(!staged.exists());
+    let after = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(after.entries[0].staged_error, None);
+    assert_eq!(
+        hub::discard_staged(&storage, &after, after.approval_revision, &plugin),
+        Err("not_staged")
+    );
+}
+
+/// P7: a same-size replacement with its old mtime restored is re-hashed, not served from cache.
+#[test]
+fn verification_cache_rehashes_same_size_same_mtime_replacement() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut storage = gideon_base::storage::Storage::open(&dir.path().join("core")).unwrap();
+    installed_v1(&mut storage);
+    let first = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(first.installed[0].state, "installed");
+    // A second refresh is a cache hit and must still agree.
+    let cached = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(cached.installed[0].state, "installed");
+    let file = namespace_file(&storage, &first.installed[0].manifest_sha256);
+    let bytes = fs::read(&file).unwrap();
+    let before = fs::metadata(&file).unwrap().modified().unwrap();
+    let mut flipped = bytes.clone();
+    flipped[0] ^= 0x01;
+    fs::write(&file, &flipped).unwrap();
+    fs::File::open(&file).unwrap().set_modified(before).unwrap();
+    assert_eq!(fs::metadata(&file).unwrap().len(), bytes.len() as u64);
+    let tampered = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
+    assert_eq!(tampered.installed[0].state, "quarantined");
 }

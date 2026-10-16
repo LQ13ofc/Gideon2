@@ -582,8 +582,12 @@ pub async fn serve(
             Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
             Some(wire) = plugin_events.recv() => {
                 if let Some(event) = plugins.accept(wire) {
+                    // Plugin logs and partial text are high-rate and never audited (no amplification).
+                    let audited = !matches!(event, crate::plugins::Ev::Log { .. } | crate::plugins::Ev::Partial { .. });
                     core.plugin_event(event, std::time::Instant::now());
-                    storage.audit(core.response(String::new(), "ok").sequence)?;
+                    if audited {
+                        storage.audit(core.response(String::new(), "ok").sequence)?;
+                    }
                 }
             },
             Some(call) = rx.recv() => {

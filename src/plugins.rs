@@ -52,10 +52,23 @@ const MAX_HEADER_VALUE: usize = 256;
 pub(crate) const PRLIMIT: &str = "/usr/bin/prlimit";
 pub(crate) const BWRAP: &str = "/usr/bin/bwrap";
 pub(crate) const MAX_ADDRESS_SPACE: u64 = 512 * 1024 * 1024;
-pub(crate) const MAX_CPU_SECONDS: u64 = 30;
+/// Lifetime RLIMIT_CPU backstop only. A long-lived plugin accumulates CPU across invocations,
+/// so the per-invocation budget (`CPU_BUDGET_MS`, enforced by the host) is the real limit.
+pub(crate) const MAX_CPU_SECONDS: u64 = 3600;
 pub(crate) const MAX_OPEN_FILES: u64 = 32;
-/// RLIMIT_NPROC counts every task of the real uid, so the cap is the current count plus this.
-const PROCESS_HEADROOM: u64 = 16;
+/// Per-invocation CPU of the sandbox process tree; test-only override GIDEON_PLUGIN_CPU_BUDGET_MS.
+const CPU_BUDGET_MS: u64 = 30_000;
+const CPU_SAMPLE: Duration = Duration::from_millis(200);
+/// /tmp is a tmpfs of this size inside the sandbox (bwrap `--size`, or RLIMIT_FSIZE per file).
+pub(crate) const MAX_TMP_BYTES: u64 = 64 * 1024 * 1024;
+/// RLIMIT_NPROC counts every task of the real uid, and other processes of that uid (other
+/// sessions, test runners) change the count at any time. The cap is the count observed at spawn
+/// plus this generous headroom: it still stops a fork bomb, but never starves bwrap's own forks.
+const PROCESS_HEADROOM: u64 = 256;
+/// Plugin lines queued for the Core. Overflow kills the plugin; floods are dropped before this.
+const LINE_QUEUE: usize = 64;
+/// Obvious log-line prefix checked before any JSON parse, so floods cost one comparison.
+const LOG_PREFIX: &[u8] = b"{\"event\":\"log\"";
 
 /// Exact reserved words only (docs/C0.md): `llm_engine` is a legal plugin id, `llm` is not.
 /// Callers pass a whole plugin id, or the first dot-separated segment of a capability.
@@ -126,6 +139,9 @@ pub struct CapabilityResult {
     pub elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partial: Option<String>,
+    /// Upstream HTTP status (100..=599), only with `error == "http_error"`. Never body or headers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct PluginItem {
@@ -176,6 +192,7 @@ pub enum Ev {
         invocation: u64,
         outcome: Result<Value, &'static str>,
         elapsed_ms: u64,
+        http_status: Option<u16>,
     },
     Partial {
         plugin_id: String,
@@ -477,10 +494,30 @@ impl PluginView {
         let mut next = self.ledger.clone();
         next.enabled.retain(|id| id != plugin_id);
         next.revision = revision.checked_add(1).ok_or("plugin_revision_exhausted")?;
-        self.save(storage, next)?;
+        if let Err(code) = self.save(storage, next) {
+            // The approval is already gone: stop the host and drop the claim now, then fail closed.
+            self.ledger.enabled.retain(|id| id != plugin_id);
+            self.stop(plugin_id);
+            self.quarantined = true;
+            return Err(code);
+        }
         self.stop(plugin_id);
         self.events.push("plugin_revoked");
         Ok(())
+    }
+    /// Runtime state of an enabled plugin for the Hub snapshot; `disabled` otherwise.
+    fn runtime_of(&self, plugin_id: &str) -> &'static str {
+        if !self.ledger.enabled.iter().any(|id| id == plugin_id) {
+            return "disabled";
+        }
+        self.runtimes.get(plugin_id).map_or("starting", |r| r.state)
+    }
+    /// The Hub snapshot's per-plugin `runtime` reports the host state, not a constant.
+    pub(crate) fn annotate(&self, mut hub: Snapshot) -> Snapshot {
+        for item in &mut hub.installed {
+            item.runtime = self.runtime_of(&item.plugin_id);
+        }
+        hub
     }
     /// Hub install, rollback or remove changed the active manifest: explicit re-enable needed.
     pub(crate) fn forget(&mut self, storage: &Storage, plugin_id: &str) {
@@ -604,6 +641,7 @@ impl PluginView {
                 invocation,
                 outcome,
                 elapsed_ms,
+                http_status,
             } => {
                 let Some(active) = self
                     .active
@@ -627,6 +665,7 @@ impl PluginView {
                         error: None,
                         elapsed_ms,
                         partial,
+                        http_status: None,
                     },
                     Err(code) => CapabilityResult {
                         capability,
@@ -636,6 +675,7 @@ impl PluginView {
                         error: Some(code),
                         elapsed_ms,
                         partial,
+                        http_status: http_status.filter(|_| code == "http_error"),
                     },
                 });
             }
@@ -775,6 +815,7 @@ pub struct Host {
     actors: HashMap<String, Actor>,
     retired: Vec<JoinHandle<()>>,
     epoch: u64,
+    cpu_budget_ms: u64,
 }
 
 impl Host {
@@ -783,6 +824,12 @@ impl Host {
         broker: PathBuf,
         sender: mpsc::UnboundedSender<Wire>,
     ) -> Self {
+        // Test-only override (validated range); production always uses CPU_BUDGET_MS.
+        let cpu_budget_ms = std::env::var("GIDEON_PLUGIN_CPU_BUDGET_MS")
+            .ok()
+            .and_then(|raw| raw.parse::<u64>().ok())
+            .filter(|ms| (50..=60000).contains(ms))
+            .unwrap_or(CPU_BUDGET_MS);
         Self {
             python,
             broker,
@@ -790,6 +837,7 @@ impl Host {
             actors: HashMap::new(),
             retired: vec![],
             epoch: 0,
+            cpu_budget_ms,
         }
     }
     /// Applies a Core intent. Returns events the Core must see immediately.
@@ -821,6 +869,7 @@ impl Host {
                     size: spec.size,
                     capabilities: spec.capabilities,
                     epoch,
+                    cpu_budget_ms: self.cpu_budget_ms,
                 };
                 let task = tokio::spawn(run(ctx, rx, self.sender.clone()));
                 self.actors.insert(
@@ -867,6 +916,7 @@ impl Host {
                         invocation,
                         outcome: Err("capability_unavailable"),
                         elapsed_ms: 0,
+                        http_status: None,
                     }]
                 }
             }
@@ -929,6 +979,7 @@ struct Ctx {
     size: u64,
     capabilities: Vec<String>,
     epoch: u64,
+    cpu_budget_ms: u64,
 }
 #[derive(Clone)]
 struct Out {
@@ -959,11 +1010,21 @@ impl Out {
         });
     }
     fn result(&self, invocation: u64, outcome: Result<Value, &'static str>, started: Instant) {
+        self.result_status(invocation, outcome, started, None);
+    }
+    fn result_status(
+        &self,
+        invocation: u64,
+        outcome: Result<Value, &'static str>,
+        started: Instant,
+        http_status: Option<u16>,
+    ) {
         self.send(Ev::Result {
             plugin_id: self.plugin_id.clone(),
             invocation,
             outcome,
             elapsed_ms: started.elapsed().as_millis() as u64,
+            http_status,
         });
     }
 }
@@ -980,7 +1041,18 @@ async fn run(
     };
     let mut restarts = 0u8;
     loop {
-        let mut session = match Session::start(&ctx).await {
+        // Stop must interrupt the handshake; the child is killed when the start future drops.
+        let started = tokio::select! {
+            started = Session::start(&ctx) => started,
+            command = commands.recv() => {
+                if let Some(Cmd::Invoke { invocation, .. }) = command {
+                    out.result(invocation, Err("capability_unavailable"), Instant::now());
+                }
+                out.state("stopped", restarts, None);
+                return;
+            }
+        };
+        let mut session = match started {
             Ok(session) => session,
             Err(code) => {
                 out.state("failed", restarts, Some(code));
@@ -1030,6 +1102,9 @@ struct Pending {
     deadline: Instant,
     grace: Option<Instant>,
     partial: String,
+    /// Sandbox CPU ticks when the invocation started, and the next per-invocation sample.
+    cpu_base: u64,
+    next_sample: Instant,
 }
 /// One brokered `llm.http` call. The broker process is killed on every exit path.
 struct HostCall {
@@ -1055,8 +1130,11 @@ fn retire(mut child: Child) {
 }
 struct Session {
     child: Child,
+    /// Sandbox root pid (bwrap); its descendants are the plugin process tree.
+    pid: u32,
+    cpu_budget_ms: u64,
     stdin: ChildStdin,
-    lines: mpsc::UnboundedReceiver<Line>,
+    lines: mpsc::Receiver<Line>,
     reader: JoinHandle<()>,
     next_id: u64,
     pending: Option<Pending>,
@@ -1065,6 +1143,8 @@ struct Session {
     broker: PathBuf,
     auth: HostAuth,
     host: Option<HostCall>,
+    /// Last upstream status the broker reported for the active invocation (Core-side only).
+    http_status: Option<u16>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1137,13 +1217,27 @@ async fn next_reply(host: &mut Option<HostCall>) -> Reply {
     }
 }
 
-async fn read_lines(stdout: ChildStdout, tx: mpsc::UnboundedSender<Line>) {
+/// Reads plugin lines into a bounded queue. Log lines over the per-second budget are dropped
+/// here, before queueing and before any JSON parse. A full queue ends the reader: the drive loop
+/// sees the queue end without a terminal line and treats it as a protocol violation (kill).
+async fn read_lines(stdout: ChildStdout, tx: mpsc::Sender<Line>) {
     let mut reader = BufReader::new(stdout);
+    let mut logs = (Instant::now(), 0u32);
     loop {
         let line = match bounded_frame(&mut reader, MAX_LINE).await {
             Ok(Some(mut bytes)) => {
                 if bytes.last() == Some(&b'\n') {
                     bytes.pop();
+                }
+                if bytes.starts_with(LOG_PREFIX) {
+                    let now = Instant::now();
+                    if now.duration_since(logs.0) >= Duration::from_secs(1) {
+                        logs = (now, 0);
+                    }
+                    if logs.1 >= LOG_PER_SECOND {
+                        continue;
+                    }
+                    logs.1 += 1;
                 }
                 Line::Frame(bytes)
             }
@@ -1152,10 +1246,119 @@ async fn read_lines(stdout: ChildStdout, tx: mpsc::UnboundedSender<Line>) {
             Ok(None) | Err(_) => Line::Closed,
         };
         let terminal = !matches!(line, Line::Frame(_));
-        if tx.send(line).is_err() || terminal {
-            return;
+        match tx.try_send(line) {
+            Ok(()) if !terminal => {}
+            // Terminal line queued, or the Session is gone: nothing more to read.
+            Ok(()) => return,
+            Err(_) => return,
         }
     }
+}
+
+/// CPU ticks (utime + stime) of `root` and its live descendants, read from /proc.
+fn tree_cpu_ticks(root: u32) -> Option<u64> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut ticks: HashMap<u32, u64> = HashMap::new();
+    for entry in fs::read_dir("/proc").ok()?.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        // comm may contain spaces or parentheses; fields start after the last ')'.
+        let Some((_, rest)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        let parsed = (
+            fields.get(1).and_then(|v| v.parse::<u32>().ok()),
+            fields.get(11).and_then(|v| v.parse::<u64>().ok()),
+            fields.get(12).and_then(|v| v.parse::<u64>().ok()),
+        );
+        if let (Some(ppid), Some(user), Some(system)) = parsed {
+            children.entry(ppid).or_default().push(pid);
+            ticks.insert(pid, user.saturating_add(system));
+        }
+    }
+    if !ticks.contains_key(&root) {
+        return None;
+    }
+    let mut total = 0u64;
+    let mut stack = vec![root];
+    let mut seen = HashSet::new();
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        total = total.saturating_add(ticks.get(&pid).copied().unwrap_or(0));
+        stack.extend(children.get(&pid).into_iter().flatten().copied());
+    }
+    Some(total)
+}
+/// Clock ticks per second for /proc stat accounting (fallback 100 if the query fails).
+fn clock_ticks() -> u64 {
+    // SAFETY: sysconf with a constant name has no preconditions.
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks > 0 {
+        ticks as u64
+    } else {
+        100
+    }
+}
+/// Whether the installed bwrap accepts `--size` for `--tmpfs` (probed once).
+fn bwrap_supports_size() -> bool {
+    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        std::process::Command::new(BWRAP)
+            .arg("--help")
+            .output()
+            .is_ok_and(|out| {
+                let text = [out.stdout, out.stderr].concat();
+                String::from_utf8_lossy(&text).contains("--size")
+            })
+    })
+}
+/// Result of the interpreter gate: a package-home or /usr interpreter that is not under the
+/// user's HOME and whose runtime directory is not `/`, `/home`, HOME or an ancestor of HOME.
+pub fn plugin_runtime_check(
+    python: &Path,
+    package_home: &Path,
+    user_home: Option<&Path>,
+) -> Result<PathBuf, &'static str> {
+    let refused = "plugin_not_runnable";
+    if !python.is_absolute() {
+        return Err(refused);
+    }
+    let real = fs::canonicalize(python).map_err(|_| refused)?;
+    let interpreter = resolve_interpreter(python);
+    let runtime = interpreter.parent().and_then(Path::parent).ok_or(refused)?;
+    let runtime = fs::canonicalize(runtime).map_err(|_| refused)?;
+    let package = fs::canonicalize(package_home).map_err(|_| refused)?;
+    if let Some(home) = user_home {
+        if real.starts_with(home) || runtime.starts_with(home) {
+            return Err("plugin_python_under_home");
+        }
+        if home.starts_with(&runtime) {
+            return Err("plugin_python_forbidden_root");
+        }
+    }
+    if runtime == Path::new("/") || runtime == Path::new("/home") {
+        return Err("plugin_python_forbidden_root");
+    }
+    let allowed = [
+        Path::new("/usr"),
+        Path::new("/usr/local"),
+        Path::new("/opt"),
+    ];
+    if allowed.iter().any(|prefix| runtime.starts_with(prefix)) || runtime.starts_with(&package) {
+        return Ok(runtime);
+    }
+    Err("plugin_python_not_allowed")
 }
 
 pub(crate) fn resolve_interpreter(python: &Path) -> PathBuf {
@@ -1189,7 +1392,8 @@ fn process_budget() -> u64 {
 }
 
 /// Sandboxed command: prlimit sets the rlimits, then bwrap runs `python -I /plugin/main.py`
-/// with no network, no user home, no repo, a private /tmp and a read-only payload.
+/// with no network, no capabilities, no user home, no repo, a private size-capped /tmp and a
+/// read-only payload. Without bwrap `--size`, /tmp is bounded per file by RLIMIT_FSIZE instead.
 pub(crate) fn sandbox_command(
     python: &Path,
     payload: &Path,
@@ -1204,36 +1408,43 @@ pub(crate) fn sandbox_command(
         .and_then(Path::parent)
         .ok_or_else(|| io::Error::other("python runtime missing"))?;
     let canonical = fs::canonicalize(runtime)?;
+    let sized = bwrap_supports_size();
+    let mut limits = vec![
+        format!("--as={MAX_ADDRESS_SPACE}"),
+        format!("--cpu={MAX_CPU_SECONDS}"),
+        format!("--nofile={MAX_OPEN_FILES}"),
+        format!("--nproc={processes}"),
+    ];
+    if !sized {
+        limits.push(format!("--fsize={MAX_TMP_BYTES}"));
+    }
     let mut command = Command::new(PRLIMIT);
+    command.env_clear().args(limits).arg("--").arg(BWRAP).args([
+        "--unshare-all",
+        "--die-with-parent",
+        "--new-session",
+        "--cap-drop",
+        "ALL",
+        "--clearenv",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--symlink",
+        "usr/lib",
+        "/lib",
+        "--symlink",
+        "usr/lib",
+        "/lib64",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+    ]);
+    if sized {
+        command.args(["--size", &MAX_TMP_BYTES.to_string()]);
+    }
     command
-        .env_clear()
-        .arg(format!("--as={MAX_ADDRESS_SPACE}"))
-        .arg(format!("--cpu={MAX_CPU_SECONDS}"))
-        .arg(format!("--nofile={MAX_OPEN_FILES}"))
-        .arg(format!("--nproc={processes}"))
-        .arg("--")
-        .arg(BWRAP)
-        .args([
-            "--unshare-all",
-            "--die-with-parent",
-            "--new-session",
-            "--clearenv",
-            "--ro-bind",
-            "/usr",
-            "/usr",
-            "--symlink",
-            "usr/lib",
-            "/lib",
-            "--symlink",
-            "usr/lib",
-            "/lib64",
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-            "--tmpfs",
-            "/tmp",
-        ])
+        .args(["--tmpfs", "/tmp"])
         .arg("--ro-bind")
         .arg(&canonical)
         .arg(&canonical)
@@ -1254,6 +1465,24 @@ pub(crate) fn sandbox_command(
     Ok(command)
 }
 
+/// Spawns the sandbox. EAGAIN (the uid hit RLIMIT_NPROC) gets exactly one retry with a freshly
+/// computed budget; any other failure is plugin_start_failed.
+async fn spawn_sandboxed(ctx: &Ctx, payload: &Path) -> Result<Child, &'static str> {
+    for attempt in 0..2 {
+        let budget = tokio::task::spawn_blocking(process_budget)
+            .await
+            .map_err(|_| "plugin_start_failed")?;
+        let mut command =
+            sandbox_command(&ctx.python, payload, budget).map_err(|_| "plugin_not_runnable")?;
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if attempt == 0 && error.raw_os_error() == Some(libc::EAGAIN) => continue,
+            Err(_) => return Err("plugin_start_failed"),
+        }
+    }
+    Err("plugin_start_failed")
+}
+
 impl Session {
     async fn start(ctx: &Ctx) -> Result<Session, &'static str> {
         let payload = hub::verified_payload_path(
@@ -1264,17 +1493,18 @@ impl Session {
             &ctx.payload_sha256,
         )
         .map_err(|_| "plugin_quarantined")?;
-        let mut command = sandbox_command(&ctx.python, &payload, process_budget())
-            .map_err(|_| "plugin_not_runnable")?;
-        let mut child = command.spawn().map_err(|_| "plugin_start_failed")?;
+        let mut child = spawn_sandboxed(ctx, &payload).await?;
+        let pid = child.id().ok_or("plugin_start_failed")?;
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             let _ = child.kill().await;
             return Err("plugin_start_failed");
         };
-        let (tx, lines) = mpsc::unbounded_channel();
+        let (tx, lines) = mpsc::channel(LINE_QUEUE);
         let reader = tokio::spawn(read_lines(stdout, tx));
         let mut session = Session {
             child,
+            pid,
+            cpu_budget_ms: ctx.cpu_budget_ms,
             stdin,
             lines,
             reader,
@@ -1285,6 +1515,7 @@ impl Session {
             broker: ctx.broker.clone(),
             auth: HostAuth::default(),
             host: None,
+            http_status: None,
         };
         let hello = serde_json::json!({"v": 1, "id": 1, "op": "hello", "plugin_id": ctx.plugin_id});
         let verdict = async {
@@ -1322,6 +1553,7 @@ impl Session {
         loop {
             let wake = self.pending.as_ref().map(|p| p.grace.unwrap_or(p.deadline));
             let host_deadline = self.host.as_ref().map(|h| h.deadline);
+            let sample = self.pending.as_ref().map(|p| p.next_sample);
             tokio::select! {
                 line = self.lines.recv() => match line {
                     Some(Line::Frame(bytes)) => {
@@ -1330,9 +1562,16 @@ impl Session {
                         }
                     }
                     Some(Line::Invalid) => return self.violation(out, "plugin_output_invalid"),
-                    Some(Line::Closed) | None => {
+                    Some(Line::Closed) => {
                         self.fail_pending(out, "plugin_error");
                         return Exit::Crashed;
+                    }
+                    // The reader stopped without a terminal line: the queue overflowed.
+                    None => return self.violation(out, "plugin_output_invalid"),
+                },
+                _ = sleep_until(sample), if sample.is_some() => {
+                    if let Err(exit) = self.sample_cpu(out) {
+                        return exit;
                     }
                 },
                 command = commands.recv() => match command {
@@ -1380,6 +1619,22 @@ impl Session {
             }
         }
     }
+    /// Per-invocation CPU budget: the sandbox tree's CPU since the invocation began.
+    fn sample_cpu(&mut self, out: &Out) -> Result<(), Exit> {
+        let Some(pending) = self.pending.as_mut() else {
+            return Ok(());
+        };
+        pending.next_sample = Instant::now() + CPU_SAMPLE;
+        let base = pending.cpu_base;
+        let Some(now) = tree_cpu_ticks(self.pid) else {
+            return Ok(());
+        };
+        let used_ms = now.saturating_sub(base).saturating_mul(1000) / clock_ticks();
+        if used_ms > self.cpu_budget_ms {
+            return Err(self.violation(out, "plugin_cpu_exceeded"));
+        }
+        Ok(())
+    }
     fn fail_pending(&mut self, out: &Out, code: &'static str) {
         if let Some(p) = self.pending.take() {
             if p.grace.is_none() {
@@ -1407,6 +1662,7 @@ impl Session {
         }
         let wire_id = self.next_id;
         self.next_id += 1;
+        self.http_status = None;
         let mut message = serde_json::json!({
             "v": 1,
             "id": wire_id,
@@ -1434,6 +1690,8 @@ impl Session {
             deadline: started + Duration::from_millis(deadline_ms),
             grace: None,
             partial: String::new(),
+            cpu_base: tree_cpu_ticks(self.pid).unwrap_or(0),
+            next_sample: started + CPU_SAMPLE,
         });
         Ok(())
     }
@@ -1458,6 +1716,7 @@ impl Session {
         let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
             return Err(self.violation(out, "plugin_output_invalid"));
         };
+        // Every log event is budgeted here; the reader already capped prefixed lines before queueing.
         if value.get("event").and_then(Value::as_str) == Some("partial") {
             return self.on_partial(value, out);
         }
@@ -1507,7 +1766,7 @@ impl Session {
             }
         } else {
             match (&reply.output, &reply.error) {
-                (None, Some(code)) if valid_code(code) => Err("plugin_error"),
+                (None, Some(code)) if valid_code(code) => Err(pass_through(code)),
                 _ => return Err(self.violation(out, "plugin_output_invalid")),
             }
         };
@@ -1517,7 +1776,12 @@ impl Session {
         self.stop_host();
         // A reply after cancel or timeout was already reported; it is dropped.
         if pending.grace.is_none() {
-            out.result(pending.invocation, outcome, pending.started);
+            out.result_status(
+                pending.invocation,
+                outcome,
+                pending.started,
+                self.http_status,
+            );
         }
         Ok(())
     }
@@ -1652,7 +1916,10 @@ impl Session {
         body["model"] = serde_json::json!(self.auth.model.clone().unwrap_or_default());
         body["stream"] = serde_json::json!(true);
         let payload = broker::payload(target, &body, &self.auth)?;
-        let mut command = broker::command(&self.python, &self.broker, process_budget())
+        let budget = tokio::task::spawn_blocking(process_budget)
+            .await
+            .map_err(|_| "network_unavailable")?;
+        let mut command = broker::command(&self.python, &self.broker, budget)
             .map_err(|_| "network_unavailable")?;
         let mut child = command.spawn().map_err(|_| "network_unavailable")?;
         let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
@@ -1699,6 +1966,7 @@ impl Session {
             }
             Reply::Error(code, status) => {
                 self.stop_host();
+                self.http_status = status.filter(|s| (100..=599).contains(s));
                 host_error_frame(id, code, status)
             }
             Reply::Closed => {
@@ -1715,6 +1983,30 @@ fn bounded_object(output: Value) -> Option<Value> {
         && depth_ok(&output, 0)
         && serde_json::to_vec(&output).is_ok_and(|b| b.len() <= MAX_OUTPUT);
     fits.then_some(output)
+}
+/// Plugin error codes that reach clients unchanged (C1). Any other plugin code reads `plugin_error`.
+const PASS_THROUGH_ERRORS: [&str; 14] = [
+    "key_missing",
+    "cloud_not_authorized",
+    "provider_not_configured",
+    "permission_denied",
+    "http_error",
+    "timeout",
+    "response_too_large",
+    "network_unavailable",
+    "cancelled",
+    "invalid_input",
+    "host_not_allowed",
+    "redirect_refused",
+    "busy",
+    "invalid_host_call",
+];
+fn pass_through(code: &str) -> &'static str {
+    PASS_THROUGH_ERRORS
+        .iter()
+        .copied()
+        .find(|allowed| *allowed == code)
+        .unwrap_or("plugin_error")
 }
 fn valid_code(code: &str) -> bool {
     !code.is_empty()

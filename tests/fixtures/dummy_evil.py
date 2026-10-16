@@ -5,6 +5,10 @@ Capability `dummy_evil.probe`, input {"probe": name} performs ONE attempt of tha
 probe and reports output {"result": "denied"|"allowed", "detail": short}.
 Probes: network, read_home, read_repo, write_root, exec, fork_bomb_limited, env,
 mem, cpu_spin (busy loop only with input allow_spin true).
+Optional inputs (defaults keep the old behaviour):
+  network    "listener": [host, port]  try ONLY that target (default: 1.1.1.1:53 and 127.0.0.1:37700)
+  read_repo  "path": file to read      (default: the repository Cargo.toml)
+  env        "names": [env var names]  also report these names if present (default: HOME, SSH_AUTH_SOCK, XDG*, DBUS*)
 
 Optional argv[1] mode (used only by unsandboxed protocol tests; the Core starts the
 plugin without arguments, so it always runs "normal"):
@@ -82,9 +86,22 @@ def _report(allowed, detail):
     return {"result": "allowed" if allowed else "denied", "detail": str(detail)[:200]}
 
 
-def probe_network():
+DEFAULT_NETWORK_TARGETS = (("1.1.1.1", 53), ("127.0.0.1", 37700))
+DEFAULT_REPO_FILE = "/home/lucas/Documentos/Gideon/base/Cargo.toml"
+INPUT_PROBES = ("network", "read_repo", "env")
+
+
+def probe_network(inp):
+    listener = inp.get("listener") if isinstance(inp, dict) else None
+    if listener is None:
+        targets = DEFAULT_NETWORK_TARGETS
+    elif (isinstance(listener, list) and len(listener) == 2 and isinstance(listener[0], str)
+          and isinstance(listener[1], int) and not isinstance(listener[1], bool)):
+        targets = ((listener[0], listener[1]),)
+    else:
+        return _report(False, "invalid listener")
     outcomes = []
-    for host, port in (("1.1.1.1", 53), ("127.0.0.1", 37700)):
+    for host, port in targets:
         try:
             sock = socket.create_connection((host, port), timeout=2)
             sock.close()
@@ -114,13 +131,18 @@ def probe_read_home():
     return _report(allowed, ", ".join(notes))
 
 
-def probe_read_repo():
+def probe_read_repo(inp):
+    path = inp.get("path", DEFAULT_REPO_FILE) if isinstance(inp, dict) else DEFAULT_REPO_FILE
+    if not isinstance(path, str) or not path:
+        return _report(False, "invalid path")
+    # Only the basename is reported, so the answer never carries the repository path.
+    name = os.path.basename(path) or "path"
     try:
-        with open("/home/lucas/Documentos/Gideon/base/Cargo.toml", "rb") as handle:
+        with open(path, "rb") as handle:
             handle.read(1)
-        return _report(True, "Cargo.toml read")
+        return _report(True, f"{name} read")
     except Exception as exc:
-        return _report(False, f"Cargo.toml {type(exc).__name__}")
+        return _report(False, f"{name} {type(exc).__name__}")
 
 
 def probe_write_root():
@@ -172,10 +194,13 @@ def probe_fork_bomb_limited():
     return _report(len(pids) == 64, f"forked={len(pids)} failed={failed}")
 
 
-def probe_env():
+def probe_env(inp):
+    names = inp.get("names", []) if isinstance(inp, dict) else []
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        return _report(False, "invalid names")
     keys = sorted(
         k for k in os.environ
-        if k in ("HOME", "SSH_AUTH_SOCK") or k.startswith(("XDG", "DBUS"))
+        if k in ("HOME", "SSH_AUTH_SOCK") or k.startswith(("XDG", "DBUS")) or k in names
     )
     detail = "present: " + ",".join(keys) if keys else "none present"
     return _report(bool(keys), detail)
@@ -247,6 +272,8 @@ def _handle_invoke(msg):
     else:
         if probe == "cpu_spin":
             output = probe_cpu_spin(inp)
+        elif probe in INPUT_PROBES:
+            output = PROBES[probe](inp)
         else:
             output = PROBES[probe]()
         send({"id": req_id, "ok": True, "output": output})
