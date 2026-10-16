@@ -19,3 +19,7 @@
 - Planned infra sprint (~1.5 h, after C2): JSON schemas in docs/schemas shared by Core/plugin/bridge with generated validators and contract tests; scripts/gatelib.py shared gate harness; scripts/affected_gates.py (changed files -> gates) and a 3-way sharded full matrix; fixed agent-prompt preamble; reuse agents via SendMessage; review contracts before code.
 - Remaining roadmap after C2: C3 Agent Runtime (observe-plan-act-verify), C4.1-C4.6 perception/action plugins (screen, computer control, audio, mic, camera gestures, display manipulation; UNSUPPORTED where the host cannot), S3 final gate, S4 Skills mechanism (no catalog of official skills), S5 Connections, final integrated package, then the consolidated human validation round (physical audio, KDE Wayland, Flatpak) that only the owner can do. Estimate 30-50 h of agent work.
 - Matrix commands: full = target/run-matrix-c1.sh (resumable via START=<gate>); evidence generators = target/mkev*.py (not versioned: recreate from the pattern in docs/evidence/*.json if lost). Package gates need a clean git tree (build_package flags dirty).
+
+## 2026-10-16 — C2 CLOSED (AUTO_VERIFIED)
+- C2 committed (7933749, efc00ae, deadline change after). Full matrix green (rerun from c0plugins after commit), live Google+Mistral PASSED, evidence docs/evidence/c2-models.json. Handoff section above is superseded for C2.
+- Next: infra sprint (optional, awaiting owner ok) or C3 Agent Runtime. Local llama.cpp certification still needs owner authorization to download binary + GGUF.
