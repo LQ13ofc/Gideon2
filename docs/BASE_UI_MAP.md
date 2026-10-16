@@ -1,7 +1,7 @@
 # Mapa da Base para S2
 
 Escopo: implementação nova em `base`, S1, cliente B1, preferências B2.1, modo seguro B2.2a pack interno B2.2b feedback/ganho B2.3 e descoberta/aprovação Hub B3.1/B3.2a/B3.2b/B3.3.
-Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json, docs/evidence/b3-catalog.json, docs/evidence/b3-permissions.json e docs/evidence/b3-import.json e docs/evidence/b3-lifecycle.json e docs/evidence/b4-package.json e docs/evidence/b4-update.json e docs/evidence/s2-final.json.
+Contratos e evidências atuais de B2: docs/B2.md e docs/evidence/b2-feedback.json, docs/evidence/b3-catalog.json, docs/evidence/b3-permissions.json e docs/evidence/b3-import.json e docs/evidence/b3-lifecycle.json e docs/evidence/b4-package.json e docs/evidence/b4-update.json e docs/evidence/s2-final.json e docs/evidence/c0-plugins.json.
 Fonte: código atual, specs S1/S2 em docs/sources, inferência CPU com fixtures,
 IPC real e Qt offscreen. Não é um mapa de prontidão física ou do legado.
 
@@ -216,3 +216,11 @@ pacote ainda. Nada instalado no host, sem autostart.
 Fluxo completo sobre pacote instalado: UI Qt empacotada → Core real (S1 virtual,
 feedback, wake suportado, Hub aprovar/instalar/remover, restart, update, rollback).
 Plugin permanece desativado; nenhum controle executa plugin. Física/KDE real pendentes.
+
+## Plugins C0
+
+Seção Plugins no diálogo do Hub: estado (Desativado/Ativo em sandbox sem rede/
+Falhou/Em quarentena), Ativar, Desativar, Revogar permissões (confirmação) e, por
+capability, campo de texto, Invocar, Cancelar e resultado. Ativar exige plugin
+instalado e permissões aprovadas; revogar remove a aprovação e exige nova aprovação.
+Nenhum controle concede permissão, executa fora do Core ou autentica publisher.

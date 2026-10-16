@@ -1,11 +1,11 @@
 # Agent state — 2026-10-16
 
-- S2 (App + Hub + pacote) AUTO_VERIFIED em ambiente virtual: B1–B4 + gate final. Branch main; code HEAD 356a8b5; evidence/docs commit follows. Local only/no remote/push/deploy. Legacy untouched.
-- PASS fmt/check/test/clippy -D warnings/release/diff-check: 67 Rust, 20 Python + 31 installer tests; 1416 process checks = 204 s2-final + 126 b4-update + 66 b4-package + 1020 regressions on release 488e1bb6fb123511c766a0951da56c750e7ad6cdd40562357695e0b0fd65bd5b. Evidence docs/evidence/s2-final.json (clean tree, commit, per-version PACKAGE.json/binary hashes; packaged binary c979630e58618234b73e927b9006962e24e3e22234a6fe71720e37fe81c5f044). Graph AST 1311 nodes/3354 edges.
-- Gate: installed packages 0.1.0/0.1.1; packaged Qt UI + Core under bwrap without repo/uv/net; S1 via virtual PCM seen by UI; feedback+wake via Qt; Hub approve + Qt install + Qt remove; restart; update (refused while Core active); rollback; state preserved; S1 each stage.
-- Deviations: wake selection last in configure; UI transcribing/executing states derived from Core event log (source marked).
-- Limits: wake replay only, no live mic path; physical audio/CPAL/PipeWire/AEC/hotplug/barge-in, real KDE Wayland, Flatpak/portal NOT validated; packaged binary != target/release by design; command worker uses host /usr/bin/python3; no signing/update channel/autostart/UI for package update; manual repair after power loss mid-update; plugin runtime disabled; publisher unauthenticated.
-- Intermittents A1 early-worker and A3 idle CPU did not recur; causes unresolved.
-- Workflow: graphify navigation; Haiku 5.5 agents implement; I review, run gates, commit.
-- Physical/human validation consolidated only after S5. No personal devices touched.
-- Next: S3 (C0 plugin runtime/SDK, capability registry, permissions, sandbox per component, activate/uninstall/revoke) — start only with explicit scope go-ahead. LLM Engine and its Model Manager exist ONLY as optional S3 plugin; never in Base.
+- S3/C0 plugin runtime AUTO_VERIFIED (virtual env). S2 AUTO_VERIFIED earlier. Branch main; code HEAD 8c25e43; evidence/docs commit follows. Local only/no remote/push/deploy. Legacy untouched.
+- PASS fmt/check/test/clippy -D warnings/release/diff-check: 87 Rust, 86 Python (1 skip); 1656 process checks = 107 c0-plugins + 133 c0-package + 66 b4-package + 126 b4-update + 204 s2-final + 1020 regressions, all rerun on release 8c25e43c134d… Evidence docs/evidence/c0-plugins.json. Graph AST 1782 nodes/4681 edges.
+- C0: manifest runtime python3_script + capabilities (hash-stable optional fields); plugin-state.json ledger; per-plugin bwrap process (unshare-all, ro root, private /tmp, cleared env, prlimit AS/CPU/NOFILE/NPROC, payload re-verified before spawn) with bounded JSON-lines protocol; ops plugin_enable/disable/revoke, capability_invoke/cancel; revoke removes approval and reapproval re-enables without reinstall; Qt Plugins section; package passes bundled CPython as --plugin-python.
+- Fixed this round: request-line bound regression (A0), writable bwrap root, revoked-plugin reapproval gap.
+- Limits: exec of /usr binaries allowed in sandbox, no seccomp; residual TOCTOU on path bind; prlimit required; plugin update/rollback pruning only in Rust tests; argv-only evil modes proven in Rust tests; wake replay only; physical audio/KDE Wayland/Flatpak not validated; package update has no UI.
+- Intermittents A1/A3 did not recur; causes unresolved.
+- Workflow: graphify navigation; Haiku 5.5 agents implement; I review, run gates, commit. Matrix policy: affected gates during dev, full matrix once per gate.
+- Physical/human validation consolidated after S5. No personal devices touched.
+- Next: C1 LLM Engine plugin (optional; S1 works without it). LLM Model Manager lives ONLY inside that plugin (C2). Need explicit direction on provider/runtime choices before building.

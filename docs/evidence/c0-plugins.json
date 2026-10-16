@@ -1,0 +1,994 @@
+{
+  "gate": "S3_C0_PLUGIN_RUNTIME",
+  "passed": 240,
+  "failed": 0,
+  "ignored": 7,
+  "gates": {
+    "c0_plugins": {
+      "gate": "C0_PLUGINS",
+      "passed": 107,
+      "failed": 0,
+      "ignored": 7,
+      "ignored_items": [
+        "argv mode ignore_cancel: not reachable from Core (plugin started without argv); input-based modes only",
+        "argv mode crash: not reachable from Core (plugin started without argv); input-based modes only",
+        "argv mode bad_json: not reachable from Core (plugin started without argv); input-based modes only",
+        "argv mode oversize: not reachable from Core (plugin started without argv); input-based modes only",
+        "argv mode dup_id: not reachable from Core (plugin started without argv); input-based modes only",
+        "argv mode log_flood: not reachable from Core (plugin started without argv); input-based modes only",
+        "cpu_spin: 40 s busy loop, not part of the gate budget"
+      ],
+      "error": null,
+      "ui": {
+        "phase": "plugins",
+        "passed": 24,
+        "failed": 0,
+        "ignored": 0,
+        "checks": [
+          "actual Core connection",
+          "accessible cancel name",
+          "minimum layout size respected",
+          "Core lists dummy_echo disabled and not enabled",
+          "status label shows Desativado",
+          "enable offered for installed plugin",
+          "invoke unavailable while disabled",
+          "Qt enable reaches Core and sandbox runs dummy_echo",
+          "status label shows sandbox running without network",
+          "typed text reaches capability input",
+          "capability result from real sandbox is uppercased text",
+          "invocation pending text cleared when result arrives",
+          "revoke waits for confirmation",
+          "confirmed revoke disables plugin in Core",
+          "revoke result label shown",
+          "invoke controls disabled after revoke",
+          "capability result cleared after revoke",
+          "UI gates enable until new approval and shows hint",
+          "Core refuses re-enable until new approval",
+          "review offered for installed unapproved plugin",
+          "re-review never defaults to publisher acknowledgement",
+          "re-approval keeps dummy_echo installed and not running",
+          "enable offered again after re-approval",
+          "re-enabled dummy_echo runs in sandbox again"
+        ],
+        "state_trace": [
+          "offline",
+          "idle"
+        ],
+        "metrics": {}
+      },
+      "evil_probes": {
+        "network": {
+          "result": "denied",
+          "detail": "1.1.1.1:53 OSError; 127.0.0.1:37700 ConnectionRefusedError"
+        },
+        "read_home": {
+          "result": "denied",
+          "detail": "bashrc FileNotFoundError, listdir FileNotFoundError"
+        },
+        "read_repo": {
+          "result": "denied",
+          "detail": "Cargo.toml FileNotFoundError"
+        },
+        "write_root": {
+          "result": "denied",
+          "detail": "/plugin/x OSError, /etc/x FileNotFoundError, /usr/x OSError"
+        },
+        "exec": {
+          "result": "allowed",
+          "detail": "rc=0"
+        },
+        "fork_bomb_limited": {
+          "result": "denied",
+          "detail": "forked=12 failed=52"
+        },
+        "env": {
+          "result": "denied",
+          "detail": "none present"
+        },
+        "mem": {
+          "result": "denied",
+          "detail": "2 GiB MemoryError"
+        },
+        "exec_note": "C0 leaves exec open (documented); the observed exec result is recorded above, not asserted",
+        "idle_cpu": {
+          "core_percent": 0.0,
+          "plugin_percent": 0.0,
+          "window_s": 3.02
+        }
+      },
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "commit": "bdb6069b118bd7b008e254ddeb2a6dce57f41a4f",
+      "scope": "local fixture plugins dummy_echo and dummy_evil through real Core and bwrap sandbox; plain_opaque refusal; no network, no LLM, no real HOME; argv-only dummy_evil modes ignored; exec probe recorded",
+      "physical_validation": "NOT_PERFORMED"
+    },
+    "c0_package": {
+      "scenarios": {
+        "1 build": "done",
+        "1 install": "done",
+        "2 isolation": "done",
+        "3 core1 echo and evil": "done",
+        "4 core2 restart": "done",
+        "5 tamper": "done",
+        "6 recover and update refused": "done",
+        "7 final": "done"
+      },
+      "isolation": {
+        "outer_probe_rc": 0,
+        "netns_interfaces": [
+          "lo"
+        ],
+        "mode": "outer_bwrap",
+        "core1_plugin_pids": 6,
+        "core1_plugin_python_pids": 2,
+        "nested_bwrap_ancestor": true,
+        "plugin_interpreters": {
+          "61553": {
+            "exe": "/tmp/gc0-ggti9b7q/r/versions/0.1.0-bdb6069b/runtime/python/bin/python3.13",
+            "argv0": "/tmp/gc0-ggti9b7q/r/versions/0.1.0-bdb6069b/runtime/python/bin/python3.13"
+          },
+          "61556": {
+            "exe": "/tmp/gc0-ggti9b7q/r/versions/0.1.0-bdb6069b/runtime/python/bin/python3.13",
+            "argv0": "/tmp/gc0-ggti9b7q/r/versions/0.1.0-bdb6069b/runtime/python/bin/python3.13"
+          }
+        }
+      },
+      "identity": {
+        "commit": "bdb6069b118bd7b008e254ddeb2a6dce57f41a4f",
+        "dirty_at_build": false,
+        "package_json_sha256_at_build": "792db49122206874517f5c7c0ba0e1f263c7f90bfbcb041b22e907e57a48d1cd",
+        "packaged_binary_sha256": "1ee6ecc9c6790130bdce791640b643454a46e5500ef2ac8c58c12df48ad36395",
+        "package_version": "0.1.0",
+        "package_json_sha256": "792db49122206874517f5c7c0ba0e1f263c7f90bfbcb041b22e907e57a48d1cd"
+      },
+      "notes": [
+        {
+          "tampered_boot_item": {
+            "plugin_id": "dummy_echo",
+            "semver": "1.0.0",
+            "capabilities": [
+              "dummy_echo.echo"
+            ],
+            "state": "quarantined",
+            "enabled": false,
+            "restarts": 0,
+            "last_error": null
+          }
+        },
+        {
+          "tampered_enable_response": {
+            "hub": {
+              "approval_revision": 4,
+              "install_revision": 2,
+              "installed": [
+                {
+                  "plugin_id": "dummy_echo",
+                  "semver": "1.0.0",
+                  "manifest_sha256": "97c29469302f01e4a4db2b69c20c6bb9857249539142a3783a73ed1bcb544197",
+                  "state": "quarantined",
+                  "runtime": "disabled",
+                  "previous": null
+                },
+                {
+                  "plugin_id": "dummy_evil",
+                  "semver": "1.0.0",
+                  "manifest_sha256": "ffede7aded551d1b1c622c099b5a013270f1bc2a036dd5e3e2015536386f518b",
+                  "state": "installed",
+                  "runtime": "disabled",
+                  "previous": null
+                }
+              ],
+              "import": null,
+              "version": 1,
+              "status": "verified",
+              "repository": "https://github.com/LQ13ofc/Gideon2",
+              "catalog_sha256": "70538cd2aa7cecc3907ee9957ab1c3a75545daa4695edafb8f6cf700b00c0334",
+              "publisher_verified": false,
+              "entries": [
+                {
+                  "manifest_sha256": "97c29469302f01e4a4db2b69c20c6bb9857249539142a3783a73ed1bcb544197",
+                  "permissions_approved": true,
+                  "payload_staged": false,
+                  "plugin_id": "dummy_echo",
+                  "semver": "1.0.0",
+                  "publisher": "Gideon local test fixture",
+                  "api_version": 1,
+                  "targets": [
+                    "linux_x86_64"
+                  ],
+                  "license": "MIT",
+                  "permissions": [
+                    "notifications"
+                  ],
+                  "dependencies": [],
+                  "conflicts": [],
+                  "download_size": 4818,
+                  "support_policy": "Fixture de teste local; sem suporte de produto",
+                  "runtime": "python3_script",
+                  "capabilities": [
+                    "dummy_echo.echo"
+                  ],
+                  "status": "installed",
+                  "reason": "none"
+                },
+                {
+                  "manifest_sha256": "ffede7aded551d1b1c622c099b5a013270f1bc2a036dd5e3e2015536386f518b",
+                  "permissions_approved": true,
+                  "payload_staged": false,
+                  "plugin_id": "dummy_evil",
+                  "semver": "1.0.0",
+                  "publisher": "Gideon local test fixture",
+                  "api_version": 1,
+                  "targets": [
+                    "linux_x86_64"
+                  ],
+                  "license": "MIT",
+                  "permissions": [
+                    "notifications"
+                  ],
+                  "dependencies": [],
+                  "conflicts": [],
+                  "download_size": 8256,
+                  "support_policy": "Fixture de teste local; sem suporte de produto",
+                  "runtime": "python3_script",
+                  "capabilities": [
+                    "dummy_evil.probe"
+                  ],
+                  "status": "installed",
+                  "reason": "none"
+                },
+                {
+                  "manifest_sha256": "c653dbefe75fe959e5e05f8454f82b7fcb63b741eaadd018278dbe08f4260908",
+                  "permissions_approved": false,
+                  "payload_staged": false,
+                  "plugin_id": "plain_opaque",
+                  "semver": "1.0.0",
+                  "publisher": "Gideon local test fixture",
+                  "api_version": 1,
+                  "targets": [
+                    "linux_x86_64"
+                  ],
+                  "license": "MIT",
+                  "permissions": [
+                    "notifications"
+                  ],
+                  "dependencies": [],
+                  "conflicts": [],
+                  "download_size": 15,
+                  "support_policy": "Fixture de teste local; sem suporte de produto",
+                  "status": "not_installed",
+                  "reason": "none"
+                }
+              ]
+            },
+            "plugins": {
+              "revision": 6,
+              "status": "ok",
+              "items": [
+                {
+                  "plugin_id": "dummy_echo",
+                  "semver": "1.0.0",
+                  "capabilities": [
+                    "dummy_echo.echo"
+                  ],
+                  "state": "quarantined",
+                  "enabled": false,
+                  "restarts": 0,
+                  "last_error": null
+                },
+                {
+                  "plugin_id": "dummy_evil",
+                  "semver": "1.0.0",
+                  "capabilities": [
+                    "dummy_evil.probe"
+                  ],
+                  "state": "disabled",
+                  "enabled": false,
+                  "restarts": 0,
+                  "last_error": null
+                }
+              ]
+            },
+            "base_pack": {
+              "version": 1,
+              "id": "base-en-dev-v1",
+              "scope": "dev_virtual_en",
+              "preflight": "verified",
+              "engines": {
+                "stt": "moonshine-voice-0.1.5/small-streaming-en-quantized-26_08_21",
+                "tts": "pocket-tts-3.3.0/english_2026-09/cpu",
+                "wake": "sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8/competitive-v2"
+              },
+              "wake_phrases": [
+                {
+                  "id": "hey_gideon",
+                  "text": "Hey Gideon",
+                  "qualification": "dev_qualified"
+                },
+                {
+                  "id": "okay_gideon",
+                  "text": "Okay Gideon",
+                  "qualification": "poc_required"
+                }
+              ],
+              "active_phrase": "hey_gideon",
+              "default_phrase": "hey_gideon",
+              "voice": "Alba",
+              "language": "en",
+              "audio_input": "virtual_pcm",
+              "audio_output": "virtual"
+            },
+            "configuration_status": "ready",
+            "configuration_recovery_available": false,
+            "preferences": {
+              "version": 1,
+              "session_timeout_ms": 30000,
+              "wake_phrase": null,
+              "revision": 0,
+              "audible_feedback": true,
+              "visual_feedback": true,
+              "output_volume_percent": 100
+            },
+            "command": {
+              "session_id": 4232518901153809069,
+              "code": "command_success",
+              "receipt": {
+                "job": {
+                  "session_id": 4232518901153809069,
+                  "command": {
+                    "kind": "open_app",
+                    "desktop_id": "com.brave.Browser.desktop"
+                  }
+                },
+                "verified": true,
+                "scope": "sandbox",
+                "result": "Sandbox app process verified: com.brave.Browser.desktop"
+              }
+            },
+            "text_input_available": false,
+            "speech_samples": 51840,
+            "speech_status": "completed",
+            "speech": {
+              "output_volume_percent": 100,
+              "session_id": 4232518901153809069,
+              "sample_rate": 24000,
+              "samples": 51840,
+              "chunks": 27,
+              "pcm_sha256": "af562d72f88ae34825d61a38047a80c651e8948ab87da7929be9755034c6b34d",
+              "peak": 0.77404326,
+              "rms": 0.08952731957833777,
+              "first_pcm_ms": 8641,
+              "elapsed_ms": 11164,
+              "sink": "virtual"
+            },
+            "stt_status": "ready",
+            "transcript": {
+              "source": "voice",
+              "session_id": 4232518901153809069,
+              "revision": 4,
+              "audio_end_us": 2720000,
+              "raw": "Hey Gideon, open brave.",
+              "normalized": "Hey Gideon, open brave.",
+              "is_final": true,
+              "confidence": null
+            },
+            "capture": {
+              "session_id": 4232518901153809069,
+              "start_us": 280000,
+              "end_us": 2720000,
+              "samples": 39040,
+              "pcm_sha256": "5c4ea3360b75b6916cff2335b29453be2a41815dc937fc770b7729c9385daa49",
+              "reason": "capture_completed"
+            },
+            "wake_status": "replay_finished",
+            "version": 1,
+            "request_id": "c0_1030",
+            "code": "plugin_quarantined",
+            "state": "idle",
+            "session_id": null,
+            "sequence": 11,
+            "events": [
+              {
+                "sequence": 1,
+                "request_id": "",
+                "session_id": null,
+                "kind": "plugin_disabled"
+              },
+              {
+                "sequence": 2,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "session_started"
+              },
+              {
+                "sequence": 3,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "transcript_partial"
+              },
+              {
+                "sequence": 4,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "transcript_partial"
+              },
+              {
+                "sequence": 5,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "transcript_partial"
+              },
+              {
+                "sequence": 6,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "capture_completed"
+              },
+              {
+                "sequence": 7,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "transcript_final"
+              },
+              {
+                "sequence": 8,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "command_authorized"
+              },
+              {
+                "sequence": 9,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "command_success"
+              },
+              {
+                "sequence": 10,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "speech_started"
+              },
+              {
+                "sequence": 11,
+                "request_id": "wake_2",
+                "session_id": 4232518901153809069,
+                "kind": "speech_completed"
+              }
+            ]
+          }
+        }
+      ],
+      "probe_results": {
+        "network": {
+          "ok": true,
+          "result": "denied",
+          "detail": "1.1.1.1:53 OSError; 127.0.0.1:37700 ConnectionRefusedError",
+          "elapsed_ms": 4
+        },
+        "read_home": {
+          "ok": true,
+          "result": "denied",
+          "detail": "bashrc FileNotFoundError, listdir FileNotFoundError",
+          "elapsed_ms": 0
+        },
+        "read_repo": {
+          "ok": true,
+          "result": "denied",
+          "detail": "Cargo.toml FileNotFoundError",
+          "elapsed_ms": 0
+        },
+        "write_root": {
+          "ok": true,
+          "result": "denied",
+          "detail": "/plugin/x OSError, /etc/x FileNotFoundError, /usr/x OSError",
+          "elapsed_ms": 0
+        },
+        "env": {
+          "ok": true,
+          "result": "denied",
+          "detail": "none present",
+          "elapsed_ms": 0
+        },
+        "mem": {
+          "ok": true,
+          "result": "denied",
+          "detail": "2 GiB MemoryError",
+          "elapsed_ms": 0
+        }
+      },
+      "gate": "C0_PACKAGE",
+      "passed": 133,
+      "failed": 0,
+      "ignored": 0,
+      "failures": [],
+      "commit": "bdb6069b118bd7b008e254ddeb2a6dce57f41a4f",
+      "dirty_at_build": false,
+      "isolation_mode": "outer_bwrap",
+      "scope": "plugin runtime (dummy_echo, dummy_evil) inside the installed relocatable package under an outer bwrap without repo, uv or network; nested plugin bwrap; Hub approve/stage/install, enable, invoke, revoke, re-approve, restart, tamper, update refused with profile_active; no physical devices",
+      "physical_validation": "NOT_PERFORMED",
+      "runtime_seconds": 150.7
+    }
+  },
+  "checks_c0_plugins": [
+    "C0 catalog verified with 3 entries",
+    "C0 catalog sha256 pinned at Core boot",
+    "dummy_echo declares python3_script runtime and dummy_echo.echo",
+    "plain_opaque is opaque (no runtime)",
+    "plain_opaque approve ok",
+    "plain_opaque install ok",
+    "plain_opaque enable refused plugin_not_runnable",
+    "native S1 before any plugin enabled",
+    "dummy_echo approve ok",
+    "dummy_echo install ok",
+    "dummy_echo installed disabled before enable",
+    "dummy_echo enable ok",
+    "capability_invoke text ok",
+    "dummy_echo uppercases text with count",
+    "invoke unknown capability => unknown_capability",
+    "non-object input => invalid_input (Core)",
+    "deadline_ms 0 => invalid_input (Core)",
+    "oversize input 9000 bytes => invalid_input (Core)",
+    "plugin-side invalid input reported as plugin_error in capability_result (C0 mapping)",
+    "deadline 1 ms on sleep_ms=500 => capability_timeout",
+    "plugin still usable after timeout",
+    "cancel submit during sleep accepted",
+    "capability_cancel ok",
+    "cancel during sleep => invoke_cancelled",
+    "dummy_echo disable ok",
+    "disable stops dummy_echo process",
+    "Qt revoke reached Core: plugin_revoked event recorded",
+    "Qt plugins phase reports zero failures",
+    "actual Core connection",
+    "accessible cancel name",
+    "minimum layout size respected",
+    "Core lists dummy_echo disabled and not enabled",
+    "status label shows Desativado",
+    "enable offered for installed plugin",
+    "invoke unavailable while disabled",
+    "Qt enable reaches Core and sandbox runs dummy_echo",
+    "status label shows sandbox running without network",
+    "typed text reaches capability input",
+    "capability result from real sandbox is uppercased text",
+    "invocation pending text cleared when result arrives",
+    "revoke waits for confirmation",
+    "confirmed revoke disables plugin in Core",
+    "revoke result label shown",
+    "invoke controls disabled after revoke",
+    "capability result cleared after revoke",
+    "UI gates enable until new approval and shows hint",
+    "Core refuses re-enable until new approval",
+    "review offered for installed unapproved plugin",
+    "re-review never defaults to publisher acknowledgement",
+    "re-approval keeps dummy_echo installed and not running",
+    "enable offered again after re-approval",
+    "re-enabled dummy_echo runs in sandbox again",
+    "UI re-approval leaves dummy_echo enabled and running",
+    "revoke ok",
+    "revoke removes plugin process (no /plugin/main.py descendant)",
+    "invoke after revoke => capability_unavailable",
+    "capability_result cleared by revoke",
+    "approval record gone from hub-approvals.json",
+    "re-enable after revoke => permissions_not_approved",
+    "re-approve dummy_echo ok",
+    "re-enable after re-approve ok",
+    "re-approved dummy_echo still installed without reinstall",
+    "re-approved dummy_echo answers invoke",
+    "dummy_evil approve ok",
+    "dummy_evil install ok",
+    "dummy_evil enable ok",
+    "dummy_evil probe network answered",
+    "dummy_evil network denied",
+    "dummy_evil probe read_home answered",
+    "dummy_evil read_home denied",
+    "dummy_evil probe read_repo answered",
+    "dummy_evil read_repo denied",
+    "dummy_evil probe write_root answered",
+    "dummy_evil write_root denied",
+    "dummy_evil probe exec answered",
+    "dummy_evil probe fork_bomb_limited answered",
+    "dummy_evil fork_bomb_limited denied",
+    "dummy_evil probe env answered",
+    "dummy_evil env denied",
+    "dummy_evil probe mem answered",
+    "dummy_evil mem denied",
+    "dummy_echo still answers after evil probes",
+    "two plugin processes running before remove",
+    "hub_remove enabled dummy_evil ok",
+    "remove drops dummy_evil from enabled set",
+    "remove stops dummy_evil process (its pid gone), dummy_echo process kept",
+    "remove leaves dummy_echo running",
+    "Core1 with running dummy_echo Core clean shutdown rc 0 with 0 plugin-related processes",
+    "Core1 with running dummy_echo no plugin processes left after Core shutdown",
+    "restart: snapshot answers within 1 s of socket",
+    "restart: enabled dummy_echo restored from plugin-state.json",
+    "restart: dummy_echo invoke works",
+    "native S1 while dummy_echo running after restart",
+    "idle Core CPU below 1% over 3 s with running idle plugin",
+    "plugin still running after idle window",
+    "dummy_echo disable after idle ok",
+    "Core2 after dummy_echo disable Core clean shutdown rc 0 with 0 plugin-related processes",
+    "Core2 after dummy_echo disable no plugin processes left after Core shutdown",
+    "native S1 after dummy_echo disable",
+    "dummy_echo remove ok",
+    "remove leaves no dummy_echo in snapshot",
+    "Core3 after disable and remove Core clean shutdown rc 0 with 0 plugin-related processes",
+    "Core3 after disable and remove no plugin processes left after Core shutdown",
+    "native S1 after dummy_echo remove on fresh boot",
+    "fresh boot after remove has no plugin processes",
+    "Core4 final Core clean shutdown rc 0 with 0 plugin-related processes",
+    "Core4 final no plugin processes left after Core shutdown"
+  ],
+  "checks_c0_package": [
+    "build: build_package.py --version 0.1.0 exits 0",
+    "build: PACKAGE.json version and commit match HEAD",
+    "build: no tracked file differs from HEAD",
+    "identity: dirty_at_build is false (clean tree at build)",
+    "install: gideon-install install 0.1.0 exits 0 with ok",
+    "install: source consumed by rename (package now lives only under ROOT)",
+    "install: list shows current 0.1.0 and revision 1",
+    "install: profile main created",
+    "install: catalog copy is byte-identical to tests/fixtures/hub-c0.json",
+    "install: ROOT is 0700 and owned by this user",
+    "install: installed bin/gideon-base sha256 equals the built binary",
+    "install: installed PACKAGE.json sha256 equals the built PACKAGE.json",
+    "isolation: outer bwrap runs and hides /home (repo and ~/.local/share/uv unreachable)",
+    "isolation: outer network namespace exposes only lo",
+    "isolation: outer bwrap hidden-source mode required for C0",
+    "S1 before plugins: configuration_status ready",
+    "S1 before plugins: base_pack preflight verified",
+    "S1 before plugins: wake replay finished",
+    "S1 before plugins: command_success receipt verified",
+    "S1 before plugins: stt_status ready",
+    "S1 before plugins: speech completed on virtual TTS with samples",
+    "core1: both plugins absent or disabled before any enable",
+    "core1: no plugin process before any enable",
+    "dummy_echo: hub explicit manifest approval accepted",
+    "dummy_echo: repo hub_import.py stages payload as external client",
+    "dummy_echo: hub install ok",
+    "dummy_echo: installed state recorded",
+    "dummy_evil: hub explicit manifest approval accepted",
+    "dummy_evil: repo hub_import.py stages payload as external client",
+    "dummy_evil: hub install ok",
+    "dummy_evil: installed state recorded",
+    "echo: plugin_enable ok",
+    "echo: plugin bwrap and python processes present after enable",
+    "echo: capability_invoke accepted",
+    "echo: uppercase output and count 1",
+    "echo: second invoke count 2",
+    "echo: non-object input refused at Core (invalid_input)",
+    "echo: unknown capability refused",
+    "echo: plugin_revoke ok",
+    "echo revoke: no plugin process left",
+    "echo: approval revision +1 on revoke",
+    "echo: permissions no longer approved after revoke",
+    "echo: item disabled and not enabled after revoke",
+    "echo: last capability_result cleared by revoke",
+    "echo: invoke after revoke is capability_unavailable",
+    "echo: re-enable without approval refused (permissions_not_approved)",
+    "echo: re-approval of the unchanged manifest accepted",
+    "echo: re-enable after re-approval ok",
+    "echo: fresh process after re-enable answers count 1",
+    "evil: plugin_enable ok",
+    "evil network: invoke accepted",
+    "evil network: denied inside the packaged sandbox",
+    "evil network: plugin answer carries no repo or home path",
+    "evil read_home: invoke accepted",
+    "evil read_home: denied inside the packaged sandbox",
+    "evil read_home: plugin answer carries no repo or home path",
+    "evil read_repo: invoke accepted",
+    "evil read_repo: denied inside the packaged sandbox",
+    "evil read_repo: plugin answer carries no repo or home path",
+    "evil write_root: invoke accepted",
+    "evil write_root: denied inside the packaged sandbox",
+    "evil write_root: plugin answer carries no repo or home path",
+    "evil env: invoke accepted",
+    "evil env: denied inside the packaged sandbox",
+    "evil env: plugin answer carries no repo or home path",
+    "evil mem: invoke accepted",
+    "evil mem: denied inside the packaged sandbox",
+    "evil mem: plugin answer carries no repo or home path",
+    "evil: plugin processes still alive after probes (no crash from probes)",
+    "evil: no repo, uv or real-home path in any plugin cmdline, environ, maps, mountinfo, cwd, root or fd",
+    "isolation: every plugin python process is a descendant of a nested bwrap (sandbox used)",
+    "isolation: plugin python is the bundled runtime of the installed package (not host /usr/bin)",
+    "core1-before: no residual Core process group after stop",
+    "core1-before: Core exit status 0 after SIGTERM",
+    "core1-before after Core stop: no plugin process left",
+    "S1 while plugins run after restart: configuration_status ready",
+    "S1 while plugins run after restart: base_pack preflight verified",
+    "S1 while plugins run after restart: wake replay finished",
+    "S1 while plugins run after restart: command_success receipt verified",
+    "S1 while plugins run after restart: stt_status ready",
+    "S1 while plugins run after restart: speech completed on virtual TTS with samples",
+    "restart: both plugins still running after S1",
+    "restart: echo fresh process answers count 1 after restart",
+    "restart: evil env probe still denied after restart",
+    "restart: plugin processes are present before Core stop",
+    "restart: no repo, uv or real-home path in plugin processes",
+    "restart: plugin_disable evil ok",
+    "restart: disabling evil leaves echo running",
+    "core2-restart: no residual Core process group after stop",
+    "core2-restart: Core exit status 0 after SIGTERM",
+    "core2-restart after Core stop: no plugin process left",
+    "tamper: exactly one installed echo payload under profiles/main/core/hub-plugins",
+    "tamper: payload bytes equal the fixture before tampering",
+    "tamper: payload file changed (size and sha)",
+    "S1 after tamper: configuration_status ready",
+    "S1 after tamper: base_pack preflight verified",
+    "S1 after tamper: wake replay finished",
+    "S1 after tamper: command_success receipt verified",
+    "S1 after tamper: stt_status ready",
+    "S1 after tamper: speech completed on virtual TTS with samples",
+    "tamper: echo not running after boot with a tampered payload",
+    "tamper: echo quarantined (Hub) or failed with plugin_quarantined at boot",
+    "tamper: no plugin process runs for the tampered payload",
+    "tamper: invoke is capability_unavailable",
+    "tamper: plugin_disable after quarantine returns ok or not_enabled",
+    "tamper: enable of tampered payload does not reach running",
+    "tamper: enable of tampered payload refused or quarantined, nothing runs",
+    "tamper: still no plugin process after enable attempt",
+    "core3-tampered: no residual Core process group after stop",
+    "core3-tampered: Core exit status 0 after SIGTERM",
+    "core3-tampered after Core stop: no plugin process left",
+    "tamper: restoring the original bytes restores the fixture sha",
+    "S1 after tamper restored: configuration_status ready",
+    "S1 after tamper restored: base_pack preflight verified",
+    "S1 after tamper restored: wake replay finished",
+    "S1 after tamper restored: command_success receipt verified",
+    "S1 after tamper restored: stt_status ready",
+    "S1 after tamper restored: speech completed on virtual TTS with samples",
+    "recover: enable echo after restore ok",
+    "recover: restored echo answers count 1",
+    "recover: plugin process running while Core active",
+    "update: hardlinked copy of installed tree made (no extra data)",
+    "update: refused with exit 3 profile_active while plugin-running Core is active",
+    "update: refused source not consumed",
+    "update: plugin still running after refused update",
+    "core4-recovered: no residual Core process group after stop",
+    "core4-recovered: Core exit status 0 after SIGTERM",
+    "core4-recovered after Core stop: no plugin process left",
+    "update: after Core stop the same id is refused as already_installed (not applied)",
+    "update: ledger still current only 0.1.0 with no orphans",
+    "final: gideon-verify passes on the installed package after tamper and restore",
+    "final: no plugin process anywhere after all Core stops",
+    "final: no Core still running"
+  ],
+  "binary_sha256_release": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+  "code_commit": "bdb6069b118bd7b008e254ddeb2a6dce57f41a4f",
+  "physical_validation": "NOT_PERFORMED",
+  "scope": "C0 only: sandboxed python3_script plugin runtime, capability registry, enable/disable/revoke/re-approve, Qt Plugins section, packaged bundled-CPython plugin runtime. No LLM, Model Manager, network, screen, mouse, keyboard or microphone capability.",
+  "rust_tests": 87,
+  "python_tests": {
+    "core_and_workers": 24,
+    "package_install": 31,
+    "package_core_args": 9,
+    "c0_fixtures": 22,
+    "c0_fixtures_skipped": 1
+  },
+  "regressions": [
+    {
+      "report": "target/evidence/a0.json",
+      "passed": 32,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "7e1b8155f27515b38c9f70e68bf50d4408d95bc0b263e6a03d56577d8ddce0d9"
+    },
+    {
+      "report": "target/evidence/a1-integration.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "7e4a35e89b95b0e06cc76232552f995e6f5df0eef498526f572f4698ba345484"
+    },
+    {
+      "report": "target/evidence/a2.json",
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "e6b68a7868f380b2964d83e3a2c8ffcee17c996f7eba73ee0e98ff5c1f03aa2b"
+    },
+    {
+      "report": "target/evidence/a3-integration.json",
+      "passed": 67,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "ff6cf93f722aa1fd49a14ae1758c066061bdd0efd6972ad96909c7cb5b9f47e1"
+    },
+    {
+      "report": "target/evidence/a4-integration.json",
+      "passed": 138,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "896eef6f5c217522e8a2c87e10d2e637eab2de950ad84cadce60b37bb2fbc249"
+    },
+    {
+      "report": "target/evidence/a5-integration.json",
+      "passed": 93,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "b8a3e4b4069b13cd65416a36f61c9721c5ad5773d4bbde47e8d32f914423e284"
+    },
+    {
+      "report": "target/evidence/a5-soak.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "e4c75bcc9b632a8df84bb7a15ee0ece0c06dfd259b0d1ed62c971308c2041b43"
+    },
+    {
+      "report": "target/evidence/a5-shutdown.json",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "b1f162264bcfaab9dd286223f3f203eadd584a93ac8920106725bf26615ca0a1"
+    },
+    {
+      "report": "target/evidence/b1-ui.json",
+      "passed": 34,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "b57aee19e2688fdd73a0ab60b7f168fa158e5e412cfa985fab27329b7f544e4a"
+    },
+    {
+      "report": "target/evidence/b2-preferences.json",
+      "passed": 31,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "bde5e4c61b46adf36e88f834ffeb89e4793f3859b71793378d691ff297971937"
+    },
+    {
+      "report": "target/evidence/b2-safe-mode.json",
+      "passed": 96,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "93d18ad5972a4e8355ad5fb2aa812748213580f5e51c850252f3f1285ba82188"
+    },
+    {
+      "report": "target/evidence/b2-pack.json",
+      "passed": 36,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "b72114a4c0ac2463e7bcc5656edcfdfb2a8f3472e46f8a5a61a469bf9a4c05fb"
+    },
+    {
+      "report": "target/evidence/b2-feedback.json",
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "209b64fa1b02b05648b018ab22e9bea0842d916d6ea0e532d90d506b0ed94c0d"
+    },
+    {
+      "report": "target/evidence/b3-catalog.json",
+      "passed": 69,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "63f50f2a3832e69bdd685c9bf431d065a662add2d7f6ddb4241323b16f42d134"
+    },
+    {
+      "report": "target/evidence/b3-permissions.json",
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "f17297aed02f83086894c2f3df4d33156a89bff83f8f56a871eace38a6c9dd05"
+    },
+    {
+      "report": "target/evidence/design.json",
+      "passed": 44,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "c40c65c8fd21449c046c6ae7a8dc6d0ca5381db30bfa249e72ddafff4b54f64a"
+    },
+    {
+      "report": "target/evidence/b3-import.json",
+      "passed": 76,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "e4085f751c7b4a70933441863d151afb0ca20c72b094b417e504b72eb28c12a6"
+    },
+    {
+      "report": "target/evidence/b3-import-timeout.json",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "ff74872c3fd582f1dbc7f23bb7acbc3716484f1de8d434ae52391f5cdd026f80"
+    },
+    {
+      "report": "target/evidence/b3-import-capacity.json",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "90f2d538ed721f137e2a2085091fc5eca53edc88cc7b7a9ba5f8b8c2322ac0e4"
+    },
+    {
+      "report": "target/evidence/b3-lifecycle.json",
+      "passed": 99,
+      "failed": 0,
+      "ignored": 0,
+      "binary_sha256": "8c25e43c134da1a10126bf4a0fbb2edb7d61a9fd69688fda24734b4d00cd65fd",
+      "report_sha256": "57cb1c28d45d503d0b9a4afbc622d6f251d81c15a1b15d90d5bc2a0f2d93c844"
+    }
+  ],
+  "regression_checks_total": 1020,
+  "package_and_s2_gates_rerun": {
+    "b4-package": {
+      "passed": 66,
+      "failed": 0,
+      "commit": "bdb6069b118bd7b008e254ddeb2a6dce57f41a4f",
+      "report_sha256": "395abe8ee45d5ef47b150cce9879cfa7963b0ad81e5a986ad8a7bab519fc3bad"
+    },
+    "b4-update": {
+      "passed": 126,
+      "failed": 0,
+      "commit": "bdb6069b118bd7b008e254ddeb2a6dce57f41a4f",
+      "report_sha256": "c36eb74c6fd7ec70d0eea1cf082c9c06dac69206cd9b48da46109706e6fdfce9"
+    },
+    "s2-final": {
+      "passed": 204,
+      "failed": 0,
+      "commit": "bdb6069b118bd7b008e254ddeb2a6dce57f41a4f",
+      "report_sha256": "b65c8838a3dadad27b01f7aff273934c190c8919b044ade1601b15c6f7b3c2f8"
+    }
+  },
+  "total_process_checks": 1656,
+  "graph": {
+    "nodes": 1782,
+    "edges": 4681,
+    "scope": "AST only"
+  },
+  "review_fixes": [
+    "Request-line bound raised to 16 KiB for capability_invoke applied to all lines and broke the A0 oversize check; now only JSON-object-looking lines may exceed 4 KiB, capped at 16 KiB, and only capability_invoke is accepted beyond 4 KiB (regression test added).",
+    "bwrap root was writable; added --remount-ro / (found by the Rust sandbox tests).",
+    "Revoked-but-installed plugins could not be re-approved; approve/permissions_approved now cover status installed, with Core and Qt tests."
+  ],
+  "ignored_coverage": "Six argv-only dummy_evil modes (ignore_cancel, crash, bad_json, oversize, dup_id, log_flood) are unreachable through the Core by design; the same behaviours are proven by tests/plugins.rs with real sandboxed processes (cancel_is_honored_and_ignored_cancel_is_killed_and_restarted_once, crash_restarts_once_then_fails, output_violations_fail_plugin_and_are_never_trusted, log_flood_is_rate_limited_into_few_core_events). cpu_spin (40 s) not run.",
+  "limitations": [
+    "exec of read-only /usr binaries is allowed inside the plugin sandbox (no network, no home, read-only root); no seccomp filter yet.",
+    "Payload is re-verified before spawn but bound by path, not by fd: a residual TOCTOU window exists; hub-plugins/ is 0700 and unreachable from the plugin.",
+    "RLIMIT_NPROC is the uid task count at spawn plus 16 (a fixed small value would stop bwrap itself).",
+    "prlimit binary required; spawn fails closed without it.",
+    "One package version exercised in the C0 package gate; plugin update/rollback pruning is covered by Rust tests, not by the process gate (only one C0 catalog).",
+    "Plugin errors surface as plugin_error (plugin code not echoed); plugin_log events carry no text.",
+    "Wake replay only; physical audio/KDE Wayland/Flatpak not validated; publisher unauthenticated.",
+    "Plugins cannot be enabled by anyone but the user via Core IPC/Qt; no auto-enable on install."
+  ],
+  "source_sha256": {
+    "src/plugins.rs": "167f48386aa32eea8172a0e84dbdff41b5df952eeb50ea33aa236a9ea60ffe4d",
+    "src/hub.rs": "b777e81c71c2a5258ef6abaf396372018bf8b8e77c4b2b340f172ae3b4ba095b",
+    "src/core.rs": "8d02a09afb3e432d028eb220696b9db21fbccabb6ce1cde85656dc10379aa9a0",
+    "src/protocol.rs": "3ad564e83a6144201510f0d3706bc8a9a7271fb4e9c858ca5d686e059243f1c3",
+    "src/storage.rs": "20dbbd9d19654672da8003451474fd57522e61ae78621f355aa824a957f4f676",
+    "src/transport.rs": "dc6f3f4585f0dd59a5cc939dfcaf92fc1499d965db5ed04861ee0f3d338face5",
+    "src/main.rs": "83e0c9c73910a044e00845df3c60ca62c72e91c4aa84c29846cb9ec582d728b9",
+    "tests/plugins.rs": "70f89b665738f6201d7c2a6e25d1f7263a08cae2e65dded5f0864b8499569719",
+    "tests/fixtures/dummy_echo.py": "b2c77499e37e9d8a6a65809d93b45f654d08badc62a41fc521868d445145468a",
+    "tests/fixtures/dummy_evil.py": "8b07ee409c4702c868f9c7e4f53fd4f8bc87a2f399a3814f11e2f151e5d47557",
+    "tests/fixtures/hub-c0.json": "70538cd2aa7cecc3907ee9957ab1c3a75545daa4695edafb8f6cf700b00c0334",
+    "app/bridge.py": "f27bce297f54b47e316162274fa032219a779e8eb868a0f1dcb4ad77b7f06302",
+    "app/Main.qml": "8c49d188ee68266790c239cbbdbba36ba19526f0a74d6f200e583391fef62b41",
+    "scripts/test_ui_offscreen.py": "a1bb64982bcda41abf8bc16cdd6004b3febeb4568898dc007ac00a8616041560",
+    "scripts/test_bridge_protocol.py": "fd63e00afad82b5350c20a0757b53241d167051488b37a939a3502d5a08b5293",
+    "scripts/verify_c0_plugins.py": "10e20615551509b896b13daa9230916d73806cac3dbacc890ac9996862141b5d",
+    "scripts/verify_c0_package.py": "63e598c529e25e0a7b24b233a5a81e2eb8cf4b5275b448ae2ea807c9ce979b2e",
+    "scripts/package_tools/gideon-core": "f9b0dfdfa0c5e573f0d75043690b57b96628435c35fa309b8ae8c539fc7d76ba",
+    "scripts/build_package.py": "6c16f39e49aa5b57621b24384fafa212d9b65ded641c5748609f427bdefa8a02",
+    "docs/C0.md": "c33c21f8fe98e4b2a3c95750b533298c12c1355fbedcdaec7f3a9e35e2b10baa"
+  }
+}
