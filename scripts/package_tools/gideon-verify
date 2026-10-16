@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Verify a gideon-base package against PACKAGE.json (stdlib only).
+
+Exit 0 only for an exact match: no missing, extra or modified entry, no
+symlink escaping the package prefix. Prints the first mismatch otherwise.
+"""
+import hashlib
+import os
+import stat
+import sys
+from pathlib import PurePosixPath
+import json
+
+PREFIX = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MANIFEST = "PACKAGE.json"
+
+
+def fail(message):
+    print(f"gideon-verify: FAIL: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def safe_relpath(path):
+    if not isinstance(path, str) or not path or path.startswith("/") or "\\" in path:
+        return False
+    parts = PurePosixPath(path).parts
+    return not any(p in ("", ".", "..") for p in parts)
+
+
+def inside_prefix(path):
+    return path == "." or not (path == ".." or path.startswith("../") or path.startswith("/"))
+
+
+def normalize(path):
+    out = []
+    for part in path.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not out:
+                return None
+            out.pop()
+        else:
+            out.append(part)
+    return "/".join(out)
+
+
+def check_parents(rel):
+    """No symlink or non-directory component between the prefix and the entry."""
+    current = PREFIX
+    for part in PurePosixPath(rel).parts[:-1]:
+        current = os.path.join(current, part)
+        st = os.lstat(current)
+        if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode):
+            fail(f"parent is not a plain directory: {rel}")
+
+
+def main():
+    if sys.argv[1:]:
+        fail("usage: gideon-verify (takes no arguments; verifies the package it lives in)")
+    manifest_path = os.path.join(PREFIX, MANIFEST)
+    try:
+        st = os.lstat(manifest_path)
+    except OSError:
+        fail(f"{MANIFEST} missing")
+    if not stat.S_ISREG(st.st_mode):
+        fail(f"{MANIFEST} is not a regular file")
+    with open(manifest_path, "rb") as handle:
+        data = json.loads(handle.read().decode("utf-8"))
+    entries = data.get("files")
+    if not isinstance(entries, list) or not entries:
+        fail("PACKAGE.json has no files list")
+
+    expected = {}
+    for entry in entries:
+        rel = entry.get("path")
+        if not safe_relpath(rel) or rel in expected or rel == MANIFEST:
+            fail(f"invalid or duplicate entry path: {rel!r}")
+        expected[rel] = entry
+
+    # Pass 1: every listed entry matches exactly.
+    total_bytes = 0
+    for rel in sorted(expected):
+        entry = expected[rel]
+        kind = entry.get("type", "file")
+        full = os.path.join(PREFIX, rel)
+        check_parents(rel)
+        try:
+            st = os.lstat(full)
+        except OSError:
+            fail(f"missing: {rel}")
+        if kind == "symlink":
+            target = entry.get("target")
+            if not stat.S_ISLNK(st.st_mode):
+                fail(f"not a symlink: {rel}")
+            if os.readlink(full) != target or not isinstance(target, str) or target.startswith("/"):
+                fail(f"symlink target changed or absolute: {rel}")
+            resolved = normalize(os.path.dirname(rel) + "/" + target if os.path.dirname(rel) else target)
+            if resolved is None or not inside_prefix(resolved):
+                fail(f"symlink escapes prefix: {rel} -> {target}")
+            # Follow the chain of packaged symlinks; it must end at a packaged regular file.
+            hops = 0
+            while True:
+                node = expected.get(resolved)
+                if node is None:
+                    # A directory is valid when packaged files live under it.
+                    if any(k.startswith(resolved + "/") for k in expected):
+                        break
+                    fail(f"symlink target is not packaged: {rel} -> {target}")
+                if node.get("type", "file") == "file":
+                    break
+                hops += 1
+                if hops > 8:
+                    fail(f"symlink chain too deep: {rel}")
+                next_target = node.get("target", "")
+                if next_target.startswith("/"):
+                    fail(f"absolute symlink in chain: {resolved}")
+                resolved = normalize(os.path.dirname(resolved) + "/" + next_target if os.path.dirname(resolved) else next_target)
+                if resolved is None or not inside_prefix(resolved):
+                    fail(f"symlink chain escapes prefix: {rel}")
+            continue
+        if kind != "file":
+            fail(f"unknown entry type for {rel}")
+        if not stat.S_ISREG(st.st_mode):
+            fail(f"not a regular file: {rel}")
+        if st.st_size != entry.get("size"):
+            fail(f"size mismatch: {rel} ({st.st_size} != {entry.get('size')})")
+        if stat.S_IMODE(st.st_mode) != int(str(entry.get("mode")), 8):
+            fail(f"mode mismatch: {rel}")
+        if digest(full) != entry.get("sha256"):
+            fail(f"sha256 mismatch: {rel}")
+        total_bytes += st.st_size
+
+    # Pass 2: nothing extra anywhere in the prefix.
+    for root, dirs, files in os.walk(PREFIX, followlinks=False):
+        for name in dirs + files:
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, PREFIX).replace(os.sep, "/")
+            st = os.lstat(full)
+            if stat.S_ISDIR(st.st_mode):
+                continue
+            if rel == MANIFEST:
+                continue
+            if rel not in expected:
+                fail(f"extra entry not in PACKAGE.json: {rel}")
+
+    print(f"gideon-verify: OK {len(expected)} entries, {total_bytes} bytes regular files")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

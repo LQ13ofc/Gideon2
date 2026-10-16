@@ -1,0 +1,23 @@
+#!/bin/sh
+# gideon-core STATE_DIR [extra gideon-base args]: verify, configure, run the Core (S1 profile).
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+PY="$HERE/runtime/python/bin/python3.13"
+if [ "$#" -lt 1 ]; then
+    echo "usage: gideon-core ABSOLUTE_STATE_DIR [extra gideon-base args]" >&2
+    exit 2
+fi
+STATE=$1
+shift
+case "$STATE" in
+    /*) ;;
+    *) echo "gideon-core: absolute STATE_DIR required" >&2; exit 2 ;;
+esac
+"$PY" -I -B "$HERE/bin/gideon-verify" || exit 1
+"$PY" -I -B "$HERE/bin/gideon-configure" "$STATE" >/dev/null || exit 1
+exec "$HERE/bin/gideon-base" --root "$STATE/core" --home "$HERE" \
+    --commands-sandbox \
+    --base-pack "$STATE/profile/pack.json" \
+    --tts-virtual "$HERE/venvs/tts/bin/python" "$STATE/profile/tts-manifest.json" \
+    --wake-replay "$HERE/venvs/a1/bin/python" "$STATE/profile/replay-manifest.json" 0 \
+    "$@"

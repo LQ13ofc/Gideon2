@@ -1,0 +1,15 @@
+#!/bin/sh
+# gideon-app STATE_DIR: verify the package, then start the QML client on STATE_DIR/core.
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+PY="$HERE/runtime/python/bin/python3.13"
+if [ "$#" -ne 1 ]; then
+    echo "usage: gideon-app ABSOLUTE_STATE_DIR" >&2
+    exit 2
+fi
+case "$1" in
+    /*) ;;
+    *) echo "gideon-app: absolute STATE_DIR required" >&2; exit 2 ;;
+esac
+"$PY" -I -B "$HERE/bin/gideon-verify" || exit 1
+exec "$HERE/venvs/ui/bin/python" -I -B "$HERE/app/main.py" --root "$1/core"

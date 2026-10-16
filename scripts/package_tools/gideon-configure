@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Render gideon-base templates into a private STATE_DIR and pin the Base pack.
+
+Usage: gideon-configure ABSOLUTE_STATE_DIR
+
+Writes only inside STATE_DIR (0700, created when absent): STATE_DIR/profile/
+(rendered manifests, evidence, tts/ root with config.yaml, pack.json) and
+STATE_DIR/core/ is left to the Core. Idempotent. Stdlib only.
+"""
+import hashlib
+import json
+import os
+import shutil
+import stat
+import sys
+import tempfile
+
+PREFIX = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATES = os.path.join(PREFIX, "templates")
+ASSETS = os.path.join(PREFIX, "assets")
+PLACEHOLDERS = ("@PREFIX@", "@PROFILE@")
+PHRASES = [("hey_gideon", "Hey Gideon", "evidence-hey.json"),
+           ("okay_gideon", "Okay Gideon", "evidence-okay.json")]
+
+
+def die(message):
+    print(f"gideon-configure: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def digest_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def digest(path):
+    with open(path, "rb") as handle:
+        return digest_bytes(handle.read())
+
+
+def load_json(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def render_value(value, mapping):
+    if isinstance(value, str):
+        for key, replacement in mapping.items():
+            value = value.replace(key, replacement)
+        return value
+    if isinstance(value, list):
+        return [render_value(v, mapping) for v in value]
+    if isinstance(value, dict):
+        return {k: render_value(v, mapping) for k, v in value.items()}
+    return value
+
+
+def check_no_placeholder(text, name):
+    for key in PLACEHOLDERS:
+        if key in text:
+            die(f"unrendered {key} left in {name}")
+
+
+def ensure_private_dir(path):
+    if os.path.lexists(path):
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+            die(f"not a plain directory: {path}")
+    else:
+        os.mkdir(path, 0o700)
+        os.chmod(path, 0o700)
+    st = os.lstat(path)
+    if stat.S_IMODE(st.st_mode) != 0o700:
+        die(f"directory must be mode 0700: {path}")
+    if st.st_uid != os.geteuid():
+        die(f"directory not owned by current user: {path}")
+
+
+def atomic_write(path, data):
+    directory = os.path.dirname(path)
+    fd, temp = tempfile.mkstemp(dir=directory, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.chmod(temp, 0o600)
+        os.replace(temp, path)
+    except BaseException:
+        if os.path.lexists(temp):
+            os.unlink(temp)
+        raise
+
+
+def write_json(path, value):
+    atomic_write(path, (json.dumps(value, indent=2) + "\n").encode("utf-8"))
+
+
+def install_binary(src, dst, expected):
+    if not os.path.isfile(src) or os.path.islink(src):
+        die(f"package asset missing or not regular: {src}")
+    if digest(src) != expected:
+        die(f"package asset does not match pinned sha256: {src}")
+    if os.path.lexists(dst):
+        if not os.path.islink(dst) and os.path.isfile(dst) and digest(dst) == expected:
+            return
+        os.unlink(dst)
+    try:
+        # Hard link: no copy in the common case, and never a symlink (tts_worker
+        # refuses symlinked artifacts). Falls back to a private copy across devices.
+        os.link(src, dst)
+    except OSError:
+        shutil.copyfile(src, dst)
+        os.chmod(dst, 0o600)
+    if digest(dst) != expected:
+        die(f"installed artifact mismatch: {dst}")
+
+
+def check_hashes(root, hashes, label):
+    for name, expected in hashes.items():
+        path = os.path.join(root, name)
+        if not os.path.isfile(path) or os.path.islink(path):
+            die(f"{label} artifact missing or symlink: {path}")
+        if digest(path) != expected:
+            die(f"{label} artifact does not match pin: {path}")
+
+
+def main():
+    if len(sys.argv) != 2:
+        die("usage: gideon-configure ABSOLUTE_STATE_DIR")
+    state = sys.argv[1]
+    if not os.path.isabs(state):
+        die("absolute STATE_DIR required")
+    state = os.path.normpath(state)
+    # The Core binds STATE_DIR/core/core.sock; AF_UNIX paths are limited to 107 bytes.
+    if len(os.fsencode(os.path.join(state, "core", "core.sock"))) >= 108:
+        die("STATE_DIR too long for the Core socket (STATE_DIR/core/core.sock must be < 108 bytes)")
+    if not os.path.isdir(os.path.dirname(state)):
+        die("parent of STATE_DIR must exist")
+    ensure_private_dir(state)
+    profile = os.path.join(state, "profile")
+    tts_root = os.path.join(profile, "tts")
+    ensure_private_dir(profile)
+    ensure_private_dir(tts_root)
+    mapping = {"@PREFIX@": PREFIX, "@PROFILE@": profile}
+
+    # Wake, STT and TTS assets are referenced by the pinned manifests; verify them.
+    replay_t = load_json(os.path.join(TEMPLATES, "replay-manifest.json"))
+    qual_t = load_json(os.path.join(TEMPLATES, "qualification-manifest.json"))
+    stt_t = load_json(os.path.join(TEMPLATES, "stt-manifest.json"))
+    tts_t = load_json(os.path.join(TEMPLATES, "tts-manifest.json"))
+
+    # 1. TTS root: real files (tts_worker rejects symlinks) under STATE, plus rendered config.
+    for artifact in tts_t["artifacts"]:
+        if artifact["name"] == "config.yaml":
+            continue
+        install_binary(os.path.join(ASSETS, "tts", artifact["name"]),
+                       os.path.join(tts_root, artifact["name"]), artifact["sha256"])
+    with open(os.path.join(TEMPLATES, "tts-config.yaml"), "r", encoding="utf-8") as handle:
+        config_text = render_value(handle.read(), mapping)
+    check_no_placeholder(config_text, "tts config.yaml")
+    config_bytes = config_text.encode("utf-8")
+    atomic_write(os.path.join(tts_root, "config.yaml"), config_bytes)
+
+    # 2. Rendered manifests.
+    tts_m = render_value(tts_t, mapping)
+    for artifact in tts_m["artifacts"]:
+        path = os.path.join(tts_root, artifact["name"])
+        if artifact["name"] == "config.yaml":
+            artifact["sha256"] = digest_bytes(config_bytes)
+            artifact["size"] = len(config_bytes)
+        elif digest(path) != artifact["sha256"]:
+            die(f"TTS artifact does not match pin: {path}")
+    write_json(os.path.join(profile, "tts-manifest.json"), tts_m)
+
+    stt_m = render_value(stt_t, mapping)
+    check_hashes(os.path.join(ASSETS, "stt"), stt_m["hashes"], "STT")
+    write_json(os.path.join(profile, "stt-manifest.json"), stt_m)
+
+    qual_m = render_value(qual_t, mapping)
+    check_hashes(os.path.join(ASSETS, "wake"), qual_m["hashes"], "wake")
+    write_json(os.path.join(profile, "qualification-manifest.json"), qual_m)
+
+    replay_m = render_value(replay_t, mapping)
+    check_hashes(os.path.join(ASSETS, "wake"), replay_m["hashes"], "wake")
+    if replay_m["vad"]["path"] != os.path.join(ASSETS, "vad", "silero_vad-v5.onnx") or \
+            digest(replay_m["vad"]["path"]) != replay_m["vad"]["sha256"]:
+        die("VAD asset does not match pin")
+    fixture = replay_m["fixtures"][0]
+    if digest(fixture["path"]) != fixture["sha256"]:
+        die("wake fixture does not match pin")
+    write_json(os.path.join(profile, "replay-manifest.json"), replay_m)
+
+    # 3. Evidence: relocated qualification manifest has a new sha256; results are unchanged.
+    qual_sha = digest(os.path.join(profile, "qualification-manifest.json"))
+    for _, _, name in PHRASES:
+        with open(os.path.join(TEMPLATES, name), "r", encoding="utf-8") as handle:
+            evidence = json.load(handle)
+        before = evidence.get("manifest_sha256")
+        if before != qual_sha:
+            evidence["manifest_sha256"] = qual_sha
+            evidence["packaged_from_manifest_sha256"] = before
+            evidence["packaged_note"] = "manifest re-pinned after relocation; measured results unchanged"
+        write_json(os.path.join(profile, name), render_value(evidence, mapping))
+
+    # 4. pack.json, same structure as scripts/build_base_pack.py.
+    phrases = {}
+    for ident, text, name in PHRASES:
+        path = os.path.join(profile, name)
+        phrases[ident] = {"text": text, "evidence": {"path": path, "sha256": digest(path)}}
+    pack = {
+        "version": 1,
+        "id": "base-en-dev-v1",
+        "wake_profile_sha256": digest(os.path.join(profile, "replay-manifest.json")),
+        "stt_profile_sha256": digest(os.path.join(profile, "stt-manifest.json")),
+        "tts_profile_sha256": digest(os.path.join(profile, "tts-manifest.json")),
+        "qualification_profile": {
+            "path": os.path.join(profile, "qualification-manifest.json"),
+            "sha256": qual_sha,
+        },
+        "phrases": phrases,
+    }
+    write_json(os.path.join(profile, "pack.json"), pack)
+    validate(profile)
+    print(os.path.join(profile, "pack.json"))
+    return 0
+
+
+def validate(profile):
+    """Re-check the pins the way src/pack.rs::load does for the fields that matter here."""
+    pack = load_json(os.path.join(profile, "pack.json"))
+    replay = load_json(os.path.join(profile, "replay-manifest.json"))
+    stt = load_json(os.path.join(profile, "stt-manifest.json"))
+    tts = load_json(os.path.join(profile, "tts-manifest.json"))
+    qual = load_json(os.path.join(profile, "qualification-manifest.json"))
+    checks = [
+        digest(os.path.join(profile, "replay-manifest.json")) == pack["wake_profile_sha256"],
+        digest(os.path.join(profile, "stt-manifest.json")) == pack["stt_profile_sha256"],
+        digest(os.path.join(profile, "tts-manifest.json")) == pack["tts_profile_sha256"],
+        digest(pack["qualification_profile"]["path"]) == pack["qualification_profile"]["sha256"],
+        replay["stt"]["manifest"] == os.path.join(profile, "stt-manifest.json"),
+        tts["config"] == os.path.join(tts["root"], "config.yaml"),
+        tts["voice"] == os.path.join(tts["root"], "alba.safetensors"),
+        set(replay["supported_phrases"]) == set(pack["phrases"]),
+    ]
+    for field in ["engine", "supported_phrases", "rejection_labels", "hashes", "encoder",
+                  "decoder", "joiner", "asset_root"]:
+        checks.append(qual.get(field) is not None and qual.get(field) == replay.get(field))
+    for ident, phrase in pack["phrases"].items():
+        evidence_path = phrase["evidence"]["path"]
+        checks.append(digest(evidence_path) == phrase["evidence"]["sha256"])
+        evidence = load_json(evidence_path)
+        checks.append(evidence.get("manifest_sha256") == pack["qualification_profile"]["sha256"])
+        checks.append(evidence.get("engine") == replay["engine"])
+        checks.append(evidence.get("active_phrase") == ident)
+    if not all(checks):
+        die("rendered pack failed self-check")
+    for name in ["model.safetensors", "tokenizer.json", "alba.safetensors", "config.yaml"]:
+        if not any(a["name"] == name for a in tts["artifacts"]):
+            die(f"TTS catalog missing {name}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

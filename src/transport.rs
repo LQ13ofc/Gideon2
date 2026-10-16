@@ -7,7 +7,12 @@ use crate::{
     wake::{Packet, WakeDescriptor, WakeInput},
 };
 use std::{
-    fs, io, os::unix::fs::PermissionsExt, path::PathBuf, process::Stdio, sync::Arc, time::Duration,
+    fs, io,
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
+    process::Stdio,
+    sync::{Arc, OnceLock},
+    time::Duration,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -102,7 +107,46 @@ pub struct WakeReplay {
     pub fixture: usize,
     pub active_phrase: Option<String>,
 }
+static HOME: OnceLock<PathBuf> = OnceLock::new();
+
+/// Accepts only an absolute, existing, non-symlink directory for `--home`.
+pub fn validate_home(path: &std::path::Path) -> io::Result<PathBuf> {
+    let invalid = || io::Error::new(io::ErrorKind::InvalidInput, "invalid --home");
+    if !path.is_absolute() {
+        return Err(invalid());
+    }
+    let metadata = fs::symlink_metadata(path).map_err(|_| invalid())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid());
+    }
+    Ok(path.to_path_buf())
+}
+
+/// Sets the Core home once at startup; unset means the development default.
+pub fn set_home(path: PathBuf) -> io::Result<()> {
+    let validated = validate_home(&path)?;
+    HOME.set(validated)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid --home"))
+}
+
+pub fn home() -> &'static std::path::Path {
+    HOME.get().map_or(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        PathBuf::as_path,
+    )
+}
+
 pub(crate) fn namespace_command(
+    python: &std::path::Path,
+    script: &str,
+    args: &[String],
+    mounts: &[PathBuf],
+) -> io::Result<Command> {
+    namespace_command_in(home(), python, script, args, mounts)
+}
+
+pub(crate) fn namespace_command_in(
+    home: &std::path::Path,
     python: &std::path::Path,
     script: &str,
     args: &[String],
@@ -153,8 +197,8 @@ pub(crate) fn namespace_command(
     .arg(&canonical)
     .arg(runtime)
     .arg("--ro-bind")
-    .arg(env!("CARGO_MANIFEST_DIR"))
-    .arg(env!("CARGO_MANIFEST_DIR"));
+    .arg(home)
+    .arg(home);
     for path in mounts {
         if !path.is_absolute() {
             return Err(io::Error::other("absolute mount required"));
@@ -164,7 +208,7 @@ pub(crate) fn namespace_command(
     cmd.args(["--setenv", "HOME", "/tmp", "--chdir", "/tmp", "--"])
         .arg(python)
         .arg("-I")
-        .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(script))
+        .arg(home.join(script))
         .args(args)
         .env_remove("DBUS_SESSION_BUS_ADDRESS")
         .env_remove("PULSE_SERVER")
@@ -574,5 +618,29 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["secret_present"], false);
         assert_eq!(value["private_home"], true);
+    }
+    #[test]
+    fn namespace_command_uses_given_home_for_bind_and_script() {
+        let home = tempfile::tempdir().unwrap();
+        let home_str = home.path().to_string_lossy().into_owned();
+        let command = super::namespace_command_in(
+            home.path(),
+            std::path::Path::new("/usr/bin/python3"),
+            "scripts/wake_worker.py",
+            &[],
+            &[],
+        )
+        .unwrap();
+        let args: Vec<String> = command
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args
+            .windows(3)
+            .any(|w| w[0] == "--ro-bind" && w[1] == home_str && w[2] == home_str));
+        let script = format!("{home_str}/scripts/wake_worker.py");
+        assert!(args.contains(&script));
+        assert!(!args.iter().any(|a| a.contains(env!("CARGO_MANIFEST_DIR"))));
     }
 }

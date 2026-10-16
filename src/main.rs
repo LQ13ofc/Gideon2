@@ -6,7 +6,7 @@ async fn main() -> io::Result<()> {
     if args.next().as_deref() != Some("--root") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input]",
+            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR]",
         ));
     }
     let root = PathBuf::from(
@@ -19,8 +19,16 @@ async fn main() -> io::Result<()> {
     let mut tts = None;
     let mut base_pack = None;
     let mut hub_catalog = None;
+    let mut home = None;
     while let Some(option) = args.next() {
         match option.as_str() {
+            "--home" if home.is_none() => {
+                let path = PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| io::Error::other("invalid --home"))?,
+                );
+                home = Some(path);
+            }
             "--hub-catalog" if hub_catalog.is_none() => {
                 let path = PathBuf::from(
                     args.next()
@@ -84,6 +92,9 @@ async fn main() -> io::Result<()> {
             }
             _ => return Err(io::Error::other("unknown or duplicate option")),
         }
+    }
+    if let Some(path) = home {
+        transport::set_home(path)?;
     }
     if tts.is_some() && !commands_sandbox {
         return Err(io::Error::other("TTS requires command profile"));
