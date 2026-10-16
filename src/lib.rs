@@ -1,11 +1,14 @@
 pub mod audio;
+pub mod broker;
 pub mod capture;
 pub mod commands;
 pub mod core;
 pub mod hub;
+pub mod llmcfg;
 pub mod pack;
 pub mod plugins;
 pub mod protocol;
+pub mod secrets;
 pub mod storage;
 pub mod stt;
 pub mod transport;

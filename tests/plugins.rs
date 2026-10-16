@@ -554,7 +554,23 @@ fn manifest_hashes_are_pinned_and_declarations_are_strict() {
     .is_err());
     assert!(declared(|p| p["capabilities"] = json!(["core.echo"])).is_err());
     assert!(declared(|p| p["plugin_id"] = json!("core")).is_err());
-    assert!(declared(|p| p["plugin_id"] = json!("audio_probe")).is_err());
+    // C1 rule (docs/C0.md): only an exact reserved word is refused, not a prefix of one.
+    assert!(declared(|p| {
+        p["plugin_id"] = json!("audio_probe");
+        p["capabilities"] = json!(["audio_probe.echo"]);
+    })
+    .is_ok());
+    assert!(declared(|p| {
+        p["plugin_id"] = json!("llm_engine");
+        p["capabilities"] = json!(["llm_engine.chat"]);
+    })
+    .is_ok());
+    assert!(declared(|p| {
+        p["plugin_id"] = json!("llm");
+        p["capabilities"] = json!(["llm.echo"]);
+    })
+    .is_err());
+    assert!(declared(|p| p["capabilities"] = json!(["llm.chat"])).is_err());
     assert!(declared(|p| p["runtime"] = json!(null)).is_err());
     assert!(declared(|p| p["capabilities"] = json!(["dummy_echo.echo"])).is_ok());
 }

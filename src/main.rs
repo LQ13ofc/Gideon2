@@ -6,7 +6,7 @@ async fn main() -> io::Result<()> {
     if args.next().as_deref() != Some("--root") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR] [--plugin-python ABSOLUTE_PYTHON]",
+            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR] [--plugin-python ABSOLUTE_PYTHON] [--net-allow-loopback (test only)]",
         ));
     }
     let root = PathBuf::from(
@@ -21,6 +21,7 @@ async fn main() -> io::Result<()> {
     let mut hub_catalog = None;
     let mut home = None;
     let mut plugin_python = None;
+    let mut net_allow_loopback = false;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--home" if home.is_none() => {
@@ -63,6 +64,8 @@ async fn main() -> io::Result<()> {
                 }
                 plugin_python = Some(path);
             }
+            // Test/dev only: lets the LLM broker reach loopback HTTP servers. Never set in packages.
+            "--net-allow-loopback" if !net_allow_loopback => net_allow_loopback = true,
             "--virtual-input" if !virtual_input => virtual_input = true,
             "--commands-sandbox" if !commands_sandbox => commands_sandbox = true,
             "--tts-virtual" if tts.is_none() => {
@@ -119,6 +122,7 @@ async fn main() -> io::Result<()> {
         base_pack,
         hub_catalog,
         plugin_python,
+        net_allow_loopback,
     )
     .await
 }

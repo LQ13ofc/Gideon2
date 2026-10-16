@@ -103,6 +103,20 @@ pub enum Operation {
     CapabilityCancel {
         capability: String,
     },
+    SecretSet {
+        provider: String,
+        key: crate::secrets::SecretKey,
+    },
+    SecretClear {
+        provider: String,
+    },
+    LlmConfigure {
+        revision: u64,
+        provider: String,
+        model: String,
+        custom_url: Option<String>,
+        cloud_consent: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -138,6 +152,9 @@ pub struct Response {
     pub plugins: crate::plugins::PluginSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability_result: Option<crate::plugins::CapabilityResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial: Option<String>,
+    pub llm: crate::llmcfg::Snapshot,
     pub base_pack: Option<crate::pack::Snapshot>,
     pub configuration_status: crate::storage::ConfigurationStatus,
     pub configuration_recovery_available: bool,
@@ -308,6 +325,27 @@ enum WireRequest {
         version: u16,
         request_id: String,
         capability: String,
+    },
+    SecretSet {
+        version: u16,
+        request_id: String,
+        provider: String,
+        key: crate::secrets::SecretKey,
+    },
+    SecretClear {
+        version: u16,
+        request_id: String,
+        provider: String,
+    },
+    LlmConfigure {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        provider: String,
+        model: String,
+        #[serde(default)]
+        custom_url: Option<String>,
+        cloud_consent: bool,
     },
 }
 impl<'de> Deserialize<'de> for Request {
@@ -567,6 +605,36 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
                 Operation::CapabilityCancel { capability },
+            ),
+            WireRequest::SecretSet {
+                version,
+                request_id,
+                provider,
+                key,
+            } => (version, request_id, Operation::SecretSet { provider, key }),
+            WireRequest::SecretClear {
+                version,
+                request_id,
+                provider,
+            } => (version, request_id, Operation::SecretClear { provider }),
+            WireRequest::LlmConfigure {
+                version,
+                request_id,
+                revision,
+                provider,
+                model,
+                custom_url,
+                cloud_consent,
+            } => (
+                version,
+                request_id,
+                Operation::LlmConfigure {
+                    revision,
+                    provider,
+                    model,
+                    custom_url,
+                    cloud_consent,
+                },
             ),
         };
         Ok(Self {

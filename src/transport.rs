@@ -369,6 +369,7 @@ pub async fn serve(
     base_pack_path: Option<std::path::PathBuf>,
     hub_catalog: Option<(std::path::PathBuf, String)>,
     plugin_python: Option<std::path::PathBuf>,
+    net_allow_loopback: bool,
 ) -> io::Result<()> {
     let mut base_pack =
         if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
@@ -412,6 +413,7 @@ pub async fn serve(
     core.set_boot_seed(epoch);
     storage.set_safe_epoch(epoch);
     core.configure_storage(&storage);
+    core.configure_llm(&storage, net_allow_loopback);
     if let Some((path, digest)) = hub_catalog {
         core.configure_hub(
             crate::hub::load(&path, &digest)
@@ -420,7 +422,9 @@ pub async fn serve(
         );
     }
     let (plugin_events_tx, mut plugin_events) = mpsc::unbounded_channel();
-    let mut plugins = crate::plugins::Host::new(plugin_python.clone(), plugin_events_tx);
+    let broker_script = home().join("scripts/net_broker.py");
+    let mut plugins =
+        crate::plugins::Host::new(plugin_python.clone(), broker_script, plugin_events_tx);
     core.configure_plugins(&storage, plugin_python.is_some());
     pump_plugins(
         &mut core,

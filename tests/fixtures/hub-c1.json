@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "repository": "https://github.com/LQ13ofc/Gideon2",
+  "plugins": [
+    {
+      "plugin_id": "llm_engine",
+      "api_version": 1,
+      "publisher": "Gideon local test fixture",
+      "semver": "1.0.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c1-v1/llm_engine.py",
+          "sha256": "5b96d04e0d0d1b9238b1331c8eeb821a99a4151064e2e17e0dbf1315fda9eeb8",
+          "size": 16410
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "network_llm"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/llm_engine.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c1-v1",
+      "support_policy": "Fixture de teste local; sem suporte de produto",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "llm_engine.chat"
+      ]
+    }
+  ]
+}

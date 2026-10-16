@@ -121,6 +121,26 @@ impl PluginState {
         Ok(())
     }
 }
+/// Private C1 ledgers: bounded, strict and 0600, read through the same guards as plugin state.
+fn read_private_bounded(root: &Path, name: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
+    let path = root.join(name);
+    let file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    validate_opened_private(&file)?;
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(io::Error::other("private ledger too large"));
+    }
+    Ok(Some(bytes))
+}
 pub struct Storage {
     pub root: PathBuf,
     pub config: Config,
@@ -383,6 +403,30 @@ impl Storage {
     pub(crate) fn save_plugin_state(&self, state: &PluginState) -> io::Result<()> {
         state.validate()?;
         self.replace_json("plugin-state.json", &serde_json::to_vec(state)?)?;
+        File::open(&self.root)?.sync_all()
+    }
+    pub(crate) fn llm_ledger(&self) -> io::Result<crate::llmcfg::LlmLedger> {
+        match read_private_bounded(&self.root, "llm-config.json", 4096)? {
+            Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            None => Ok(Default::default()),
+        }
+    }
+    pub(crate) fn save_llm_ledger(&self, ledger: &crate::llmcfg::LlmLedger) -> io::Result<()> {
+        self.replace_json("llm-config.json", &serde_json::to_vec(ledger)?)?;
+        File::open(&self.root)?.sync_all()
+    }
+    pub(crate) fn llm_secrets(&self) -> io::Result<crate::secrets::Secrets> {
+        match read_private_bounded(&self.root, "secrets.json", 4096)? {
+            Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            None => Ok(Default::default()),
+        }
+    }
+    pub(crate) fn save_llm_secrets(&self, secrets: &crate::secrets::Secrets) -> io::Result<()> {
+        let bytes = serde_json::to_vec(secrets)?;
+        if bytes.len() > 4096 {
+            return Err(io::Error::other("secrets too large"));
+        }
+        self.replace_json("secrets.json", &bytes)?;
         File::open(&self.root)?.sync_all()
     }
     pub fn update_preferences(

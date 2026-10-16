@@ -54,6 +54,7 @@ pub struct Core {
     speech_summary: Option<crate::tts::Summary>,
     speech_samples: usize,
     plugins: crate::plugins::PluginView,
+    llm: crate::llmcfg::LlmState,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -91,6 +92,7 @@ impl Core {
             speech_summary: None,
             speech_samples: 0,
             plugins: Default::default(),
+            llm: Default::default(),
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -573,6 +575,8 @@ impl Core {
             hub: self.hub.clone(),
             plugins: self.plugins.snapshot(self.hub.as_ref()),
             capability_result: self.plugins.last().cloned(),
+            partial: self.plugins.partial(),
+            llm: self.llm.snapshot(),
             configuration_status: self.configuration_status,
             configuration_recovery_available: self.configuration_recovery_available,
             preferences: self.preferences.clone(),
@@ -635,6 +639,10 @@ impl Core {
     pub fn plugin_event(&mut self, ev: crate::plugins::Ev, now: Instant) {
         self.plugins.event(ev, now);
         self.flush_plugin_events("");
+    }
+    /// Loads the C1 ledgers (LLM config and vault presence); `allow_loopback` is test-only.
+    pub fn configure_llm(&mut self, storage: &crate::storage::Storage, allow_loopback: bool) {
+        self.llm = crate::llmcfg::LlmState::load(storage, allow_loopback);
     }
     pub fn take_plugin_intents(&mut self) -> Vec<crate::plugins::Intent> {
         self.plugins.take_intents()
@@ -798,15 +806,69 @@ impl Core {
                 input,
                 deadline_ms,
             } => {
-                let result =
-                    self.plugins
-                        .invoke(self.hub.as_ref(), &capability, input, deadline_ms);
+                let result = self.plugins.invoke(
+                    self.hub.as_ref(),
+                    &capability,
+                    input,
+                    deadline_ms,
+                    &self.llm,
+                );
                 self.plugin_result(&req.request_id, result)
             }
             Operation::CapabilityCancel { capability } => {
                 let result = self.plugins.cancel(&capability);
                 self.plugin_result(&req.request_id, result)
             }
+            Operation::SecretSet { .. }
+            | Operation::SecretClear { .. }
+            | Operation::LlmConfigure { .. }
+                if self.session.is_some() =>
+            {
+                "busy"
+            }
+            Operation::SecretSet { provider, key } => match storage.as_deref() {
+                Some(storage) => match self.llm.set_secret(storage, &provider, key.expose()) {
+                    Ok(()) => {
+                        self.emit(req.request_id.clone(), None, "secret_set");
+                        "ok"
+                    }
+                    Err(code) => code,
+                },
+                None => "secrets_unavailable",
+            },
+            Operation::SecretClear { provider } => match storage.as_deref() {
+                Some(storage) => match self.llm.clear_secret(storage, &provider) {
+                    Ok(()) => {
+                        self.emit(req.request_id.clone(), None, "secret_cleared");
+                        "ok"
+                    }
+                    Err(code) => code,
+                },
+                None => "secrets_unavailable",
+            },
+            Operation::LlmConfigure {
+                revision,
+                provider,
+                model,
+                custom_url,
+                cloud_consent,
+            } => match storage.as_deref() {
+                Some(storage) => match self.llm.configure(
+                    storage,
+                    revision,
+                    &provider,
+                    &model,
+                    custom_url,
+                    cloud_consent,
+                ) {
+                    Ok(()) => {
+                        self.emit(req.request_id.clone(), None, "llm_configured");
+                        "ok"
+                    }
+                    Err(code) => code,
+                },
+                None => "llm_unavailable",
+            },
 
             Operation::HubBegin { .. }
             | Operation::HubChunk { .. }

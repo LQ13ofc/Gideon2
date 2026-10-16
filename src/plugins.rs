@@ -2,7 +2,9 @@
 //! registry (`PluginView`) and the transport-owned sandboxed Python host (`Host`).
 //! Declarations never grant authority: approval, install and enable are all re-checked.
 use crate::{
+    broker::{self, Reply, DEADLINE as BROKER_DEADLINE, MAX_RESPONSE},
     hub::{self, Snapshot},
+    llmcfg::{HostAuth, LlmState, NETWORK_PERMISSION},
     storage::{PluginState, Storage},
     transport::bounded_frame,
 };
@@ -41,18 +43,24 @@ const LOG_PER_MINUTE: usize = 20;
 const HELLO_DEADLINE: Duration = Duration::from_secs(3);
 const GRACE: Duration = Duration::from_secs(1);
 const WRITE_DEADLINE: Duration = Duration::from_secs(2);
-const PRLIMIT: &str = "/usr/bin/prlimit";
-const BWRAP: &str = "/usr/bin/bwrap";
-const MAX_ADDRESS_SPACE: u64 = 512 * 1024 * 1024;
-const MAX_CPU_SECONDS: u64 = 30;
-const MAX_OPEN_FILES: u64 = 32;
+/// Partial text accumulated per invocation (C1); larger overflow is dropped, never queued.
+const MAX_PARTIAL: usize = 16384;
+const MAX_PARTIAL_CHUNK: usize = 2048;
+const PARTIAL_EVENTS_PER_SECOND: usize = 10;
+const MAX_HEADERS: usize = 8;
+const MAX_HEADER_VALUE: usize = 256;
+pub(crate) const PRLIMIT: &str = "/usr/bin/prlimit";
+pub(crate) const BWRAP: &str = "/usr/bin/bwrap";
+pub(crate) const MAX_ADDRESS_SPACE: u64 = 512 * 1024 * 1024;
+pub(crate) const MAX_CPU_SECONDS: u64 = 30;
+pub(crate) const MAX_OPEN_FILES: u64 = 32;
 /// RLIMIT_NPROC counts every task of the real uid, so the cap is the current count plus this.
 const PROCESS_HEADROOM: u64 = 16;
 
+/// Exact reserved words only (docs/C0.md): `llm_engine` is a legal plugin id, `llm` is not.
+/// Callers pass a whole plugin id, or the first dot-separated segment of a capability.
 fn reserved(name: &str) -> bool {
-    RESERVED
-        .iter()
-        .any(|ns| name == *ns || name.strip_prefix(*ns).is_some_and(|r| r.starts_with('_')))
+    RESERVED.contains(&name)
 }
 fn capability_shape(c: &str) -> bool {
     let parts: Vec<_> = c.split('.').collect();
@@ -116,6 +124,8 @@ pub struct CapabilityResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<&'static str>,
     pub elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial: Option<String>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct PluginItem {
@@ -145,6 +155,7 @@ pub enum Intent {
         capability: String,
         input: Value,
         deadline_ms: u64,
+        auth: HostAuth,
     },
     Cancel {
         plugin_id: String,
@@ -165,6 +176,11 @@ pub enum Ev {
         invocation: u64,
         outcome: Result<Value, &'static str>,
         elapsed_ms: u64,
+    },
+    Partial {
+        plugin_id: String,
+        invocation: u64,
+        text: String,
     },
     Log {
         plugin_id: String,
@@ -188,6 +204,7 @@ struct Active {
     invocation: u64,
     plugin_id: String,
     capability: String,
+    partial: String,
 }
 
 /// Core-side authority view. Holds no process handles and never trusts plugin output.
@@ -203,6 +220,7 @@ pub(crate) struct PluginView {
     events: Vec<&'static str>,
     next_invocation: u64,
     logs: VecDeque<Instant>,
+    partial_events: VecDeque<Instant>,
 }
 
 fn spec_for(storage: &Storage, hub: &Snapshot, plugin_id: &str) -> Result<Spec, &'static str> {
@@ -484,6 +502,7 @@ impl PluginView {
         capability: &str,
         input: Value,
         deadline_ms: u64,
+        llm: &LlmState,
     ) -> Result<(), &'static str> {
         let hub = hub
             .filter(|h| h.status == "verified")
@@ -512,10 +531,15 @@ impl PluginView {
         }
         self.next_invocation = self.next_invocation.saturating_add(1);
         let invocation = self.next_invocation;
+        // Authority for brokered HTTP is fixed per invocation: approved grant plus Core config.
+        let permission =
+            owner.permissions_approved && owner.permissions.iter().any(|p| p == NETWORK_PERMISSION);
+        let auth = llm.host_auth(permission);
         self.active = Some(Active {
             invocation,
             plugin_id: owner.plugin_id.clone(),
             capability: capability.to_owned(),
+            partial: String::new(),
         });
         self.last = None;
         self.intents.push_back(Intent::Invoke {
@@ -524,6 +548,7 @@ impl PluginView {
             capability: capability.to_owned(),
             input,
             deadline_ms,
+            auth,
         });
         self.events.push("capability_invoked");
         Ok(())
@@ -588,6 +613,7 @@ impl PluginView {
                     return;
                 };
                 let capability = active.capability.clone();
+                let partial = (!active.partial.is_empty()).then(|| active.partial.clone());
                 self.active = None;
                 if !self.ledger.enabled.iter().any(|id| *id == plugin_id) {
                     return;
@@ -600,6 +626,7 @@ impl PluginView {
                         output: Some(output),
                         error: None,
                         elapsed_ms,
+                        partial,
                     },
                     Err(code) => CapabilityResult {
                         capability,
@@ -608,8 +635,38 @@ impl PluginView {
                         output: None,
                         error: Some(code),
                         elapsed_ms,
+                        partial,
                     },
                 });
+            }
+            Ev::Partial {
+                plugin_id,
+                invocation,
+                text,
+            } => {
+                let Some(active) = self
+                    .active
+                    .as_mut()
+                    .filter(|a| a.invocation == invocation && a.plugin_id == plugin_id)
+                else {
+                    return;
+                };
+                if active.partial.len() + text.len() > MAX_PARTIAL {
+                    return;
+                }
+                active.partial.push_str(&text);
+                // Event rate is bounded; the accumulated text is not, within the 16 KiB cap.
+                while self
+                    .partial_events
+                    .front()
+                    .is_some_and(|t| now.duration_since(*t) >= Duration::from_secs(1))
+                {
+                    self.partial_events.pop_front();
+                }
+                if self.partial_events.len() < PARTIAL_EVENTS_PER_SECOND {
+                    self.partial_events.push_back(now);
+                    self.events.push("capability_partial");
+                }
             }
             Ev::Log { .. } => {
                 while self
@@ -634,6 +691,13 @@ impl PluginView {
     }
     pub(crate) fn last(&self) -> Option<&CapabilityResult> {
         self.last.as_ref()
+    }
+    /// Live text of the running invocation, present only while it has produced partials.
+    pub(crate) fn partial(&self) -> Option<String> {
+        self.active
+            .as_ref()
+            .filter(|a| !a.partial.is_empty())
+            .map(|a| a.partial.clone())
     }
     pub(crate) fn snapshot(&self, hub: Option<&Snapshot>) -> PluginSnapshot {
         let items = hub
@@ -692,6 +756,7 @@ enum Cmd {
         capability: String,
         input: Value,
         deadline_ms: u64,
+        auth: HostAuth,
     },
     Cancel {
         invocation: u64,
@@ -705,6 +770,7 @@ struct Actor {
 }
 pub struct Host {
     python: Option<PathBuf>,
+    broker: PathBuf,
     sender: mpsc::UnboundedSender<Wire>,
     actors: HashMap<String, Actor>,
     retired: Vec<JoinHandle<()>>,
@@ -712,9 +778,14 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn new(python: Option<PathBuf>, sender: mpsc::UnboundedSender<Wire>) -> Self {
+    pub fn new(
+        python: Option<PathBuf>,
+        broker: PathBuf,
+        sender: mpsc::UnboundedSender<Wire>,
+    ) -> Self {
         Self {
             python,
+            broker,
             sender,
             actors: HashMap::new(),
             retired: vec![],
@@ -743,6 +814,7 @@ impl Host {
                 let ctx = Ctx {
                     root: root.to_path_buf(),
                     python,
+                    broker: self.broker.clone(),
                     plugin_id: spec.plugin_id.clone(),
                     manifest_sha256: spec.manifest_sha256,
                     payload_sha256: spec.payload_sha256,
@@ -774,6 +846,7 @@ impl Host {
                 capability,
                 input,
                 deadline_ms,
+                auth,
             } => {
                 let sent = self.actors.get(&plugin_id).is_some_and(|a| {
                     a.commands
@@ -782,6 +855,7 @@ impl Host {
                             capability,
                             input,
                             deadline_ms,
+                            auth,
                         })
                         .is_ok()
                 });
@@ -810,9 +884,10 @@ impl Host {
     /// Drops events from retired generations; a terminal state retires its actor.
     pub fn accept(&mut self, wire: Wire) -> Option<Ev> {
         let id = match &wire.ev {
-            Ev::State { plugin_id, .. } | Ev::Result { plugin_id, .. } | Ev::Log { plugin_id } => {
-                plugin_id.clone()
-            }
+            Ev::State { plugin_id, .. }
+            | Ev::Result { plugin_id, .. }
+            | Ev::Partial { plugin_id, .. }
+            | Ev::Log { plugin_id } => plugin_id.clone(),
         };
         if self.actors.get(&id).is_none_or(|a| a.epoch != wire.epoch) {
             return None;
@@ -847,6 +922,7 @@ impl Host {
 struct Ctx {
     root: PathBuf,
     python: PathBuf,
+    broker: PathBuf,
     plugin_id: String,
     manifest_sha256: String,
     payload_sha256: String,
@@ -873,6 +949,13 @@ impl Out {
             state,
             restarts,
             error,
+        });
+    }
+    fn partial(&self, invocation: u64, text: String) {
+        self.send(Ev::Partial {
+            plugin_id: self.plugin_id.clone(),
+            invocation,
+            text,
         });
     }
     fn result(&self, invocation: u64, outcome: Result<Value, &'static str>, started: Instant) {
@@ -946,6 +1029,29 @@ struct Pending {
     started: Instant,
     deadline: Instant,
     grace: Option<Instant>,
+    partial: String,
+}
+/// One brokered `llm.http` call. The broker process is killed on every exit path.
+struct HostCall {
+    id: u64,
+    child: Child,
+    replies: mpsc::UnboundedReceiver<Reply>,
+    reader: JoinHandle<()>,
+    deadline: Instant,
+    received: usize,
+}
+impl HostCall {
+    fn abandon(self) {
+        self.reader.abort();
+        retire(self.child);
+    }
+}
+/// Kills a child that Core no longer needs and reaps it in the background (no zombies).
+fn retire(mut child: Child) {
+    let _ = child.start_kill();
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
 }
 struct Session {
     child: Child,
@@ -955,6 +1061,10 @@ struct Session {
     next_id: u64,
     pending: Option<Pending>,
     log_window: (Instant, u32),
+    python: PathBuf,
+    broker: PathBuf,
+    auth: HostAuth,
+    host: Option<HostCall>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -985,6 +1095,47 @@ struct LogLine {
     level: String,
     text: String,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PartialLine {
+    event: String,
+    id: u64,
+    text: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostCallLine {
+    op: String,
+    #[serde(default)]
+    v: Option<u16>,
+    id: u64,
+    service: String,
+    args: HostArgs,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostArgs {
+    path: String,
+    body: Value,
+    stream: bool,
+    /// Accepted for compatibility and always dropped: Core sets every broker header itself.
+    #[serde(default)]
+    headers: Option<BTreeMap<String, String>>,
+}
+fn host_error_frame(id: u64, code: &str, status: Option<u16>) -> Value {
+    let mut frame = serde_json::json!({"v": 1, "op": "host_reply", "id": id, "error": code});
+    if let Some(status) = status {
+        frame["status"] = serde_json::json!(status);
+    }
+    frame
+}
+/// Resolves the next broker line; a dropped broker reads as `Closed`.
+async fn next_reply(host: &mut Option<HostCall>) -> Reply {
+    match host.as_mut() {
+        Some(call) => call.replies.recv().await.unwrap_or(Reply::Closed),
+        None => std::future::pending().await,
+    }
+}
 
 async fn read_lines(stdout: ChildStdout, tx: mpsc::UnboundedSender<Line>) {
     let mut reader = BufReader::new(stdout);
@@ -1007,7 +1158,7 @@ async fn read_lines(stdout: ChildStdout, tx: mpsc::UnboundedSender<Line>) {
     }
 }
 
-fn resolve_interpreter(python: &Path) -> PathBuf {
+pub(crate) fn resolve_interpreter(python: &Path) -> PathBuf {
     match fs::read_link(python) {
         Ok(target) if target.is_relative() => {
             python.parent().unwrap_or(Path::new("/")).join(target)
@@ -1130,6 +1281,10 @@ impl Session {
             next_id: 2,
             pending: None,
             log_window: (Instant::now(), 0),
+            python: ctx.python.clone(),
+            broker: ctx.broker.clone(),
+            auth: HostAuth::default(),
+            host: None,
         };
         let hello = serde_json::json!({"v": 1, "id": 1, "op": "hello", "plugin_id": ctx.plugin_id});
         let verdict = async {
@@ -1166,6 +1321,7 @@ impl Session {
     async fn drive(&mut self, commands: &mut mpsc::UnboundedReceiver<Cmd>, out: &Out) -> Exit {
         loop {
             let wake = self.pending.as_ref().map(|p| p.grace.unwrap_or(p.deadline));
+            let host_deadline = self.host.as_ref().map(|h| h.deadline);
             tokio::select! {
                 line = self.lines.recv() => match line {
                     Some(Line::Frame(bytes)) => {
@@ -1180,8 +1336,8 @@ impl Session {
                     }
                 },
                 command = commands.recv() => match command {
-                    Some(Cmd::Invoke { invocation, capability, input, deadline_ms }) => {
-                        if let Err(exit) = self.invoke(out, invocation, &capability, input, deadline_ms).await {
+                    Some(Cmd::Invoke { invocation, capability, input, deadline_ms, auth }) => {
+                        if let Err(exit) = self.invoke(out, invocation, &capability, input, deadline_ms, auth).await {
                             return exit;
                         }
                     }
@@ -1192,6 +1348,20 @@ impl Session {
                     }
                     Some(Cmd::Stop) | None => return Exit::Stopped,
                 },
+                reply = next_reply(&mut self.host), if self.host.is_some() => {
+                    if let Err(exit) = self.broker_reply(reply).await {
+                        return exit;
+                    }
+                },
+                _ = sleep_until(host_deadline), if host_deadline.is_some() => {
+                    if let Some(call) = self.host.take() {
+                        let id = call.id;
+                        call.abandon();
+                        if let Err(exit) = self.host_error(id, "timeout", None).await {
+                            return exit;
+                        }
+                    }
+                },
                 _ = sleep_until(wake) => {
                     let Some(pending) = self.pending.as_mut() else { continue };
                     if pending.grace.is_some() {
@@ -1200,6 +1370,7 @@ impl Session {
                     }
                     pending.grace = Some(Instant::now() + GRACE);
                     let (wire_id, invocation, started) = (pending.wire_id, pending.invocation, pending.started);
+                    self.stop_host();
                     out.result(invocation, Err("capability_timeout"), started);
                     let cancel = serde_json::json!({"v": 1, "op": "cancel", "id": wire_id});
                     if self.write(&cancel).await.is_err() {
@@ -1227,6 +1398,7 @@ impl Session {
         capability: &str,
         input: Value,
         deadline_ms: u64,
+        auth: HostAuth,
     ) -> Result<(), Exit> {
         let started = Instant::now();
         if self.pending.is_some() {
@@ -1235,7 +1407,7 @@ impl Session {
         }
         let wire_id = self.next_id;
         self.next_id += 1;
-        let message = serde_json::json!({
+        let mut message = serde_json::json!({
             "v": 1,
             "id": wire_id,
             "op": "invoke",
@@ -1243,6 +1415,14 @@ impl Session {
             "input": input,
             "deadline_ms": deadline_ms,
         });
+        // Config is visible to plugins as context only; the key and URL never are.
+        if let Some(provider) = auth.provider {
+            message["ctx"] = serde_json::json!({"llm": {
+                "provider": provider.as_str(),
+                "model": auth.model.clone().unwrap_or_default(),
+            }});
+        }
+        self.auth = auth;
         if self.write(&message).await.is_err() {
             out.result(invocation, Err("plugin_error"), started);
             return Err(Exit::Crashed);
@@ -1253,6 +1433,7 @@ impl Session {
             started,
             deadline: started + Duration::from_millis(deadline_ms),
             grace: None,
+            partial: String::new(),
         });
         Ok(())
     }
@@ -1265,6 +1446,7 @@ impl Session {
         }
         pending.grace = Some(Instant::now() + GRACE);
         let (wire_id, started) = (pending.wire_id, pending.started);
+        self.stop_host();
         out.result(invocation, Err("invoke_cancelled"), started);
         let cancel = serde_json::json!({"v": 1, "op": "cancel", "id": wire_id});
         if self.write(&cancel).await.is_err() {
@@ -1276,6 +1458,12 @@ impl Session {
         let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
             return Err(self.violation(out, "plugin_output_invalid"));
         };
+        if value.get("event").and_then(Value::as_str) == Some("partial") {
+            return self.on_partial(value, out);
+        }
+        if value.get("op").is_some() {
+            return self.host_call(value, out).await;
+        }
         if value.get("event").is_some() {
             let Ok(log) = serde_json::from_value::<LogLine>(value) else {
                 return Err(self.violation(out, "plugin_output_invalid"));
@@ -1326,6 +1514,7 @@ impl Session {
         let Some(pending) = self.pending.take() else {
             return Ok(());
         };
+        self.stop_host();
         // A reply after cancel or timeout was already reported; it is dropped.
         if pending.grace.is_none() {
             out.result(pending.invocation, outcome, pending.started);
@@ -1333,6 +1522,7 @@ impl Session {
         Ok(())
     }
     async fn shutdown(mut self) {
+        self.stop_host();
         let id = self.next_id;
         let _ = self
             .write(&serde_json::json!({"v": 1, "id": id, "op": "shutdown"}))
@@ -1346,8 +1536,177 @@ impl Session {
         self.reader.abort();
     }
     async fn kill(mut self) {
+        self.stop_host();
         let _ = self.child.kill().await;
         self.reader.abort();
+    }
+    fn stop_host(&mut self) {
+        if let Some(call) = self.host.take() {
+            call.abandon();
+        }
+    }
+    /// Partial text from a running invocation: bounded per line and in total, never queued.
+    fn on_partial(&mut self, value: Value, out: &Out) -> Result<(), Exit> {
+        let Ok(line) = serde_json::from_value::<PartialLine>(value) else {
+            return Err(self.violation(out, "plugin_output_invalid"));
+        };
+        let current = self
+            .pending
+            .as_ref()
+            .map(|p| (p.wire_id, p.invocation, p.grace.is_some()));
+        let Some((wire_id, invocation, cancelled)) = current else {
+            return Err(self.violation(out, "plugin_output_invalid"));
+        };
+        if line.event != "partial" || line.id != wire_id || line.text.len() > MAX_PARTIAL_CHUNK {
+            return Err(self.violation(out, "plugin_output_invalid"));
+        }
+        if cancelled {
+            return Ok(());
+        }
+        if let Some(pending) = self.pending.as_mut() {
+            if pending.partial.len() + line.text.len() <= MAX_PARTIAL {
+                pending.partial.push_str(&line.text);
+                out.partial(invocation, line.text);
+            }
+        }
+        Ok(())
+    }
+    /// The Core-side gate for `llm.http`, evaluated against this invocation's snapshot.
+    fn authorize(&self) -> Result<broker::Target, &'static str> {
+        let auth = &self.auth;
+        if !auth.permission {
+            return Err("permission_denied");
+        }
+        if auth.provider.is_none() {
+            return Err("provider_not_configured");
+        }
+        if auth.key.is_none() {
+            return Err("key_missing");
+        }
+        let target = broker::target(auth)?;
+        // Loopback is exempt from cloud consent only in the explicit test mode.
+        let exempt = target.loopback && auth.allow_loopback;
+        if !auth.cloud_consent && !exempt {
+            return Err("cloud_not_authorized");
+        }
+        Ok(target)
+    }
+    async fn host_error(
+        &mut self,
+        id: u64,
+        code: &'static str,
+        status: Option<u16>,
+    ) -> Result<(), Exit> {
+        self.write(&host_error_frame(id, code, status))
+            .await
+            .map_err(|_| Exit::Crashed)
+    }
+    /// Plugin `host_call`: strict shape, one active call, Core gate, then the sandboxed broker.
+    async fn host_call(&mut self, value: Value, out: &Out) -> Result<(), Exit> {
+        let Ok(line) = serde_json::from_value::<HostCallLine>(value) else {
+            return Err(self.violation(out, "plugin_output_invalid"));
+        };
+        let cancelled = match self.pending.as_ref() {
+            Some(pending) => pending.grace.is_some(),
+            None => return Err(self.violation(out, "plugin_output_invalid")),
+        };
+        let oversized_headers = line.args.headers.as_ref().is_some_and(|h| {
+            h.len() > MAX_HEADERS || h.values().any(|v| v.len() > MAX_HEADER_VALUE)
+        });
+        if line.op != "host_call" || line.v.is_some_and(|v| v != 1) || oversized_headers {
+            return Err(self.violation(out, "plugin_output_invalid"));
+        }
+        let id = line.id;
+        let gate = if cancelled {
+            Err("cancelled")
+        } else if self.host.is_some() {
+            Err("busy")
+        } else if line.service != "llm.http"
+            || line.args.path != broker::CHAT_PATH
+            || !line.args.stream
+            || !line.args.body.is_object()
+        {
+            Err("invalid_host_call")
+        } else {
+            self.authorize()
+        };
+        let opened = match gate {
+            Ok(target) => self.open_broker(id, line.args.body, &target).await,
+            Err(code) => Err(code),
+        };
+        match opened {
+            Ok(call) => {
+                self.host = Some(call);
+                Ok(())
+            }
+            Err(code) => self.host_error(id, code, None).await,
+        }
+    }
+    async fn open_broker(
+        &self,
+        id: u64,
+        mut body: Value,
+        target: &broker::Target,
+    ) -> Result<HostCall, &'static str> {
+        // The Core, not the plugin, chooses the model and forces streaming.
+        body["model"] = serde_json::json!(self.auth.model.clone().unwrap_or_default());
+        body["stream"] = serde_json::json!(true);
+        let payload = broker::payload(target, &body, &self.auth)?;
+        let mut command = broker::command(&self.python, &self.broker, process_budget())
+            .map_err(|_| "network_unavailable")?;
+        let mut child = command.spawn().map_err(|_| "network_unavailable")?;
+        let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            retire(child);
+            return Err("network_unavailable");
+        };
+        let (tx, replies) = mpsc::unbounded_channel();
+        let reader = tokio::spawn(broker::read_replies(stdout, tx));
+        let written =
+            tokio::time::timeout(WRITE_DEADLINE, broker::write_payload(&mut stdin, &payload)).await;
+        drop(stdin);
+        if !matches!(written, Ok(Ok(()))) {
+            reader.abort();
+            retire(child);
+            return Err("network_unavailable");
+        }
+        Ok(HostCall {
+            id,
+            child,
+            replies,
+            reader,
+            deadline: Instant::now() + BROKER_DEADLINE,
+            received: 0,
+        })
+    }
+    /// Forwards one broker line to the plugin; any terminal line also retires the broker.
+    async fn broker_reply(&mut self, reply: Reply) -> Result<(), Exit> {
+        let Some(call) = self.host.as_mut() else {
+            return Ok(());
+        };
+        let id = call.id;
+        let frame = match reply {
+            Reply::Chunk(text) => {
+                call.received = call.received.saturating_add(text.len());
+                if call.received > MAX_RESPONSE {
+                    self.stop_host();
+                    return self.host_error(id, "response_too_large", None).await;
+                }
+                serde_json::json!({"v": 1, "op": "host_reply", "id": id, "chunk": text})
+            }
+            Reply::Done(status) => {
+                self.stop_host();
+                serde_json::json!({"v": 1, "op": "host_reply", "id": id, "done": true, "status": status})
+            }
+            Reply::Error(code, status) => {
+                self.stop_host();
+                host_error_frame(id, code, status)
+            }
+            Reply::Closed => {
+                self.stop_host();
+                host_error_frame(id, "network_unavailable", None)
+            }
+        };
+        self.write(&frame).await.map_err(|_| Exit::Crashed)
     }
 }
 /// Plugin output must be a JSON object within the 8 KiB and depth-4 contract.
