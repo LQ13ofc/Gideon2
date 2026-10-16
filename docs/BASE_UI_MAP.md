@@ -93,7 +93,7 @@ e RollbackPreferences; SelectWake exige ID DEV qualificado e idle/revisão.
 RecoverConfiguration só em safe mode com revisão do boot.
 Config exige idle e revisão atual; App não escreve disco.
 Discovery está em base_pack do Snapshot quando --base-pack é fornecido;
-Install e VoiceDevices físicos ainda não têm endpoints.
+VoiceDevices físicos ainda não têm endpoints (Install existe desde B3.3).
 Incoming frame 4096B, UI response até 65536B; 8 peers/16 calls. Um request Qt em
 voo, active poll 150ms, idle 1s; watchdog 2s; reconnect 0.5–5s. Delta ignora
 request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga controles.
@@ -113,8 +113,8 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
 | Volume/mute command | Estado simulado por invocação em tmpfs | Não usar receipt como volume atual do host |
 | Open app | Desktop ID allowlist → app fixture | Não afirmar que Brave real ou janela Wayland abriu |
 | Hora/data | UTC no executor sandbox | Não prometer timezone configurável antes de suporte |
-| Hub / Plugins | Catálogo local lido e exibido; instalação/execução ausentes | Publisher não autenticado; checksum verifica só os bytes do catálogo |
-| LLM / Skills / Connections | Não implementados | Nenhum painel Models/LLM até plugin S3 |
+| Hub / Plugins | Catálogo, aprovação, staging, install/update/rollback/remove em namespace (B3.1–B3.3); plugin Python ativável em sandbox sem rede (C0) | Publisher não autenticado; checksum verifica só os bytes do catálogo |
+| LLM / Skills / Connections | LLM Engine em desenvolvimento (C1, plugin opcional); Skills e Connections não implementados | Nenhum painel Models/LLM fora do plugin |
 
 ## Dependências antes de B2/B3/B4
 
@@ -139,10 +139,10 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
    coloca somente catálogo em quarentena; Base continua. Nenhum binário baixado
    ou instalado. B3.2a aprova permissões exatas via Core/IPC/Qt, vinculadas ao manifest e catálogo,
    com revisão/persistência privada/restart; não concede grants Base. B3.2b recebe bytes bounded pelo IPC e publica payload opaco verificado em staging
-   privado, exibido como não instalado. B3.3 ainda precisa ciclo de instalação,
+   privado, exibido como não instalado. B3.3 (feito depois) cobre o ciclo de instalação,
    update/rollback/removal em namespace e audit.
-6. B4: paths de workers usam CARGO_MANIFEST_DIR e assets/venvs do workspace;
-   relocalização/pacote offline/lifecycle precisam trabalho antes de distribuição.
+6. B4: resolvido em B4.1/B4.2 (Core --home, pacote relocável, instalação versionada);
+   permanecem sem assinatura, canal de update, autostart e UI de update.
    Nenhum Flatpak/portal/auto-login do host foi instalado ou validado.
 
 ## Limites de prontidão

@@ -1,6 +1,9 @@
 # Gideon Base — reconstrução
 
-Core novo Rust, desenvolvido por gates A0→A5 numa única linha. Planejamento: [docs/A0.md](docs/A0.md); checkpoint: [docs/AGENT_STATE.md](docs/AGENT_STATE.md).
+Core novo Rust. Estado: S1 (A0–A5) e S2 (B1–B4, pacote relocável e instalação versionada)
+AUTO_VERIFIED em ambiente virtual; C0 (runtime de plugins) AUTO_VERIFIED; C1 (plugin LLM)
+em desenvolvimento. Física/Wayland real/Flatpak NÃO validados. Detalhes: docs/B3.md, docs/B4.md,
+docs/C0.md, docs/C1.md, docs/AGENT_STATE.md. Planejamento: [docs/A0.md](docs/A0.md); checkpoint: [docs/AGENT_STATE.md](docs/AGENT_STATE.md).
 
 ```sh
 cargo test --offline
@@ -29,7 +32,8 @@ target/a1-venv/bin/python scripts/test_wake_worker.py
 python3 scripts/verify_a1.py
 target/a1-venv/bin/python scripts/evaluate_wake.py target/a1-competitive/manifest.json target/evidence/a1-quality.json
 ```
-O exit code do avaliador indica execução do experimento; o campo `quality`
+O resultado PASS_DEV_ONLY de Hey Gideon está em docs/evidence/a1-selectable-hey.json;
+`a1-quality.json` é o baseline original (FAILED). O exit code do avaliador indica execução do experimento; o campo `quality`
 indica o resultado do gate. `FAILED` impede avanço, mesmo que o comando termine.
 
 Navegação local: `python3 scripts/graph.py query "Core WakeInput" --budget 1000`; [Graphify](docs/GRAPHIFY.md).
