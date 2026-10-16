@@ -23,3 +23,6 @@
 ## 2026-10-16 — C2 CLOSED (AUTO_VERIFIED)
 - C2 committed (7933749, efc00ae, deadline change after). Full matrix green (rerun from c0plugins after commit), live Google+Mistral PASSED, evidence docs/evidence/c2-models.json. Handoff section above is superseded for C2.
 - Next: infra sprint (optional, awaiting owner ok) or C3 Agent Runtime. Local llama.cpp certification still needs owner authorization to download binary + GGUF.
+
+## 2026-10-16 — C3 CLOSED (AUTO_VERIFIED)
+- C3 Agent Runtime committed, full matrix green (target/run-matrix-c3.sh), evidence docs/evidence/c3-agent.json. Next: C4.1 screen.observe (needs contract doc docs/C4.md).
