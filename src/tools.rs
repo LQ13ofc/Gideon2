@@ -27,10 +27,12 @@ const DESKTOP_SUFFIX: &str = ".desktop";
 pub enum Risk {
     ReadOnly,
     StateChanging,
+    /// Publication or otherwise irreversible effects: always needs explicit approval.
+    Destructive,
 }
 
 /// The only tools a model or plugin can ever reach. Adding a row is a Core change.
-const REGISTRY: [(&str, Risk); 6] = [
+pub const REGISTRY: [(&str, Risk); 6] = [
     ("open_app", Risk::StateChanging),
     ("set_volume", Risk::StateChanging),
     ("mute", Risk::StateChanging),
@@ -39,8 +41,24 @@ const REGISTRY: [(&str, Risk); 6] = [
     ("get_date", Risk::ReadOnly),
 ];
 
+/// Agent test tools, reachable only under `--agent-synthetic`. They act on the synthetic app.
+pub const SYNTHETIC_REGISTRY: [(&str, Risk); 4] = [
+    ("synth_screen_read", Risk::ReadOnly),
+    ("synth_counter_inc", Risk::StateChanging),
+    ("synth_set_text", Risk::StateChanging),
+    ("synth_publish", Risk::Destructive),
+];
+
 pub fn risk(name: &str) -> Option<Risk> {
     REGISTRY
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, risk)| *risk)
+}
+
+/// Risk of a synthetic tool; `None` unless the synthetic registry is enabled by the caller.
+pub fn synthetic_risk(name: &str) -> Option<Risk> {
+    SYNTHETIC_REGISTRY
         .iter()
         .find(|(known, _)| *known == name)
         .map(|(_, risk)| *risk)
@@ -204,6 +222,11 @@ pub struct View {
     pub state: State,
     pub reason: Option<&'static str>,
     pub result: Option<String>,
+    /// Set only for proposals created by an agent run (C3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<u32>,
 }
 
 struct Entry {
@@ -309,6 +332,8 @@ impl Ledger {
                 state: State::Pending,
                 reason: None,
                 result: None,
+                run_id: None,
+                step: None,
             },
             created: now,
             seq: self.sequence,
@@ -322,6 +347,17 @@ impl Ledger {
             }
         }
         proposal_id
+    }
+    /// Marks a proposal as owned by an agent run and step (C3). Unknown ids are ignored.
+    pub fn tag(&mut self, proposal_id: &str, run_id: &str, step: u32) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.view.proposal_id == proposal_id)
+        {
+            entry.view.run_id = Some(run_id.to_owned());
+            entry.view.step = Some(step);
+        }
     }
     pub fn set(
         &mut self,

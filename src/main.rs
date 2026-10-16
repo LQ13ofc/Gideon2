@@ -22,8 +22,22 @@ async fn main() -> io::Result<()> {
     let mut home = None;
     let mut plugin_python = None;
     let mut net_allow_loopback = false;
+    let mut agent = gideon_base::agent::Options::default();
     while let Some(option) = args.next() {
         match option.as_str() {
+            // Test/dev only: synthetic agent tools on `<home>/synthetic`. Never in packages.
+            "--agent-synthetic" if !agent.synthetic => agent.synthetic = true,
+            "--agent-allow-destructive" if !agent.allow_destructive => {
+                agent.allow_destructive = true
+            }
+            // Test only: divides the 120 s run deadline by N (1..=1000).
+            "--agent-clock-scale" if agent.clock_scale == 0 => {
+                agent.clock_scale = args
+                    .next()
+                    .and_then(|raw| raw.parse::<u32>().ok())
+                    .filter(|n| (1..=1000).contains(n))
+                    .ok_or_else(|| io::Error::other("invalid --agent-clock-scale"))?;
+            }
             "--home" if home.is_none() => {
                 let path = PathBuf::from(
                     args.next()
@@ -107,6 +121,16 @@ async fn main() -> io::Result<()> {
             _ => return Err(io::Error::other("unknown or duplicate option")),
         }
     }
+    if agent.synthetic && home.is_none() {
+        return Err(io::Error::other("--agent-synthetic requires --home"));
+    }
+    if agent.allow_destructive && !agent.synthetic {
+        return Err(io::Error::other(
+            "--agent-allow-destructive requires --agent-synthetic",
+        ));
+    }
+    gideon_base::agent::configure(agent)
+        .map_err(|_| io::Error::other("agent options already set"))?;
     if let Some(path) = home {
         transport::set_home(path)?;
     }

@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod audio;
 pub mod broker;
 pub mod capture;

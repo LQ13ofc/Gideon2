@@ -25,7 +25,7 @@ struct Session {
 /// Single owner for sessions, events and authority; no detached action tasks.
 pub struct Core {
     base_pack: Option<crate::pack::Snapshot>,
-    hub: Option<crate::hub::Snapshot>,
+    pub(crate) hub: Option<crate::hub::Snapshot>,
     configuration_status: crate::storage::ConfigurationStatus,
     configuration_recovery_available: bool,
     preferences: crate::storage::Config,
@@ -53,11 +53,13 @@ pub struct Core {
     speech_status: &'static str,
     speech_summary: Option<crate::tts::Summary>,
     speech_samples: usize,
-    plugins: crate::plugins::PluginView,
-    llm: crate::llmcfg::LlmState,
-    tools: crate::tools::Ledger,
+    pub(crate) plugins: crate::plugins::PluginView,
+    pub(crate) llm: crate::llmcfg::LlmState,
+    pub(crate) tools: crate::tools::Ledger,
     /// Set by an accepted capability_invoke; cleared only when its matching result lands.
     tool_source: bool,
+    /// C3 agent run (at most one); idle and inert unless a `*.chat` plugin runs.
+    pub(crate) agent: crate::agent::Agent,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -98,21 +100,32 @@ impl Core {
             llm: Default::default(),
             tools: Default::default(),
             tool_source: false,
+            agent: crate::agent::Agent::new(crate::agent::options()),
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
         self.next_session = seed;
         self.tools.set_epoch(seed);
+        self.agent.set_boot_seed(seed);
+    }
+    /// True while a voice session holds the Core (agent actions and wake sessions exclude each other).
+    pub(crate) fn voice_active(&self) -> bool {
+        self.session.is_some()
     }
     /// Enables the tool executor (same sandbox as Base commands) and sets the proposal TTL.
     pub fn configure_tools(&mut self, ttl: Duration, executor: bool) {
         self.tools.configure(ttl, executor);
     }
+    /// Earliest wake-up for proposal expiry or the agent run deadline.
     pub fn tool_deadline(&self) -> Option<Instant> {
-        self.tools.deadline()
+        match (self.tools.deadline(), self.agent.deadline()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
     pub fn expire_tools(&mut self, now: Instant) {
         self.tools.expire(now);
+        self.agent_expire(now);
     }
     pub fn take_tool_job(&mut self) -> Option<crate::commands::Job> {
         self.tools.start()
@@ -135,8 +148,9 @@ impl Core {
             }
             None => self.tool_failed(String::new(), &id, "executor_failed"),
         }
+        self.agent_settle(&id, None);
     }
-    fn tool_denied(&mut self, request_id: String, id: &str, code: &'static str) {
+    pub(crate) fn tool_denied(&mut self, request_id: String, id: &str, code: &'static str) {
         self.tools
             .set(id, crate::tools::State::Denied, Some(code), None);
         self.emit(request_id, None, "tool_denied");
@@ -210,6 +224,7 @@ impl Core {
     }
     /// Revoked, disabled or failed plugins lose their pending proposals.
     fn sweep_tools(&mut self) {
+        self.agent_guard();
         if !self.tools.has_pending() {
             return;
         }
@@ -222,6 +237,7 @@ impl Core {
             .map(|i| i.plugin_id.clone())
             .collect();
         self.tools.cancel_unavailable(&running);
+        self.agent_settle_awaited();
     }
     fn tool_decide(
         &mut self,
@@ -245,11 +261,15 @@ impl Core {
                 self.tools
                     .set(proposal_id, State::Denied, Some("user_denied"), None);
                 self.emit(request_id, None, "tool_denied");
+                self.agent_settle(proposal_id, None);
                 "ok"
             }
             ToolDecision::Authorize => {
                 if self.tools.busy() {
                     return "busy";
+                }
+                if self.agent_owns(&view) {
+                    return self.agent_authorize(request_id, proposal_id, &view);
                 }
                 // Arguments are validated again at authorize time, not only at proposal time.
                 match crate::tools::command(&view.tool, &view.args) {
@@ -726,7 +746,7 @@ impl Core {
             self.emit(s.request_id, Some(s.id), kind);
         }
     }
-    fn emit(&mut self, request_id: String, session_id: Option<u64>, kind: &'static str) {
+    pub(crate) fn emit(&mut self, request_id: String, session_id: Option<u64>, kind: &'static str) {
         self.sequence += 1;
         if self.events.len() == 64 {
             self.events.pop_front();
@@ -773,6 +793,7 @@ impl Core {
             sequence: self.sequence,
             events: self.events.iter().cloned().collect(),
             tool_proposals: self.tools.snapshot(),
+            agent: self.agent.view(),
         }
     }
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
@@ -814,6 +835,7 @@ impl Core {
         self.plugins.event(ev, now);
         if let Some(plugin_id) = result_of {
             self.ingest_result(&plugin_id, now);
+            self.agent_on_result();
         }
         self.sweep_tools();
         self.flush_plugin_events("");
@@ -946,6 +968,11 @@ impl Core {
             {
                 "busy"
             }
+            Operation::CapabilityInvoke { .. } | Operation::CapabilityCancel { .. }
+                if self.agent.is_active() =>
+            {
+                "agent_busy"
+            }
             Operation::PluginEnable {
                 revision,
                 plugin_id,
@@ -1059,6 +1086,8 @@ impl Core {
                     match self.llm.configure(storage, revision, input) {
                         Ok(()) => {
                             self.emit(req.request_id.clone(), None, "llm_configured");
+                            // A changed chat configuration revokes the run that depends on it.
+                            self.agent_abort_revoked();
                             "ok"
                         }
                         Err(code) => code,
@@ -1470,6 +1499,11 @@ impl Core {
                 proposal_id,
                 decision,
             } => self.tool_decide(req.request_id.clone(), &proposal_id, decision),
+            Operation::AgentStart { goal, capability } => {
+                self.agent_start(req.request_id.clone(), &goal, capability, now)
+            }
+            Operation::AgentAbort { run_id } => self.agent_abort(&run_id),
+            Operation::AgentTestBump => self.agent_test_bump(),
             Operation::Snapshot => unreachable!(),
         };
         self.sweep_tools();

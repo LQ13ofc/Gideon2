@@ -139,6 +139,15 @@ pub enum Operation {
         proposal_id: String,
         decision: ToolDecision,
     },
+    AgentStart {
+        goal: String,
+        capability: Option<String>,
+    },
+    AgentAbort {
+        run_id: String,
+    },
+    /// Test-only: exists solely under `--agent-synthetic`; otherwise refused.
+    AgentTestBump,
 }
 
 /// User decision on a tool proposal. Only a client request can carry it; plugins cannot.
@@ -191,6 +200,7 @@ pub struct Response {
     pub preferences: crate::storage::Config,
     pub command: Option<crate::commands::Outcome>,
     pub tool_proposals: Vec<crate::tools::View>,
+    pub agent: Option<crate::agent::View>,
     pub text_input_available: bool,
     pub speech_samples: usize,
     pub speech_status: &'static str,
@@ -410,6 +420,22 @@ enum WireRequest {
         request_id: String,
         proposal_id: String,
         decision: ToolDecision,
+    },
+    AgentStart {
+        version: u16,
+        request_id: String,
+        goal: String,
+        #[serde(default)]
+        capability: Option<String>,
+    },
+    AgentAbort {
+        version: u16,
+        request_id: String,
+        run_id: String,
+    },
+    AgentTestBump {
+        version: u16,
+        request_id: String,
     },
 }
 impl<'de> Deserialize<'de> for Request {
@@ -751,6 +777,25 @@ impl<'de> Deserialize<'de> for Request {
                     decision,
                 },
             ),
+            WireRequest::AgentStart {
+                version,
+                request_id,
+                goal,
+                capability,
+            } => (
+                version,
+                request_id,
+                Operation::AgentStart { goal, capability },
+            ),
+            WireRequest::AgentAbort {
+                version,
+                request_id,
+                run_id,
+            } => (version, request_id, Operation::AgentAbort { run_id }),
+            WireRequest::AgentTestBump {
+                version,
+                request_id,
+            } => (version, request_id, Operation::AgentTestBump),
         };
         Ok(Self {
             version,
