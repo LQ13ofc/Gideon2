@@ -1,34 +1,72 @@
 #!/usr/bin/env python3
-"""gideon-install: versioned install, update, rollback and profiles for gideon-base (B4.2).
+"""gideon-install: versioned install, update, rollback, repair and profiles for gideon-base (B4.2/B4.3).
 
-Usage: gideon-install --install-root ROOT install PKG | update PKG | rollback | list
+Usage: gideon-install --install-root ROOT install PKG | update PKG | rollback | repair | list
        | profile create NAME | profile list
 
 ROOT (absolute; created 0700 if missing; must be a real directory owned by this uid, mode 0700)
 holds:
-  install.json        ledger, 0600, <= 16 KiB: version 1, revision, current, previous, versions
-  versions/<id>/     installed packages, id = <version>-<commit[:8]>
+  install.json        committed ledger, 0600, <= 16 KiB: version 1, revision, current, previous,
+                      versions[{id, version, commit, package_json_sha256, verifier_sha256}]
+  .install.json.tmp   pending ledger of an update/rollback/install in progress (fsynced before
+                      any link moves; present only between "ledger written" and "ledger committed")
+  versions/<id>/      installed packages, id = <version>-<commit[:8]>
   current, previous   relative symlinks to versions/<id>
   profiles/<name>/    per-profile state, 0700, independent of the version
-  .lock               flock held for the whole mutating command
+  .lock               flock: LOCK_EX for install/update/rollback/repair/profile create,
+                      LOCK_SH held by gideon-launch for the whole lifetime of the Core
+                      If LOCK_EX is busy and a profile core.sock accepts, profile_active (exit 3)
+                      at once; otherwise wait GIDEON_INSTALL_LOCK_TIMEOUT (10 s), then locked (6).
 
 Every command prints one JSON object on stdout.
-Exit codes: 0 ok, 2 usage, 3 profile_active, 4 verify_failed, 5 state (ledger or layout
-invalid, or refused), 6 other, 99 injected failure (GIDEON_INSTALL_FAIL_AT=stage|ledger|switch).
+Exit codes: 0 ok, 2 usage, 3 profile_active, 4 verify_failed (incl. verifier_modified),
+5 state (ledger or layout invalid, needs_repair, or refused), 6 other (incl. locked, unexpected
+exceptions), 99 injected failure (GIDEON_INSTALL_FAIL_AT=stage|ledger|switch|between_links|before_commit).
 
 Source handling: PKG must pass its own bin/gideon-verify. On the same filesystem as ROOT the
 package directory is RENAMED into versions/, so PKG no longer exists afterwards (the source is
-consumed). Otherwise it is copied with symlinks kept and modes preserved, and PKG is untouched.
-GIDEON_INSTALL_FORCE_COPY=1 forces the copy path (used by the tests).
+consumed). If verification of the moved copy fails, the source is moved back to its original path
+(or to a .quarantine-* sibling) and reported as "source_restored". Otherwise it is copied with
+symlinks kept and modes preserved, and PKG is untouched. GIDEON_INSTALL_FORCE_COPY=1 forces the
+copy path and GIDEON_INSTALL_LOCK_TIMEOUT=SECONDS overrides the 10 s lock wait (both used by the tests).
 
-Commit order: stage (copy or rename, then re-verify) -> rename to versions/<id> -> write ledger
-temp -> [inject ledger] -> create .current.tmp/.previous.tmp symlinks -> [inject switch] ->
-replace symlinks -> replace ledger (commit point) -> drop the oldest version directory.
-A failure before the ledger replace leaves the previous state valid. The next mutating command
-removes its own leftovers (.stage-*, .current.tmp, .previous.tmp, .install.json.tmp). Orphan
-versions/<id> directories are never touched; they are listed under "orphans".
-Known limit: a hard power loss between the symlink replace and the ledger replace leaves
-symlinks ahead of the ledger; the next command then exits 5 (layout_invalid) and needs a human.
+Commit order (every mutating command):
+  stage (copy or rename, verify) -> rename to versions/<id> -> fsync the version tree ->
+  write .install.json.tmp (fsynced) -> [inject ledger] -> .current.tmp/.previous.tmp symlinks ->
+  [inject switch] -> replace previous -> [inject between_links] -> replace current ->
+  [inject before_commit] -> rename .install.json.tmp over install.json (COMMIT POINT) ->
+  drop the version no longer referenced (update only).
+
+Crash recovery (crash-safe; any state left by a kill is one of these):
+  * Before the COMMIT POINT the committed ledger is still authoritative.
+  * Committed ledger present, links match the pending ledger exactly -> repair rolls FORWARD
+    (commits the pending ledger, after every version it names verifies). Links do not match ->
+    repair rolls BACK: links are re-pointed to the committed ledger, the pending ledger is discarded.
+  * No committed ledger (interrupted first install): a pending ledger whose versions verify is
+    committed (roll forward; the consumed package is kept, links are created to match). Without a
+    usable pending ledger, a current link to a version directory whose package verifies and names
+    itself REBUILDS the ledger for it (revision 1, previous null); otherwise dangling links are removed.
+    A version directory is never deleted unless the committed ledger held it and the pending ledger
+    dropped it.
+  * Other commands refuse with error needs_repair (exit 5) and print the repair command when links
+    are ahead of the committed ledger while a pending ledger exists. Without a pending ledger a
+    mismatch stays layout_invalid (external tampering: needs a human).
+  * Own leftovers (.stage-* in versions/, .current.tmp, .previous.tmp) and the version directory of a
+    discarded pending ledger are moved to .quarantine-* names in versions/ (never deleted), so the
+    same package can be retried.
+  Other orphan versions/<id> directories that the ledger does not reference are never touched; they
+  are listed under "orphans" and an install of the same id refuses with orphan_conflict.
+
+Verifier pin (trust anchor, detects post-install tampering only): the ledger records
+sha256(bin/gideon-verify) of every installed version. Every ledger check (launch, core, rollback,
+update, list) refuses with verifier_modified (exit 4) when the on-disk verifier differs. gideon-launch
+passes the pinned hash to gideon-core in GIDEON_PINNED_VERIFIER_SHA256 so the Core re-checks it
+before running. This does NOT authenticate the package: whoever can rewrite the verifier and the
+ledger can also rewrite the pin. Real authenticity needs signing (docs/B4.md, B4.3).
+
+Known limit: gideon-core and the Python runtime are not pinned by the ledger, only the verifier
+and PACKAGE.json (which pins every other file) are. Ledgers written before the verifier pin
+(no verifier_sha256 in entries) are rejected as ledger_invalid: reinstall.
 """
 import argparse
 import errno
@@ -50,8 +88,10 @@ LOCK = ".lock"
 TMP_LINKS = (".current.tmp", ".previous.tmp")
 MAX_LEDGER = 16384
 MAX_PKG_JSON = 64 << 20
+MAX_VERIFIER = 4 << 20
 SOCKET_TIMEOUT = 0.5
 LOCK_TIMEOUT = 10.0
+LEDGER_VERSION = 1
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,79}")
 VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,39}")
 COMMIT_RE = re.compile(r"unknown|[0-9a-f]{7,40}")
@@ -59,7 +99,7 @@ SHA_RE = re.compile(r"[0-9a-f]{64}")
 PROFILE_RE = re.compile(r"[a-z0-9_-]{1,32}")
 STAGE_RE = re.compile(r"\.stage-[A-Za-z0-9][A-Za-z0-9._+-]{0,79}")
 TOP_KEYS = {"version", "revision", "current", "previous", "versions"}
-ENTRY_KEYS = {"id", "version", "commit", "package_json_sha256"}
+ENTRY_KEYS = {"id", "version", "commit", "package_json_sha256", "verifier_sha256"}
 
 
 class Fail(Exception):
@@ -98,6 +138,26 @@ def fsync_dir(path):
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def fsync_tree(path):
+    """fsync every regular file, then every directory bottom-up. Returns the synced paths (files, then dirs)."""
+    synced = []
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            if not stat.S_ISREG(os.lstat(full).st_mode):
+                continue
+            fd = os.open(full, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            synced.append(full)
+    for dirpath, dirnames, filenames in os.walk(path, topdown=False, followlinks=False):
+        fsync_dir(dirpath)
+        synced.append(dirpath)
+    return synced
 
 
 def is_real_dir(path):
@@ -142,20 +202,25 @@ def guard_root(root, create):
 
 
 def acquire(root, shared=False):
+    """flock on ROOT/.lock. Returns an fd with close-on-exec set; callers may make it inheritable."""
     fd = os.open(os.path.join(root, LOCK), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
             raise Fail("root_invalid", "lock file is not a private regular file")
         mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
-        deadline = time.monotonic() + LOCK_TIMEOUT
+        timeout = float(os.environ.get("GIDEON_INSTALL_LOCK_TIMEOUT", LOCK_TIMEOUT))
+        deadline = time.monotonic() + timeout
         while True:
             try:
                 fcntl.flock(fd, mode | fcntl.LOCK_NB)
                 return fd
             except BlockingIOError:
+                if not shared:
+                    # A running profile Core (it holds the shared lock) is refused at once, not after the wait.
+                    check_no_active_profile(root)
                 if time.monotonic() >= deadline:
-                    raise Fail("locked", "install root is locked by another command", rc=6)
+                    raise Fail("locked", "install root is locked (a Core is running or another command holds it)", rc=6)
                 time.sleep(0.05)
     except BaseException:
         os.close(fd)
@@ -163,19 +228,29 @@ def acquire(root, shared=False):
 
 
 def read_regular(path, limit, code, private=False):
+    """Regular file, at most limit bytes. lstat before open; O_NONBLOCK so FIFOs cannot block; fstat recheck."""
+    name = os.path.basename(path)
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        before = os.lstat(path)
     except OSError as exc:
-        raise Fail(code, f"cannot open {os.path.basename(path)}: {exc.strerror}")
+        raise Fail(code, f"cannot inspect {name}: {exc.strerror}")
+    if not stat.S_ISREG(before.st_mode):
+        raise Fail(code, f"{name} must be a regular file, not a link, FIFO or device")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as exc:
+        raise Fail(code, f"cannot open {name}: {exc.strerror}")
     with os.fdopen(fd, "rb") as handle:
         st = os.fstat(handle.fileno())
-        if not stat.S_ISREG(st.st_mode) or st.st_size > limit:
-            raise Fail(code, f"{os.path.basename(path)} must be a regular file of at most {limit} bytes")
+        if not stat.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
+            raise Fail(code, f"{name} changed while opening or is not a regular file")
+        if st.st_size > limit:
+            raise Fail(code, f"{name} must be a regular file of at most {limit} bytes")
         if private and (stat.S_IMODE(st.st_mode) != 0o600 or st.st_nlink != 1 or st.st_uid != os.getuid()):
-            raise Fail(code, f"{os.path.basename(path)} must be mode 0600, nlink 1, owned by this user")
+            raise Fail(code, f"{name} must be mode 0600, nlink 1, owned by this user")
         data = handle.read(limit + 1)
     if len(data) > limit:
-        raise Fail(code, f"{os.path.basename(path)} grew beyond {limit} bytes")
+        raise Fail(code, f"{name} grew beyond {limit} bytes")
     return data
 
 
@@ -194,8 +269,8 @@ def validate_ledger(obj):
 
     if not isinstance(obj, dict) or set(obj) != TOP_KEYS:
         raise bad("keys must be exactly version, revision, current, previous, versions")
-    if type(obj["version"]) is not int or obj["version"] != 1:
-        raise bad("version must be 1")
+    if type(obj["version"]) is not int or obj["version"] != LEDGER_VERSION:
+        raise bad(f"version must be {LEDGER_VERSION}")
     if type(obj["revision"]) is not int or obj["revision"] < 1:
         raise bad("revision must be an integer >= 1")
     cur = obj["current"]
@@ -210,12 +285,14 @@ def validate_ledger(obj):
     seen = []
     for entry in versions:
         if not isinstance(entry, dict) or set(entry) != ENTRY_KEYS:
-            raise bad("version entries must have exactly id, version, commit, package_json_sha256")
-        ident, ver, commit, digest = (entry["id"], entry["version"], entry["commit"], entry["package_json_sha256"])
+            raise bad("version entries must have exactly id, version, commit, package_json_sha256, verifier_sha256")
+        ident, ver, commit = entry["id"], entry["version"], entry["commit"]
+        digest, verifier = entry["package_json_sha256"], entry["verifier_sha256"]
         if not (isinstance(ident, str) and ID_RE.fullmatch(ident)
                 and isinstance(ver, str) and VERSION_RE.fullmatch(ver)
                 and isinstance(commit, str) and COMMIT_RE.fullmatch(commit)
-                and isinstance(digest, str) and SHA_RE.fullmatch(digest)):
+                and isinstance(digest, str) and SHA_RE.fullmatch(digest)
+                and isinstance(verifier, str) and SHA_RE.fullmatch(verifier)):
             raise bad("version entry field has the wrong type or shape")
         if ident != f"{ver}-{commit[:8]}":
             raise bad(f"id {ident} does not match version and commit")
@@ -225,15 +302,30 @@ def validate_ledger(obj):
     return obj
 
 
-def read_ledger(root):
-    if not os.path.lexists(os.path.join(root, LEDGER)):
-        return None
-    data = read_regular(os.path.join(root, LEDGER), MAX_LEDGER, "ledger_invalid", private=True)
+def read_ledger_file(path):
+    data = read_regular(path, MAX_LEDGER, "ledger_invalid", private=True)
     try:
         obj = json.loads(data.decode("utf-8"), object_pairs_hook=_no_duplicates)
     except (ValueError, UnicodeDecodeError) as exc:
         raise Fail("ledger_invalid", f"ledger is not valid JSON: {exc}")
     return validate_ledger(obj)
+
+
+def read_ledger(root):
+    if not os.path.lexists(os.path.join(root, LEDGER)):
+        return None
+    return read_ledger_file(os.path.join(root, LEDGER))
+
+
+def read_pending(root):
+    """Pending (uncommitted) ledger, or None. A pending file that does not validate was never fully written: discard."""
+    path = os.path.join(root, LEDGER_TMP)
+    if not os.path.lexists(path):
+        return None
+    try:
+        return read_ledger_file(path)
+    except Fail:
+        return None
 
 
 def check_package_json(version_dir, entry):
@@ -246,6 +338,29 @@ def check_package_json(version_dir, entry):
         raise Fail("layout_invalid", f"PACKAGE.json of {entry['id']} is not valid JSON")
     if not isinstance(obj, dict) or obj.get("version") != entry["version"] or obj.get("commit") != entry["commit"]:
         raise Fail("layout_invalid", f"PACKAGE.json of {entry['id']} disagrees with the ledger")
+    try:
+        verifier = read_regular(os.path.join(version_dir, "bin", "gideon-verify"), MAX_VERIFIER, "verifier_modified")
+    except Fail as fail:
+        raise Fail("verifier_modified", f"bin/gideon-verify of {entry['id']}: {fail.message}", rc=4)
+    if sha256(verifier) != entry["verifier_sha256"]:
+        raise Fail("verifier_modified",
+                   f"bin/gideon-verify of {entry['id']} differs from the hash pinned at install; refusing to run",
+                   rc=4)
+
+
+def link_state(path):
+    """Symlink target as stored, None when absent, '!' when present but not a symlink."""
+    if not os.path.lexists(path):
+        return None
+    if not os.path.islink(path):
+        return "!"
+    return os.readlink(path)
+
+
+def links_match(root, ledger):
+    want = {"current": os.path.join("versions", ledger["current"]),
+            "previous": os.path.join("versions", ledger["previous"]) if ledger["previous"] else None}
+    return all(link_state(os.path.join(root, name)) == want[name] for name in ("current", "previous"))
 
 
 def check_links(root, ledger):
@@ -265,13 +380,20 @@ def check_links(root, ledger):
             raise Fail("layout_invalid", f"{name} does not match the ledger")
 
 
+def needs_repair(root, why):
+    return Fail("needs_repair", f"{why}; run: gideon-install --install-root {root} repair", rc=5)
+
+
 def load_state(root):
-    """Validated ledger, or None when nothing is installed. Read-only."""
+    """Validated committed ledger, or None when nothing is installed. Read-only."""
     ledger = read_ledger(root)
+    pending = os.path.lexists(os.path.join(root, LEDGER_TMP))
     vdir = os.path.join(root, "versions")
     if ledger is None:
         for name in ("current", "previous"):
             if os.path.lexists(os.path.join(root, name)):
+                if pending:
+                    raise needs_repair(root, "an interrupted first install left links without a committed ledger")
                 raise Fail("layout_invalid", f"{name} exists without a ledger")
         if os.path.lexists(vdir) and not is_real_dir(vdir):
             raise Fail("layout_invalid", "versions must be a real directory")
@@ -283,7 +405,12 @@ def load_state(root):
         if not is_real_dir(version_dir):
             raise Fail("layout_invalid", f"version directory missing: {entry['id']}")
         check_package_json(version_dir, entry)
-    check_links(root, ledger)
+    try:
+        check_links(root, ledger)
+    except Fail:
+        if pending:
+            raise needs_repair(root, "an interrupted update or rollback left links ahead of the ledger")
+        raise
     return ledger
 
 
@@ -296,7 +423,7 @@ def orphans(root, ledger):
     if not is_real_dir(vdir):
         return []
     known = {e["id"] for e in ledger["versions"]} if ledger else set()
-    # own .stage-* leftovers are not orphans: the next mutating command removes them
+    # own .stage-* leftovers are not orphans: the next mutating command quarantines them
     return sorted(name for name in os.listdir(vdir) if name not in known and not STAGE_RE.fullmatch(name))
 
 
@@ -362,8 +489,9 @@ def package_info(pkg_dir):
     if not (isinstance(version, str) and VERSION_RE.fullmatch(version)
             and isinstance(commit, str) and COMMIT_RE.fullmatch(commit)):
         raise Fail("invalid_pkg", "PACKAGE.json needs a usable version and commit", rc=2)
+    verifier = read_regular(os.path.join(pkg_dir, "bin", "gideon-verify"), MAX_VERIFIER, "invalid_pkg")
     return {"id": f"{version}-{commit[:8]}", "version": version, "commit": commit,
-            "package_json_sha256": sha256(data)}
+            "package_json_sha256": sha256(data), "verifier_sha256": sha256(verifier)}
 
 
 def source_dir(root, pkg):
@@ -398,6 +526,32 @@ def materialize(src, stage):
     return "copied"
 
 
+def unique_sibling(directory, base):
+    candidate = os.path.join(directory, base)
+    n = 1
+    while os.path.lexists(candidate):
+        candidate = os.path.join(directory, f"{base}.{n}")
+        n += 1
+    return candidate
+
+
+def restore_source(stage, src):
+    """Put a moved source back at its original path (or a .quarantine-* sibling). Returns where it is."""
+    target = src if not os.path.lexists(src) else unique_sibling(os.path.dirname(src), ".quarantine-" + os.path.basename(src))
+    try:
+        os.rename(stage, target)
+    except OSError:
+        return stage  # left in place inside versions/ (never deleted)
+    return target
+
+
+def quarantine(directory, name):
+    """Move a tool-owned leftover aside instead of deleting it (a moved source may still be inside)."""
+    target = unique_sibling(directory, ".quarantine-" + name.lstrip("."))
+    os.rename(os.path.join(directory, name), target)
+    return target
+
+
 def install_version(root, src, info):
     vdir = os.path.join(root, "versions")
     final = os.path.join(vdir, info["id"])
@@ -410,12 +564,18 @@ def install_version(root, src, info):
         verify_pkg(stage)
         if package_info(stage) != info:
             raise Fail("verify_failed", "staged copy differs from the verified source", rc=4)
-    except Fail:
-        shutil.rmtree(stage, ignore_errors=True)
+    except BaseException as exc:
+        if how == "moved":
+            where = restore_source(stage, src)
+            if isinstance(exc, Fail):
+                exc.extra["source_restored"] = where
+        else:
+            shutil.rmtree(stage, ignore_errors=True)
         raise
     inject("stage")
     os.rename(stage, final)
     fsync_dir(vdir)
+    fsync_tree(final)
     return how
 
 
@@ -425,12 +585,15 @@ def write_ledger(root, ledger):
     if len(data) > MAX_LEDGER:
         raise Fail("state", "ledger would exceed 16 KiB")
     tmp = os.path.join(root, LEDGER_TMP)
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     with os.fdopen(fd, "wb") as handle:
         os.fchmod(handle.fileno(), 0o600)
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
+    fsync_dir(root)
     return tmp
 
 
@@ -450,8 +613,10 @@ def switch_links(root, pairs):
         os.symlink(os.path.join("versions", target), tmp)
         temps.append((tmp, os.path.join(root, name)))
     inject("switch")
-    for tmp, final in temps:
+    for index, (tmp, final) in enumerate(temps):
         os.replace(tmp, final)
+        if index == 0 and len(temps) > 1:
+            inject("between_links")
     fsync_dir(root)
 
 
@@ -461,17 +626,13 @@ def commit_ledger(root, tmp):
 
 
 def recover(root, ledger):
-    """Remove only leftovers this tool creates (name patterns) that the ledger does not reference."""
+    """Quarantine stage leftovers this tool creates and remove its temp links and pending ledger."""
     known = {e["id"] for e in ledger["versions"]} if ledger else set()
     vdir = os.path.join(root, "versions")
     if is_real_dir(vdir):
-        for name in os.listdir(vdir):
-            path = os.path.join(vdir, name)
+        for name in sorted(os.listdir(vdir)):
             if STAGE_RE.fullmatch(name) and name not in known:
-                if os.path.isdir(path) and not os.path.islink(path):
-                    shutil.rmtree(path)
-                else:
-                    os.unlink(path)
+                quarantine(vdir, name)
     for name in TMP_LINKS:
         path = os.path.join(root, name)
         if os.path.islink(path):
@@ -496,11 +657,13 @@ def cmd_install(root, pkg):
             os.mkdir(vdir, 0o700)
         recover(root, None)
         how = install_version(root, src, info)
-        ledger = {"version": 1, "revision": 1, "current": info["id"], "previous": None, "versions": [info]}
+        ledger = {"version": LEDGER_VERSION, "revision": 1, "current": info["id"], "previous": None,
+                  "versions": [info]}
         tmp = write_ledger(root, ledger)
-        cas_check(root, 0)
         inject("ledger")
+        cas_check(root, 0)
         switch_links(root, [("current", info["id"])])
+        inject("before_commit")
         commit_ledger(root, tmp)
         return {"ok": True, "command": "install", "current": info["id"], "previous": None,
                 "revision": 1, "source": how}
@@ -523,12 +686,13 @@ def cmd_update(root, pkg):
         recover(root, ledger)
         how = install_version(root, src, info)
         old = ledger["current"]
-        new = {"version": 1, "revision": ledger["revision"] + 1, "current": info["id"], "previous": old,
-               "versions": [entry_for(ledger, old), info]}
+        new = {"version": LEDGER_VERSION, "revision": ledger["revision"] + 1, "current": info["id"],
+               "previous": old, "versions": [entry_for(ledger, old), info]}
         tmp = write_ledger(root, new)
         cas_check(root, ledger["revision"])
         inject("ledger")
         switch_links(root, [("previous", old), ("current", info["id"])])
+        inject("before_commit")
         commit_ledger(root, tmp)
         dropped = ledger["previous"]
         if dropped:
@@ -551,17 +715,125 @@ def cmd_rollback(root):
         target = ledger["previous"]
         verify_pkg(os.path.join(root, "versions", target))
         recover(root, ledger)
-        new = {"version": 1, "revision": ledger["revision"] + 1, "current": target,
+        new = {"version": LEDGER_VERSION, "revision": ledger["revision"] + 1, "current": target,
                "previous": ledger["current"], "versions": ledger["versions"]}
         tmp = write_ledger(root, new)
         cas_check(root, ledger["revision"])
         inject("ledger")
         switch_links(root, [("previous", ledger["current"]), ("current", target)])
+        inject("before_commit")
         commit_ledger(root, tmp)
         return {"ok": True, "command": "rollback", "current": target, "previous": ledger["current"],
                 "revision": new["revision"]}
     finally:
         os.close(fd)
+
+
+def pending_complete(root, pending):
+    """Every version a pending ledger names must still match its ledger entry and verify."""
+    for entry in pending["versions"]:
+        check_package_json(os.path.join(root, "versions", entry["id"]), entry)
+    verify_pkg(os.path.join(root, "versions", pending["current"]))
+
+
+def try_rebuild(root):
+    """No committed ledger: adopt current's version directory when its package verifies and names itself."""
+    target = link_state(os.path.join(root, "current"))
+    if not target or target == "!" or not target.startswith("versions/"):
+        return None
+    ident = target[len("versions/"):]
+    if not ID_RE.fullmatch(ident):
+        return None
+    vdir = os.path.join(root, "versions", ident)
+    if not is_real_dir(vdir):
+        return None
+    try:
+        info = package_info(vdir)
+        verify_pkg(vdir)
+    except Fail:
+        return None
+    if info["id"] != ident:
+        return None
+    return {"version": LEDGER_VERSION, "revision": 1, "current": ident, "previous": None, "versions": [info]}
+
+
+def cmd_repair(root):
+    fd = acquire(root)
+    try:
+        check_no_active_profile(root)
+        committed = read_ledger(root)
+        pending = read_pending(root)
+        tmp = os.path.join(root, LEDGER_TMP)
+        action = "none"
+        dropped = []
+        forward = False
+        if pending is not None and (committed is None or links_match(root, pending)):
+            try:
+                pending_complete(root, pending)
+                forward = True
+            except Fail:
+                forward = False
+        if forward:
+            os.replace(tmp, os.path.join(root, LEDGER))
+            fsync_dir(root)
+            if committed is not None:
+                keep = {e["id"] for e in pending["versions"]}
+                dropped = [e["id"] for e in committed["versions"] if e["id"] not in keep]
+            committed = pending
+            action = "rolled_forward"
+        elif os.path.lexists(tmp):
+            os.unlink(tmp)
+            action = "discarded_pending"
+            if pending is not None:
+                known = {e["id"] for e in committed["versions"]} if committed else set()
+                vdir = os.path.join(root, "versions")
+                for entry in pending["versions"]:
+                    if entry["id"] not in known and is_real_dir(os.path.join(vdir, entry["id"])):
+                        quarantine(vdir, entry["id"])  # the failed transaction's own version: moved aside, not deleted
+        if committed is None:
+            rebuilt = try_rebuild(root)
+            if rebuilt is not None:
+                commit_ledger(root, write_ledger(root, rebuilt))
+                committed = rebuilt
+                action = "rebuilt"
+            elif fix_links(root, {"current": None, "previous": None}):
+                action = "removed_links"
+        else:
+            if fix_links(root, committed) and action == "none":
+                action = "relinked"
+        for ident in dropped:
+            shutil.rmtree(os.path.join(root, "versions", ident), ignore_errors=True)
+        recover(root, committed)
+        state = load_state(root)
+        return {"ok": True, "command": "repair", "action": action,
+                "current": state["current"] if state else None,
+                "previous": state["previous"] if state else None,
+                "revision": state["revision"] if state else 0, "dropped": dropped}
+    finally:
+        os.close(fd)
+
+
+def fix_links(root, ledger):
+    """Re-point current/previous to the ledger (ledger None entries mean the link must be absent)."""
+    changed = []
+    for name in ("current", "previous"):
+        path = os.path.join(root, name)
+        want = ledger[name]
+        if want is None:
+            if os.path.lexists(path):
+                os.unlink(path)
+                changed.append(name)
+            continue
+        target = os.path.join("versions", want)
+        if link_state(path) != target:
+            tmp = os.path.join(root, f".{name}.tmp")
+            if os.path.lexists(tmp):
+                os.unlink(tmp)
+            os.symlink(target, tmp)
+            os.replace(tmp, path)
+            changed.append(name)
+    fsync_dir(root)
+    return changed
 
 
 def cmd_list(root):
@@ -611,12 +883,13 @@ def cmd_profile_list(root):
 
 
 def build_parser():
-    parser = Parser(prog="gideon-install", description="Versioned install, update and rollback of gideon-base.")
+    parser = Parser(prog="gideon-install", description="Versioned install, update, rollback and repair of gideon-base.")
     parser.add_argument("--install-root", required=True, metavar="ROOT")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     for name in ("install", "update"):
         sub.add_parser(name).add_argument("pkg", metavar="PKG")
     sub.add_parser("rollback")
+    sub.add_parser("repair")
     sub.add_parser("list")
     prof = sub.add_parser("profile")
     prof_sub = prof.add_subparsers(dest="profile_command", required=True, metavar="ACTION")
@@ -635,6 +908,8 @@ def dispatch(args):
         return cmd_update(root, args.pkg)
     if args.command == "rollback":
         return cmd_rollback(root)
+    if args.command == "repair":
+        return cmd_repair(root)
     if args.command == "list":
         return cmd_list(root)
     if args.profile_command == "create":
@@ -650,8 +925,8 @@ def main(argv=None):
         obj = {"ok": False, "error": fail.code, "message": fail.message}
         obj.update(fail.extra)
         return emit(obj, fail.rc)
-    except OSError as exc:
-        return emit({"ok": False, "error": "other", "message": str(exc)}, 6)
+    except Exception as exc:  # includes OSError, subprocess.TimeoutExpired, unexpected errors
+        return emit({"ok": False, "error": "other", "message": f"{exc.__class__.__name__}: {exc}"}, 6)
 
 
 if __name__ == "__main__":

@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
-"""Verify a gideon-base package against PACKAGE.json (stdlib only).
+"""Verify a gideon-base package against PACKAGE.json (stdlib only). Fails closed.
 
-Exit 0 only for an exact match: no missing, extra or modified entry, no
-symlink escaping the package prefix. Prints the first mismatch otherwise.
+Exit 0 only for an exact match: every listed entry present with the listed type, size, mode and
+sha256; no symlink escaping the package prefix; every regular file has st_nlink == 1 (no hard
+link aliases); every directory on disk is an expected one (an ancestor of a listed entry or a
+listed "dir" entry), and every directory could be listed (unreadable directories fail); no extra
+entry of any kind. Regular files are opened with O_NOFOLLOW|O_NONBLOCK after an lstat check and
+the descriptor is re-checked with fstat, so FIFOs and device nodes are refused without blocking.
+Prints the first mismatch and exits 1 otherwise.
+
+Scope limit: this file judges the package it lives in. Whoever can rewrite this file can also
+rewrite the verdict. gideon-install pins its sha256 in the ledger; see docs/B4.md (B4.3 signing).
 """
 import hashlib
+import json
 import os
 import stat
 import sys
 from pathlib import PurePosixPath
-import json
 
 PREFIX = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST = "PACKAGE.json"
+MAX_MANIFEST = 64 << 20
 
 
 def fail(message):
@@ -20,12 +29,33 @@ def fail(message):
     sys.exit(1)
 
 
-def digest(path):
+def open_regular(path, rel):
+    """Open a regular file: lstat check, O_NOFOLLOW|O_NONBLOCK open, fstat recheck. Returns (handle, st)."""
+    try:
+        before = os.lstat(path)
+    except OSError:
+        fail(f"missing: {rel}")
+    if not stat.S_ISREG(before.st_mode):
+        fail(f"not a regular file: {rel}")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as exc:
+        fail(f"cannot open {rel}: {exc.strerror}")
+    handle = os.fdopen(fd, "rb")
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
+        handle.close()
+        fail(f"not a regular file or changed while opening: {rel}")
+    return handle, st
+
+
+def digest(path, rel):
+    handle, st = open_regular(path, rel)
     h = hashlib.sha256()
-    with open(path, "rb") as handle:
+    with handle:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             h.update(chunk)
-    return h.hexdigest()
+    return h.hexdigest(), st
 
 
 def safe_relpath(path):
@@ -58,33 +88,47 @@ def check_parents(rel):
     current = PREFIX
     for part in PurePosixPath(rel).parts[:-1]:
         current = os.path.join(current, part)
-        st = os.lstat(current)
+        try:
+            st = os.lstat(current)
+        except OSError:
+            fail(f"missing parent of {rel}")
         if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode):
             fail(f"parent is not a plain directory: {rel}")
 
 
-def main():
-    if sys.argv[1:]:
-        fail("usage: gideon-verify (takes no arguments; verifies the package it lives in)")
+def on_walk_error(err):
+    where = os.path.relpath(err.filename, PREFIX) if err.filename else "?"
+    fail(f"cannot list directory {where}: {err.strerror}")
+
+
+def verify():
     manifest_path = os.path.join(PREFIX, MANIFEST)
-    try:
-        st = os.lstat(manifest_path)
-    except OSError:
-        fail(f"{MANIFEST} missing")
-    if not stat.S_ISREG(st.st_mode):
-        fail(f"{MANIFEST} is not a regular file")
-    with open(manifest_path, "rb") as handle:
-        data = json.loads(handle.read().decode("utf-8"))
-    entries = data.get("files")
+    handle, _ = open_regular(manifest_path, MANIFEST)
+    with handle:
+        raw = handle.read(MAX_MANIFEST + 1)
+    if len(raw) > MAX_MANIFEST:
+        fail("PACKAGE.json is too large")
+    data = json.loads(raw.decode("utf-8"))
+    entries = data.get("files") if isinstance(data, dict) else None
     if not isinstance(entries, list) or not entries:
         fail("PACKAGE.json has no files list")
 
     expected = {}
+    expected_dirs = set()
     for entry in entries:
+        if not isinstance(entry, dict):
+            fail("PACKAGE.json entry is not an object")
         rel = entry.get("path")
         if not safe_relpath(rel) or rel in expected or rel == MANIFEST:
             fail(f"invalid or duplicate entry path: {rel!r}")
         expected[rel] = entry
+    for rel, entry in expected.items():
+        if entry.get("type", "file") not in ("file", "symlink", "dir"):
+            fail(f"unknown entry type for {rel}")
+        parts = PurePosixPath(rel).parts
+        for i in range(1, len(parts)):
+            expected_dirs.add("/".join(parts[:i]))
+    expected_dirs.update(rel for rel, e in expected.items() if e.get("type") == "dir")
 
     # Pass 1: every listed entry matches exactly.
     total_bytes = 0
@@ -93,6 +137,14 @@ def main():
         kind = entry.get("type", "file")
         full = os.path.join(PREFIX, rel)
         check_parents(rel)
+        if kind == "dir":
+            try:
+                st = os.lstat(full)
+            except OSError:
+                fail(f"missing directory: {rel}")
+            if not stat.S_ISDIR(st.st_mode):
+                fail(f"not a directory: {rel}")
+            continue
         try:
             st = os.lstat(full)
         except OSError:
@@ -117,11 +169,13 @@ def main():
                     fail(f"symlink target is not packaged: {rel} -> {target}")
                 if node.get("type", "file") == "file":
                     break
+                if node.get("type") == "dir":
+                    break
                 hops += 1
                 if hops > 8:
                     fail(f"symlink chain too deep: {rel}")
                 next_target = node.get("target", "")
-                if next_target.startswith("/"):
+                if not isinstance(next_target, str) or next_target.startswith("/"):
                     fail(f"absolute symlink in chain: {resolved}")
                 resolved = normalize(os.path.dirname(resolved) + "/" + next_target if os.path.dirname(resolved) else next_target)
                 if resolved is None or not inside_prefix(resolved):
@@ -131,21 +185,31 @@ def main():
             fail(f"unknown entry type for {rel}")
         if not stat.S_ISREG(st.st_mode):
             fail(f"not a regular file: {rel}")
+        if st.st_nlink != 1:
+            fail(f"hard link alias (st_nlink {st.st_nlink}): {rel}")
         if st.st_size != entry.get("size"):
             fail(f"size mismatch: {rel} ({st.st_size} != {entry.get('size')})")
         if stat.S_IMODE(st.st_mode) != int(str(entry.get("mode")), 8):
             fail(f"mode mismatch: {rel}")
-        if digest(full) != entry.get("sha256"):
+        got, opened = digest(full, rel)
+        if opened.st_nlink != 1:
+            fail(f"hard link alias (st_nlink {opened.st_nlink}): {rel}")
+        if got != entry.get("sha256"):
             fail(f"sha256 mismatch: {rel}")
         total_bytes += st.st_size
 
-    # Pass 2: nothing extra anywhere in the prefix.
-    for root, dirs, files in os.walk(PREFIX, followlinks=False):
+    # Pass 2: nothing extra anywhere in the prefix; every directory listable and expected.
+    for root, dirs, files in os.walk(PREFIX, onerror=on_walk_error, followlinks=False):
         for name in dirs + files:
             full = os.path.join(root, name)
             rel = os.path.relpath(full, PREFIX).replace(os.sep, "/")
-            st = os.lstat(full)
+            try:
+                st = os.lstat(full)
+            except OSError:
+                fail(f"cannot inspect: {rel}")
             if stat.S_ISDIR(st.st_mode):
+                if rel not in expected_dirs:
+                    fail(f"extra directory not in PACKAGE.json: {rel}")
                 continue
             if rel == MANIFEST:
                 continue
@@ -154,6 +218,17 @@ def main():
 
     print(f"gideon-verify: OK {len(expected)} entries, {total_bytes} bytes regular files")
     return 0
+
+
+def main():
+    if sys.argv[1:]:
+        fail("usage: gideon-verify (takes no arguments; verifies the package it lives in)")
+    try:
+        return verify()
+    except SystemExit:
+        raise
+    except Exception as exc:  # fail closed on anything unexpected
+        fail(f"internal error: {exc.__class__.__name__}: {exc}")
 
 
 if __name__ == "__main__":

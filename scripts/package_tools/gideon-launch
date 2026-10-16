@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""gideon-launch --install-root ROOT PERFIL [core args...]: fail-closed launcher (B4.2).
+"""gideon-launch --install-root ROOT PERFIL [core args...]: fail-closed launcher (B4.2/B4.3).
 
-Takes the exclusive lock, validates the ledger and the layout (gideon-install's rules),
-verifies the current version with its gideon-verify, creates ROOT/profiles/PERFIL (0700) if
-missing, then execs current/bin/gideon-core ROOT/profiles/PERFIL [args]. The lock fd is
-close-on-exec, so it is released atomically by exec. Any inconsistency exits non-zero with a
-message on stderr and never execs. Stdlib only; reuses gideon-install from the same directory.
+Takes a SHARED lock on ROOT/.lock and keeps that fd inheritable, so the lock lives as long as the
+Core it execs (install/update/rollback/repair take the exclusive lock and wait or refuse meanwhile).
+Validates the ledger and layout (gideon-install's rules, including the verifier pin), verifies the
+current version with its gideon-verify, creates ROOT/profiles/PERFIL (0700) if missing, then execs
+current/bin/gideon-core ROOT/profiles/PERFIL [args] with GIDEON_PINNED_VERIFIER_SHA256 set.
+Core options the package pins (--root --home --base-pack --tts-virtual --wake-replay
+--commands-sandbox --plugin-python, also as --opt=value) are rejected with exit 2.
+Any inconsistency exits non-zero with a message on stderr and never execs. Stdlib only; reuses
+gideon-install from the same directory.
 """
 import argparse
 import importlib.machinery
@@ -16,6 +20,10 @@ import sys
 
 sys.dont_write_bytecode = True  # never create bin/__pycache__ inside the package
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Options gideon-core sets itself. Keep in sync with scripts/package_tools/gideon-core.
+PINNED_OPTIONS = ("--root", "--home", "--base-pack", "--tts-virtual", "--wake-replay",
+                  "--commands-sandbox", "--plugin-python")
+PIN_ENV = "GIDEON_PINNED_VERIFIER_SHA256"
 
 
 def load_installer():
@@ -30,6 +38,13 @@ def load_installer():
 gi = load_installer()
 
 
+def reject_pinned(core_args):
+    for arg in core_args:
+        for option in PINNED_OPTIONS:
+            if arg == option or arg.startswith(option + "="):
+                raise gi.Fail("usage", f"{option} is set by the package; remove it from the arguments", rc=2)
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="gideon-launch")
     parser.add_argument("--install-root", required=True, metavar="ROOT")
@@ -38,24 +53,32 @@ def main(argv):
     args = parser.parse_args(argv)
     try:
         gi.validate_profile(args.profile)
+        reject_pinned(args.core_args)
         root = gi.guard_root(args.install_root, create=False)
-        gi.acquire(root)  # fd kept open on purpose: released by exec (close-on-exec)
+        lock_fd = gi.acquire(root, shared=True)
+        os.set_inheritable(lock_fd, True)  # held for the Core's lifetime: inherited across execv
         ledger = gi.load_state(root)
         if ledger is None:
             raise gi.Fail("not_installed", "nothing installed; run gideon-install install first")
+        pin = gi.entry_for(ledger, ledger["current"])["verifier_sha256"]
         gi.verify_pkg(os.path.join(root, "versions", ledger["current"]))
         pdir = os.path.join(root, "profiles")
         if not os.path.lexists(pdir):
-            os.mkdir(pdir, 0o700)
-            os.chmod(pdir, 0o700)
+            try:
+                os.mkdir(pdir, 0o700)
+                os.chmod(pdir, 0o700)
+            except FileExistsError:
+                pass
         elif not gi.is_real_dir(pdir):
             raise gi.Fail("layout_invalid", "profiles must be a real directory")
         profile = os.path.join(pdir, args.profile)
         if not os.path.lexists(profile):
-            os.mkdir(profile, 0o700)
-            os.chmod(profile, 0o700)
-        else:
-            gi.check_profile_dir(profile)
+            try:
+                os.mkdir(profile, 0o700)
+                os.chmod(profile, 0o700)
+            except FileExistsError:
+                pass
+        gi.check_profile_dir(profile)
         core = os.path.join(root, "current", "bin", "gideon-core")
         st = os.stat(core)
         if not stat.S_ISREG(st.st_mode) or not os.access(core, os.X_OK):
@@ -67,6 +90,7 @@ def main(argv):
         sys.stderr.write(f"gideon-launch: other: {exc}\n")
         return 6
     sys.stdout.flush()
+    os.environ[PIN_ENV] = pin
     os.execv(core, [core, profile, *args.core_args])
     return 6  # not reached
 

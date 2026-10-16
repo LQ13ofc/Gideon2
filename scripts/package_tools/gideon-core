@@ -1,6 +1,10 @@
 #!/bin/sh
 # gideon-core STATE_DIR [extra gideon-base args]: verify, configure, run the Core (S1 profile).
-# GIDEON_CORE_DRYRUN=1 prints the final gideon-base argv as JSON and exits before verify/configure.
+# GIDEON_CORE_DRYRUN=1 prints the final gideon-base argv as JSON (python json.dumps, NUL-separated
+# input, faithful for any argument) and exits before verify/configure.
+# GIDEON_PINNED_VERIFIER_SHA256 (set by gideon-launch): refuse to run when bin/gideon-verify differs.
+PATH=/usr/bin:/bin
+export PATH
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 PY="$HERE/runtime/python/bin/python3.13"
@@ -14,10 +18,15 @@ case "$STATE" in
     /*) ;;
     *) echo "gideon-core: absolute STATE_DIR required" >&2; exit 2 ;;
 esac
+# Options the package pins (also reached through gideon-launch) are refused, as "--opt" or "--opt=value".
+# Not pinned, so still accepted: --hub-catalog PATH DIGEST (absolute path, user-chosen catalog),
+# --virtual-input, and --net-allow-loopback (test-only; no package path sets it).
 for arg in "$@"; do
     case "$arg" in
+        --root|--root=*|--home|--home=*|--base-pack|--base-pack=*|--tts-virtual|--tts-virtual=*| \
+        --wake-replay|--wake-replay=*|--commands-sandbox|--commands-sandbox=*| \
         --plugin-python|--plugin-python=*)
-            echo "gideon-core: --plugin-python is set by the package; remove it from the arguments" >&2
+            echo "gideon-core: $arg is set by the package; remove it from the arguments" >&2
             exit 2 ;;
     esac
 done
@@ -32,15 +41,24 @@ set -- "$HERE/bin/gideon-base" --root "$STATE/core" --home "$HERE" \
     --wake-replay "$HERE/venvs/a1/bin/python" "$STATE/profile/replay-manifest.json" 0 \
     "$@"
 if [ "${GIDEON_CORE_DRYRUN:-}" = 1 ]; then
-    printf '{"argv":['
-    sep=
-    for arg in "$@"; do
-        esc=$(printf '%s' "$arg" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
-        printf '%s"%s"' "$sep" "$esc"
-        sep=,
-    done
-    printf ']}\n'
+    printf '%s\0' "$@" | python3 -I -B -c 'import json, sys
+parts = sys.stdin.buffer.read().split(b"\0")[:-1]
+print(json.dumps({"argv": [p.decode("utf-8", "surrogateescape") for p in parts]}))'
     exit 0
+fi
+if [ -n "${GIDEON_PINNED_VERIFIER_SHA256:-}" ]; then
+    pin_py=$PY
+    [ -x "$pin_py" ] || pin_py=python3
+    "$pin_py" -I -B -c 'import hashlib, os, stat, sys
+path, want = sys.argv[1], sys.argv[2]
+if not stat.S_ISREG(os.lstat(path).st_mode):
+    sys.exit(1)
+fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+with os.fdopen(fd, "rb") as handle:
+    data = handle.read()
+sys.exit(0 if hashlib.sha256(data).hexdigest() == want else 1)' \
+        "$HERE/bin/gideon-verify" "$GIDEON_PINNED_VERIFIER_SHA256" \
+        || { echo "gideon-core: verifier_modified: bin/gideon-verify differs from the hash pinned at install" >&2; exit 4; }
 fi
 "$PY" -I -B "$HERE/bin/gideon-verify" || exit 1
 "$PY" -I -B "$HERE/bin/gideon-configure" "$STATE" >/dev/null || exit 1

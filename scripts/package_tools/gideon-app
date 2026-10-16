@@ -1,5 +1,7 @@
 #!/bin/sh
 # gideon-app STATE_DIR: verify the package, then start the QML client on STATE_DIR/core.
+PATH=/usr/bin:/bin
+export PATH
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 PY="$HERE/runtime/python/bin/python3.13"

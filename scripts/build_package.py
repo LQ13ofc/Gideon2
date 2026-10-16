@@ -18,6 +18,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parents[1]
@@ -167,14 +168,44 @@ def scan_host_paths(pkg):
     return hits
 
 
+def checked_name(name):
+    """A manifest file name must be a plain relative path: no absolute, no '..', no empty or backslash parts."""
+    if not isinstance(name, str) or not name or "\0" in name or "\\" in name or name.startswith("/"):
+        die(f"unsafe manifest name: {name!r}")
+    parts = PurePosixPath(name).parts
+    if any(part in ("", ".", "..") for part in parts):
+        die(f"unsafe manifest name: {name!r}")
+    return name
+
+
+def checked_join(base, name):
+    """base / name for a validated manifest name; the result must stay inside base."""
+    joined = Path(base) / checked_name(name)
+    if os.path.commonpath([os.path.abspath(base), os.path.abspath(joined)]) != os.path.abspath(base):
+        die(f"manifest name escapes {base}: {name!r}")
+    return joined
+
+
+HOME_PROBE = "relative-home-probe"
+UNSUPPORTED = "unknown or duplicate option"
+
+
+def supports_home(binary):
+    """True when the packaged gideon-base parses --home. Probe with a relative home: it is rejected by the
+    home validation before any state is touched, so an unsupported binary reports the unknown option instead."""
+    proc = subprocess.run([str(binary), "--root", "/nonexistent-gideon-probe", "--home", HOME_PROBE],
+                          capture_output=True, text=True, timeout=60)
+    return UNSUPPORTED not in (proc.stderr + proc.stdout)
+
+
 def copy_pinned(src_dir, names, dst_dir, hashes):
     for name in names:
-        src = src_dir / name
+        src = checked_join(src_dir, name)
         if not src.is_file():
             die(f"missing pinned asset {src}")
         if sha256(src) != hashes[name]:
             die(f"asset does not match its pin: {src}")
-        copy_file(src, dst_dir / name)
+        copy_file(src, checked_join(dst_dir, name))
 
 
 def ignore_pycache(_dir, names):
@@ -247,6 +278,28 @@ def main():
     if not gideon_base.is_file():
         die("target/release/gideon-base missing; build it first")
     packaged_binary = build_packaged_binary()
+    # Build into a private sibling dir, then rename on success: a die or disk-full leaves no partial package.
+    staging = Path(tempfile.mkdtemp(prefix=f".{name}.partial-", dir=out_root))
+    try:
+        dropped = build_tree(staging / name, name, version, gideon_base, packaged_binary)
+        if pkg.exists():
+            die(f"refusing to overwrite {pkg}")
+        os.rename(staging / name, pkg)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    shutil.rmtree(staging, ignore_errors=True)
+    entries = load(pkg / "PACKAGE.json")["files"]
+    total = sum(e.get("size", 0) for e in entries)
+    print(f"built {pkg}")
+    print(f"entries {len(entries)} regular bytes {total} ({total / 2**20:.1f} MiB)")
+    print("dropped / excluded:")
+    for item in dropped:
+        print(f"  - {item}")
+
+
+def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
+    """Populate pkg (must not exist yet). Returns the list of dropped / excluded items."""
     pkg.mkdir()
     dropped = []
 
@@ -254,10 +307,10 @@ def main():
     runtime = resolve_runtime()
     shutil.copytree(runtime, pkg / "runtime/python", symlinks=True, ignore=ignore_pycache)
     check_plugin_runtime(pkg / "runtime/python")
-    for name in VENVS:
-        copy_venv(name, pkg / "venvs" / name)
-        extra = [i.name for i in (REPO / f"target/{name}-venv/bin").iterdir() if i.name not in VENV_BIN_KEEP]
-        dropped.append(f"venvs/{name}/bin: {len(extra)} console scripts/activate files (dev shebangs)")
+    for venv in VENVS:
+        copy_venv(venv, pkg / "venvs" / venv)
+        extra = [i.name for i in (REPO / f"target/{venv}-venv/bin").iterdir() if i.name not in VENV_BIN_KEEP]
+        dropped.append(f"venvs/{venv}/bin: {len(extra)} console scripts/activate files (dev shebangs)")
 
     # assets: wake (dereferenced), VAD, STT, TTS binaries, one fixture
     replay = load(REPLAY)
@@ -311,12 +364,12 @@ def main():
     for worker in ("wake_worker.py", "stt_worker.py", "tts_worker.py", "command_worker.py", "pcm_fixture.py"):
         copy_file(REPO / "scripts" / worker, pkg / "scripts" / worker)
     app_src = REPO / "app"
-    for name in ("main.py", "bridge.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
-        copy_file(app_src / name, pkg / "app" / name)
+    for app_file in ("main.py", "bridge.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
+        copy_file(app_src / app_file, pkg / "app" / app_file)
     shutil.copytree(app_src / "assets", pkg / "app/assets", ignore=ignore_pycache)
     copy_file(packaged_binary, pkg / "bin/gideon-base")
-    if b"--home" not in (pkg / "bin/gideon-base").read_bytes():
-        print("build_package: WARNING gideon-base has no --home; gideon-core cannot start S1 yet", file=sys.stderr)
+    if not supports_home(pkg / "bin/gideon-base"):
+        die("packaged gideon-base does not parse --home; gideon-core cannot start S1 (rebuild the binary)")
     for tool in ("gideon-verify", "gideon-configure", "gideon-core", "gideon-app", "gideon-install", "gideon-launch"):
         copy_file(TOOLS / tool, pkg / "bin" / tool)
     for path in list((pkg / "bin").iterdir()) + [pkg / "runtime/python/bin/python3.13"]:
@@ -340,6 +393,8 @@ def main():
             if resolved.startswith("..") or os.path.isabs(resolved):
                 die(f"symlink escapes prefix: {rel} -> {target}")
             entries.append({"type": "symlink", "path": rel, "target": target})
+        elif path.is_dir():
+            entries.append({"type": "dir", "path": rel})
         elif path.is_file():
             st = path.stat()
             entries.append({"type": "file", "path": rel, "size": st.st_size,
@@ -354,7 +409,7 @@ def main():
         commit, dirty = "unknown", True
     write_json(pkg / "PACKAGE.json", {
         "format": 1,
-        "name": name,
+        "name": pkg_name,
         "version": version,
         "target": "linux_x86_64",
         "commit": commit,
@@ -379,12 +434,7 @@ def main():
         },
         "files": entries,
     })
-    total = sum(e.get("size", 0) for e in entries)
-    print(f"built {pkg}")
-    print(f"entries {len(entries)} regular bytes {total} ({total / 2**20:.1f} MiB)")
-    print("dropped / excluded:")
-    for item in dropped:
-        print(f"  - {item}")
+    return dropped
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -27,6 +28,17 @@ PHRASES = [("hey_gideon", "Hey Gideon", "evidence-hey.json"),
 def die(message):
     print(f"gideon-configure: {message}", file=sys.stderr)
     sys.exit(1)
+
+
+# Paths are injected unescaped into config.yaml (YAML plain scalars). Only this set is safe; anything
+# else (space, '#', quotes, backslash, newline, ...) is rejected rather than quoted.
+SAFE_PATH = re.compile(r"[A-Za-z0-9._/+-]+")
+
+
+def check_safe_path(path, what):
+    if not SAFE_PATH.fullmatch(path):
+        die(f"{what} may only contain A-Za-z0-9._/+- (rejected: {path!r}); "
+            "spaces, '#', quotes, backslashes and newlines are not supported")
 
 
 def digest_bytes(data):
@@ -149,6 +161,8 @@ def main():
     state = sys.argv[1]
     if not os.path.isabs(state):
         die("absolute STATE_DIR required")
+    check_safe_path(state, "STATE_DIR")
+    check_safe_path(PREFIX, "package path")
     state = os.path.normpath(state)
     # The Core binds STATE_DIR/core/core.sock; AF_UNIX paths are limited to 107 bytes.
     if len(os.fsencode(os.path.join(state, "core", "core.sock"))) >= 108:
