@@ -122,7 +122,18 @@ pub enum Operation {
         provider: String,
         model: String,
         custom_url: Option<String>,
+        local_port: Option<u16>,
+        fallback: Option<crate::llmcfg::FallbackInput>,
         cloud_consent: bool,
+    },
+    LlmMarkGood {
+        revision: u64,
+    },
+    LlmRollback {
+        revision: u64,
+    },
+    PluginSettingsClear {
+        plugin_id: String,
     },
     ToolDecide {
         proposal_id: String,
@@ -373,7 +384,26 @@ enum WireRequest {
         model: String,
         #[serde(default)]
         custom_url: Option<String>,
+        #[serde(default)]
+        local_port: Option<u16>,
+        #[serde(default)]
+        fallback: Option<crate::llmcfg::FallbackInput>,
         cloud_consent: bool,
+    },
+    LlmMarkGood {
+        version: u16,
+        request_id: String,
+        revision: u64,
+    },
+    LlmRollback {
+        version: u16,
+        request_id: String,
+        revision: u64,
+    },
+    PluginSettingsClear {
+        version: u16,
+        request_id: String,
+        plugin_id: String,
     },
     ToolDecide {
         version: u16,
@@ -673,6 +703,8 @@ impl<'de> Deserialize<'de> for Request {
                 provider,
                 model,
                 custom_url,
+                local_port,
+                fallback,
                 cloud_consent,
             } => (
                 version,
@@ -682,8 +714,29 @@ impl<'de> Deserialize<'de> for Request {
                     provider,
                     model,
                     custom_url,
+                    local_port,
+                    fallback,
                     cloud_consent,
                 },
+            ),
+            WireRequest::LlmMarkGood {
+                version,
+                request_id,
+                revision,
+            } => (version, request_id, Operation::LlmMarkGood { revision }),
+            WireRequest::LlmRollback {
+                version,
+                request_id,
+                revision,
+            } => (version, request_id, Operation::LlmRollback { revision }),
+            WireRequest::PluginSettingsClear {
+                version,
+                request_id,
+                plugin_id,
+            } => (
+                version,
+                request_id,
+                Operation::PluginSettingsClear { plugin_id },
             ),
             WireRequest::ToolDecide {
                 version,

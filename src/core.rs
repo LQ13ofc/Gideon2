@@ -1011,6 +1011,9 @@ impl Core {
             Operation::SecretSet { .. }
             | Operation::SecretClear { .. }
             | Operation::LlmConfigure { .. }
+            | Operation::LlmMarkGood { .. }
+            | Operation::LlmRollback { .. }
+            | Operation::PluginSettingsClear { .. }
                 if self.session.is_some() =>
             {
                 "busy"
@@ -1040,24 +1043,71 @@ impl Core {
                 provider,
                 model,
                 custom_url,
+                local_port,
+                fallback,
                 cloud_consent,
             } => match storage.as_deref() {
-                Some(storage) => match self.llm.configure(
-                    storage,
-                    revision,
-                    &provider,
-                    &model,
-                    custom_url,
-                    cloud_consent,
-                ) {
+                Some(storage) => {
+                    let input = crate::llmcfg::ConfigInput {
+                        provider,
+                        model,
+                        custom_url,
+                        local_port,
+                        fallback,
+                        cloud_consent,
+                    };
+                    match self.llm.configure(storage, revision, input) {
+                        Ok(()) => {
+                            self.emit(req.request_id.clone(), None, "llm_configured");
+                            "ok"
+                        }
+                        Err(code) => code,
+                    }
+                }
+                None => "llm_unavailable",
+            },
+            Operation::LlmMarkGood { revision } => match storage.as_deref() {
+                Some(storage) => match self.llm.mark_good(storage, revision) {
                     Ok(()) => {
-                        self.emit(req.request_id.clone(), None, "llm_configured");
+                        self.emit(req.request_id.clone(), None, "llm_marked_good");
                         "ok"
                     }
                     Err(code) => code,
                 },
                 None => "llm_unavailable",
             },
+            Operation::LlmRollback { revision } => match storage.as_deref() {
+                Some(storage) => match self.llm.rollback(storage, revision) {
+                    Ok(()) => {
+                        self.emit(req.request_id.clone(), None, "llm_rolled_back");
+                        "ok"
+                    }
+                    Err(code) => code,
+                },
+                None => "llm_unavailable",
+            },
+            Operation::PluginSettingsClear { plugin_id } => {
+                if !crate::protocol::valid_id(&plugin_id) {
+                    "invalid_id"
+                } else {
+                    match storage.as_deref() {
+                        Some(storage) => {
+                            match crate::storage::plugin_settings_clear(&storage.root, &plugin_id) {
+                                Ok(()) => {
+                                    self.emit(
+                                        req.request_id.clone(),
+                                        None,
+                                        "plugin_settings_cleared",
+                                    );
+                                    "ok"
+                                }
+                                Err(_) => "settings_unavailable",
+                            }
+                        }
+                        None => "settings_unavailable",
+                    }
+                }
+            }
 
             Operation::HubBegin { .. }
             | Operation::HubChunk { .. }

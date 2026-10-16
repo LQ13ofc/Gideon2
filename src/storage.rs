@@ -777,6 +777,127 @@ impl Storage {
     }
 }
 
+/// Per-plugin settings directory under the private root. Survives plugin removal and reinstall;
+/// only `plugin_settings_clear` (a user operation) deletes a file.
+const SETTINGS_DIR: &str = "plugin-settings";
+/// Hard cap of one settings file (envelope included); the Core also caps the data at 8 KiB.
+pub const SETTINGS_FILE_LIMIT: u64 = 16 * 1024;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SettingsFile {
+    version: u16,
+    data: serde_json::Value,
+}
+
+fn settings_paths(root: &Path, plugin_id: &str) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
+    if !crate::protocol::valid_id(plugin_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid plugin id",
+        ));
+    }
+    let dir = root.join(SETTINGS_DIR);
+    let path = dir.join(format!("{plugin_id}.json"));
+    let temporary = dir.join(format!(".{plugin_id}.json.pending"));
+    Ok((dir, path, temporary))
+}
+
+/// Settings object of `plugin_id`, or `None` when nothing was ever stored. Unsafe or malformed
+/// files are errors, never silently replaced.
+pub fn plugin_settings_read(root: &Path, plugin_id: &str) -> io::Result<Option<serde_json::Value>> {
+    let (dir, path, _) = settings_paths(root, plugin_id)?;
+    match fs::symlink_metadata(&dir) {
+        Ok(_) => private_metadata(&dir, true)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    let file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    validate_opened_private(&file)?;
+    let mut bytes = Vec::new();
+    file.take(SETTINGS_FILE_LIMIT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > SETTINGS_FILE_LIMIT {
+        return Err(io::Error::other("plugin settings too large"));
+    }
+    let stored: SettingsFile = serde_json::from_slice(&bytes)?;
+    if stored.version != 1 || !stored.data.is_object() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid plugin settings",
+        ));
+    }
+    Ok(Some(stored.data))
+}
+
+/// Atomic, fsynced replacement of the settings of `plugin_id` (0600 in a 0700 directory).
+pub fn plugin_settings_write(
+    root: &Path,
+    plugin_id: &str,
+    data: &serde_json::Value,
+) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    let (dir, path, temporary) = settings_paths(root, plugin_id)?;
+    let bytes = serde_json::to_vec(&SettingsFile {
+        version: 1,
+        data: data.clone(),
+    })?;
+    if bytes.len() as u64 > SETTINGS_FILE_LIMIT {
+        return Err(io::Error::other("plugin settings too large"));
+    }
+    if fs::symlink_metadata(&dir).is_err() {
+        fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    }
+    private_metadata(&dir, true)?;
+    if fs::symlink_metadata(&path).is_ok() {
+        private_metadata(&path, false)?;
+    }
+    // A crashed earlier writer leaves only its own temporary; a link there is removed, not followed.
+    let _ = fs::remove_file(&temporary);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&temporary)?;
+    let result = (|| {
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        fs::rename(&temporary, &path)?;
+        File::open(&dir)?.sync_all()
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// Deletes the stored settings of `plugin_id`; absent settings are already cleared.
+pub fn plugin_settings_clear(root: &Path, plugin_id: &str) -> io::Result<()> {
+    let (dir, path, temporary) = settings_paths(root, plugin_id)?;
+    if fs::symlink_metadata(&dir).is_err() {
+        return Ok(());
+    }
+    private_metadata(&dir, true)?;
+    let _ = fs::remove_file(&temporary);
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {
+            private_metadata(&path, false)?;
+            fs::remove_file(&path)?;
+            File::open(&dir)?.sync_all()
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 impl Drop for Storage {
     fn drop(&mut self) {
         self.hub_import.take();

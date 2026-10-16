@@ -2,7 +2,7 @@
 //! runs `scripts/net_broker.py` under bwrap with a shared network namespace and no repo, home or
 //! user data. The key travels on the broker's second stdin line, never argv or env.
 use crate::{
-    llmcfg::{self, HostAuth, Provider},
+    llmcfg::{self, Provider, ProviderId, Route, LOCAL_HOST, MIN_LOCAL_PORT},
     transport::bounded_frame,
 };
 use serde::Deserialize;
@@ -27,35 +27,52 @@ const MAX_BROKER_LINE: usize = 256 * 1024;
 const MAX_CHUNK_CHARS: usize = 16384;
 const BROKER_IN_SANDBOX: &str = "/broker/net_broker.py";
 
-/// Resolved, allowlisted destination. `url` is what the broker requests.
+/// Resolved, allowlisted destination. `url` is what the broker requests. `keyless` targets are
+/// loopback-only local providers: the broker sends no Authorization header to them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     pub url: String,
     pub host: String,
     pub https: bool,
     pub loopback: bool,
+    pub keyless: bool,
 }
 
-/// Fixed hosts for built-in providers; `custom` takes the configured URL (re-validated here).
-pub fn target(auth: &HostAuth) -> Result<Target, &'static str> {
-    let provider = auth.provider.ok_or("provider_not_configured")?;
-    let base = match provider {
-        Provider::Custom => auth
-            .custom_url
-            .as_deref()
-            .ok_or("provider_not_configured")?
-            .to_owned(),
-        fixed => fixed.fixed_base().ok_or("host_not_allowed")?.to_owned(),
-    };
-    let endpoint =
-        llmcfg::parse_endpoint(&base, auth.allow_loopback).map_err(|_| "host_not_allowed")?;
-    let fixed_host = match provider {
+/// Fixed host of a built-in cloud provider; `custom` has none and is checked against its URL.
+fn fixed_host(provider: Provider) -> Option<&'static str> {
+    match provider {
         Provider::Openrouter => Some("openrouter.ai"),
         Provider::Opencode => Some("opencode.ai"),
         Provider::Google => Some("generativelanguage.googleapis.com"),
         Provider::Custom => None,
+    }
+}
+
+/// Resolves a route to its allowlisted destination. Local routes are always loopback-only and
+/// never resolve names; `allow_loopback` (test mode) only opens loopback for `custom`.
+pub fn target(route: &Route, allow_loopback: bool) -> Result<Target, &'static str> {
+    let (base, fixed, allow) = match route.provider {
+        ProviderId::Cloud(Provider::Custom) => (
+            route.custom_url.clone().ok_or("provider_not_configured")?,
+            None,
+            allow_loopback,
+        ),
+        ProviderId::Cloud(provider) => (
+            provider.fixed_base().ok_or("host_not_allowed")?.to_owned(),
+            fixed_host(provider),
+            allow_loopback,
+        ),
+        ProviderId::Local | ProviderId::Ollama => (
+            llmcfg::local_base(route.local_port.ok_or("provider_not_configured")?),
+            Some(LOCAL_HOST),
+            true,
+        ),
     };
-    if fixed_host.is_some_and(|host| host != endpoint.host) {
+    let endpoint = llmcfg::parse_endpoint(&base, allow).map_err(|_| "host_not_allowed")?;
+    if fixed.is_some_and(|host| host != endpoint.host) {
+        return Err("host_not_allowed");
+    }
+    if route.provider.is_local() && endpoint.port < MIN_LOCAL_PORT {
         return Err("host_not_allowed");
     }
     let scheme = if endpoint.https { "https" } else { "http" };
@@ -69,6 +86,7 @@ pub fn target(auth: &HostAuth) -> Result<Target, &'static str> {
         host: endpoint.host,
         https: endpoint.https,
         loopback: endpoint.loopback,
+        keyless: route.provider.is_local(),
     })
 }
 
@@ -79,12 +97,13 @@ pub struct Payload {
     pub key_line: Vec<u8>,
 }
 
+/// `key` is `None` only for keyless (local) targets, which send `{"key": null}`; a cloud target
+/// without a key is refused before any request line is built.
 pub fn payload(
     target: &Target,
     body: &serde_json::Value,
-    auth: &HostAuth,
+    key: Option<&str>,
 ) -> Result<Payload, &'static str> {
-    let key = auth.key.as_deref().ok_or("key_missing")?;
     let body_text = serde_json::to_string(body).map_err(|_| "invalid_host_call")?;
     if body_text.len() > MAX_BODY {
         return Err("invalid_host_call");
@@ -96,13 +115,17 @@ pub fn payload(
         "body": body_text,
         "timeout_s": DEADLINE.as_secs(),
         "expected_host": target.host,
-        "allow_http": !target.https && target.loopback && auth.allow_loopback,
-        "allow_loopback": auth.allow_loopback,
+        "allow_http": !target.https && target.loopback,
+        "allow_loopback": target.loopback,
     });
     let mut line = serde_json::to_vec(&request).map_err(|_| "invalid_host_call")?;
     line.push(b'\n');
-    let mut key_line =
-        serde_json::to_vec(&serde_json::json!({"key": key})).map_err(|_| "invalid_host_call")?;
+    let key_value = match (key, target.keyless) {
+        (Some(key), _) => serde_json::json!({"key": key}),
+        (None, true) => serde_json::json!({"key": null}),
+        (None, false) => return Err("key_missing"),
+    };
+    let mut key_line = serde_json::to_vec(&key_value).map_err(|_| "invalid_host_call")?;
     key_line.push(b'\n');
     Ok(Payload { line, key_line })
 }
@@ -262,85 +285,104 @@ pub(crate) async fn write_payload(
 mod tests {
     use super::*;
 
-    fn auth(provider: Provider, url: Option<&str>, loopback: bool) -> HostAuth {
-        HostAuth {
-            permission: true,
-            provider: Some(provider),
-            model: Some("m".into()),
+    const FAKE: &str = "fake-key-0123456789";
+
+    fn route(provider: &str, url: Option<&str>, port: Option<u16>) -> Route {
+        let parsed = ProviderId::parse(provider).unwrap();
+        Route {
+            provider: parsed,
+            model: "m".into(),
             custom_url: url.map(str::to_owned),
-            key: Some("fake-key-0123456789".into()),
-            cloud_consent: true,
-            allow_loopback: loopback,
+            local_port: port,
         }
     }
 
     #[test]
     fn fixed_providers_resolve_only_to_their_hosts() {
-        let t = target(&auth(Provider::Google, None, false)).unwrap();
+        let t = target(&route("google", None, None), false).unwrap();
         assert_eq!(
             t.url,
             "https://generativelanguage.googleapis.com:443/v1beta/openai/chat/completions"
         );
         assert_eq!(t.host, "generativelanguage.googleapis.com");
+        assert!(!t.keyless);
         assert_eq!(
-            target(&auth(Provider::Openrouter, None, false))
+            target(&route("openrouter", None, None), false)
                 .unwrap()
                 .host,
             "openrouter.ai"
         );
         assert_eq!(
-            target(&auth(Provider::Opencode, None, false)).unwrap().url,
+            target(&route("opencode", None, None), false).unwrap().url,
             "https://opencode.ai:443/zen/v1/chat/completions"
         );
     }
 
     #[test]
     fn custom_targets_need_https_or_flagged_loopback() {
-        assert!(target(&auth(
-            Provider::Custom,
-            Some("https://api.example.com/v1"),
+        assert!(target(
+            &route("custom", Some("https://api.example.com/v1"), None),
             false
-        ))
+        )
         .is_ok());
-        assert!(target(&auth(
-            Provider::Custom,
-            Some("http://api.example.com/v1"),
+        assert!(target(
+            &route("custom", Some("http://api.example.com/v1"), None),
             false
-        ))
+        )
         .is_err());
-        assert!(target(&auth(
-            Provider::Custom,
-            Some("https://93.184.216.34/v1"),
+        assert!(target(
+            &route("custom", Some("https://93.184.216.34/v1"), None),
             false
-        ))
+        )
         .is_err());
-        assert!(target(&auth(
-            Provider::Custom,
-            Some("http://127.0.0.1:8/v1"),
-            false
-        ))
-        .is_err());
-        let loopback =
-            target(&auth(Provider::Custom, Some("http://127.0.0.1:8/v1"), true)).unwrap();
-        assert!(loopback.loopback && !loopback.https);
+        assert!(target(&route("custom", Some("http://127.0.0.1:8/v1"), None), false).is_err());
+        let loopback = target(&route("custom", Some("http://127.0.0.1:8/v1"), None), true).unwrap();
+        assert!(loopback.loopback && !loopback.https && !loopback.keyless);
         assert_eq!(loopback.url, "http://127.0.0.1:8/v1/chat/completions");
     }
 
     #[test]
+    fn local_targets_are_keyless_loopback_literals_without_consent_flag() {
+        let t = target(&route("local", None, Some(8080)), false).unwrap();
+        assert_eq!(t.url, "http://127.0.0.1:8080/v1/chat/completions");
+        assert_eq!(t.host, "127.0.0.1");
+        assert!(t.loopback && t.keyless && !t.https);
+        let ollama = target(&route("ollama", None, Some(11434)), false).unwrap();
+        assert_eq!(ollama.url, "http://127.0.0.1:11434/v1/chat/completions");
+        assert_eq!(
+            target(&route("local", None, Some(80)), false),
+            Err("host_not_allowed")
+        );
+        assert_eq!(
+            target(&route("local", None, None), false),
+            Err("provider_not_configured")
+        );
+    }
+
+    #[test]
     fn payload_carries_key_only_on_second_line() {
-        let a = auth(Provider::Custom, Some("http://127.0.0.1:8/v1"), true);
-        let t = target(&a).unwrap();
-        let p = payload(&t, &serde_json::json!({"model": "m"}), &a).unwrap();
+        let t = target(&route("custom", Some("http://127.0.0.1:8/v1"), None), true).unwrap();
+        let p = payload(&t, &serde_json::json!({"model": "m"}), Some(FAKE)).unwrap();
         let first = String::from_utf8(p.line.clone()).unwrap();
-        assert!(!first.contains("fake-key-0123456789"));
+        assert!(!first.contains(FAKE));
         assert!(String::from_utf8(p.key_line.clone())
             .unwrap()
-            .contains("fake-key-0123456789"));
-        let no_key = HostAuth { key: None, ..a };
+            .contains(FAKE));
         assert_eq!(
-            payload(&t, &serde_json::json!({}), &no_key).err(),
+            payload(&t, &serde_json::json!({}), None).err(),
             Some("key_missing")
         );
+    }
+
+    #[test]
+    fn keyless_payload_sends_null_key_and_never_a_key() {
+        let t = target(&route("ollama", None, Some(11434)), false).unwrap();
+        let p = payload(&t, &serde_json::json!({"model": "m"}), None).unwrap();
+        assert_eq!(String::from_utf8(p.key_line).unwrap(), "{\"key\":null}\n");
+        let request: serde_json::Value = serde_json::from_slice(&p.line).unwrap();
+        assert_eq!(request["allow_http"], true);
+        assert_eq!(request["allow_loopback"], true);
+        assert_eq!(request["expected_host"], "127.0.0.1");
     }
 
     #[test]

@@ -1224,12 +1224,14 @@ fn shipped_llm_fixture_catalog_loads_with_the_network_llm_grant() {
         .find(|e| e["plugin_id"] == "llm_engine")
         .cloned()
         .expect("llm_engine entry");
-    assert_eq!(entry["permissions"], json!(["network_llm"]));
+    assert_eq!(
+        entry["permissions"],
+        json!(["network_llm", "storage_settings"])
+    );
     assert_eq!(entry["runtime"], "python3_script");
-    assert!(entry["capabilities"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("llm_engine.chat")));
+    let capabilities = entry["capabilities"].as_array().unwrap();
+    assert!(capabilities.contains(&json!("llm_engine.chat")));
+    assert!(capabilities.contains(&json!("llm_engine.models")));
 }
 
 /// P12: an upstream error arrives as `http_error` with the Core-side `http_status`; the body and

@@ -4,8 +4,8 @@
 use crate::{
     broker::{self, Reply, DEADLINE as BROKER_DEADLINE, MAX_RESPONSE},
     hub::{self, Snapshot},
-    llmcfg::{HostAuth, LlmState, NETWORK_PERMISSION},
-    storage::{PluginState, Storage},
+    llmcfg::{Access, HostAuth, LlmState, NETWORK_PERMISSION, SETTINGS_PERMISSION},
+    storage::{self, PluginState, Storage},
     transport::bounded_frame,
 };
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,8 @@ const MAX_PARTIAL_CHUNK: usize = 2048;
 const PARTIAL_EVENTS_PER_SECOND: usize = 10;
 const MAX_HEADERS: usize = 8;
 const MAX_HEADER_VALUE: usize = 256;
+/// Serialized size of one `settings.put` object (C2); the stored file adds its own envelope.
+const MAX_SETTINGS: usize = 8192;
 pub(crate) const PRLIMIT: &str = "/usr/bin/prlimit";
 pub(crate) const BWRAP: &str = "/usr/bin/bwrap";
 pub(crate) const MAX_ADDRESS_SPACE: u64 = 512 * 1024 * 1024;
@@ -201,6 +203,11 @@ pub enum Ev {
     },
     Log {
         plugin_id: String,
+    },
+    /// A fallback `llm.http` attempt reached the broker (no content, no provider data).
+    FallbackUsed {
+        plugin_id: String,
+        invocation: u64,
     },
 }
 /// Event tagged with the actor generation that produced it; stale generations are dropped.
@@ -568,10 +575,10 @@ impl PluginView {
         }
         self.next_invocation = self.next_invocation.saturating_add(1);
         let invocation = self.next_invocation;
-        // Authority for brokered HTTP is fixed per invocation: approved grant plus Core config.
-        let permission =
-            owner.permissions_approved && owner.permissions.iter().any(|p| p == NETWORK_PERMISSION);
-        let auth = llm.host_auth(permission);
+        // Authority for brokered HTTP and settings is fixed per invocation: approved grants plus Core config.
+        let granted =
+            |name: &str| owner.permissions_approved && owner.permissions.iter().any(|p| p == name);
+        let auth = llm.host_auth(granted(NETWORK_PERMISSION), granted(SETTINGS_PERMISSION));
         self.active = Some(Active {
             invocation,
             plugin_id: owner.plugin_id.clone(),
@@ -706,6 +713,18 @@ impl PluginView {
                 if self.partial_events.len() < PARTIAL_EVENTS_PER_SECOND {
                     self.partial_events.push_back(now);
                     self.events.push("capability_partial");
+                }
+            }
+            Ev::FallbackUsed {
+                plugin_id,
+                invocation,
+            } => {
+                let current = self
+                    .active
+                    .as_ref()
+                    .is_some_and(|a| a.invocation == invocation && a.plugin_id == plugin_id);
+                if current && self.ledger.enabled.iter().any(|id| *id == plugin_id) {
+                    self.events.push("llm_fallback_used");
                 }
             }
             Ev::Log { .. } => {
@@ -937,6 +956,7 @@ impl Host {
             Ev::State { plugin_id, .. }
             | Ev::Result { plugin_id, .. }
             | Ev::Partial { plugin_id, .. }
+            | Ev::FallbackUsed { plugin_id, .. }
             | Ev::Log { plugin_id } => plugin_id.clone(),
         };
         if self.actors.get(&id).is_none_or(|a| a.epoch != wire.epoch) {
@@ -1141,6 +1161,9 @@ struct Session {
     log_window: (Instant, u32),
     python: PathBuf,
     broker: PathBuf,
+    /// Private Core root (settings live under it) and the plugin whose settings these are.
+    root: PathBuf,
+    plugin_id: String,
     auth: HostAuth,
     host: Option<HostCall>,
     /// Last upstream status the broker reported for the active invocation (Core-side only).
@@ -1182,6 +1205,7 @@ struct PartialLine {
     id: u64,
     text: String,
 }
+/// Arguments are parsed per service, so each service has its own strict shape.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HostCallLine {
@@ -1190,18 +1214,29 @@ struct HostCallLine {
     v: Option<u16>,
     id: u64,
     service: String,
-    args: HostArgs,
+    args: Value,
 }
+/// `llm.http` arguments. `target` picks the route; absent means `primary`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HostArgs {
+struct HttpArgs {
     path: String,
     body: Value,
     stream: bool,
     /// Accepted for compatibility and always dropped: Core sets every broker header itself.
     #[serde(default)]
     headers: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    target: Option<String>,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PutArgs {
+    data: Value,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NoArgs {}
 fn host_error_frame(id: u64, code: &str, status: Option<u16>) -> Value {
     let mut frame = serde_json::json!({"v": 1, "op": "host_reply", "id": id, "error": code});
     if let Some(status) = status {
@@ -1528,6 +1563,8 @@ impl Session {
             log_window: (Instant::now(), 0),
             python: ctx.python.clone(),
             broker: ctx.broker.clone(),
+            root: ctx.root.clone(),
+            plugin_id: ctx.plugin_id.clone(),
             auth: HostAuth::default(),
             host: None,
             http_status: None,
@@ -1686,12 +1723,19 @@ impl Session {
             "input": input,
             "deadline_ms": deadline_ms,
         });
-        // Config is visible to plugins as context only; the key and URL never are.
-        if let Some(provider) = auth.provider {
-            message["ctx"] = serde_json::json!({"llm": {
-                "provider": provider.as_str(),
-                "model": auth.model.clone().unwrap_or_default(),
-            }});
+        // Config is visible to plugins as context only; keys and URLs never are.
+        if let Some(primary) = auth.primary.as_ref() {
+            let mut llm = serde_json::json!({
+                "provider": primary.route.provider.as_str(),
+                "model": primary.route.model,
+            });
+            if let Some(fallback) = auth.fallback.as_ref() {
+                llm["fallback"] = serde_json::json!({
+                    "provider": fallback.route.provider.as_str(),
+                    "model": fallback.route.model,
+                });
+            }
+            message["ctx"] = serde_json::json!({ "llm": llm });
         }
         self.auth = auth;
         if self.write(&message).await.is_err() {
@@ -1850,25 +1894,56 @@ impl Session {
         }
         Ok(())
     }
-    /// The Core-side gate for `llm.http`, evaluated against this invocation's snapshot.
-    fn authorize(&self) -> Result<broker::Target, &'static str> {
+    /// Core-side gate for one route. Local routes need neither a key nor consent; cloud routes need
+    /// both, the key checked first. Loopback is exempt from cloud consent only in test mode.
+    fn authorize(&self, access: Option<&Access>) -> Result<broker::Target, &'static str> {
         let auth = &self.auth;
         if !auth.permission {
             return Err("permission_denied");
         }
-        if auth.provider.is_none() {
-            return Err("provider_not_configured");
+        let access = access.ok_or("provider_not_configured")?;
+        if access.route.provider.is_local() {
+            return broker::target(&access.route, auth.allow_loopback);
         }
-        if auth.key.is_none() {
+        if access.key.is_none() {
             return Err("key_missing");
         }
-        let target = broker::target(auth)?;
-        // Loopback is exempt from cloud consent only in the explicit test mode.
+        let target = broker::target(&access.route, auth.allow_loopback)?;
         let exempt = target.loopback && auth.allow_loopback;
         if !auth.cloud_consent && !exempt {
             return Err("cloud_not_authorized");
         }
         Ok(target)
+    }
+    /// Gate for one `llm.http` host_call, in a fixed order: cancel, busy, shape, route, authority.
+    /// Returns the route, its target, and whether this call is the fallback attempt.
+    fn http_gate(
+        &self,
+        cancelled: bool,
+        args: &HttpArgs,
+    ) -> Result<(Access, broker::Target, bool), &'static str> {
+        if cancelled {
+            return Err("cancelled");
+        }
+        if self.host.is_some() {
+            return Err("busy");
+        }
+        if args.path != broker::CHAT_PATH || !args.stream || !args.body.is_object() {
+            return Err("invalid_host_call");
+        }
+        let fallback = match args.target.as_deref() {
+            None | Some("primary") => false,
+            Some("fallback") => true,
+            Some(_) => return Err("invalid_host_call"),
+        };
+        let access = if fallback {
+            self.auth.fallback.as_ref()
+        } else {
+            self.auth.primary.as_ref()
+        };
+        let target = self.authorize(access)?;
+        let access = access.cloned().ok_or("provider_not_configured")?;
+        Ok((access, target, fallback))
     }
     async fn host_error(
         &mut self,
@@ -1880,57 +1955,110 @@ impl Session {
             .await
             .map_err(|_| Exit::Crashed)
     }
-    /// Plugin `host_call`: strict shape, one active call, Core gate, then the sandboxed broker.
+    /// Core-side settings store of this plugin (C2). The Core never interprets the object.
+    fn settings(&self, service: &str, args: Value) -> Result<Value, &'static str> {
+        if service == "settings.get" {
+            serde_json::from_value::<NoArgs>(args).map_err(|_| "invalid_host_call")?;
+            return storage::plugin_settings_read(&self.root, &self.plugin_id)
+                .map(|data| data.unwrap_or(Value::Null))
+                .map_err(|_| "settings_unavailable");
+        }
+        let PutArgs { data } = serde_json::from_value(args).map_err(|_| "invalid_host_call")?;
+        let size = serde_json::to_vec(&data).map_or(usize::MAX, |bytes| bytes.len());
+        if !data.is_object() || size > MAX_SETTINGS || !depth_ok(&data, 0) {
+            return Err("invalid_input");
+        }
+        storage::plugin_settings_write(&self.root, &self.plugin_id, &data)
+            .map_err(|_| "settings_unavailable")?;
+        Ok(Value::Null)
+    }
+    /// Plugin `host_call`: strict shape, one active call, Core gates, then either the sandboxed
+    /// broker (`llm.http`) or the plugin's own settings (`settings.get` / `settings.put`).
     async fn host_call(&mut self, value: Value, out: &Out) -> Result<(), Exit> {
         let Ok(line) = serde_json::from_value::<HostCallLine>(value) else {
             return Err(self.violation(out, "plugin_output_invalid"));
         };
-        let cancelled = match self.pending.as_ref() {
-            Some(pending) => pending.grace.is_some(),
+        let (cancelled, invocation) = match self.pending.as_ref() {
+            Some(pending) => (pending.grace.is_some(), pending.invocation),
             None => return Err(self.violation(out, "plugin_output_invalid")),
         };
-        let oversized_headers = line.args.headers.as_ref().is_some_and(|h| {
-            h.len() > MAX_HEADERS || h.values().any(|v| v.len() > MAX_HEADER_VALUE)
-        });
-        if line.op != "host_call" || line.v.is_some_and(|v| v != 1) || oversized_headers {
+        if line.op != "host_call" || line.v.is_some_and(|v| v != 1) {
             return Err(self.violation(out, "plugin_output_invalid"));
         }
         let id = line.id;
-        let gate = if cancelled {
-            Err("cancelled")
-        } else if self.host.is_some() {
-            Err("busy")
-        } else if line.service != "llm.http"
-            || line.args.path != broker::CHAT_PATH
-            || !line.args.stream
-            || !line.args.body.is_object()
-        {
-            Err("invalid_host_call")
-        } else {
-            self.authorize()
-        };
-        let opened = match gate {
-            Ok(target) => self.open_broker(id, line.args.body, &target).await,
-            Err(code) => Err(code),
-        };
-        match opened {
-            Ok(call) => {
-                self.host = Some(call);
-                Ok(())
+        match line.service.as_str() {
+            "llm.http" => {
+                let Ok(args) = serde_json::from_value::<HttpArgs>(line.args) else {
+                    return Err(self.violation(out, "plugin_output_invalid"));
+                };
+                let oversized_headers = args.headers.as_ref().is_some_and(|h| {
+                    h.len() > MAX_HEADERS || h.values().any(|v| v.len() > MAX_HEADER_VALUE)
+                });
+                if oversized_headers {
+                    return Err(self.violation(out, "plugin_output_invalid"));
+                }
+                let opened = match self.http_gate(cancelled, &args) {
+                    Ok((access, target, fallback)) => self
+                        .open_broker(id, args.body, &access, &target)
+                        .await
+                        .map(|call| (call, fallback)),
+                    Err(code) => Err(code),
+                };
+                match opened {
+                    Ok((call, fallback)) => {
+                        self.host = Some(call);
+                        if fallback {
+                            out.send(Ev::FallbackUsed {
+                                plugin_id: out.plugin_id.clone(),
+                                invocation,
+                            });
+                        }
+                        Ok(())
+                    }
+                    Err(code) => self.host_error(id, code, None).await,
+                }
             }
-            Err(code) => self.host_error(id, code, None).await,
+            service @ ("settings.get" | "settings.put") => {
+                let outcome = if cancelled {
+                    Err("cancelled")
+                } else if self.host.is_some() {
+                    Err("busy")
+                } else if !self.auth.settings {
+                    Err("permission_denied")
+                } else {
+                    self.settings(service, line.args)
+                };
+                match outcome {
+                    Ok(data) => self
+                        .write(&serde_json::json!({"v": 1, "op": "host_reply", "id": id, "done": true, "data": data}))
+                        .await
+                        .map_err(|_| Exit::Crashed),
+                    Err(code) => self.host_error(id, code, None).await,
+                }
+            }
+            _ => {
+                let code = if cancelled {
+                    "cancelled"
+                } else if self.host.is_some() {
+                    "busy"
+                } else {
+                    "invalid_host_call"
+                };
+                self.host_error(id, code, None).await
+            }
         }
     }
     async fn open_broker(
         &self,
         id: u64,
         mut body: Value,
+        access: &Access,
         target: &broker::Target,
     ) -> Result<HostCall, &'static str> {
         // The Core, not the plugin, chooses the model and forces streaming.
-        body["model"] = serde_json::json!(self.auth.model.clone().unwrap_or_default());
+        body["model"] = serde_json::json!(access.route.model);
         body["stream"] = serde_json::json!(true);
-        let payload = broker::payload(target, &body, &self.auth)?;
+        let payload = broker::payload(target, &body, access.key.as_deref())?;
         let budget = tokio::task::spawn_blocking(process_budget)
             .await
             .map_err(|_| "network_unavailable")?;
@@ -2000,7 +2128,7 @@ fn bounded_object(output: Value) -> Option<Value> {
     fits.then_some(output)
 }
 /// Plugin error codes that reach clients unchanged (C1). Any other plugin code reads `plugin_error`.
-const PASS_THROUGH_ERRORS: [&str; 14] = [
+const PASS_THROUGH_ERRORS: [&str; 18] = [
     "key_missing",
     "cloud_not_authorized",
     "provider_not_configured",
@@ -2015,6 +2143,10 @@ const PASS_THROUGH_ERRORS: [&str; 14] = [
     "redirect_refused",
     "busy",
     "invalid_host_call",
+    "model_unsupported_feature",
+    "model_not_found",
+    "model_selftest_failed",
+    "settings_unavailable",
 ];
 fn pass_through(code: &str) -> &'static str {
     PASS_THROUGH_ERRORS
