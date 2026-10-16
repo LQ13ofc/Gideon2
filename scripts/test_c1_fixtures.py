@@ -31,6 +31,7 @@ C0_CATALOG = FIXTURES / "hub-c0.json"
 PYTHON = sys.executable
 CLEAN_ENV = {"PATH": "/usr/bin:/bin"}
 CAP = "llm_engine.chat"
+BRAVE = "com.brave.Browser.desktop"  # the only open_app desktop_id the Core accepts
 MiB = 1024 * 1024
 ALLOWED_HOST_ERRORS = ("permission_denied", "cloud_not_authorized", "provider_not_configured",
                        "key_missing", "http_error", "timeout", "response_too_large",
@@ -400,9 +401,25 @@ class LlmEngineTest(unittest.TestCase):
     def test_tool_call_open_app_reassembled(self):
         output = self.ok(invoke(self.plugin, self.sim, inp("tool:open_app", tools=True)))
         self.assertEqual(output["tool_calls"], [{"id": "call_1", "name": "open_app",
-                                                 "arguments": {"desktop_id": "terminal"}}])
+                                                 "arguments": {"desktop_id": BRAVE}}])
         self.assertEqual(output["finish_reason"], "tool_calls")
         self.assertNotIn("tool_calls_dropped", output)
+
+    def test_tool_call_get_time_empty_arguments(self):
+        output = self.ok(invoke(self.plugin, self.sim, inp("tool:get_time", tools=True)))
+        self.assertEqual(output["tool_calls"], [{"id": "call_1", "name": "get_time",
+                                                 "arguments": {}}])
+        self.assertEqual(output["finish_reason"], "tool_calls")
+
+    def test_tool_call_mute_empty_arguments(self):
+        output = self.ok(invoke(self.plugin, self.sim, inp("tool:mute", tools=True)))
+        self.assertEqual(output["tool_calls"], [{"id": "call_1", "name": "mute",
+                                                 "arguments": {}}])
+
+    def test_tool_call_set_volume_level_40(self):
+        output = self.ok(invoke(self.plugin, self.sim, inp("tool:set_volume", tools=True)))
+        self.assertEqual(output["tool_calls"], [{"id": "call_1", "name": "set_volume",
+                                                 "arguments": {"level": 40}}])
 
     def test_tool_name_passthrough_for_core_to_deny(self):
         output = self.ok(invoke(self.plugin, self.sim, inp("tool:rm", tools=True)))
@@ -433,7 +450,7 @@ class LlmEngineTest(unittest.TestCase):
 
     # -- provider errors and key handling --------------------------------
     def test_http_errors_map_without_leaking_body(self):
-        for prefix in ("e401:", "e402:", "e429:", "e500:"):
+        for prefix in ("e401:", "e402:", "e403:", "e429:", "e500:", "e503:"):
             with self.subTest(prefix=prefix):
                 result = invoke(self.plugin, self.sim, inp(prefix + "x"))
                 self.err(result, "http_error")

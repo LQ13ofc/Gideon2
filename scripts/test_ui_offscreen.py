@@ -7,7 +7,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -24,7 +24,8 @@ check('actual Core connection',bridge.connected)
 button=window.findChild(QObject,'cancelButton');subtitle=window.findChild(QObject,'subtitle');inputbox=window.findChild(QObject,'textInput')
 check('accessible cancel name',QAccessible.queryAccessibleInterface(button).text(QAccessible.Text.Name)=='Cancelar sessão')
 window.setProperty('width',640);window.setProperty('height',520);QTest.qWait(100)
-check('minimum layout size respected',window.property('width')>=480 and window.property('height')>=420)
+minimum=(window.property('minimumWidth'),window.property('minimumHeight'));check('QML minimum is 480x520',minimum==(480,520))
+check('minimum layout size respected',window.property('width')>=minimum[0] and window.property('height')>=minimum[1])
 def visual_item(name):
     stack=[window.contentItem()]
     while stack:
@@ -77,6 +78,101 @@ elif args.phase=='lifecycle':
     wait(lambda:fixture_record() is None and visual_item('hubLifecycleResult').property('text')!='Removendo no Core',15)
     check('Qt removal confirmed reaches Core ledger',fixture_record() is None)
     check('hub result label shows Plugin removido',visual_item('hubLifecycleResult').property('text')=='Plugin removido')
+elif args.phase=='chat':
+    # Gate protocol (C1 UI): the gate starts a real Core with llm_engine installed, approved and enabled, configured with a
+    # fake OpenAI-compatible provider and a fake key written by the gate (this phase never sees or types a key).
+    # Message prefixes understood by the fake provider:
+    #   (none)  - SSE partials that grow, then a final text
+    #   tool:   - proposes open_app (a state change, so it waits for Autorizar)
+    #   slow:   - keeps the reply open until the Core cancels it
+    # Markers written to --artifacts, in order:
+    #   chat-ready   - Conversa offered by the running engine, input and send present
+    #   tool-pending - proposal card with Autorizar and Negar is on screen
+    #   tool-done    - after Autorizar the proposal reached executed
+    #   cancelled    - a slow reply was cancelled from the UI and ended as cancelled
+    #   config-saved - Motor LLM saved through the Core and the Core revision moved
+    wait(lambda:bridge.chatAvailable,50)
+    check('Conversa offered only because llm_engine chat runs',bridge.chatAvailable)
+    nav=visual_item('nav7');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:window.property('page')==7,3)
+    check('Conversa page shows the chat panel',visual_item('chatPanel').property('visible'))
+    field=visual_item('chatInput');send=visual_item('chatSend');cancel=visual_item('chatCancel')
+    check('chat input and send present while idle',field.property('enabled') and not send.property('enabled'))
+    Path(args.artifacts,'chat-ready').touch()
+    def observe_until(condition,seconds,observed):
+        until=time.monotonic()+seconds
+        while not condition():
+            if time.monotonic()>until:raise TimeoutError((bridge.chatState,bridge.chatResult))
+            observed();QTest.qWait(15)
+    def submit(text):
+        field.forceActiveFocus();field.setProperty('text','');QTest.keyClicks(window,text)
+        send.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    partials=[];states=[]
+    def observe():
+        if not states or states[-1]!=bridge.chatState:states.append(bridge.chatState)
+        if bridge.chatPartial and (not partials or partials[-1]!=bridge.chatPartial):partials.append(bridge.chatPartial)
+    submit('Oi, responda em uma frase.')
+    observe_until(lambda:bridge.chatState=='done',40,observe)
+    check('partials grew before the final text',len(partials)>=2 and len(partials[-1])>len(partials[0]))
+    check('streaming state was observed',('streaming' in states) and states[-1]=='done')
+    check('final assistant text is shown once',[m['role'] for m in bridge.chatMessages].count('assistant')==1 and bridge.chatMessages[-1]['text']!='')
+    check('live bubble hidden once the final reply is shown',not visual_item('chatStreaming').property('visible'))
+    submit('tool: abra o navegador')
+    observe_until(lambda:any(p['state']=='pending' for p in bridge.toolProposals),40,observe)
+    pending=next(p for p in bridge.toolProposals if p['state']=='pending');pid=pending['proposal_id']
+    check('tool proposal card offers Autorizar and Negar only while pending',visual_item('authorize_'+pid).property('visible') and visual_item('deny_'+pid).property('visible'))
+    Path(args.artifacts,'tool-pending').touch()
+    authorize=visual_item('authorize_'+pid);authorize.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    observe_until(lambda:next((p['state'] for p in bridge.toolProposals if p['proposal_id']==pid),'')=='executed',30,observe)
+    check('authorized tool reaches executed with a sandbox receipt',next(p for p in bridge.toolProposals if p['proposal_id']==pid)['result'] is not None)
+    check('decision buttons disappear after the decision',not visual_item('authorize_'+pid).property('visible'))
+    Path(args.artifacts,'tool-done').touch()
+    observe_until(lambda:bridge.chatState=='done',40,observe)
+    submit('slow: responda devagar')
+    observe_until(lambda:bridge.chatState in ('waiting','streaming'),20,observe)
+    check('cancel enabled during slow reply',cancel.property('enabled'))
+    cancel.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    observe_until(lambda:bridge.chatState=='cancelled',30,observe)
+    check('cancel reaches the Core and ends the reply as cancelled',bridge.chatState=='cancelled' and not cancel.property('enabled'))
+    Path(args.artifacts,'cancelled').touch()
+    settings=window.findChild(QObject,'settingsButton');settings.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    preferences=window.findChild(QObject,'preferencesDialog');wait(lambda:preferences.property('visible'),3)
+    llm_open=visual_item('llmOpenButton');llm_open.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    dialog=window.findChild(QObject,'llmDialog');wait(lambda:dialog.property('visible'),3)
+    key=window.findChild(QObject,'llmKey')
+    check('key field is empty and masked when Motor LLM opens',key.property('text')=='' and key.property('displayText')=='')
+    saved_consent=bridge.llmConfig.get('cloud_consent')is True
+    box=window.findChild(QObject,'llmConsent')
+    check('cloud consent checkbox reflects the saved Core consent when Motor LLM opens',box.property('checked')==saved_consent)
+    check('cloud consent warning stays visible next to the checkbox',window.findChild(QObject,'llmConsentWarning').property('visible'))
+    check('key status shows only configured or not configured',window.findChild(QObject,'llmKeyStatus').property('text') in ('Chave configurada','Sem chave'))
+    revision=bridge.llmRevision;save=window.findChild(QObject,'saveLlmConfigButton')
+    check('save configuration offered with the Core revision',save.property('enabled') and revision==window.property('llmRevisionCaptured'))
+    save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.llmRevision!=revision,10)
+    check('Core saved configuration and moved its revision',bridge.llmResult=='Configuração salva pelo Core')
+    check('saving without touching the checkbox keeps the saved consent',bridge.llmConfig.get('cloud_consent')==saved_consent)
+    Path(args.artifacts,'config-saved').touch()
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
+    # Reopen, then a user click flips the box; saving sends the flipped value; a second round restores the saved one.
+    def reopen_llm():
+        dialog.close();llm_open=visual_item('llmOpenButton');llm_open.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        reopened=window.findChild(QObject,'llmDialog');wait(lambda:reopened.property('visible'),3);return reopened
+    dialog=reopen_llm()
+    box=window.findChild(QObject,'llmConsent');check('reopened dialog reflects the Core consent again',box.property('checked')==saved_consent)
+    box.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    check('user click flips the consent checkbox',box.property('checked')==(not saved_consent))
+    revision=bridge.llmRevision;save=window.findChild(QObject,'saveLlmConfigButton')
+    save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.llmRevision!=revision,10)
+    check('saving the flipped checkbox sends exactly that consent value',bridge.llmConfig.get('cloud_consent')==(not saved_consent))
+    dialog=reopen_llm()
+    box=window.findChild(QObject,'llmConsent');box.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    revision=bridge.llmRevision;save=window.findChild(QObject,'saveLlmConfigButton')
+    save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.llmRevision!=revision,10)
+    check('original consent value restored after the round trip',bridge.llmConfig.get('cloud_consent')==saved_consent)
+    dialog.close();preferences.close()
 elif args.phase=='plugins':
     # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,
     # then launches this phase. Markers written to --artifacts by this phase, in order:
@@ -115,7 +211,7 @@ elif args.phase=='plugins':
     check('capability result cleared after revoke',visual_item('capabilityResult').property('text')=='' and bridge.capabilityResultText=='')
     check('UI gates enable until new approval and shows hint',not visual_item('enable_dummy_echo').property('enabled') and visual_item('reapprovalHint_dummy_echo').property('visible'))
     bridge.enablePlugin('dummy_echo')
-    wait(lambda:bridge.pluginResult=='permissions_not_approved',10)
+    wait(lambda:bridge.pluginResult=='Aprove as permissões antes de ativar',10)
     check('Core refuses re-enable until new approval',dummy()['state']=='disabled' and dummy()['enabled'] is False)
     Path(args.artifacts,'revoked').touch()
     review=visual_item('review_dummy_echo');check('review offered for installed unapproved plugin',review.property('enabled'));review.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
