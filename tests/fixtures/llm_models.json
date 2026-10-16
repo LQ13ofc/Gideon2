@@ -1,0 +1,228 @@
+{
+  "version": 1,
+  "source": "tests/fixtures/llm_models.json (embedded into tests/fixtures/llm_engine.py by scripts/make_c1_catalog.py)",
+  "models": [
+    {
+      "id": "google-gemini-3.5-flash-lite",
+      "label": "Gemini 3.5 Flash Lite (Google)",
+      "kind": "cloud",
+      "provider": "google",
+      "model": "gemini-3.5-flash-lite",
+      "custom_url": null,
+      "tier": "recommended",
+      "license": "Google AI API terms (free tier)",
+      "quantization": null,
+      "sha256": null,
+      "backend": "openai-compatible API",
+      "features": {
+        "streaming": "supported",
+        "tool_use": "supported",
+        "vision": "unknown",
+        "cancel": "supported",
+        "context_tokens": null
+      },
+      "certification": {
+        "state": "certified",
+        "evidence": "docs/evidence/c1-llm.json (verify_c1_live.py); tests: cancel closes provider connection",
+        "date": "2026-10-16"
+      },
+      "cost": {
+        "input_per_mtok": null,
+        "output_per_mtok": null,
+        "currency": null
+      },
+      "latency_hint": "unknown",
+      "min_hardware": {
+        "ram_gb": null,
+        "gpu": "none"
+      },
+      "local_port": null,
+      "offline": false
+    },
+    {
+      "id": "mistral-ministral-3b-latest",
+      "label": "Ministral 3B (Mistral)",
+      "kind": "cloud",
+      "provider": "custom",
+      "model": "ministral-3b-latest",
+      "custom_url": "https://api.mistral.ai/v1",
+      "tier": "recommended",
+      "license": "Mistral API terms",
+      "quantization": null,
+      "sha256": null,
+      "backend": "openai-compatible API",
+      "features": {
+        "streaming": "supported",
+        "tool_use": "supported",
+        "vision": "unknown",
+        "cancel": "supported",
+        "context_tokens": null
+      },
+      "certification": {
+        "state": "certified",
+        "evidence": "docs/evidence/c1-llm.json (verify_c1_live.py); tests: cancel closes provider connection",
+        "date": "2026-10-16"
+      },
+      "cost": {
+        "input_per_mtok": null,
+        "output_per_mtok": null,
+        "currency": null
+      },
+      "latency_hint": "unknown",
+      "min_hardware": {
+        "ram_gb": null,
+        "gpu": "none"
+      },
+      "local_port": null,
+      "offline": false
+    },
+    {
+      "id": "openrouter-llama-3.2-3b-instruct",
+      "label": "Llama 3.2 3B Instruct (OpenRouter)",
+      "kind": "cloud",
+      "provider": "openrouter",
+      "model": "meta-llama/llama-3.2-3b-instruct",
+      "custom_url": null,
+      "tier": "recommended",
+      "license": "per model card (not verified)",
+      "quantization": null,
+      "sha256": null,
+      "backend": "openai-compatible API",
+      "features": {
+        "streaming": "unknown",
+        "tool_use": "unknown",
+        "vision": "unknown",
+        "cancel": "unknown",
+        "context_tokens": null
+      },
+      "certification": {
+        "state": "candidate",
+        "evidence": null,
+        "date": null
+      },
+      "cost": {
+        "input_per_mtok": null,
+        "output_per_mtok": null,
+        "currency": null
+      },
+      "latency_hint": "unknown",
+      "min_hardware": {
+        "ram_gb": null,
+        "gpu": "none"
+      },
+      "local_port": null,
+      "offline": false
+    },
+    {
+      "id": "opencode-gpt-5.4-nano",
+      "label": "GPT-5.4 nano (OpenCode)",
+      "kind": "cloud",
+      "provider": "opencode",
+      "model": "gpt-5.4-nano",
+      "custom_url": null,
+      "tier": "recommended",
+      "license": "per provider terms (not verified)",
+      "quantization": null,
+      "sha256": null,
+      "backend": "openai-compatible API",
+      "features": {
+        "streaming": "unknown",
+        "tool_use": "unknown",
+        "vision": "unknown",
+        "cancel": "unknown",
+        "context_tokens": null
+      },
+      "certification": {
+        "state": "candidate",
+        "evidence": null,
+        "date": null
+      },
+      "cost": {
+        "input_per_mtok": null,
+        "output_per_mtok": null,
+        "currency": null
+      },
+      "latency_hint": "unknown",
+      "min_hardware": {
+        "ram_gb": null,
+        "gpu": "none"
+      },
+      "local_port": null,
+      "offline": false
+    },
+    {
+      "id": "local-llamacpp-gguf",
+      "label": "Local GGUF via llama.cpp (candidate)",
+      "kind": "local",
+      "provider": "local",
+      "model": "gguf-local",
+      "custom_url": null,
+      "tier": "recommended",
+      "license": "per GGUF model (not verified)",
+      "quantization": "Q4_K_M",
+      "sha256": null,
+      "backend": "llama.cpp",
+      "features": {
+        "streaming": "unknown",
+        "tool_use": "unknown",
+        "vision": "unknown",
+        "cancel": "unknown",
+        "context_tokens": null
+      },
+      "certification": {
+        "state": "candidate",
+        "evidence": null,
+        "date": null
+      },
+      "cost": {
+        "input_per_mtok": null,
+        "output_per_mtok": null,
+        "currency": null
+      },
+      "latency_hint": "unknown",
+      "min_hardware": {
+        "ram_gb": 8,
+        "gpu": "optional"
+      },
+      "local_port": 8080,
+      "offline": true
+    },
+    {
+      "id": "local-ollama-llama3.2-3b",
+      "label": "Llama 3.2 3B via Ollama (candidate)",
+      "kind": "local",
+      "provider": "ollama",
+      "model": "llama3.2:3b",
+      "custom_url": null,
+      "tier": "recommended",
+      "license": "per model card (not verified)",
+      "quantization": null,
+      "sha256": null,
+      "backend": "ollama",
+      "features": {
+        "streaming": "unknown",
+        "tool_use": "unknown",
+        "vision": "unknown",
+        "cancel": "unknown",
+        "context_tokens": null
+      },
+      "certification": {
+        "state": "candidate",
+        "evidence": null,
+        "date": null
+      },
+      "cost": {
+        "input_per_mtok": null,
+        "output_per_mtok": null,
+        "currency": null
+      },
+      "latency_hint": "unknown",
+      "min_hardware": {
+        "ram_gb": 8,
+        "gpu": "optional"
+      },
+      "local_port": 11434,
+      "offline": true
+    }
+  ]
+}

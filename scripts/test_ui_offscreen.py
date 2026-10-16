@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""This test executes only inside a private offscreen bwrap namespace."""
+"""This test executes only inside a private offscreen bwrap namespace.
+
+Phase protocol (each phase writes one empty marker file per checkpoint into --artifacts, in order; the gate waits for them):
+  models phase (C2, needs a real Core with llm_engine installed, approved and enabled, and a gate-written fake-ports.json):
+    fake-ports.json  {"ok": port, "fail": port, "text": port}: loopback fake llama.cpp-style servers the gate starts;
+                     "ok" answers healthy selftests, "fail" answers 503, "text" answers without tool calls.
+    models-ready         Modelos LLM offered, tabs named, badges only certified as Certificado, Local filter works
+    custom-added         fake-ok saved through the custom form and listed as Personalizado
+    model-active         Usar este modelo ran configure -> selftest -> mark good; status Disponível
+    selftest-rolled-back fake-fail failed the selftest; the Core restored the last good model and the UI says so
+    status-unavailable   fake-text (declared without tool use) reported INDISPONÍVEL, or its failed test rolled back
+    custom-removed       fake-fail removed after confirmation (Cancel is the default and keeps it)
+"""
 import argparse,json,os,sys,time
 from pathlib import Path
 BASE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(BASE/'app'))
@@ -7,7 +19,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -78,6 +90,65 @@ elif args.phase=='lifecycle':
     wait(lambda:fixture_record() is None and visual_item('hubLifecycleResult').property('text')!='Removendo no Core',15)
     check('Qt removal confirmed reaches Core ledger',fixture_record() is None)
     check('hub result label shows Plugin removido',visual_item('hubLifecycleResult').property('text')=='Plugin removido')
+elif args.phase=='models':
+    # Gate protocol (C2 UI): markers and fake-ports.json are documented in the module docstring.
+    ports=json.loads(Path(args.artifacts,'fake-ports.json').read_text(encoding='utf-8'))
+    wait(lambda:bridge.modelsAvailable,50)
+    check('Modelos LLM offered only because llm_engine.models runs',bridge.modelsAvailable)
+    nav=visual_item('nav8');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:window.property('page')==8,3)
+    check('models panel visible on its page',visual_item('modelsPanel').property('visible'))
+    check('recommended tab has its accessible name',QAccessible.queryAccessibleInterface(visual_item('modelsTabRecommended')).text(QAccessible.Text.Name)=='Aba Recomendados')
+    check('only certified models read Certificado',all((m['certification']['state']=='certified')==(bridge.certificationBadge(m['certification']['state'])=='Certificado') for m in bridge.modelsRecommended))
+    def has_item(name):
+        stack=[window.contentItem()]
+        while stack:
+            current=stack.pop()
+            if current.objectName()==name:return True
+            stack.extend(current.childItems())
+        return False
+    visual_item('modelsFilter').setProperty('currentIndex',1);QTest.qWait(50)
+    check('Local filter hides cloud recommendations',all(not has_item('model_'+m['id']) for m in bridge.modelsRecommended if m['kind']=='cloud'))
+    visual_item('modelsFilter').setProperty('currentIndex',0)
+    Path(args.artifacts,'models-ready').touch()
+    visual_item('modelsTabs').setProperty('currentIndex',1);QTest.qWait(50)
+    def save_custom(label,port,tool='unknown'):
+        visual_item('customProvider').setProperty('currentIndex',0);visual_item('customModelId').setProperty('text',label)
+        visual_item('customPort').setProperty('value',port);visual_item('customToolUse').setProperty('currentIndex',{'unknown':0,'supported':1,'unsupported':2}[tool])
+        wait(lambda:not bridge.modelsBusy,40)  # the save button is disabled while a model request runs
+        save=visual_item('saveCustomButton');save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        wait(lambda:any(m['label']==label for m in bridge.modelsCustom),30)
+    def custom_id(label):return next(m['id'] for m in bridge.modelsCustom if m['label']==label)
+    def use(label):
+        select=visual_item('model_'+custom_id(label));select.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        before=bridge.modelsResult;button=visual_item('useModelButton');button.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        wait(lambda:not bridge.modelsBusy and bridge.modelsResult!=before,90)
+    save_custom('fake-ok',ports['ok'])
+    check('custom model saved through the Core and listed as Personalizado',any(m['label']=='fake-ok' for m in bridge.modelsCustom))
+    Path(args.artifacts,'custom-added').touch()
+    use('fake-ok')
+    check('use runs configure, selftest and mark good',bridge.modelsResult.startswith('Modelo ativo: fake-ok'))
+    check('status line reads Disponível for the tested model',bridge.modelsStatus=='Disponível' and bridge.llmConfig.get('model')=='fake-ok')
+    Path(args.artifacts,'model-active').touch()
+    save_custom('fake-fail',ports['fail'])
+    use('fake-fail')
+    check('failed selftest is reported and the last good model is restored',"configuração anterior restaurada" in bridge.modelsResult and bridge.llmConfig.get('model')=='fake-ok')
+    Path(args.artifacts,'selftest-rolled-back').touch()
+    save_custom('fake-text',ports.get('text',ports['ok']),tool='unsupported')
+    use('fake-text')
+    if bridge.modelsResult.startswith('Modelo ativo: fake-text'):check('text-only model shows INDISPONÍVEL for tool use',bridge.modelsStatus=='INDISPONÍVEL: tool_use não suportado')
+    else:check('text-only model failed its test and was rolled back',"configuração anterior restaurada" in bridge.modelsResult)
+    Path(args.artifacts,'status-unavailable').touch()
+    select=visual_item('model_'+custom_id('fake-fail'));select.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    remove=visual_item('removeCustomButton');remove.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    confirm=window.findChild(QObject,'removeCustomConfirm');wait(lambda:confirm.property('visible'),3)
+    confirm.close();QTest.qWait(50)
+    check('cancelled removal keeps the custom model',any(m['label']=='fake-fail' for m in bridge.modelsCustom))
+    remove=visual_item('removeCustomButton');remove.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:confirm.property('visible'),3);visual_item('confirmRemoveCustomButton').forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:not any(m['label']=='fake-fail' for m in bridge.modelsCustom),30)
+    check('confirmed removal deletes it through the Core',not any(m['label']=='fake-fail' for m in bridge.modelsCustom))
+    Path(args.artifacts,'custom-removed').touch()
 elif args.phase=='chat':
     # Gate protocol (C1 UI): the gate starts a real Core with llm_engine installed, approved and enabled, configured with a
     # fake OpenAI-compatible provider and a fake key written by the gate (this phase never sees or types a key).

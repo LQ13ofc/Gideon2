@@ -5,11 +5,12 @@ from collections import Counter
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
 from bridge import Bridge,CHAT_STATE_LABELS,CODE_MESSAGES,PREFS_DONE,SECTION_SIGNALS,STALE_MESSAGE,bounded_output,chat_input_size,chat_messages_for,chat_problem,llm_url_ok,text_problem,valid_key,validate_snapshot
+from bridge import CERT_BADGES,FEATURE_LABELS,MODEL_CAPABILITY,custom_form_problem,custom_model,fallback_for,model_status,target_for,valid_model,valid_models_page,valid_selftest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
-QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child']
-APP=None if (QML_CHILD or QML_CHAT_CHILD) else QCoreApplication([])
+QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child']
+APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
 EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
 BASE={'version':1,'request_id':'r','code':'ok','state':'idle','sequence':1,'session_id':None,'transcript':None,'command':None,'events':[],'text_input_available':True,'speech_samples':0,'speech_status':'idle','wake_status':'unavailable','stt_status':'unavailable','plugins':{'revision':0,'status':'ok','items':[]},'llm':EMPTY_LLM,'tool_proposals':[]}
@@ -336,9 +337,12 @@ class Regressions(unittest.TestCase):
         env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
         proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-child'],env=env,capture_output=True,text=True,timeout=240)
         self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
-LLM_CONFIG={'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True}
+# C2 snapshot config carries local_port, lkg and fallback too (null when unused); the fixtures spell them out.
+CONFIG_TAILS={'local_port':None,'lkg':None,'fallback':None}
+LLM_CONFIG={'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True,**CONFIG_TAILS}
 def llm_state(revision=1,config=None,secrets=None):
-    return {'revision':revision,'config':config,'secrets':secrets or {'openrouter':False,'opencode':False,'google':True,'custom':False}}
+    # Copied: the key-material tests mutate the config they are given, and LLM_CONFIG must stay the valid fixture for every later test.
+    return {'revision':revision,'config':copy.deepcopy(config),'secrets':secrets or {'openrouter':False,'opencode':False,'google':True,'custom':False}}
 def tool_item(pid='tool_1_1',tool='open_app',state='pending',args=None,reason=None,result=None):
     return {'proposal_id':pid,'plugin_id':'llm_engine','call_id':'call_'+pid,'tool':tool,'args':args if args is not None else {'desktop_id':'brave.desktop'},'state':state,'reason':reason,'result':result}
 def chat_result(text='Olá',ok=True,error=None,partial=None,extra=None):
@@ -380,7 +384,7 @@ class LlmContract(unittest.TestCase):
     def test_llm_snapshot_accepts_exact_shape_and_null_config(self):
         validate_snapshot({**BASE,'llm':llm_state(config=LLM_CONFIG)},'r',0)
         validate_snapshot({**BASE,'llm':llm_state()},'r',0)
-        for config in [{'provider':'custom','model':'local-model','custom_url':'https://example.test/v1','cloud_consent':False},{'provider':'custom','model':'local','custom_url':'http://127.0.0.1:8080/v1','cloud_consent':True},{'provider':'opencode','model':'m:1/x-y.z','custom_url':None,'cloud_consent':False}]:
+        for config in [{**CONFIG_TAILS,'provider':'custom','model':'local-model','custom_url':'https://example.test/v1','cloud_consent':False},{**CONFIG_TAILS,'provider':'custom','model':'local','custom_url':'http://127.0.0.1:8080/v1','cloud_consent':True},{**CONFIG_TAILS,'provider':'opencode','model':'m:1/x-y.z','custom_url':None,'cloud_consent':False}]:
             with self.subTest(config=config):validate_snapshot({**BASE,'llm':llm_state(config=config)},'r',0)
     def test_llm_snapshot_rejects_key_material_at_every_level(self):
         cases=[('top-level key',lambda l:l.update(key=FAKE_KEY)),('secrets key',lambda l:l['secrets'].update(key=FAKE_KEY)),('secrets value is the key',lambda l:l['secrets'].update(google=FAKE_KEY)),('config key',lambda l:l['config'].update(key=FAKE_KEY)),('config api_key',lambda l:l['config'].update(api_key=FAKE_KEY)),('secrets missing provider',lambda l:l['secrets'].pop('custom')),('secrets extra provider',lambda l:l['secrets'].update(llamacpp=False))]
@@ -614,7 +618,7 @@ class LlmBridge(unittest.TestCase):
         bridge.configureLlm('custom','local-model','https://example.test/v1',False,bridge.llmRevision)
         request=next_request(peer)
         self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'llm_configure','revision':3,'provider':'custom','model':'local-model','custom_url':'https://example.test/v1','cloud_consent':False})
-        answer(peer,request,chat_snapshot(llm=llm_state(revision=4,config={'provider':'custom','model':'local-model','custom_url':'https://example.test/v1','cloud_consent':False})));settle(bridge)
+        answer(peer,request,chat_snapshot(llm=llm_state(revision=4,config={**CONFIG_TAILS,'provider':'custom','model':'local-model','custom_url':'https://example.test/v1','cloud_consent':False})));settle(bridge)
         self.assertEqual(bridge.llmResult,'Configuração salva pelo Core')
         bridge.configureLlm('google','gemini-3.5-flash-lite','',True,'3');self.assertEqual(bridge.llmResult,CODE_MESSAGES['stale_llm_revision'])
         bridge.configureLlm('openrouter','bad model!','',False,'4');self.assertEqual(bridge.llmResult,CODE_MESSAGES['invalid_config'])
@@ -859,7 +863,483 @@ class CoreContract(unittest.TestCase):
         validate_snapshot(copy.deepcopy(BASE),'r',0)
         with self.assertRaises(ValueError):validate_snapshot({**BASE,'unexpected_field':1},'r',0)
         with self.assertRaises(ValueError):validate_snapshot({k:v for k,v in BASE.items() if k!='wake_status'},'r',0)
+# ---- C2 model manager (docs/C2.md): Model schema, status rules, the useModel state machine and the Modelos LLM page.
+MODEL_DIGEST='d'*64
+SELFTEST_OK={'ok':True,'latency_ms':120,'features':{'streaming':'supported','tool_use':'supported','vision':'unknown','cancel':'supported','context_tokens':None},'source':'probed'}
+def cloud_model(**change):
+    base={'id':'gemini-lite','label':'Gemini 3.5 Flash-Lite','kind':'cloud','provider':'google','model':'gemini-3.5-flash-lite','tier':'recommended','license':'Proprietária','quantization':None,'sha256':None,'backend':'OpenAI-compatível','features':{'streaming':'supported','tool_use':'supported','vision':'unknown','cancel':'supported','context_tokens':None},'certification':{'state':'certified','evidence':'docs/evidence/c1-llm.json','date':'2026-10-16'},'cost':{'input_per_mtok':None,'output_per_mtok':None,'currency':None},'latency_hint':'unknown','min_hardware':{'ram_gb':None,'gpu':'unknown'},'offline':False,'custom_url':None,'local_port':None}
+    return {**base,**change}
+def local_model(**change):
+    base=cloud_model(id='llama-7b',label='Llama 7B Q4',kind='local',provider='local',model='llama-7b-q4',license='MIT',quantization='Q4_K_M',sha256=MODEL_DIGEST,backend='llama.cpp',features={'streaming':'unknown','tool_use':'unknown','vision':'unknown','cancel':'unknown','context_tokens':4096},certification={'state':'candidate','evidence':None,'date':None},min_hardware={'ram_gb':8,'gpu':'none'},offline=True,local_port=8080)
+    return {**base,**change}
+def models_output(recommended=None,custom=(),selected=None):
+    return {'recommended':[cloud_model(),local_model()] if recommended is None else list(recommended),'custom':list(custom),'selected':selected,'hardware':{'cpu_cores':8,'ram_gb':16,'gpu':'unknown'}}
+def form(**change):
+    base={'provider':'google','model':'gemini-3.5-flash-lite','custom_url':'','local_port':None,'features':{'streaming':'unknown','tool_use':'unknown','vision':'unknown','cancel':'unknown'}}
+    return {**base,**change}
+def models_snapshot(revision=1,config=None,secrets=None,result=None,caps=('llm_engine.models',)):
+    return chat_snapshot(llm=llm_state(revision=revision,config=config,secrets=secrets),capabilities=caps,result=result)
+def models_result(output=None,ok=True,error=None,extra=None):
+    result={'capability':MODEL_CAPABILITY,'plugin_id':'llm_engine','ok':ok,'elapsed_ms':9}
+    if ok:result['output']=output
+    else:result['error']=error
+    result.update(extra or {})
+    return result
+def with_result(snap,result):return {**snap,'capability_result':result}
+def ack(bridge,peer,request,snap,code='ok'):
+    """Answers one request the bridge has in flight and stops the poll timer, so each test controls every step."""
+    answer(peer,request,snap,code);wait_idle(30);bridge.poll.stop()
+def serve(bridge,peer,snap,code='ok'):
+    request=next_request(peer);ack(bridge,peer,request,snap,code);return request
+def page_of(output,tab,offset=0,limit=6):
+    """The list page the Core answers for one tab of a models_output dict (total = all Models of the tab)."""
+    return {'tab':tab,'items':output[tab][offset:offset+limit],'total':len(output[tab]),'offset':offset,'selected':output['selected'],'hardware':output['hardware']}
+def load_catalog(bridge,peer,output,snap):
+    for tab in ('recommended','custom'):
+        bridge.listModels(tab);serve(bridge,peer,snap)
+        bridge.refresh();serve(bridge,peer,with_result(snap,models_result(page_of(output,tab))))
+def deliver(bridge,peer,snap,page):
+    """Core side of one list request already acked: the page arrives as the capability result."""
+    bridge.refresh();serve(bridge,peer,with_result(snap,models_result(page)))
+def fetch(bridge,peer,snap,call,page):
+    """Runs one bridge call that sends a list request, acks it, delivers the page; returns the request."""
+    call();request=next_request(peer);ack(bridge,peer,request,snap);deliver(bridge,peer,snap,page);return request
+def custom_models(count,prefix='c'):
+    return [cloud_model(id=f'{prefix}{i}',tier='custom',certification={'state':'declared','evidence':None,'date':None}) for i in range(count)]
+def quiet(test,peer):
+    wait_idle(40);test.assertFalse(peer.canReadLine(),'unexpected Core request')
+def apply_snap(bridge,snap):bridge._apply(validate_snapshot(copy.deepcopy(snap),'r',0))
+class ModelsContract(unittest.TestCase):
+    def test_valid_model_accepts_every_certification_state_and_kind(self):
+        for state in ('certified','candidate','declared','probed'):
+            with self.subTest(state=state):
+                evidence='docs/evidence/c1-llm.json' if state=='certified' else None
+                self.assertTrue(valid_model(cloud_model(certification={'state':state,'evidence':evidence,'date':None}),'recommended'))
+        self.assertTrue(valid_model(local_model(),'recommended'))
+        self.assertTrue(valid_model(cloud_model(tier='custom',certification={'state':'declared','evidence':None,'date':None}),'custom'))
+    def test_valid_model_rejects_every_schema_break(self):
+        cases=[('unknown key',cloud_model(extra=1)),('missing key',{k:v for k,v in cloud_model().items() if k!='offline'}),('kind invented',cloud_model(kind='remote')),
+            ('local provider marked cloud',local_model(kind='cloud')),('fixed cloud marked local',cloud_model(kind='local')),('provider invented',cloud_model(provider='llamacpp')),
+            ('tier mismatch',cloud_model(tier='custom')),('id with space',cloud_model(id='gemini lite')),('id over 64',cloud_model(id='x'*65)),
+            ('label with control char',cloud_model(label='a\nb')),('label over 128 bytes',cloud_model(label='á'*65)),
+            ('feature state invented',cloud_model(features={**cloud_model()['features'],'tool_use':'yes'})),('feature key missing',cloud_model(features={'streaming':'supported','tool_use':'supported','vision':'unknown','cancel':'supported'})),
+            ('certified without evidence',cloud_model(certification={'state':'certified','evidence':None,'date':None})),('certified blank evidence',cloud_model(certification={'state':'certified','evidence':'  ','date':None})),
+            ('certification state invented',cloud_model(certification={'state':'verified','evidence':'x','date':None})),('date not a date',cloud_model(certification={'state':'probed','evidence':None,'date':'2026-13-40'})),
+            ('cost without currency',cloud_model(cost={'input_per_mtok':1.0,'output_per_mtok':2.0,'currency':None})),('currency without cost',cloud_model(cost={'input_per_mtok':None,'output_per_mtok':None,'currency':'USD'})),
+            ('negative cost',cloud_model(cost={'input_per_mtok':-1,'output_per_mtok':None,'currency':'USD'})),('latency invented',cloud_model(latency_hint='instant')),
+            ('gpu invented',cloud_model(min_hardware={'ram_gb':None,'gpu':'cuda'})),('offline not bool',cloud_model(offline='no')),('sha256 not hex',local_model(sha256='z'*64)),
+            ('local without port',local_model(local_port=None)),('local port 1023',local_model(local_port=1023)),('local with URL',local_model(custom_url='https://example.test')),
+            ('cloud with port',cloud_model(local_port=8080)),('custom over http',cloud_model(provider='custom',kind='cloud',custom_url='http://example.test',model='m')),
+            ('ram over limit',cloud_model(min_hardware={'ram_gb':10**6,'gpu':'none'}))]
+        for name,model in cases:
+            with self.subTest(case=name):self.assertFalse(valid_model(model,'recommended'))
+    def test_valid_models_page_bounds_shape_and_size(self):
+        base=page_of(models_output(),'recommended')
+        self.assertTrue(valid_models_page(base,'recommended',0))
+        self.assertTrue(valid_models_page(page_of(models_output(selected={'provider':'google','model':'gemini-3.5-flash-lite'}),'recommended'),'recommended',0))
+        custom=[cloud_model(id=f'c{i}',tier='custom',certification={'state':'declared','evidence':None,'date':None}) for i in range(16)]
+        self.assertTrue(valid_models_page(page_of(models_output(custom=custom),'custom',6),'custom',6))
+        self.assertTrue(valid_models_page(page_of(models_output(custom=custom),'custom',15),'custom',15))
+        self.assertTrue(valid_models_page(page_of(models_output(custom=custom),'custom',40),'custom',40))  # past total: no items
+        heavy=[cloud_model(id=f'{i:02d}'+'m'*62,label='x'*128,license='y'*64,quantization='q'*32,sha256=MODEL_DIGEST,backend='b'*64,model='m'*96,certification={'state':'certified','evidence':'e'*256,'date':'2026-10-16'}) for i in range(6)]
+        self.assertTrue(valid_models_page({**base,'items':heavy,'total':6},'recommended',0))  # maximal text is still a page
+        cases={'extra top key':{**base,'debug':1},'hardware missing':{k:v for k,v in base.items() if k!='hardware'},
+            'seven items in one page':{**base,'items':[cloud_model(id=f'r{i}') for i in range(7)],'total':7},
+            'duplicate id in page':{**base,'items':[cloud_model(id='gemini-lite'),cloud_model(id='gemini-lite')],'total':2},
+            'wrong tab echoed':{**base,'tab':'custom'},'offset not echoed':{**base,'offset':3},
+            'total below the page end':{**base,'total':1},'items with total zero':{**base,'total':0},
+            'selected provider invented':{**base,'selected':{'provider':'llamacpp','model':'x'}},
+            'hardware gpu invented':{**base,'hardware':{'cpu_cores':8,'ram_gb':16,'gpu':'cuda'}},
+            'not a dict':[]}
+        for name,output in cases.items():
+            with self.subTest(case=name):self.assertFalse(valid_models_page(output,'recommended',0))
+        self.assertFalse(valid_models_page(page_of(models_output(custom=custom),'custom',10),'custom',6))  # offset mismatch
+    def test_selftest_result_must_be_a_real_probe(self):
+        self.assertTrue(valid_selftest(SELFTEST_OK))
+        for change in ({'ok':False},{'source':'declared'},{'features':{**SELFTEST_OK['features'],'vision':'supported'}},{'latency_ms':-1},{'extra':1}):
+            with self.subTest(change=change):self.assertFalse(valid_selftest({**SELFTEST_OK,**change}))
+    def test_custom_form_matrix_boundaries_and_accents(self):
+        accepted=[form(),form(model='a'),form(model='a'*128),form(provider='local',model='llama',local_port=1024),form(provider='local',model='llama',local_port=65535),
+            form(provider='ollama',model='llama3',local_port=8080.0),form(provider='custom',model='m',custom_url='https://example.test/v1'),form(provider='custom',model='m',custom_url='https://'+'a'*192),
+            form(provider='openrouter',model='x:free'),form(model='modelo_v1.2/x-y:z')]
+        for item in accepted:
+            with self.subTest(form=item):self.assertIsNone(custom_form_problem(item))
+        refused=[form(model=''),form(model='a'*129),form(model='modelo-á'),form(model='a b'),form(provider='llamacpp'),form(provider='local',model='llama',local_port=1023),
+            form(provider='local',model='llama',local_port=65536),form(provider='local',model='llama',local_port=True),form(provider='local',model='llama',local_port='8080'),
+            form(provider='local',model='llama',local_port=8080,custom_url='https://example.test'),form(provider='custom',model='m',custom_url='http://example.test'),
+            form(provider='custom',model='m',custom_url='https://u@example.test'),form(provider='custom',model='m',custom_url='https://'+'a'*193),form(provider='custom',model='m',custom_url=''),
+            form(provider='custom',model='m',custom_url='https://example.test',local_port=8080),form(provider='google',custom_url='https://example.test'),form(provider='google',local_port=8080),
+            form(features={'streaming':'yes','tool_use':'unknown','vision':'unknown','cancel':'unknown'}),form(features={'streaming':'unknown'})]
+        for item in refused:
+            with self.subTest(form=item):self.assertIsNotNone(custom_form_problem(item))
+    def test_custom_model_is_declared_never_certified_and_keeps_its_endpoint(self):
+        for item in (form(provider='local',model='llama',local_port=8080),form(provider='custom',model='m',custom_url='https://example.test/v1')):
+            model=custom_model(item);self.assertTrue(valid_model(model,'custom'));self.assertEqual(model['certification']['state'],'declared')
+        local=custom_model(form(provider='local',model='llama',local_port=8080));self.assertEqual((local['kind'],local['local_port'],local['custom_url']),('local',8080,None))
+        self.assertNotEqual(custom_model(form(model='a'))['id'],custom_model(form(model='b'))['id'])
+        self.assertTrue(custom_model(form(model='a'*128))['id'].startswith('custom-'))
+    def test_status_line_is_computed_from_keys_consent_and_features(self):
+        models=models_output()['recommended'];keyed={'openrouter':False,'opencode':False,'google':True,'custom':False}
+        self.assertEqual(model_status(LLM_CONFIG,models,keyed),'Disponível')
+        self.assertEqual(model_status(None,models,keyed),'Sem modelo selecionado')
+        self.assertEqual(model_status(LLM_CONFIG,models,keyed,testing=True),'Em teste')
+        self.assertEqual(model_status({**LLM_CONFIG,'cloud_consent':False},models,keyed),'Sem consentimento')
+        self.assertEqual(model_status(LLM_CONFIG,models,{**keyed,'google':False}),'Sem chave')
+        no_tools=[cloud_model(features={**cloud_model()['features'],'tool_use':'unsupported'})]
+        self.assertEqual(model_status(LLM_CONFIG,no_tools,keyed),'INDISPONÍVEL: tool_use não suportado')
+        self.assertEqual(model_status(LLM_CONFIG,[],keyed),'Sem dados do modelo')
+        local={'provider':'local','model':'llama-7b-q4','custom_url':None,'cloud_consent':False,'local_port':8080,'lkg':None,'fallback':None}
+        self.assertEqual(model_status(local,models,{k:False for k in keyed}),'Disponível')
+    def test_badges_and_feature_words_are_the_exact_contract(self):
+        self.assertEqual(CERT_BADGES,{'certified':'Certificado','candidate':'Candidato','declared':'Declarado','probed':'Testado'})
+        self.assertEqual(FEATURE_LABELS,{'supported':'Suportado','unsupported':'Não suportado','unknown':'Desconhecido'})
+    def test_target_and_fallback_shapes_match_the_core_keys(self):
+        self.assertEqual(target_for(cloud_model(),True),{'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True})
+        self.assertEqual(target_for(local_model(),False),{'provider':'local','model':'llama-7b-q4','custom_url':None,'cloud_consent':False,'local_port':8080})
+        self.assertEqual(fallback_for(cloud_model()),{'provider':'google','model':'gemini-3.5-flash-lite'})
+        self.assertEqual(fallback_for(local_model()),{'provider':'local','model':'llama-7b-q4','local_port':8080})
+        self.assertEqual(fallback_for(custom_model(form(provider='custom',model='m',custom_url='https://example.test/v1'))),{'provider':'custom','model':'m','custom_url':'https://example.test/v1'})
+    def test_config_snapshot_is_strict_about_local_port_lkg_and_fallback(self):
+        local={'provider':'local','model':'llama-7b-q4','custom_url':None,'cloud_consent':False,'local_port':8080,'lkg':None,'fallback':None}
+        lkg={'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'local_port':None,'cloud_consent':True}
+        # The Core omits local_port, fallback and lkg when null: the four required keys alone are a valid config.
+        core_omits={'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True}
+        for config in (local,{**local,'provider':'ollama','local_port':11434},{**LLM_CONFIG,'lkg':lkg,'fallback':{'provider':'google','model':'gemini-3.5-flash-lite'}},
+                       {**LLM_CONFIG,'fallback':{'provider':'local','model':'llama-7b-q4','local_port':8080}},core_omits):
+            with self.subTest(config=config):validate_snapshot({**BASE,'llm':llm_state(config=config)},'r',0)
+        bad={'local without port':{**local,'local_port':None},'port 1023':{**local,'local_port':1023},'port 65536':{**local,'local_port':65536},'port as bool':{**local,'local_port':True},
+            'port as text':{**local,'local_port':'8080'},'missing cloud_consent':{k:v for k,v in LLM_CONFIG.items() if k!='cloud_consent'},
+            'lkg extra key':{**LLM_CONFIG,'lkg':{**lkg,'extra':1}},'lkg missing cloud_consent':{**LLM_CONFIG,'lkg':{k:v for k,v in lkg.items() if k!='cloud_consent'}},
+            'lkg local without port':{**LLM_CONFIG,'lkg':{**lkg,'provider':'local','model':'llama-7b-q4','custom_url':None}},
+            'fallback with consent key':{**LLM_CONFIG,'fallback':{'provider':'google','model':'m','cloud_consent':True}},'fallback custom without URL':{**LLM_CONFIG,'fallback':{'provider':'custom','model':'m'}},
+            'fallback is text':{**LLM_CONFIG,'fallback':'google'}}
+        for name,config in bad.items():
+            with self.subTest(case=name),self.assertRaises(ValueError):validate_snapshot({**BASE,'llm':llm_state(config=config)},'r',0)
+    def test_models_codes_are_portuguese_and_capability_errors_are_accepted(self):
+        for code in ('model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable','no_lkg'):
+            with self.subTest(code=code):self.assertIn(code,CODE_MESSAGES);self.assertNotIn('Core recusou',CODE_MESSAGES[code])
+        for code in ('model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable'):
+            validate_snapshot(copy.deepcopy(models_snapshot(result=models_result(ok=False,error=code))),'r',0)
+        validate_snapshot(copy.deepcopy(models_snapshot(result=models_result(ok=False,error='model_selftest_failed',extra={'http_status':429}))),'r',0)
+        with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(models_snapshot(result=models_result(ok=False,error='model_not_found',extra={'http_status':404}))),'r',0)
+        with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(models_snapshot(result=models_result(ok=False,error='invented_code'))),'r',0)
+class ModelsBridge(unittest.TestCase):
+    def test_capability_gates_the_page_and_chat_is_separate(self):
+        bridge,peer=connect_bridge(self,models_snapshot(revision=1,config=LLM_CONFIG))
+        self.assertTrue(bridge.modelsAvailable)
+        apply_snap(bridge,chat_snapshot(capabilities=('llm_engine.chat',)));self.assertFalse(bridge.modelsAvailable)
+        apply_snap(bridge,chat_snapshot(state='starting',capabilities=('llm_engine.models',)));self.assertFalse(bridge.modelsAvailable)
+        bridge.listModels('recommended');self.assertEqual(bridge.modelsResult,'Modelos LLM indisponíveis: o plugin não está ativo');quiet(self,peer)
+    def test_list_request_is_exact_and_an_accepted_catalog_reaches_the_properties(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        bridge.listModels('recommended');request=next_request(peer)
+        self.assertEqual((request['op'],request['capability'],request['input'],request['deadline_ms']),('capability_invoke','llm_engine.models',{'action':'list','tab':'recommended','offset':0,'limit':6},5000))
+        ack(bridge,peer,request,snap);deliver(bridge,peer,snap,page_of(models_output(),'recommended'))
+        self.assertEqual([m['id'] for m in bridge.modelsRecommended],['gemini-lite','llama-7b'])
+        self.assertEqual((bridge.modelsHardware['cpu_cores'],bridge.modelsResult,bridge.modelsBusy),(8,'Catálogo atualizado',False))
+    def test_invalid_catalog_is_discarded_with_a_visible_message(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        bridge.listModels('recommended');ack(bridge,peer,next_request(peer),snap)
+        deliver(bridge,peer,snap,{'recommended':[{'id':'x'}],'custom':[],'selected':None,'hardware':{}})
+        self.assertEqual(bridge.modelsRecommended,[]);self.assertIn('recusada',bridge.modelsResult)
+    def test_stale_capability_result_is_not_taken_as_the_answer(self):
+        previous=models_result(page_of(models_output(recommended=[cloud_model(id='old')]),'recommended'))
+        snap=models_snapshot(revision=3,config=LLM_CONFIG,result=previous);bridge,peer=connect_bridge(self,snap)
+        bridge.listModels('recommended');ack(bridge,peer,next_request(peer),snap)
+        self.assertEqual((bridge.modelsRecommended,bridge.models_wait),([],'list'))
+        deliver(bridge,peer,snap,page_of(models_output(recommended=[cloud_model(id='fresh')]),'recommended'))
+        self.assertEqual([m['id'] for m in bridge.modelsRecommended],['fresh'])
+    def test_paging_merges_pages_in_order_and_requests_exact_fields(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        out=models_output(custom=custom_models(8))
+        request=fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(out,'custom',0))
+        self.assertEqual(request['input'],{'action':'list','tab':'custom','offset':0,'limit':6})
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],[f'c{i}' for i in range(6)])
+        self.assertEqual((bridge.modelsCustomTotal,bridge.modelsRecommendedTotal),(8,0))
+        request=fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page_of(out,'custom',6))
+        self.assertEqual(request['input'],{'action':'list','tab':'custom','offset':6,'limit':6})
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],[f'c{i}' for i in range(8)])
+        self.assertEqual(bridge.modelsResult,'Catálogo atualizado')
+        bridge.loadMoreModels('custom');quiet(self,peer)  # everything loaded: nothing is requested
+    def test_duplicate_ids_across_pages_are_dropped_and_offsets_follow_the_core(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        allc=custom_models(8)
+        fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(models_output(custom=allc),'custom',0))
+        page={**page_of(models_output(custom=allc),'custom',0),'offset':6,'items':[allc[5],allc[6]],'total':8}  # c5 repeats, then c6
+        fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page)
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],[f'c{i}' for i in range(7)])
+        self.assertEqual(bridge.models_page['custom']['next'],8)
+        bridge.loadMoreModels('custom');quiet(self,peer)
+    def test_stale_offset_answer_is_refused_and_the_loaded_items_stay(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        out=models_output(custom=custom_models(8))
+        fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(out,'custom',0))
+        fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page_of(out,'custom',3))
+        self.assertIn('recusada',bridge.modelsResult)
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],[f'c{i}' for i in range(6)])
+        request=fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page_of(out,'custom',6))
+        self.assertEqual(request['input']['offset'],6)
+        self.assertEqual(len(bridge.modelsCustom),8)
+    def test_total_changes_follow_the_newest_page(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(models_output(custom=custom_models(8)),'custom',0))
+        newer=models_output(custom=custom_models(9))
+        fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page_of(newer,'custom',6))
+        self.assertEqual((bridge.modelsCustomTotal,len(bridge.modelsCustom)),(9,9))
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],[f'c{i}' for i in range(9)])
+        bridge.loadMoreModels('custom');quiet(self,peer)
+    def test_refreshing_a_tab_resets_it_to_its_first_page(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        out=models_output(custom=custom_models(8))
+        fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(out,'custom',0))
+        fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page_of(out,'custom',6))
+        fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(models_output(custom=custom_models(2,'n')),'custom',0))
+        self.assertEqual(([m['id'] for m in bridge.modelsCustom],bridge.modelsCustomTotal),(['n0','n1'],2))
+    def test_tab_reload_asked_while_a_page_is_in_flight_runs_after_the_answer(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        bridge.listModels('recommended');ack(bridge,peer,next_request(peer),snap)
+        bridge.listModels('custom');quiet(self,peer)  # queued behind the recommended page, nothing sent yet
+        deliver(bridge,peer,snap,page_of(models_output(custom=custom_models(2)),'recommended'))
+        request=next_request(peer);self.assertEqual(request['input'],{'action':'list','tab':'custom','offset':0,'limit':6})
+        ack(bridge,peer,request,snap);deliver(bridge,peer,snap,page_of(models_output(custom=custom_models(2)),'custom'))
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],['c0','c1'])
+        self.assertEqual((bridge.modelsRecommendedTotal,bridge.modelsCustomTotal),(2,2))
+    def test_sixteen_customs_are_all_reachable_through_pages_of_six(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        out=models_output(custom=custom_models(16))
+        requests=[fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(out,'custom',0))]
+        while bridge.models_page['custom']['next']<16:
+            offset=bridge.models_page['custom']['next']
+            requests.append(fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page_of(out,'custom',offset)))
+        self.assertEqual([r['input']['offset'] for r in requests],[0,6,12])
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],[f'c{i}' for i in range(16)])
+        self.assertEqual(bridge.modelsCustomTotal,16)
+        bridge.loadMoreModels('custom');quiet(self,peer)
+    def test_catalog_signal_is_separate_from_status_signal(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        counts=Counter();bridge.modelsCatalogChanged.connect(lambda:counts.update(['catalog']));bridge.modelsStateChanged.connect(lambda:counts.update(['state']))
+        load_catalog(bridge,peer,models_output(),snap);self.assertGreaterEqual(counts['catalog'],1)
+        counts.clear();bridge._models_say('Aguarde');self.assertEqual((counts['catalog'],counts['state']),(0,1))
+    def test_use_model_success_is_configure_selftest_then_mark_good_once(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.useModel('gemini-lite','1');configure=next_request(peer)
+        self.assertEqual(configure,{'version':1,'request_id':configure['request_id'],'op':'llm_configure','revision':1,'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True})
+        ack(bridge,peer,configure,models_snapshot(revision=2,config=LLM_CONFIG))
+        probe=next_request(peer)
+        self.assertEqual((probe['op'],probe['capability'],probe['input'],probe['deadline_ms']),('capability_invoke','llm_engine.models',{'action':'selftest'},10000))
+        ack(bridge,peer,probe,models_snapshot(revision=2,config=LLM_CONFIG))
+        bridge.refresh();serve(bridge,peer,with_result(models_snapshot(revision=2,config=LLM_CONFIG),models_result(SELFTEST_OK)))
+        mark=next_request(peer);self.assertEqual((mark['op'],mark['revision']),('llm_mark_good',2))
+        ack(bridge,peer,mark,models_snapshot(revision=2,config=LLM_CONFIG))
+        self.assertEqual(bridge.modelsResult,'Modelo ativo: Gemini 3.5 Flash-Lite · teste ok em 120 ms');self.assertFalse(bridge.modelsBusy);quiet(self,peer)
+    def _to_selftest(self,bridge,peer,snap):
+        bridge.useModel('gemini-lite','1');configure=next_request(peer);ack(bridge,peer,configure,models_snapshot(revision=2,config=LLM_CONFIG))
+        probe=next_request(peer);ack(bridge,peer,probe,models_snapshot(revision=2,config=LLM_CONFIG))
+    def test_selftest_failure_rolls_back_exactly_once_with_visible_message(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        self._to_selftest(bridge,peer,snap)
+        bridge.refresh();serve(bridge,peer,with_result(models_snapshot(revision=2,config=LLM_CONFIG),models_result(ok=False,error='model_selftest_failed',extra={'http_status':503})))
+        rollback=next_request(peer);self.assertEqual((rollback['op'],rollback['revision']),('llm_rollback',2))
+        ack(bridge,peer,rollback,models_snapshot(revision=3,config=LLM_CONFIG))
+        self.assertIn('Teste do modelo falhou (HTTP 503)',bridge.modelsResult);self.assertIn('configuração anterior restaurada',bridge.modelsResult)
+        quiet(self,peer)
+    def test_refused_selftest_is_a_failed_test_and_rolls_back(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.useModel('gemini-lite','1');configure=next_request(peer);ack(bridge,peer,configure,models_snapshot(revision=2,config=LLM_CONFIG))
+        probe=next_request(peer);ack(bridge,peer,probe,models_snapshot(revision=2,config=LLM_CONFIG),code='busy')
+        rollback=next_request(peer);self.assertEqual(rollback['op'],'llm_rollback')
+        ack(bridge,peer,rollback,models_snapshot(revision=3,config=LLM_CONFIG))
+        self.assertIn(CODE_MESSAGES['busy'],bridge.modelsResult);quiet(self,peer)
+    def test_missing_lkg_is_reported_not_hidden(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        self._to_selftest(bridge,peer,snap)
+        bridge.refresh();serve(bridge,peer,with_result(models_snapshot(revision=2,config=LLM_CONFIG),models_result(ok=False,error='model_selftest_failed')))
+        rollback=next_request(peer);ack(bridge,peer,rollback,models_snapshot(revision=2,config=LLM_CONFIG),code='no_lkg')
+        self.assertIn('reversão não aplicada',bridge.modelsResult);self.assertIn('Não há configuração anterior salva',bridge.modelsResult);quiet(self,peer)
+    def test_second_submit_and_list_are_refused_while_a_flow_runs(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.useModel('gemini-lite','1');configure=next_request(peer)
+        bridge.useModel('gemini-lite','1');bridge.listModels('recommended');bridge.deleteCustomModel('x')
+        self.assertEqual(bridge.modelsResult,'Aguarde a operação anterior do gerenciador');quiet(self,peer)
+        ack(bridge,peer,configure,models_snapshot(revision=1,config=LLM_CONFIG),code='stale_llm_revision')
+        self.assertEqual(bridge.modelsResult,CODE_MESSAGES['stale_llm_revision']);quiet(self,peer)
+    def test_stale_revision_and_unknown_model_send_nothing(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.useModel('gemini-lite','0');self.assertEqual(bridge.modelsResult,CODE_MESSAGES['stale_llm_revision']);quiet(self,peer)
+        bridge.useModel('ghost','1');self.assertEqual(bridge.modelsResult,CODE_MESSAGES['model_not_found']);quiet(self,peer)
+    def test_missing_key_or_consent_refuses_a_cloud_model_before_the_core(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'custom':False})
+        bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.useModel('gemini-lite','1');self.assertTrue(bridge.modelsResult.startswith('Sem chave'));quiet(self,peer)
+        apply_snap(bridge,models_snapshot(revision=1,config={**LLM_CONFIG,'cloud_consent':False}))
+        bridge.useModel('gemini-lite','1');self.assertTrue(bridge.modelsResult.startswith('Sem consentimento'));quiet(self,peer)
+    def test_local_model_needs_no_key_or_consent_and_sends_its_port(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'custom':False})
+        bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.useModel('llama-7b','1');request=next_request(peer)
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'llm_configure','revision':1,'provider':'local','model':'llama-7b-q4','custom_url':None,'cloud_consent':True,'local_port':8080})
+    def test_cloud_payload_never_carries_a_local_port(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.useModel('gemini-lite','1');request=next_request(peer);self.assertNotIn('local_port',request)
+    def test_selftest_answer_that_is_not_a_probe_rolls_back(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        self._to_selftest(bridge,peer,snap)
+        bad={**SELFTEST_OK,'features':{**SELFTEST_OK['features'],'vision':'supported'}}
+        bridge.refresh();serve(bridge,peer,with_result(models_snapshot(revision=2,config=LLM_CONFIG),models_result(bad)))
+        rollback=next_request(peer);self.assertEqual(rollback['op'],'llm_rollback')
+        ack(bridge,peer,rollback,models_snapshot(revision=3,config=LLM_CONFIG))
+        self.assertIn('Resposta do teste recusada pelo esquema',bridge.modelsResult);quiet(self,peer)
+    def test_disconnect_during_selftest_rolls_back_once_on_reconnect(self):
+        bridge,peer=connect_bridge(self,models_snapshot(revision=2,config=LLM_CONFIG))
+        bridge.models_flow={'label':'Gemini','next':None,'reason_text':'','latency':None};bridge.models_wait='selftest'
+        bridge._offline()
+        self.assertTrue(bridge.models_recover);self.assertIsNone(bridge.models_flow);self.assertIsNone(bridge.models_wait)
+        sent=[];bridge._request=lambda op,**kw:(sent.append((op,kw)) or True)
+        # Reconnect: the Core's first snapshot arrives before any model step runs; the rollback uses its revision.
+        apply_snap(bridge,models_snapshot(revision=2,config=LLM_CONFIG));bridge.online=True
+        bridge._models_next();bridge._models_next();bridge._models_next()
+        self.assertEqual([op for op,_ in sent],['llm_rollback']);self.assertEqual(sent[0][1]['revision'],2);self.assertFalse(bridge.models_recover)
+    def test_fallback_payloads_and_cloud_consent_gate(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.setFallback('gemini-lite','1');request=next_request(peer)
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'llm_configure','revision':1,'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True,'fallback':{'provider':'google','model':'gemini-3.5-flash-lite'}})
+        ack(bridge,peer,request,models_snapshot(revision=2,config={**LLM_CONFIG,'fallback':{'provider':'google','model':'gemini-3.5-flash-lite'}}))
+        self.assertEqual(bridge.modelsFallback,{'provider':'google','model':'gemini-3.5-flash-lite'})
+        bridge.setFallback('llama-7b','2');request=next_request(peer)
+        self.assertEqual(request['fallback'],{'provider':'local','model':'llama-7b-q4','local_port':8080});self.assertNotIn('local_port',{k:v for k,v in request.items() if k!='fallback'})
+        ack(bridge,peer,request,models_snapshot(revision=3,config={**LLM_CONFIG,'fallback':{'provider':'local','model':'llama-7b-q4','local_port':8080}}))
+        apply_snap(bridge,models_snapshot(revision=3,config={**LLM_CONFIG,'cloud_consent':False}))
+        bridge.setFallback('gemini-lite','3');self.assertTrue(bridge.modelsResult.startswith('Fallback na nuvem exige'));quiet(self,peer)
+        apply_snap(bridge,models_snapshot(revision=3,config={**LLM_CONFIG,'fallback':{'provider':'local','model':'llama-7b-q4','local_port':8080}}))
+        bridge.clearFallback('3');request=next_request(peer);self.assertIsNone(request['fallback'])
+    def test_configure_and_use_keep_the_saved_fallback(self):
+        fallback={'provider':'google','model':'gemini-3.5-flash-lite'}
+        snap=models_snapshot(revision=1,config={**LLM_CONFIG,'fallback':fallback});bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.configureLlm('google','gemini-3.5-flash-lite','',True,'1');request=next_request(peer)
+        self.assertEqual(request['fallback'],fallback)
+        ack(bridge,peer,request,models_snapshot(revision=2,config={**LLM_CONFIG,'fallback':fallback}))
+        bridge.useModel('llama-7b','2');request=next_request(peer)
+        self.assertEqual((request['op'],request['fallback']),('llm_configure',fallback))
+    def test_save_custom_then_refresh_the_catalog(self):
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
+        bridge.saveCustomModel(form(provider='custom',model='my-model',custom_url='https://example.test/v1'))
+        request=next_request(peer);self.assertEqual((request['op'],request['capability'],request['input']['action']),('capability_invoke','llm_engine.models','save_custom'))
+        model=request['input']['model'];self.assertEqual((model['provider'],model['tier'],model['certification']['state']),('custom','custom','declared'))
+        ack(bridge,peer,request,snap);bridge.refresh();serve(bridge,peer,with_result(snap,models_result({'id':model['id']})))
+        refresh=next_request(peer);self.assertEqual(refresh['input'],{'action':'list','tab':'custom','offset':0,'limit':6});self.assertEqual(bridge.modelsResult,'Modelo personalizado salvo')
+    def test_delete_only_known_custom_ids(self):
+        custom=custom_model(form(provider='custom',model='my-model',custom_url='https://example.test/v1'))
+        snap=models_snapshot(revision=1,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(custom=[custom]),snap)
+        bridge.deleteCustomModel('ghost');self.assertEqual(bridge.modelsResult,CODE_MESSAGES['model_not_found']);quiet(self,peer)
+        bridge.deleteCustomModel(custom['id']);request=next_request(peer)
+        self.assertEqual((request['op'],request['input']),('capability_invoke',{'action':'delete_custom','id':custom['id']}))
+    def test_clear_plugin_settings_payload_and_message(self):
+        bridge,peer=connect_bridge(self,models_snapshot(revision=1,config=LLM_CONFIG))
+        bridge.clearPluginSettings();request=next_request(peer)
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'plugin_settings_clear','plugin_id':'llm_engine'})
+        ack(bridge,peer,request,models_snapshot(revision=1,config=LLM_CONFIG));self.assertEqual(bridge.modelsResult,'Dados do plugin apagados')
+    def test_chat_and_motor_llm_refuse_while_a_model_flow_runs(self):
+        snap=chat_snapshot(llm=llm_state(revision=1,config=LLM_CONFIG),capabilities=('llm_engine.chat','llm_engine.models'))
+        bridge,peer=connect_bridge(self,snap);bridge.models_flow={'label':'x','next':None,'reason_text':'','latency':None}
+        bridge.sendChat('oi');self.assertEqual(bridge.chatResult,'Aguarde o gerenciador de modelos')
+        bridge.configureLlm('google','gemini-3.5-flash-lite','',True,'1');self.assertEqual(bridge.llmResult,'Aguarde o gerenciador de modelos');quiet(self,peer)
+    def test_models_page_follows_qml_rules(self):
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
+        proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-models-child'],env=env,capture_output=True,text=True,timeout=240)
+        self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
+def qml_models_child():
+    from PySide6.QtGui import QAccessible,QGuiApplication
+    from PySide6.QtCore import QCoreApplication,QEvent
+    from main import create
+    app=QGuiApplication(sys.argv[:1]);QAccessible.setActive(True);checks=[]
+    def check(name,value):
+        if not value:raise AssertionError(name)
+        checks.append(name)
+    with tempfile.TemporaryDirectory(prefix='gideon-qml-models-') as td:
+        bridge,engine=create(app,td);window=engine.rootObjects()[0]
+        bridge.retry.stop();bridge.online=True
+        try:return _qml_models_checks(bridge,window,check,checks)
+        finally:
+            for w in engine.rootObjects():w.close();w.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            del engine;del bridge
+def _qml_models_checks(bridge,window,check,checks):
+    from PySide6.QtGui import QAccessible
+    from PySide6.QtCore import QMetaObject,QObject
+    from PySide6.QtTest import QTest
+    def items():
+        stack=[window.contentItem()];found=[]
+        while stack:
+            current=stack.pop();found.append(current);stack.extend(current.childItems())
+        return found
+    def find(name):
+        item=next((i for i in items() if i.objectName()==name),None)
+        if item is None:raise AssertionError('missing '+name)
+        return item
+    def present(name):return any(i.objectName()==name for i in items())
+    def acc(name):return QAccessible.queryAccessibleInterface(find(name)).text(QAccessible.Text.Name)
+    def texts():return [i.property('text') for i in items() if isinstance(i.property('text'),str)]
+    def apply(snap):bridge._apply(validate_snapshot(copy.deepcopy(snap),'r',0));QTest.qWait(30)
+    def catalog(output):bridge.models_data=output;bridge._models_touch(catalog=True);QTest.qWait(50)
+    window.setProperty('page',8);QTest.qWait(50)
+    check('no models plugin: Modelos LLM cannot be the page',window.property('page')==0)
+    check('no models plugin: nav item hidden',not find('nav8').property('visible'))
+    check('no models plugin: models panel hidden',not find('modelsPanel').property('visible'))
+    apply(models_snapshot(revision=1,config=LLM_CONFIG));QTest.qWait(50)
+    check('models plugin running: nav item visible',find('nav8').property('visible'))
+    window.setProperty('page',8);QTest.qWait(50)
+    check('models plugin running: models panel visible on page 8',find('modelsPanel').property('visible'))
+    check('recommended tab accessible name',acc('modelsTabRecommended')=='Aba Recomendados')
+    check('custom tab accessible name',acc('modelsTabCustom')=='Aba Personalizados')
+    custom=custom_model(form(provider='custom',model='my-model',custom_url='https://example.test/v1'))
+    probed=cloud_model(id='probed-x',label='Probed X',model='probed-x',certification={'state':'probed','evidence':None,'date':None})
+    catalog(models_output(recommended=[cloud_model(),local_model(),probed],custom=[custom]))
+    check('certified shows Certificado',find('badge_gemini-lite').property('text')=='Certificado')
+    check('candidate shows Candidato and never Certificado',find('badge_llama-7b').property('text')=='Candidato')
+    check('probed shows Testado',find('badge_probed-x').property('text')=='Testado')
+    find('modelsTabs').setProperty('currentIndex',1);QTest.qWait(50)
+    check('custom model shows Declarado',find('badge_'+custom['id']).property('text')=='Declarado')
+    find('modelsTabs').setProperty('currentIndex',0);QTest.qWait(50)
+    find('modelsFilter').setProperty('currentIndex',1);QTest.qWait(50)
+    check('Local filter hides cloud models',not present('model_gemini-lite') and present('model_llama-7b'))
+    find('modelsFilter').setProperty('currentIndex',0);QTest.qWait(50)
+    QMetaObject.invokeMethod(find('model_gemini-lite'),'click');QTest.qWait(50)
+    check('details open for the selected model',find('modelDetails').property('visible'))
+    check('details show the title',find('modelDetailTitle').property('text')=='Gemini 3.5 Flash-Lite')
+    check('feature matrix uses the exact words',"Recurso tool_use: Suportado" in texts() and "Recurso vision: Desconhecido" in texts())
+    check('certification details name the evidence',"Certificação: Certificado · evidência: docs/evidence/c1-llm.json · data 2026-10-16" in texts())
+    check('use button names the model',acc('useModelButton')=='Usar este modelo: Gemini 3.5 Flash-Lite')
+    names=[acc(i.objectName()) for i in items() if i.objectName().startswith('model_')]
+    check('model row accessible names are unique and non-empty',len(names)==3 and len(set(names))==3 and all(names))
+    check('hardware panel shows cores, RAM and unknown GPU',"CPU: 8 núcleos · RAM: 16 GB · GPU: desconhecido" in texts())
+    clear=window.findChild(QObject,'clearPluginConfirm');QMetaObject.invokeMethod(clear,'open');QTest.qWait(80)
+    check('clear-data confirmation opens',clear.property('visible'))
+    check('Cancel is the focused default of clear-data confirmation',any(i.property('text')=='Cancelar' and i.property('visible') and i.property('activeFocus') for i in items()))
+    check('confirm button is not focused',not find('confirmClearPluginButton').property('activeFocus'))
+    clear.close();QTest.qWait(30)
+    find('modelsTabs').setProperty('currentIndex',1);QTest.qWait(50)
+    find('customProvider').setProperty('currentIndex',2);find('customModelId').setProperty('text','gemini-x');find('customUrl').setProperty('text','');QTest.qWait(20)
+    check('custom URL required for Personalizado',find('customFormProblem').property('visible') and not find('saveCustomButton').property('enabled'))
+    find('customUrl').setProperty('text','http://example.test');QTest.qWait(20)
+    check('http refused for the custom provider',not find('saveCustomButton').property('enabled'))
+    find('customUrl').setProperty('text','https://example.test/v1');QTest.qWait(20)
+    check('valid https custom form enables save',find('saveCustomButton').property('enabled'))
+    find('customModelId').setProperty('text','modelo-á');QTest.qWait(20)
+    check('accented model identifier is refused',not find('saveCustomButton').property('enabled'))
+    find('customModelId').setProperty('text','gemini-x');find('modelsTabs').setProperty('currentIndex',0);QTest.qWait(20)
+    apply(models_snapshot(revision=1,config={**LLM_CONFIG,'fallback':{'provider':'google','model':'gemini-3.5-flash-lite'}}));QTest.qWait(30)
+    check('cloud fallback shows the exact warning',find('fallbackCloudWarning').property('visible') and find('fallbackCloudWarning').property('text')=='Mensagens poderão ir para a nuvem se o modelo principal falhar')
+    apply(models_snapshot(revision=1,config={**LLM_CONFIG,'fallback':{'provider':'local','model':'llama-7b-q4','local_port':8080}}));QTest.qWait(30)
+    find('fallbackModel').setProperty('currentIndex',0);QTest.qWait(20)
+    check('warning follows the picked cloud model',find('fallbackCloudWarning').property('visible'))
+    find('fallbackModel').setProperty('currentIndex',1);QTest.qWait(20)
+    check('local pick and local current fallback show no cloud warning',not find('fallbackCloudWarning').property('visible'))
+    apply(chat_snapshot(state='disabled',enabled=False,capabilities=('llm_engine.models',)));QTest.qWait(50)
+    check('plugin stopped: page returns to Início',window.property('page')==0)
+    check('plugin stopped: nav item hidden',not find('nav8').property('visible'))
+    print(f'qml models checks ok: {len(checks)}');return 0
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())
+    if QML_MODELS_CHILD:sys.exit(qml_models_child())
     unittest.main()

@@ -4,6 +4,8 @@
 stdin, line 1: one JSON request {"url","method":"POST","headers":{..},"body":str,
 "timeout_s":int,"expected_host":str,"allow_http":bool,"allow_loopback":bool}.
 stdin, line 2: {"key": "..."}; the key never appears in argv, env, stdout or stderr.
+The keyless form {"key": null} is for local loopback providers only: it sends no Authorization
+header and only IP-literal loopback targets are accepted (no name resolution).
 stdout: JSON lines only: {"chunk": str<=16384 chars}, then exactly one terminal line:
 {"done":true,"status":2xx} or {"error": code[, "status": N]}. Headers and bodies of
 failed responses are never printed. Redirects are refused, never followed.
@@ -66,14 +68,18 @@ def read_request():
         secret = json.loads(key_line.decode("utf-8"))
     except ValueError:
         raise Stop("invalid_request")
-    key = secret.get("key") if isinstance(secret, dict) and set(secret) == {"key"} else None
+    if not isinstance(secret, dict) or set(secret) != {"key"}:
+        raise Stop("invalid_request")
+    key = secret["key"]
+    if key is None:
+        return request, None
     if not isinstance(key, str) or not 8 <= len(key) <= 256 or not key.isascii() \
             or not all(33 <= ord(c) <= 126 for c in key):
         raise Stop("invalid_request")
     return request, key
 
 
-def check_target(request):
+def check_target(request, keyless=False):
     parts = urlsplit(request["url"])
     if parts.scheme not in ("https", "http") or parts.username or parts.password \
             or parts.query or parts.fragment or not parts.hostname:
@@ -88,6 +94,8 @@ def check_target(request):
     loopback = host == "localhost" or (ip is not None and ip.is_loopback)
     if loopback and not request["allow_loopback"]:
         raise Stop("host_not_allowed")
+    if keyless and (ip is None or not ip.is_loopback):
+        raise Stop("host_not_allowed")
     if ip is not None and not loopback:
         raise Stop("host_not_allowed")
     if parts.scheme == "http" and not (request["allow_http"] and loopback):
@@ -97,7 +105,7 @@ def check_target(request):
 
 
 def stream(request, key):
-    parts, host, port = check_target(request)
+    parts, host, port = check_target(request, keyless=key is None)
     deadline = time.monotonic() + request["timeout_s"]
     if parts.scheme == "https":
         connection = http.client.HTTPSConnection(
@@ -106,7 +114,8 @@ def stream(request, key):
         connection = http.client.HTTPConnection(host, port, timeout=request["timeout_s"])
     headers = {name: value for name, value in request["headers"].items()
                if name.lower() in ALLOWED_HEADERS}
-    headers["Authorization"] = "Bearer " + key
+    if key is not None:
+        headers["Authorization"] = "Bearer " + key
     try:
         connection.request("POST", parts.path or "/", body=request["body"].encode("utf-8"),
                            headers=headers)

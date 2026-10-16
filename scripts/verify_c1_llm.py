@@ -27,6 +27,7 @@ EVIDENCE = BASE / 'target/evidence'
 PYTHON = '/usr/bin/python3'
 PLUGIN = 'llm_engine'
 CAP = 'llm_engine.chat'
+CAP_MODELS = 'llm_engine.models'
 PLUGIN_MARK = b'/plugin/main.py'
 BROKER_MARK = b'net_broker.py'
 BRAVE = 'com.brave.Browser.desktop'
@@ -396,8 +397,9 @@ def scen_setup(td, fake):
     native_effect(root, 'S1 native before any LLM plugin (wake replay to command)')
     h = req(root)['hub']
     e = entry(h)
-    check('Hub catalog hub-c1.json verified with llm_engine entry', h['status'] == 'verified' and e is not None
-          and e['runtime'] == 'python3_script' and e['capabilities'] == [CAP] and e['permissions'] == ['network_llm'],
+    check('Hub catalog hub-c1.json verified with llm_engine 1.1.0 entry', h['status'] == 'verified' and e is not None
+          and e['runtime'] == 'python3_script' and e['capabilities'] == [CAP, CAP_MODELS]
+          and e['permissions'] == ['network_llm', 'storage_settings'],
           h.get('status'))
     check('catalog sha256 pinned at Core boot', h.get('catalog_sha256') == sha(CATALOG))
     check('llm_engine approve (network_llm) ok', approve(root)['code'] == 'ok')

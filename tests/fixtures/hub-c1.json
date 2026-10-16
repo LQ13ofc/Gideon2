@@ -6,31 +6,33 @@
       "plugin_id": "llm_engine",
       "api_version": 1,
       "publisher": "Gideon local test fixture",
-      "semver": "1.0.0",
+      "semver": "1.1.0",
       "targets": [
         "linux_x86_64"
       ],
       "binaries": [
         {
           "target": "linux_x86_64",
-          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c1-v1/llm_engine.py",
-          "sha256": "5b96d04e0d0d1b9238b1331c8eeb821a99a4151064e2e17e0dbf1315fda9eeb8",
-          "size": 16410
+          "url": "https://github.com/LQ13ofc/Gideon2/releases/download/c2-v1/llm_engine.py",
+          "sha256": "7cec0ceff99088746c27f93e76ee334e0f18dda68d883fa1dbe7f74940490d2d",
+          "size": 49472
         }
       ],
       "license": "MIT",
       "permissions": [
-        "network_llm"
+        "network_llm",
+        "storage_settings"
       ],
       "dependencies": [],
       "conflicts": [],
       "entrypoint": "bin/llm_engine.py",
-      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c1-v1",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c2-v1",
       "support_policy": "Fixture de teste local; sem suporte de produto",
       "signature": null,
       "runtime": "python3_script",
       "capabilities": [
-        "llm_engine.chat"
+        "llm_engine.chat",
+        "llm_engine.models"
       ]
     }
   ]

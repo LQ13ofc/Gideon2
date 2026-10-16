@@ -21,16 +21,22 @@ ApplicationWindow {
     property string reviewRevision: ""
     // Revision captured when the Motor LLM dialog opens; configureLlm refuses it if the live snapshot moved on.
     property string llmRevisionCaptured: ""
+    // C2 model manager: the revision is captured when a model is selected and when a models operation settles; useModel and setFallback refuse it if the Core moved on.
+    property string modelsRevisionCaptured: ""
+    property var selectedModel: null
+    readonly property var featureChoices: [{id: "unknown", text: "Desconhecido"}, {id: "supported", text: "Suportado"}, {id: "unsupported", text: "Não suportado"}]
     // Per-plugin drafts survive delegate recreation (keyed by plugin_id). Plain JS, not reactive by design.
     property var drafts: ({})
     property int page: 0
+    // Opening Modelos LLM refreshes the catalog once and captures the Core revision the user is looking at. Not a binding, so it cannot loop.
+    onPageChanged: { if (page === 8) { modelsRevisionCaptured = core.llmRevision; core.listModels("recommended") } }
     property int themeIndex: 0
     property color accentColor: "#7693ff"
     readonly property string preferencesSuccess: "Preferências salvas pelo Core"
     readonly property bool spacious: width >= 1080 && height >= 760
     readonly property bool packAvailable: core.wakeChoices.length > 0
-    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa"]
-    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice"]
+    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM"]
+    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub"]
     readonly property var stateLabels: ({idle:"Em espera", capturing:"Ouvindo", transcribing:"Transcrevendo", executing:"Executando", speaking:"Respondendo", offline:"Core indisponível", safe_mode:"Modo seguro", restart_required:"Reinício necessário"})
     readonly property var statusLabels: ({unavailable:"Indisponível", idle:"Em espera", ready:"Pronto", starting:"Iniciando", replaying:"Reproduzindo", replay_finished:"Replay encerrado", failed:"Falhou", completed:"Concluído", speaking:"Respondendo", muted:"Mudo", disabled:"Desligado", cancelled:"Cancelado", timed_out:"Tempo esgotado", audio_error:"Erro de áudio", stt_failed:"Falha na transcrição", stt_unavailable:"Transcrição indisponível", transcript_final:"Transcrição final", capture_completed:"Captura concluída", no_speech:"Sem fala detectada", capture_too_long:"Captura longa demais"})
     function statusText(status) { return statusLabels[status] || "Indisponível"; }
@@ -50,6 +56,17 @@ ApplicationWindow {
     function toolStateText(state) { switch (state) { case "pending": return "aguardando sua decisão"; case "authorized": return "autorizada; executando"; case "executed": return "executada"; case "denied": return "negada"; case "failed": return "falhou"; case "expired": return "expirada"; case "cancelled": return "cancelada"; default: return state; } }
     function sendChatDraft() { var t = chatInput.text.trim(); if (t.length === 0 || core.chatTextProblem(t) !== "") return; core.sendChat(t) }
     function openLlm() { llmRevisionCaptured = core.llmRevision; llmDialog.open() }
+    function filteredModels(list, filter) { var out = []; for (var i = 0; i < list.length; i++) { var m = list[i]; if (filter === 1 && m.kind !== "local") continue; if (filter === 2 && m.kind !== "cloud") continue; out.push(m); } return out; }
+    function allModels() { return core.modelsRecommended.concat(core.modelsCustom); }
+    function modelById(ident) { var list = allModels(); for (var i = 0; i < list.length; i++) if (list[i].id === ident) return list[i]; return null; }
+    function selectModel(m) { selectedModel = m; modelsRevisionCaptured = core.llmRevision; }
+    function isCloudProvider(p) { return p === "openrouter" || p === "opencode" || p === "google" || p === "custom"; }
+    function fallbackPicked() { return modelById(fallbackPick.currentValue); }
+    function fallbackIsCloud() { var m = fallbackPicked(); return isCloudProvider(core.modelsFallback.provider) || (!!m && m.kind === "cloud"); }
+    function fallbackAllowed() { var m = fallbackPicked(); return !!m && (m.kind !== "cloud" || core.llmConfig.cloud_consent === true); }
+    function latencyText(v) { switch (v) { case "low": return "baixa"; case "medium": return "média"; case "high": return "alta"; default: return "desconhecida"; } }
+    function gpuText(v) { switch (v) { case "none": return "não requer"; case "optional": return "opcional"; case "required": return "obrigatória"; default: return "desconhecida"; } }
+    function customForm() { var prov = customProvider.currentValue; var local = prov === "local" || prov === "ollama"; return { provider: prov, model: customModelId.text, custom_url: prov === "custom" ? customUrl.text : "", local_port: local ? customPort.value : null, features: { streaming: customStreaming.currentValue, tool_use: customToolUse.currentValue, vision: customVision.currentValue, cancel: customCancel.currentValue } }; }
     function wakeText() { var pack = core.snapshotPack; if (!pack.wake_phrases) return "Não configurada"; for (var i=0;i<pack.wake_phrases.length;i++) if (pack.wake_phrases[i].id === pack.active_phrase) return pack.wake_phrases[i].text; return "Não ativa"; }
     // Core-owned state changes resync the controls; a rejected save must not leave the user's unsaved values on screen.
     Connections {
@@ -58,6 +75,9 @@ ApplicationWindow {
         function onPrefsSettled(message) { if (message !== window.preferencesSuccess) window.syncPreferenceControls() }
         function onTextSent(sent) { if (input.text === sent) input.text = "" }
         function onChatSent(sent) { if (chatInput.text.trim() === sent) { chatInput.text = ""; window.setDraft("#chat", "text", "") } }
+        // The captured model revision follows the user's own operations: refreshed when one settles, never on background changes.
+        function onModelsStateChanged() { if (!core.modelsBusy) window.modelsRevisionCaptured = core.llmRevision }
+        function onChanged() { if (window.page === 8 && !core.modelsAvailable) window.page = 0 }
     }
     Dialog {
         id: preferences; objectName: "preferencesDialog"
@@ -236,9 +256,11 @@ ApplicationWindow {
                 Label { text: "Consentimento salvo: " + (core.llmConfig.cloud_consent === true ? "concedido" : "não concedido"); textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 GlowButton {
                     objectName: "saveLlmConfigButton"; text: "Salvar configuração"; Accessible.name: "Salvar configuração do Motor LLM"
-                    enabled: core.llmConfigAvailable && modelField.acceptableInput
+                    enabled: core.llmConfigAvailable && modelField.acceptableInput && core.llmConfig.provider !== "local" && core.llmConfig.provider !== "ollama"
                     onClicked: core.configureLlm(providerBox.currentValue, modelField.text, providerBox.currentValue === "custom" ? urlField.text : "", consentBox.checked, window.llmRevisionCaptured)
                 }
+                // A local provider is configured only through Modelos LLM; this dialog would otherwise overwrite it.
+                Label { objectName: "llmLocalNotice"; visible: core.llmConfig.provider === "local" || core.llmConfig.provider === "ollama"; text: "Configuração local ativa: altere em Modelos LLM."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 Label { objectName: "llmResult"; text: core.llmResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             }
         }
@@ -296,6 +318,36 @@ ApplicationWindow {
             GlowButton { objectName: "confirmRevokeButton"; text: "Revogar"; Accessible.name: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id : "Revogar"; Layout.alignment: Qt.AlignRight; onClicked: revokeConfirm.accept() }
         }
     }
+    // Destructive confirmations for the model manager: Cancel is the focused default; the explicit action button is the only way to accept.
+    Dialog {
+        id: removeCustomConfirm; objectName: "removeCustomConfirm"
+        property var entry: null
+        title: "Remover modelo personalizado"; modal: true; anchors.centerIn: parent
+        width: Math.min(400, window.width - 32)
+        standardButtons: Dialog.Cancel
+        background: GlassCard { theme: window.themeIndex }
+        onOpened: { var cancel = standardButton(Dialog.Cancel); if (cancel) { cancel.text = "Cancelar"; cancel.forceActiveFocus() } }
+        onAccepted: { if (entry) core.deleteCustomModel(entry.id) }
+        contentItem: ColumnLayout {
+            width: removeCustomConfirm.availableWidth
+            Label { text: removeCustomConfirm.entry ? "Remover " + removeCustomConfirm.entry.label + " da lista de modelos personalizados? O modelo no provedor não é apagado." : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            GlowButton { objectName: "confirmRemoveCustomButton"; text: "Remover"; Accessible.name: removeCustomConfirm.entry ? "Remover modelo " + removeCustomConfirm.entry.id : "Remover"; Layout.alignment: Qt.AlignRight; onClicked: removeCustomConfirm.accept() }
+        }
+    }
+    Dialog {
+        id: clearPluginConfirm; objectName: "clearPluginConfirm"
+        title: "Apagar dados do plugin"; modal: true; anchors.centerIn: parent
+        width: Math.min(400, window.width - 32)
+        standardButtons: Dialog.Cancel
+        background: GlassCard { theme: window.themeIndex }
+        onOpened: { var cancel = standardButton(Dialog.Cancel); if (cancel) { cancel.text = "Cancelar"; cancel.forceActiveFocus() } }
+        onAccepted: core.clearPluginSettings()
+        contentItem: ColumnLayout {
+            width: clearPluginConfirm.availableWidth
+            Label { text: "Apagar as configurações guardadas pelo plugin LLM, inclusive modelos personalizados? O plugin e a configuração do Core (provedor, modelo e chaves) não são alterados."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            GlowButton { objectName: "confirmClearPluginButton"; text: "Apagar dados"; Accessible.name: "Apagar dados do plugin LLM"; Layout.alignment: Qt.AlignRight; onClicked: clearPluginConfirm.accept() }
+        }
+    }
     Rectangle {
         id: sidebar
         width: window.width >= 1000 ? 232 : 64
@@ -324,7 +376,7 @@ ApplicationWindow {
                     text: sidebar.width > 100 ? modelData : ""
                     Accessible.name: modelData
                     image: "assets/" + window.navIcons[index] + ".png"
-                    accent: window.accentColor; checked: window.page === index; visible: index !== 7 || core.chatAvailable
+                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : true
                     onClicked: window.page = index
                     ToolTip.visible: hovered && sidebar.width < 100; ToolTip.text: modelData
                 }
@@ -422,7 +474,7 @@ ApplicationWindow {
                     ColumnLayout {
                         anchors.left: parent.left; anchors.leftMargin: 26; anchors.verticalCenter: parent.verticalCenter; width: window.width > 900 ? parent.width - 260 : parent.width - 52; spacing: 10
                         Label { text: window.navigation[window.page]; color: "#f1f5ff"; font.pixelSize: window.width > 900 ? 52 : 24; font.bold: true }
-                        Label { text: window.page === 1 ? "Configure como o Gideon escuta e responde." : window.page === 3 ? "Defina o estilo visual do Gideon." : window.page === 2 ? "Sua voz, seus ajustes de áudio." : window.page === 4 ? "Cada capacidade precisa de autorização." : window.page === 5 ? "Acompanhe o estado real da Base." : window.page === 7 ? "Converse com o motor LLM opcional." : "Capacidades opcionais, em um só lugar."; color: "#b7caf3"; font.pixelSize: 17; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: window.page === 1 ? "Configure como o Gideon escuta e responde." : window.page === 3 ? "Defina o estilo visual do Gideon." : window.page === 2 ? "Sua voz, seus ajustes de áudio." : window.page === 4 ? "Cada capacidade precisa de autorização." : window.page === 5 ? "Acompanhe o estado real da Base." : window.page === 7 ? "Converse com o motor LLM opcional." : window.page === 8 ? "Escolha, teste e configure o modelo do motor LLM." : "Capacidades opcionais, em um só lugar."; color: "#b7caf3"; font.pixelSize: 17; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
                 GlassCard {
@@ -533,6 +585,110 @@ ApplicationWindow {
                     ColumnLayout { id: hubPageColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
                         Label { text: core.hubDescription; color: "#b0c3e9"; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         GlowButton { text: "Explorar catálogo"; enabled: core.connected; onClicked: hubDialog.open() }
+                    }
+                }
+                // Modelos LLM: shown only while llm_engine runs with llm_engine.models; the Base has no models page.
+                GlassCard {
+                objectName: "modelsPanel"
+                theme: window.themeIndex
+                    visible: window.page === 8 && core.modelsAvailable; Layout.fillWidth: true; implicitHeight: modelsColumn.implicitHeight + 44
+                    ColumnLayout {
+                        id: modelsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        Label { text: "Modelos LLM"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        Label { objectName: "modelsStatus"; text: "Estado do modelo atual: " + core.modelsStatus; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Estado do modelo atual: " + core.modelsStatus }
+                        Label { objectName: "modelsSelectedLabel"; text: core.modelsSelected.provider ? "Configurado: " + core.modelsSelected.provider + " · " + core.modelsSelected.model : "Nenhum modelo configurado"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        ProgressBar { objectName: "modelsProgress"; visible: core.modelsBusy; indeterminate: true; Layout.fillWidth: true; Accessible.name: "Operação de modelo em andamento" }
+                        Label { objectName: "modelsResult"; visible: text.length > 0; text: core.modelsResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado do modelo: " + text }
+                        GlowButton { objectName: "modelsRefresh"; text: "Atualizar lista"; Accessible.name: "Atualizar lista de modelos"; enabled: core.modelsAvailable && !core.modelsBusy; onClicked: core.listModels(modelsTabs.currentIndex === 0 ? "recommended" : "custom") }
+                        TabBar {
+                            id: modelsTabs; objectName: "modelsTabs"; Layout.fillWidth: true
+                            onCurrentIndexChanged: core.listModels(currentIndex === 0 ? "recommended" : "custom")
+                            TabButton { objectName: "modelsTabRecommended"; text: "Recomendados"; Accessible.name: "Aba Recomendados" }
+                            TabButton { objectName: "modelsTabCustom"; text: "Personalizados"; Accessible.name: "Aba Personalizados" }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label { text: "Mostrar:"; textFormat: Text.PlainText }
+                            ComboBox { id: modelsFilter; objectName: "modelsFilter"; model: ["Todos", "Local", "Nuvem"]; Layout.fillWidth: true; Accessible.name: "Filtro por local ou nuvem" }
+                        }
+                        Label { objectName: "modelsEmpty"; visible: modelRows.count === 0; text: "Nenhum modelo nesta lista."; textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true }
+                        Label { objectName: "modelsCount"; text: (modelsTabs.currentIndex === 0 ? core.modelsRecommended.length + " de " + core.modelsRecommendedTotal : core.modelsCustom.length + " de " + core.modelsCustomTotal); textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true; Accessible.name: "Modelos carregados: " + text }
+                        Repeater {
+                            id: modelRows
+                            model: window.filteredModels(modelsTabs.currentIndex === 0 ? core.modelsRecommended : core.modelsCustom, modelsFilter.currentIndex)
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                GlowButton { objectName: "model_" + modelData.id; text: modelData.label + " · " + (modelData.kind === "local" ? "Local" : "Nuvem"); Layout.fillWidth: true; Accessible.name: "Selecionar modelo " + modelData.label + " (" + modelData.id + ")"; onClicked: window.selectModel(modelData) }
+                                Label { objectName: "badge_" + modelData.id; text: core.certificationBadge(modelData.certification.state); textFormat: Text.PlainText; color: modelData.certification.state === "certified" ? "#78debc" : "#ffc674"; Accessible.name: "Certificação de " + modelData.label + ": " + text }
+                            }
+                        }
+                        GlowButton { objectName: "modelsLoadMore"; text: "Carregar mais"; Layout.fillWidth: true; visible: modelsTabs.currentIndex === 0 ? core.modelsRecommended.length < core.modelsRecommendedTotal : core.modelsCustom.length < core.modelsCustomTotal; enabled: core.modelsAvailable && !core.modelsBusy; Accessible.name: "Carregar mais modelos"; onClicked: core.loadMoreModels(modelsTabs.currentIndex === 0 ? "recommended" : "custom") }
+                        GlassCard {
+                            objectName: "modelDetails"; theme: window.themeIndex
+                            visible: window.selectedModel !== null; Layout.fillWidth: true; implicitHeight: detailColumn.implicitHeight + 44
+                            ColumnLayout {
+                                id: detailColumn; anchors.fill: parent; anchors.margins: 18; spacing: 6
+                                Label { objectName: "modelDetailTitle"; text: window.selectedModel ? window.selectedModel.label : ""; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; font.pixelSize: 18; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                                Label { text: window.selectedModel ? (window.selectedModel.kind === "local" ? "Local" : "Nuvem") + " · provedor " + window.selectedModel.provider + " · " + window.selectedModel.model : ""; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                                Label { objectName: "modelDetailCertification"; text: window.selectedModel ? "Certificação: " + core.certificationBadge(window.selectedModel.certification.state) + (window.selectedModel.certification.evidence ? " · evidência: " + window.selectedModel.certification.evidence : "") + (window.selectedModel.certification.date ? " · data " + window.selectedModel.certification.date : "") : ""; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                Label { text: window.selectedModel ? "Licença: " + window.selectedModel.license + "\nQuantização: " + (window.selectedModel.quantization || "não se aplica") + "\nHash (SHA-256): " + (window.selectedModel.sha256 || "não se aplica") + "\nBackend: " + window.selectedModel.backend : ""; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                                Repeater {
+                                    model: ["streaming", "tool_use", "vision", "cancel"]
+                                    delegate: Label {
+                                        required property string modelData
+                                        text: "Recurso " + modelData + ": " + core.featureLabel(window.selectedModel ? window.selectedModel.features[modelData] : "unknown")
+                                        textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    }
+                                }
+                                Label { text: window.selectedModel ? "Contexto: " + (window.selectedModel.features.context_tokens === null ? "não informado" : window.selectedModel.features.context_tokens + " tokens") : ""; textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                Label { text: window.selectedModel ? (window.selectedModel.cost.currency === null ? "Custo: não informado" : "Custo (USD por milhão de tokens): entrada " + window.selectedModel.cost.input_per_mtok + " · saída " + window.selectedModel.cost.output_per_mtok) : ""; textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                Label { text: window.selectedModel ? "Latência: " + window.latencyText(window.selectedModel.latency_hint) + " · hardware mínimo: RAM " + (window.selectedModel.min_hardware.ram_gb === null ? "não informada" : window.selectedModel.min_hardware.ram_gb + " GB") + ", GPU " + window.gpuText(window.selectedModel.min_hardware.gpu) : ""; textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                Label { text: window.selectedModel ? (window.selectedModel.offline ? "Funciona offline" : "Requer rede") : ""; textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    GlowButton { objectName: "useModelButton"; text: "Usar este modelo"; Accessible.name: window.selectedModel ? "Usar este modelo: " + window.selectedModel.label : "Usar este modelo"; enabled: core.modelsAvailable && !core.modelsBusy && window.selectedModel !== null; onClicked: core.useModel(window.selectedModel.id, window.modelsRevisionCaptured) }
+                                    GlowButton { objectName: "removeCustomButton"; text: "Remover"; visible: modelsTabs.currentIndex === 1 && window.selectedModel !== null; Accessible.name: window.selectedModel ? "Remover modelo personalizado " + window.selectedModel.id : "Remover"; enabled: core.modelsAvailable && !core.modelsBusy; onClicked: { removeCustomConfirm.entry = window.selectedModel; removeCustomConfirm.open() } }
+                                }
+                            }
+                        }
+                        ColumnLayout {
+                            objectName: "customForm"; visible: modelsTabs.currentIndex === 1; Layout.fillWidth: true; spacing: 8
+                            Label { text: "Adicionar modelo personalizado"; color: "#f1f5ff"; font.bold: true }
+                            ComboBox { id: customProvider; objectName: "customProvider"; Layout.fillWidth: true; textRole: "text"; valueRole: "id"; Accessible.name: "Provedor do modelo personalizado"; model: [{id: "local", text: "Local (llama.cpp)"}, {id: "ollama", text: "Ollama (local)"}, {id: "custom", text: "Personalizado (https)"}, {id: "openrouter", text: "OpenRouter (nuvem)"}, {id: "opencode", text: "OpenCode (nuvem)"}, {id: "google", text: "Google AI Studio (nuvem)"}] }
+                            TextField { id: customModelId; objectName: "customModelId"; Layout.fillWidth: true; maximumLength: 128; placeholderText: "Identificador do modelo"; Accessible.name: "Identificador do modelo personalizado"; validator: RegularExpressionValidator { regularExpression: /[A-Za-z0-9._:\/-]{1,128}/ } }
+                            SpinBox { id: customPort; objectName: "customPort"; from: 1024; to: 65535; value: 8080; editable: true; enabled: customProvider.currentValue === "local" || customProvider.currentValue === "ollama"; Accessible.name: "Porta do servidor local, de 1024 a 65535" }
+                            TextField { id: customUrl; objectName: "customUrl"; Layout.fillWidth: true; maximumLength: 200; placeholderText: "https://"; enabled: customProvider.currentValue === "custom"; Accessible.name: "URL https do modelo personalizado" }
+                            Label { text: "Recursos declarados (não certificados)"; color: "#b0c3e9"; Layout.fillWidth: true }
+                            GridLayout {
+                                Layout.fillWidth: true; columns: window.width > 900 ? 2 : 1; columnSpacing: 12
+                                ComboBox { id: customStreaming; objectName: "customStreaming"; Layout.fillWidth: true; model: window.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Streaming declarado" }
+                                ComboBox { id: customToolUse; objectName: "customToolUse"; Layout.fillWidth: true; model: window.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Tool use declarado" }
+                                ComboBox { id: customVision; objectName: "customVision"; Layout.fillWidth: true; model: window.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Visão declarada" }
+                                ComboBox { id: customCancel; objectName: "customCancel"; Layout.fillWidth: true; model: window.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Cancelamento declarado" }
+                            }
+                            Label { objectName: "customFormProblem"; visible: text.length > 0; text: core.customFormProblem(window.customForm()); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            GlowButton { objectName: "saveCustomButton"; text: "Salvar modelo personalizado"; Accessible.name: "Salvar modelo personalizado"; enabled: core.modelsAvailable && !core.modelsBusy && core.customFormProblem(window.customForm()) === ""; onClicked: core.saveCustomModel(window.customForm()) }
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true; spacing: 8
+                            Label { text: "Fallback (opcional)"; color: "#f1f5ff"; font.bold: true }
+                            Label { objectName: "fallbackCurrent"; text: core.modelsFallback.provider ? "Atual: " + core.modelsFallback.provider + " · " + core.modelsFallback.model : "Nenhum fallback configurado"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            ComboBox { id: fallbackPick; objectName: "fallbackModel"; Layout.fillWidth: true; model: window.allModels(); textRole: "label"; valueRole: "id"; Accessible.name: "Modelo para fallback" }
+                            Label { objectName: "fallbackCloudWarning"; visible: window.fallbackIsCloud(); text: "Mensagens poderão ir para a nuvem se o modelo principal falhar"; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Aviso: envio à nuvem no fallback" }
+                            Label { objectName: "fallbackConsentNeeded"; visible: window.fallbackIsCloud() && core.llmConfig.cloud_consent !== true; text: "Para fallback na nuvem, marque o consentimento em Motor LLM."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                GlowButton { objectName: "setFallbackButton"; text: "Usar como fallback"; Accessible.name: "Usar o modelo escolhido como fallback"; enabled: core.modelsAvailable && !core.modelsBusy && fallbackPick.currentIndex >= 0 && window.fallbackAllowed(); onClicked: core.setFallback(fallbackPick.currentValue, window.modelsRevisionCaptured) }
+                                GlowButton { objectName: "clearFallbackButton"; text: "Remover fallback"; Accessible.name: "Remover fallback"; enabled: core.modelsAvailable && !core.modelsBusy && !!core.modelsFallback.provider; onClicked: core.clearFallback(window.modelsRevisionCaptured) }
+                            }
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true; spacing: 6
+                            Label { text: "Hardware"; color: "#f1f5ff"; font.bold: true }
+                            Label { objectName: "modelsHardware"; text: core.modelsHardware.cpu_cores ? "CPU: " + core.modelsHardware.cpu_cores + " núcleos · RAM: " + (core.modelsHardware.ram_gb === null ? "desconhecida" : core.modelsHardware.ram_gb + " GB") + " · GPU: " + (core.modelsHardware.gpu === "unknown" ? "desconhecido" : core.modelsHardware.gpu) : "Hardware: aguardando catálogo"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            GlowButton { objectName: "clearPluginSettingsButton"; text: "Apagar dados do plugin"; Accessible.name: "Apagar dados do plugin LLM"; enabled: core.connected && !core.modelsBusy; onClicked: clearPluginConfirm.open() }
+                        }
                     }
                 }
                 GlassCard {

@@ -1,25 +1,55 @@
 #!/usr/bin/env python3
-"""llm_engine: C1 fixture plugin (stdlib only; no file, env, network or log-content access).
+"""llm_engine 1.1.0: LLM plugin fixture (stdlib only; no file, env, network or log-content access
+except /proc/cpuinfo and /proc/meminfo for the hardware summary).
 
-Speaks JSON-lines protocol v1 on stdin/stdout (docs/C0.md, docs/C1.md).
-Capability `llm_engine.chat`:
+Speaks JSON-lines protocol v1 on stdin/stdout (docs/C0.md, docs/C1.md, docs/C2.md).
+
+Capability `llm_engine.chat` (C1 compatible):
   input  {"messages": [{"role", "content"}] (1..=32, content str <=4096 chars),
-          "tools": bool, "max_tokens": int 1..=1024}
+          "tools": bool, "max_tokens": int 1..=1024,
+          "require"?: [subset of "tools","streaming","vision"] (<=3, unique),
+          "fallback"?: bool (default false)}
   the invoke envelope carries "ctx": {"llm": {"provider", "model"}} chosen by the Core.
-  output {"text", "finish_reason", "tool_calls": [{"id","name","arguments"}] (<=4), "usage"?}
-The plugin never holds the API key and never adds Authorization: it asks the Core for
+  output {"text", "finish_reason", "tool_calls": [{"id","name","arguments"}] (<=4), "usage"?,
+          "used_fallback": bool}
+  A `require` item the effective feature matrix marks unsupported ⇒ model_unsupported_feature
+  before any llm.http host_call. Fallback: one retry with target "fallback" only after a
+  recoverable error (http 429/500/502/503/504, network_unavailable, timeout) and only when no
+  text was received yet and `fallback` is true.
+
+Capability `llm_engine.models` (C2): actions list, describe, selftest, save_custom,
+  delete_custom, features (see docs/C2.md). `list` is paginated: input {"action":"list",
+  "tab": "recommended"|"custom", "offset": int>=0, "limit": 1..=6}; output {"tab", "items":
+  [Model] (full Models, in catalog/store order, from offset), "total": int (all Models of the
+  tab), "offset", "selected", "hardware"}. A page holds at most `limit` Models and is also cut
+  so the output stays within 8 KiB (a full Model can be ~2.9 KiB with accented text, so a page
+  may hold fewer than `limit`); the next page starts at offset + len(items). Nothing is
+  dropped: every Model is reachable by paging. An offset at or past total gives items []. Settings persist through host services
+  `settings.get` (args {}; host_reply {"v":1,"op":"host_reply","id","done":true,"data":object|null})
+  and `settings.put` (args {"data": object}; reply data null). The stored object is
+  {"customs": [row, ...]} (rows in STORE_FIELDS order, <= 16) plus an optional
+  "probes" map written by selftest (<= 32 entries, <= 8 KiB in total; probes are evicted
+  first, customs never). No secret is ever accepted or stored.
+
+The plugin never holds an API key and never adds Authorization: it asks the Core for
 `llm.http` with host_call and reassembles the SSE lines that come back in host_reply chunks.
 """
 import json
 import os
+import re
 import select
 import sys
 import time
+from urllib.parse import urlsplit
 
 PLUGIN_ID = "llm_engine"
+PLUGIN_VERSION = "1.1.0"
 CAPABILITY = "llm_engine.chat"
-CAPABILITIES = [CAPABILITY]
+CAPABILITY_MODELS = "llm_engine.models"
+CAPABILITIES = [CAPABILITY, CAPABILITY_MODELS]
 SERVICE = "llm.http"
+SETTINGS_GET = "settings.get"
+SETTINGS_PUT = "settings.put"
 PATH = "/chat/completions"
 MAX_LINE = 65536
 MAX_BODY = 256 * 1024
@@ -36,13 +66,194 @@ PARTIAL_GAP = 0.05  # at most 20 partial events per second
 MAX_TOOL_CALLS = 4
 MAX_TOOL_SLOTS = 32
 MAX_ID = 64
+MAX_MODELS_INPUT = 8192
+MAX_SETTINGS = 8192  # settings.put data object, bytes of JSON
+MAX_SETTINGS_REPLY = 16384
+MAX_CUSTOMS = 16
+MAX_PROBES = 32
+LIST_TABS = ("recommended", "custom")
+PAGE_MAX = 6
+PROBED_FEATURES = ("streaming", "tool_use", "cancel")  # what a selftest can determine
+LOCAL_PORT_MIN, LOCAL_PORT_MAX = 1024, 65535
 ROLES = ("system", "user", "assistant", "tool")
-INPUT_KEYS = frozenset(("messages", "tools", "max_tokens"))
+CHAT_KEYS = frozenset(("messages", "tools", "max_tokens"))
+CHAT_OPTIONAL_KEYS = frozenset(("require", "fallback"))
 MESSAGE_KEYS = frozenset(("role", "content"))
 HOST_ERRORS = (
     "permission_denied", "cloud_not_authorized", "provider_not_configured", "key_missing",
     "http_error", "timeout", "response_too_large", "network_unavailable", "cancelled",
 )
+RECOVERABLE_STATUS = (429, 500, 502, 503, 504)
+RECOVERABLE_ERRORS = ("network_unavailable", "timeout")
+REQUIRE_FEATURE = {"tools": "tool_use", "streaming": "streaming", "vision": "vision"}
+FEATURE_KEYS = ("streaming", "tool_use", "vision", "cancel", "context_tokens")
+FEATURE_STATES = ("supported", "unsupported", "unknown")
+UNKNOWN_FEATURES = {"streaming": "unknown", "tool_use": "unknown", "vision": "unknown",
+                    "cancel": "unknown", "context_tokens": None}
+LOCAL_PROVIDERS = ("local", "ollama")
+CLOUD_PROVIDERS = ("openrouter", "opencode", "google", "custom")
+LATENCY_HINTS = ("low", "medium", "high", "unknown")
+GPU_STATES = ("none", "optional", "required", "unknown")
+MODEL_KEYS = frozenset((
+    "id", "label", "kind", "provider", "model", "custom_url", "tier", "license", "quantization",
+    "sha256", "backend", "features", "certification", "cost", "latency_hint", "min_hardware",
+    "offline", "local_port",
+))
+MODEL_ACTION_KEYS = {
+    "list": frozenset(("action", "tab", "offset", "limit")),
+    "describe": frozenset(("action", "id")),
+    "selftest": frozenset(("action",)),
+    "save_custom": frozenset(("action", "model")),
+    "delete_custom": frozenset(("action", "id")),
+    "features": frozenset(("action",)),
+}
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
+MODEL_RE = re.compile(r"^[A-Za-z0-9._:/-]{1,96}$")
+BACKEND_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,31}$")
+SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+# Heuristic guard: a stored model must never look like it carries a credential.
+SECRET_RE = re.compile(r"(?i)(?<![a-z0-9])(sk-|api[_-]?key|bearer|secret|password|authorization|token)")
+
+# BEGIN GENERATED RECOMMENDED CATALOG (source: tests/fixtures/llm_models.json; scripts/make_c1_catalog.py)
+RECOMMENDED = [{'id': 'google-gemini-3.5-flash-lite',
+  'label': 'Gemini 3.5 Flash Lite (Google)',
+  'kind': 'cloud',
+  'provider': 'google',
+  'model': 'gemini-3.5-flash-lite',
+  'custom_url': None,
+  'tier': 'recommended',
+  'license': 'Google AI API terms (free tier)',
+  'quantization': None,
+  'sha256': None,
+  'backend': 'openai-compatible API',
+  'features': {'streaming': 'supported',
+               'tool_use': 'supported',
+               'vision': 'unknown',
+               'cancel': 'supported',
+               'context_tokens': None},
+  'certification': {'state': 'certified',
+                    'evidence': 'docs/evidence/c1-llm.json (verify_c1_live.py); tests: cancel '
+                                'closes provider connection',
+                    'date': '2026-10-16'},
+  'cost': {'input_per_mtok': None, 'output_per_mtok': None, 'currency': None},
+  'latency_hint': 'unknown',
+  'min_hardware': {'ram_gb': None, 'gpu': 'none'},
+  'local_port': None,
+  'offline': False},
+ {'id': 'mistral-ministral-3b-latest',
+  'label': 'Ministral 3B (Mistral)',
+  'kind': 'cloud',
+  'provider': 'custom',
+  'model': 'ministral-3b-latest',
+  'custom_url': 'https://api.mistral.ai/v1',
+  'tier': 'recommended',
+  'license': 'Mistral API terms',
+  'quantization': None,
+  'sha256': None,
+  'backend': 'openai-compatible API',
+  'features': {'streaming': 'supported',
+               'tool_use': 'supported',
+               'vision': 'unknown',
+               'cancel': 'supported',
+               'context_tokens': None},
+  'certification': {'state': 'certified',
+                    'evidence': 'docs/evidence/c1-llm.json (verify_c1_live.py); tests: cancel '
+                                'closes provider connection',
+                    'date': '2026-10-16'},
+  'cost': {'input_per_mtok': None, 'output_per_mtok': None, 'currency': None},
+  'latency_hint': 'unknown',
+  'min_hardware': {'ram_gb': None, 'gpu': 'none'},
+  'local_port': None,
+  'offline': False},
+ {'id': 'openrouter-llama-3.2-3b-instruct',
+  'label': 'Llama 3.2 3B Instruct (OpenRouter)',
+  'kind': 'cloud',
+  'provider': 'openrouter',
+  'model': 'meta-llama/llama-3.2-3b-instruct',
+  'custom_url': None,
+  'tier': 'recommended',
+  'license': 'per model card (not verified)',
+  'quantization': None,
+  'sha256': None,
+  'backend': 'openai-compatible API',
+  'features': {'streaming': 'unknown',
+               'tool_use': 'unknown',
+               'vision': 'unknown',
+               'cancel': 'unknown',
+               'context_tokens': None},
+  'certification': {'state': 'candidate', 'evidence': None, 'date': None},
+  'cost': {'input_per_mtok': None, 'output_per_mtok': None, 'currency': None},
+  'latency_hint': 'unknown',
+  'min_hardware': {'ram_gb': None, 'gpu': 'none'},
+  'local_port': None,
+  'offline': False},
+ {'id': 'opencode-gpt-5.4-nano',
+  'label': 'GPT-5.4 nano (OpenCode)',
+  'kind': 'cloud',
+  'provider': 'opencode',
+  'model': 'gpt-5.4-nano',
+  'custom_url': None,
+  'tier': 'recommended',
+  'license': 'per provider terms (not verified)',
+  'quantization': None,
+  'sha256': None,
+  'backend': 'openai-compatible API',
+  'features': {'streaming': 'unknown',
+               'tool_use': 'unknown',
+               'vision': 'unknown',
+               'cancel': 'unknown',
+               'context_tokens': None},
+  'certification': {'state': 'candidate', 'evidence': None, 'date': None},
+  'cost': {'input_per_mtok': None, 'output_per_mtok': None, 'currency': None},
+  'latency_hint': 'unknown',
+  'min_hardware': {'ram_gb': None, 'gpu': 'none'},
+  'local_port': None,
+  'offline': False},
+ {'id': 'local-llamacpp-gguf',
+  'label': 'Local GGUF via llama.cpp (candidate)',
+  'kind': 'local',
+  'provider': 'local',
+  'model': 'gguf-local',
+  'custom_url': None,
+  'tier': 'recommended',
+  'license': 'per GGUF model (not verified)',
+  'quantization': 'Q4_K_M',
+  'sha256': None,
+  'backend': 'llama.cpp',
+  'features': {'streaming': 'unknown',
+               'tool_use': 'unknown',
+               'vision': 'unknown',
+               'cancel': 'unknown',
+               'context_tokens': None},
+  'certification': {'state': 'candidate', 'evidence': None, 'date': None},
+  'cost': {'input_per_mtok': None, 'output_per_mtok': None, 'currency': None},
+  'latency_hint': 'unknown',
+  'min_hardware': {'ram_gb': 8, 'gpu': 'optional'},
+  'local_port': 8080,
+  'offline': True},
+ {'id': 'local-ollama-llama3.2-3b',
+  'label': 'Llama 3.2 3B via Ollama (candidate)',
+  'kind': 'local',
+  'provider': 'ollama',
+  'model': 'llama3.2:3b',
+  'custom_url': None,
+  'tier': 'recommended',
+  'license': 'per model card (not verified)',
+  'quantization': None,
+  'sha256': None,
+  'backend': 'ollama',
+  'features': {'streaming': 'unknown',
+               'tool_use': 'unknown',
+               'vision': 'unknown',
+               'cancel': 'unknown',
+               'context_tokens': None},
+  'certification': {'state': 'candidate', 'evidence': None, 'date': None},
+  'cost': {'input_per_mtok': None, 'output_per_mtok': None, 'currency': None},
+  'latency_hint': 'unknown',
+  'min_hardware': {'ram_gb': 8, 'gpu': 'optional'},
+  'local_port': 11434,
+  'offline': True}]
+# END GENERATED RECOMMENDED CATALOG
 
 
 def _tool(name, description, properties, required):
@@ -71,6 +282,7 @@ TOOLS = [
     _tool("get_time", "Read the current time.", {}, []),
     _tool("get_date", "Read the current date.", {}, []),
 ]
+TOOL_NAMES = frozenset(tool["function"]["name"] for tool in TOOLS)
 
 _buf = bytearray()
 _discarding = False
@@ -78,9 +290,11 @@ _host_seq = 0
 
 
 class _Fail(Exception):
-    def __init__(self, code):
+    def __init__(self, code, status=None):
         super().__init__(code)
         self.code = code
+        self.status = status
+        self.got_text = False
 
 
 class _Cancel(Exception):
@@ -94,6 +308,10 @@ class _Shutdown(Exception):
 def _send(obj):
     sys.stdout.write(json.dumps(obj, separators=(",", ":")) + "\n")
     sys.stdout.flush()
+
+
+def _log(text):
+    _send({"event": "log", "level": "info", "text": text})
 
 
 def _size(obj):
@@ -155,8 +373,11 @@ def _parse(line):
 
 
 def _valid_input(inp):
-    """Return (messages, tools, max_tokens) or None when the input is invalid."""
-    if not isinstance(inp, dict) or set(inp) != INPUT_KEYS:
+    """Return (messages, tools, max_tokens, require, fallback) or None when invalid."""
+    if not isinstance(inp, dict):
+        return None
+    keys = set(inp)
+    if not CHAT_KEYS <= keys or not keys <= CHAT_KEYS | CHAT_OPTIONAL_KEYS:
         return None
     messages, tools, max_tokens = inp["messages"], inp["tools"], inp["max_tokens"]
     if not isinstance(messages, list) or not 1 <= len(messages) <= MAX_MESSAGES:
@@ -175,27 +396,49 @@ def _valid_input(inp):
         return None
     if not 1 <= max_tokens <= MAX_TOKENS:
         return None
-    return clean, tools, max_tokens
+    require = inp.get("require", [])
+    if not isinstance(require, list) or len(require) > len(REQUIRE_FEATURE):
+        return None
+    for item in require:
+        if not isinstance(item, str) or item not in REQUIRE_FEATURE:
+            return None
+    if len(set(require)) != len(require):
+        return None
+    fallback = inp.get("fallback", False)
+    if not isinstance(fallback, bool):
+        return None
+    return clean, tools, max_tokens, list(require), fallback
 
 
-def _llm_model(msg):
-    """Model chosen by the Core in the invoke envelope, or None when not configured."""
+def _selection(msg):
+    """(provider, model, custom_url|None) chosen by the Core in the invoke envelope, or None."""
     ctx = msg.get("ctx")
     llm = ctx.get("llm") if isinstance(ctx, dict) else None
     if not isinstance(llm, dict):
         return None
     provider, model = llm.get("provider"), llm.get("model")
-    if not isinstance(provider, str) or not provider:
+    if not isinstance(provider, str) or not 0 < len(provider) <= 32:
         return None
     if not isinstance(model, str) or not 0 < len(model) <= 128:
         return None
-    return model
+    url = llm.get("custom_url")
+    if not isinstance(url, str) or len(url) > 256:
+        url = None
+    return provider, model, url
+
+
+def _chat_body(model, messages, max_tokens, tools):
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": True}
+    if tools:
+        body["tools"] = TOOLS
+    return body
 
 
 class _Chat:
-    """One invocation: SSE text in, partial events out, one final output."""
+    """One invocation: SSE text in, partial events out, one final output.
+    quiet=True (selftest probes) emits no partial events."""
 
-    def __init__(self, req_id):
+    def __init__(self, req_id, quiet=False, used_fallback=False):
         self.id = req_id
         self.sse = ""
         self.raw = 0
@@ -208,6 +451,8 @@ class _Chat:
         self.emitted = 0
         self.partial_closed = False
         self.last_emit = 0.0
+        self.quiet = quiet
+        self.used_fallback = used_fallback
 
     # -- SSE reassembly -------------------------------------------------
     def feed(self, chunk):
@@ -265,7 +510,7 @@ class _Chat:
 
     def _text(self, piece):
         self.text_parts.append(piece)
-        if not self.partial_closed:
+        if not self.partial_closed and not self.quiet:
             self.pending += piece
 
     def _tool_delta(self, tool_call, pos):
@@ -315,6 +560,13 @@ class _Chat:
 
     # -- main loop ------------------------------------------------------
     def run(self, host_id):
+        try:
+            return self._run(host_id)
+        except _Fail as fail:
+            fail.got_text = bool(self.text_parts)
+            raise
+
+    def _run(self, host_id):
         while True:
             while self._partial_due():
                 self._emit_partial()
@@ -338,7 +590,10 @@ class _Chat:
                 continue
             if "error" in msg:
                 code = msg.get("error")
-                raise _Fail(code if code in HOST_ERRORS else "plugin_error")
+                status = msg.get("status")
+                if isinstance(status, bool) or not isinstance(status, int):
+                    status = None
+                raise _Fail(code if code in HOST_ERRORS else "plugin_error", status)
             if "chunk" in msg:
                 chunk = msg["chunk"]
                 if not isinstance(chunk, str) or len(chunk) > MAX_CHUNK:
@@ -347,7 +602,7 @@ class _Chat:
             if msg.get("done") is True:
                 status = msg.get("status", 200)
                 if isinstance(status, int) and not isinstance(status, bool) and status != 200:
-                    raise _Fail("http_error")
+                    raise _Fail("http_error", status)
                 self.finish_stream()
                 break
         while self.pending:
@@ -375,7 +630,8 @@ class _Chat:
                 dropped += 1
                 continue
             calls.append({"id": call_id, "name": name, "arguments": arguments})
-        out = {"text": "".join(self.text_parts), "finish_reason": self.finish, "tool_calls": calls}
+        out = {"text": "".join(self.text_parts), "finish_reason": self.finish,
+               "tool_calls": calls, "used_fallback": self.used_fallback}
         if self.usage is not None:
             out["usage"] = self.usage
         truncated = False
@@ -401,39 +657,550 @@ class _Chat:
                 return out
 
 
-def _handle_invoke(msg):
+def _next_host_id():
     global _host_seq
-    req_id = msg.get("id")
-    if not isinstance(req_id, int) or isinstance(req_id, bool):
+    _host_seq += 1
+    return _host_seq
+
+
+def _run_chat(req_id, body, target=None, quiet=False, used_fallback=False):
+    """One llm.http host_call (target "fallback" only when the Core must use its fallback)."""
+    args = {"path": PATH, "body": body, "stream": True}
+    if target is not None:
+        args["target"] = target
+    host_call = {"op": "host_call", "id": _host_seq + 1, "service": SERVICE, "args": args}
+    if _size(body) > MAX_BODY or _size(host_call) > MAX_LINE:
+        raise _Fail("invalid_input")
+    _next_host_id()
+    _send(host_call)
+    return _Chat(req_id, quiet=quiet, used_fallback=used_fallback).run(host_call["id"])
+
+
+def _recoverable(fail):
+    if fail.got_text:
+        return False
+    if fail.code == "http_error":
+        return fail.status in RECOVERABLE_STATUS
+    return fail.code in RECOVERABLE_ERRORS
+
+
+def _find_entry(entries, provider, model, url):
+    for entry in entries:
+        if entry["provider"] != provider or entry["model"] != model:
+            continue
+        if url is not None and entry["custom_url"] != url:
+            continue
+        return entry
+    return None
+
+
+# -- settings (host services settings.get / settings.put) ------------------
+def _host_exchange(req_id, service, args):
+    """host_call a settings service. Core reply (src/plugins.rs): one host_reply line with
+    done:true and data (object or null); settings never stream chunks."""
+    host_id = _next_host_id()
+    _send({"op": "host_call", "id": host_id, "service": service, "args": args})
+    while True:
+        line = _read_line(None)
+        msg = _parse(line)
+        if msg is None:
+            continue
+        op = msg.get("op")
+        if op == "cancel":
+            if msg.get("id") == req_id:
+                raise _Cancel()
+            continue
+        if op == "shutdown":
+            raise _Shutdown()
+        if op == "invoke" and isinstance(msg.get("id"), int):
+            _send({"id": msg["id"], "ok": False, "error": "plugin_error"})
+            continue
+        if op != "host_reply" or msg.get("id") != host_id:
+            continue
+        if "error" in msg:
+            code = msg.get("error")
+            status = msg.get("status")
+            if isinstance(status, bool) or not isinstance(status, int):
+                status = None
+            raise _Fail(code if code in HOST_ERRORS else "plugin_error", status)
+        if set(msg) != {"v", "op", "id", "done", "data"} or msg.get("done") is not True:
+            raise _Fail("plugin_error")
+        data = msg["data"]
+        if data is not None and not isinstance(data, dict):
+            raise _Fail("plugin_error")
+        if data is not None and _size(data) > MAX_SETTINGS_REPLY:
+            raise _Fail("response_too_large")
+        return data
+
+
+# Stored form: one positional row per custom model (16 full Model objects do not fit in the
+# 8 KiB settings budget). Constant fields (tier custom, certification declared with no evidence)
+# are implied; every row is decoded and validated as a full Model on read and on write.
+STORE_FIELDS = ("id", "label", "kind", "provider", "model", "custom_url", "license",
+                "quantization", "sha256", "backend", "streaming", "tool_use", "vision", "cancel",
+                "context_tokens", "input_per_mtok", "output_per_mtok", "currency", "latency_hint",
+                "ram_gb", "gpu", "offline", "local_port")
+
+
+def _encode_custom(model):
+    features, cost, hardware = model["features"], model["cost"], model["min_hardware"]
+    return [model["id"], model["label"], model["kind"], model["provider"], model["model"],
+            model["custom_url"], model["license"], model["quantization"], model["sha256"],
+            model["backend"], features["streaming"], features["tool_use"], features["vision"],
+            features["cancel"], features["context_tokens"], cost["input_per_mtok"],
+            cost["output_per_mtok"], cost["currency"], model["latency_hint"],
+            hardware["ram_gb"], hardware["gpu"], model["offline"], model["local_port"]]
+
+
+def _decode_custom(row):
+    if not isinstance(row, list) or len(row) != len(STORE_FIELDS):
+        return None
+    v = dict(zip(STORE_FIELDS, row))
+    model = {
+        "id": v["id"], "label": v["label"], "kind": v["kind"], "provider": v["provider"],
+        "model": v["model"], "custom_url": v["custom_url"], "tier": "custom",
+        "license": v["license"], "quantization": v["quantization"], "sha256": v["sha256"],
+        "backend": v["backend"],
+        "features": {"streaming": v["streaming"], "tool_use": v["tool_use"],
+                     "vision": v["vision"], "cancel": v["cancel"],
+                     "context_tokens": v["context_tokens"]},
+        "certification": {"state": "declared", "evidence": None, "date": None},
+        "cost": {"input_per_mtok": v["input_per_mtok"], "output_per_mtok": v["output_per_mtok"],
+                 "currency": v["currency"]},
+        "latency_hint": v["latency_hint"],
+        "min_hardware": {"ram_gb": v["ram_gb"], "gpu": v["gpu"]},
+        "offline": v["offline"],
+        "local_port": v["local_port"],
+    }
+    return _validate_model(model)
+
+
+# Probe entries (selftest results) live in the same settings object under "probes", keyed
+# "provider|model|local_port" (local_port empty when null). `at` is the probe sequence number:
+# the plugin keeps no clock, so the oldest probe is the one with the smallest `at`.
+def _probe_key(provider, model, port):
+    return "%s|%s|%s" % (provider, model, "" if port is None else port)
+
+
+def _check_probe(key, probe):
+    if not isinstance(key, str) or len(key) > 160 or key.count("|") != 2:
+        return False
+    if not isinstance(probe, dict) or set(probe) != {"features", "latency_ms", "at", "source"}:
+        return False
+    features = probe["features"]
+    if not isinstance(features, dict) or set(features) != set(FEATURE_KEYS):
+        return False
+    if features["vision"] != "unknown" or features["context_tokens"] is not None:
+        return False
+    if any(features[key] not in FEATURE_STATES for key in ("streaming", "tool_use", "cancel")):
+        return False
+    latency, at = probe["latency_ms"], probe["at"]
+    if isinstance(latency, bool) or not isinstance(latency, int) or not 0 <= latency <= 600000:
+        return False
+    if isinstance(at, bool) or not isinstance(at, int) or not 1 <= at <= 2 ** 31 - 1:
+        return False
+    return probe["source"] == "probed"
+
+
+def _load_store(req_id):
+    """(customs, probes) from settings. Any storage problem fails closed (settings_unavailable)."""
+    try:
+        data = _host_exchange(req_id, SETTINGS_GET, {})
+    except _Fail as fail:
+        if fail.code == "permission_denied":
+            raise
+        raise _Fail("settings_unavailable")
+    if data is None:
+        return [], {}
+    if "customs" not in data or not set(data) <= {"customs", "probes"}:
+        raise _Fail("settings_unavailable")
+    stored = data["customs"]
+    if not isinstance(stored, list) or len(stored) > MAX_CUSTOMS:
+        raise _Fail("settings_unavailable")
+    customs = []
+    for row in stored:
+        model = _decode_custom(row)
+        if model is None:
+            raise _Fail("settings_unavailable")
+        customs.append(model)
+    if len({model["id"] for model in customs}) != len(customs):
+        raise _Fail("settings_unavailable")
+    raw = data.get("probes", {})
+    if not isinstance(raw, dict) or len(raw) > MAX_PROBES:
+        raise _Fail("settings_unavailable")
+    for key, probe in raw.items():
+        if not _check_probe(key, probe):
+            raise _Fail("settings_unavailable")
+    return customs, dict(raw)
+
+
+def _oldest(probes):
+    return min(probes, key=lambda key: probes[key]["at"])
+
+
+def _write_store(req_id, customs, probes):
+    """One settings.put with customs and probes. Probes are evicted oldest-first until the object
+    fits MAX_SETTINGS; customs are never evicted (over budget with no probes left = invalid)."""
+    kept = dict(probes)
+    while len(kept) > MAX_PROBES:
+        del kept[_oldest(kept)]
+    while True:
+        data = {"customs": [_encode_custom(model) for model in customs]}
+        if kept:
+            data["probes"] = kept
+        if _size(data) <= MAX_SETTINGS:
+            break
+        if not kept:
+            raise _Fail("invalid_input")
+        del kept[_oldest(kept)]
+    try:
+        _host_exchange(req_id, SETTINGS_PUT, {"data": data})
+    except _Fail as fail:
+        if fail.code == "permission_denied":
+            raise
+        raise _Fail("settings_unavailable")
+
+
+# -- model schema validation -------------------------------------------------
+def _is_text(value, low, high):
+    """Length bounds count UTF-8 bytes (the bridge's PlainText rule), not characters."""
+    return (isinstance(value, str) and low <= len(value.encode("utf-8")) <= high
+            and not any(ord(ch) < 32 or ord(ch) == 127 for ch in value))
+
+
+def _int_in(value, low, high):
+    return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+
+
+def _is_number(value, low, high):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and low <= value <= high
+
+
+def _https_url(value):
+    if not _is_text(value, 8, 200):
+        return False
+    try:
+        parts = urlsplit(value)
+        parts.port  # raises ValueError on a bad port
+    except ValueError:
+        return False
+    return (parts.scheme == "https" and bool(parts.hostname) and "@" not in parts.netloc
+            and not parts.query and not parts.fragment)
+
+
+def _validate_model(value):
+    """Strict check of one stored or submitted custom Model. Returns the value or None."""
+    if not isinstance(value, dict) or set(value) != MODEL_KEYS:
+        return None
+    try:
+        ok = _check_model(value)
+    except (KeyError, TypeError, ValueError):
+        ok = False
+    return value if ok else None
+
+
+def _check_model(value):
+    if not (isinstance(value["id"], str) and ID_RE.match(value["id"])):
+        return False
+    if not _is_text(value["label"], 1, 48):
+        return False
+    if value["tier"] != "custom":
+        return False
+    kind, provider, url = value["kind"], value["provider"], value["custom_url"]
+    if kind == "local":
+        if provider not in LOCAL_PROVIDERS or url is not None:
+            return False
+    elif kind == "cloud":
+        if provider not in CLOUD_PROVIDERS:
+            return False
+        if provider == "custom":
+            if not _https_url(url):
+                return False
+        elif url is not None:
+            return False
+    else:
+        return False
+    port = value["local_port"]
+    if provider in LOCAL_PROVIDERS:
+        if (isinstance(port, bool) or not isinstance(port, int)
+                or not LOCAL_PORT_MIN <= port <= LOCAL_PORT_MAX):
+            return False
+    elif port is not None:
+        return False
+    if not (isinstance(value["model"], str) and MODEL_RE.match(value["model"])):
+        return False
+    if not _is_text(value["license"], 1, 64):
+        return False
+    if value["quantization"] is not None and not _is_text(value["quantization"], 1, 32):
+        return False
+    if value["sha256"] is not None and not (isinstance(value["sha256"], str)
+                                            and SHA_RE.match(value["sha256"])):
+        return False
+    if not (isinstance(value["backend"], str) and BACKEND_RE.match(value["backend"])):
+        return False
+    features = value["features"]
+    if not isinstance(features, dict) or set(features) != set(FEATURE_KEYS):
+        return False
+    for key in ("streaming", "tool_use", "vision", "cancel"):
+        if features[key] not in FEATURE_STATES:
+            return False
+    tokens = features["context_tokens"]
+    if tokens is not None and (isinstance(tokens, bool) or not isinstance(tokens, int)
+                               or not 1 <= tokens <= 10_000_000):
+        return False
+    cert = value["certification"]
+    if (not isinstance(cert, dict) or set(cert) != {"state", "evidence", "date"}
+            or cert["state"] != "declared" or cert["evidence"] is not None or cert["date"] is not None):
+        return False
+    cost = value["cost"]
+    if not isinstance(cost, dict) or set(cost) != {"input_per_mtok", "output_per_mtok", "currency"}:
+        return False
+    for key in ("input_per_mtok", "output_per_mtok"):
+        if cost[key] is not None and not _is_number(cost[key], 0, 1_000_000):
+            return False
+    if cost["currency"] not in (None, "USD"):
+        return False
+    if (cost["input_per_mtok"] is not None or cost["output_per_mtok"] is not None) \
+            and cost["currency"] != "USD":
+        return False
+    if value["latency_hint"] not in LATENCY_HINTS:
+        return False
+    hardware = value["min_hardware"]
+    if not isinstance(hardware, dict) or set(hardware) != {"ram_gb", "gpu"}:
+        return False
+    if hardware["ram_gb"] is not None and not _is_number(hardware["ram_gb"], 0.5, 4096):
+        return False
+    if hardware["gpu"] not in GPU_STATES:
+        return False
+    if not isinstance(value["offline"], bool):
+        return False
+    for text in (value["id"], value["label"], value["model"], value["license"], value["backend"],
+                 value["quantization"] or "", url or ""):
+        if SECRET_RE.search(text):
+            return False
+    return True
+
+
+def _lookup(customs, provider, model, url):
+    """Matched catalog entry (recommended first, then custom) or None."""
+    entry = _find_entry(RECOMMENDED, provider, model, url)
+    if entry is None:
+        entry = _find_entry(customs, provider, model, url)
+    return entry
+
+
+def _resolve(req_id, provider, model, url):
+    """Effective feature matrix: the matched entry's features (certified | candidate | declared),
+    overridden by a stored probe for streaming, tool_use and cancel. `source` is "probed" when a
+    probe applies, else the matched entry's certification.state, else "unknown"."""
+    customs, probes = _load_store(req_id)
+    entry = _lookup(customs, provider, model, url)
+    if entry is None:
+        features, source = dict(UNKNOWN_FEATURES), "unknown"
+    else:
+        features, source = dict(entry["features"]), entry["certification"]["state"]
+    port = None if entry is None else entry["local_port"]
+    probe = probes.get(_probe_key(provider, model, port))
+    if probe is not None:
+        for name in PROBED_FEATURES:
+            if probe["features"][name] != "unknown":
+                features[name] = probe["features"][name]
+        source = "probed"
+    return features, source
+
+
+def _hardware():
+    """CPU cores and RAM from /proc inside the sandbox; any failure gives null."""
+    cores, ram_gb = None, None
+    try:
+        with open("/proc/cpuinfo", "rb") as fh:
+            data = fh.read(1024 * 1024)
+        count = data.count(b"\nprocessor") + (1 if data.startswith(b"processor") else 0)
+        cores = count or None
+    except OSError:
+        pass
+    try:
+        with open("/proc/meminfo", "rb") as fh:
+            data = fh.read(64 * 1024)
+        for line in data.split(b"\n"):
+            if line.startswith(b"MemTotal:"):
+                kib = int(line.split()[1])
+                ram_gb = round(kib / (1024 * 1024), 1) if kib > 0 else None
+                break
+    except (OSError, ValueError, IndexError):
+        pass
+    return {"cpu_cores": cores, "ram_gb": ram_gb, "gpu": "unknown"}
+
+
+def _selftest(req_id, provider, model, url):
+    """Probe the selected configuration: one short streaming chat, then one tool probe. The
+    result is stored as a probe (settings.put) so features and chat `require` use it."""
+    customs, probes = _load_store(req_id)
+    entry = _lookup(customs, provider, model, url)
+    port = None if entry is None else entry["local_port"]
+    started = time.monotonic()
+    body = _chat_body(model, [{"role": "user", "content": "Reply with the word ok."}], 16, False)
+    try:
+        output = _run_chat(req_id, body, quiet=True)
+    except _Fail as fail:
+        _log("selftest streaming probe failed: %s" % fail.code)
+        raise _Fail("model_selftest_failed")
+    if not output["text"]:
+        _log("selftest streaming probe returned no text")
+        raise _Fail("model_selftest_failed")
+    latency_ms = int((time.monotonic() - started) * 1000)
+    tool_body = _chat_body(model, [{"role": "user", "content": "Call the get_time tool."}],
+                           32, True)
+    try:
+        probe = _run_chat(req_id, tool_body, quiet=True)
+        named = [call for call in probe["tool_calls"] if call["name"] in TOOL_NAMES]
+        tool_use = "supported" if named else "unsupported"
+    except _Fail as fail:
+        if fail.code == "http_error" and fail.status in (400, 404, 422):
+            tool_use = "unsupported"
+        else:
+            _log("selftest tool probe failed: %s" % fail.code)
+            raise _Fail("model_selftest_failed")
+    features = {"streaming": "supported", "tool_use": tool_use, "vision": "unknown",
+                "cancel": "unknown", "context_tokens": None}
+    seq = max((probe["at"] for probe in probes.values()), default=0) + 1
+    probes[_probe_key(provider, model, port)] = {"features": features, "latency_ms": latency_ms,
+                                                 "at": seq, "source": "probed"}
+    _write_store(req_id, customs, probes)
+    return {"ok": True, "latency_ms": latency_ms, "features": features, "source": "probed"}
+
+
+def _find_recommended(model_id):
+    for entry in RECOMMENDED:
+        if entry["id"] == model_id:
+            return entry
+    return None
+
+
+def _models_action(action, inp, msg, req_id):
+    selection = _selection(msg)
+    if action == "list":
+        # Exact shape of docs/C2.md and app/bridge.py valid_models_page: full Models only.
+        tab, offset, limit = inp["tab"], inp["offset"], inp["limit"]
+        if tab not in LIST_TABS or not _int_in(offset, 0, 2 ** 31 - 1) or not _int_in(limit, 1, PAGE_MAX):
+            raise _Fail("invalid_input")
+        entries = list(RECOMMENDED) if tab == "recommended" else _load_store(req_id)[0]
+        base = {
+            "tab": tab, "items": [], "total": len(entries), "offset": offset,
+            "selected": None if selection is None else {"provider": selection[0],
+                                                        "model": selection[1]},
+            "hardware": _hardware(),
+        }
+        # Pack the requested window in order; stop before the 8 KiB output would overflow.
+        # The page is shorter than `limit` only in that case, and the next page starts at
+        # offset + len(items), so no Model is ever skipped.
+        items = []
+        for entry in entries[offset:offset + limit]:
+            if _size(dict(base, items=items + [entry])) > MAX_OUTPUT:
+                break
+            items.append(entry)
+        if offset < len(entries) and not items:
+            raise _Fail("plugin_error")
+        base["items"] = items
+        return base
+    if action == "describe":
+        model_id = inp["id"]
+        if not isinstance(model_id, str) or not ID_RE.match(model_id):
+            raise _Fail("invalid_input")
+        entry = _find_recommended(model_id)
+        if entry is None:
+            entry = _find_entry_by_id(_load_store(req_id)[0], model_id)
+        if entry is None:
+            raise _Fail("model_not_found")
+        return {"model": entry}
+    if action == "selftest":
+        if selection is None:
+            raise _Fail("provider_not_configured")
+        return _selftest(req_id, *selection)
+    if action == "features":
+        if selection is None:
+            return {"selected": None, "source": "unknown", "features": dict(UNKNOWN_FEATURES)}
+        features, source = _resolve(req_id, *selection)
+        return {"selected": {"provider": selection[0], "model": selection[1]},
+                "source": source, "features": features}
+    if action == "save_custom":
+        model = _validate_model(inp["model"])
+        if model is None:
+            raise _Fail("invalid_input")
+        customs, probes = _load_store(req_id)
+        if _find_recommended(model["id"]) is not None or _find_entry_by_id(customs, model["id"]):
+            raise _Fail("invalid_input")
+        if len(customs) >= MAX_CUSTOMS:
+            raise _Fail("invalid_input")
+        customs.append(model)
+        _write_store(req_id, customs, probes)
+        return {"saved": model["id"], "custom_count": len(customs)}
+    if action == "delete_custom":
+        model_id = inp["id"]
+        if not isinstance(model_id, str) or not ID_RE.match(model_id):
+            raise _Fail("invalid_input")
+        customs, probes = _load_store(req_id)
+        kept = [entry for entry in customs if entry["id"] != model_id]
+        if len(kept) == len(customs):
+            raise _Fail("model_not_found")
+        _write_store(req_id, kept, probes)
+        return {"deleted": model_id, "custom_count": len(kept)}
+    raise _Fail("invalid_input")
+
+
+def _find_entry_by_id(entries, model_id):
+    for entry in entries:
+        if entry["id"] == model_id:
+            return entry
+    return None
+
+
+def _handle_models(msg, req_id):
+    inp = msg.get("input")
+    if _size(inp) > MAX_MODELS_INPUT or not isinstance(inp, dict):
+        _send({"id": req_id, "ok": False, "error": "invalid_input"})
         return
-    if msg.get("capability") != CAPABILITY:
-        _send({"id": req_id, "ok": False, "error": "unknown_capability"})
+    action = inp.get("action")
+    if not isinstance(action, str) or MODEL_ACTION_KEYS.get(action) != frozenset(inp):
+        _send({"id": req_id, "ok": False, "error": "invalid_input"})
         return
+    try:
+        output = _models_action(action, inp, msg, req_id)
+    except _Fail as fail:
+        _send({"id": req_id, "ok": False, "error": fail.code})
+    except _Cancel:
+        _send({"id": req_id, "ok": False, "error": "cancelled"})
+    else:
+        if _size(output) > MAX_OUTPUT:
+            _send({"id": req_id, "ok": False, "error": "plugin_error"})
+        else:
+            _send({"id": req_id, "ok": True, "output": output})
+
+
+def _handle_chat(msg, req_id):
     parsed = _valid_input(msg.get("input"))
     if parsed is None:
         _send({"id": req_id, "ok": False, "error": "invalid_input"})
         return
-    messages, tools, max_tokens = parsed
-    model = _llm_model(msg)
-    if model is None:
+    messages, tools, max_tokens, require, fallback = parsed
+    selection = _selection(msg)
+    if selection is None:
         _send({"id": req_id, "ok": False, "error": "provider_not_configured"})
         return
-    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": True}
-    if tools:
-        body["tools"] = TOOLS
-    host_call = {
-        "op": "host_call",
-        "id": _host_seq + 1,
-        "service": SERVICE,
-        "args": {"path": PATH, "body": body, "stream": True},
-    }
-    if _size(body) > MAX_BODY or _size(host_call) > MAX_LINE:
-        _send({"id": req_id, "ok": False, "error": "invalid_input"})
-        return
-    _host_seq += 1
-    _send(host_call)
+    provider, model, url = selection
     try:
-        output = _Chat(req_id).run(host_call["id"])
+        if require:
+            features, _source = _resolve(req_id, provider, model, url)
+            for name in require:
+                if features[REQUIRE_FEATURE[name]] == "unsupported":
+                    raise _Fail("model_unsupported_feature")
+        body = _chat_body(model, messages, max_tokens, tools)
+        try:
+            output = _run_chat(req_id, body)
+        except _Fail as first:
+            if not (fallback and _recoverable(first)):
+                raise
+            output = _run_chat(req_id, body, target="fallback", used_fallback=True)
     except _Fail as fail:
         _send({"id": req_id, "ok": False, "error": fail.code})
     except _Cancel:
@@ -442,10 +1209,23 @@ def _handle_invoke(msg):
         _send({"id": req_id, "ok": True, "output": output})
 
 
+def _handle_invoke(msg):
+    req_id = msg.get("id")
+    if not isinstance(req_id, int) or isinstance(req_id, bool):
+        return
+    capability = msg.get("capability")
+    if capability == CAPABILITY:
+        _handle_chat(msg, req_id)
+    elif capability == CAPABILITY_MODELS:
+        _handle_models(msg, req_id)
+    else:
+        _send({"id": req_id, "ok": False, "error": "unknown_capability"})
+
+
 def _handle_hello(msg):
     _send({"v": 1, "id": msg.get("id"), "ok": True, "plugin_id": msg.get("plugin_id"),
            "api": 1, "capabilities": CAPABILITIES})
-    _send({"event": "log", "level": "info", "text": "llm_engine ready"})
+    _log("llm_engine ready")
 
 
 def main():

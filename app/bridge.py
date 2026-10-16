@@ -1,5 +1,5 @@
 """Thin, bounded Qt IPC adapter. Core owns all parsing, sessions and authority."""
-import json,math,os,re,stat,unicodedata,uuid
+import datetime,hashlib,json,math,os,re,stat,unicodedata,uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer
@@ -17,7 +17,7 @@ RUNTIME_STATES=('disabled','starting','running','failed','stopped')
 # Codes Core writes to plugin last_error (src/plugins.rs runtime start, violation and crash paths).
 PLUGIN_LAST_ERRORS=frozenset({'plugin_crashed','plugin_cpu_exceeded','plugin_output_invalid','plugin_start_failed','plugin_not_runnable','plugin_quarantined','handshake_timeout','handshake_mismatch'})
 # Codes a capability_result can carry (src/plugins.rs PASS_THROUGH_ERRORS plus Core-owned results).
-CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled'})
+CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable'})
 # Tool proposal reasons (src/tools.rs and src/core.rs tool_denied/tool_failed).
 TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_failed','executor_unavailable','user_denied','invalid_args','unknown_tool','busy'})
 HUB_REASONS=('ledger_missing','ledger_invalid')
@@ -61,7 +61,14 @@ def bounded_output(value):
     except (TypeError,ValueError,RecursionError):return False
 # C1 (docs/C1.md) contract: Core limits mirrored here so the UI refuses before a round trip.
 LLM_PROVIDERS=('openrouter','opencode','google','custom');LLM_SECRET_KEYS=frozenset(LLM_PROVIDERS)
-LLM_CONFIG_KEYS=frozenset({'provider','model','custom_url','cloud_consent'});LLM_URL_LIMIT=200
+# C2 (docs/C2.md): local providers take a loopback port and never need a key or cloud consent.
+LOCAL_PROVIDERS=('local','ollama');CONFIG_PROVIDERS=LLM_PROVIDERS+LOCAL_PROVIDERS;FIXED_CLOUD_PROVIDERS=('openrouter','opencode','google')
+LOCAL_PORT_MIN,LOCAL_PORT_MAX=1024,65535
+# The Core serializes config with local_port, fallback and lkg omitted when null (skip_serializing_if): they are optional keys.
+LLM_CONFIG_REQUIRED=frozenset({'provider','model','custom_url','cloud_consent'});LLM_CONFIG_KEYS=LLM_CONFIG_REQUIRED|{'local_port','fallback','lkg'}
+LKG_KEYS=frozenset({'provider','model','custom_url','local_port','cloud_consent'});LKG_REQUIRED=frozenset({'provider','model','custom_url','cloud_consent'})
+FALLBACK_KEYS=frozenset({'provider','model','custom_url','local_port'})
+LLM_URL_LIMIT=200
 MODEL_ID=re.compile(r'[A-Za-z0-9._:/-]{1,128}');PROPOSAL_ID=re.compile(r'[A-Za-z0-9_]{1,64}')
 TOOL_STATES=('pending','denied','authorized','executed','failed','expired','cancelled')
 TOOL_KEYS=frozenset({'proposal_id','plugin_id','call_id','tool','args','state','reason','result'})
@@ -84,19 +91,147 @@ def llm_url_ok(url):
 def valid_key(key):
     """Core secret rule: 8..=256 printable ASCII bytes without spaces or controls."""
     return isinstance(key,str) and 8<=len(key)<=256 and all('!'<=c<='~' for c in key)
-def llm_config_problem(provider,model,url,consent):
-    """Client-side mirror of LlmConfig::validate; True means refuse."""
-    if provider not in LLM_PROVIDERS or type(consent) is not bool or not isinstance(model,str) or not MODEL_ID.fullmatch(model):return True
+def llm_config_problem(provider,model,url,consent,port=None):
+    """Client-side mirror of LlmConfig::validate; True means refuse. The port matters only for local providers (ignored elsewhere, as in the Core)."""
+    if provider not in CONFIG_PROVIDERS or type(consent) is not bool or not isinstance(model,str) or not MODEL_ID.fullmatch(model):return True
     if provider=='custom':return not llm_url_ok(url)
+    if provider in LOCAL_PROVIDERS:return url is not None or not is_int(port,LOCAL_PORT_MIN,LOCAL_PORT_MAX)
     return url is not None
+def target_problem(target,keys,required):
+    """A last-known-good or fallback target: exact keys, then the same rules as the live config. True means refuse."""
+    if not (isinstance(target,dict) and required<=set(target)<=keys):return True
+    return llm_config_problem(target['provider'],target['model'],target.get('custom_url'),target.get('cloud_consent',False),target.get('local_port'))
 def valid_llm(llm):
     if not (isinstance(llm,dict) and set(llm)=={'revision','config','secrets'} and is_int(llm['revision'])):return False
     secrets=llm['secrets']
     if not (isinstance(secrets,dict) and set(secrets)==LLM_SECRET_KEYS and all(type(v) is bool for v in secrets.values())):return False
     config=llm['config']
     if config is None:return True
-    if not (isinstance(config,dict) and set(config)==LLM_CONFIG_KEYS):return False
-    return not llm_config_problem(config['provider'],config['model'],config['custom_url'],config['cloud_consent'])
+    if not (isinstance(config,dict) and LLM_CONFIG_REQUIRED<=set(config)<=LLM_CONFIG_KEYS):return False
+    if llm_config_problem(config['provider'],config['model'],config['custom_url'],config['cloud_consent'],config.get('local_port')):return False
+    if config.get('local_port') is not None and not is_int(config['local_port'],1,LOCAL_PORT_MAX):return False
+    if config.get('lkg') is not None and target_problem(config['lkg'],LKG_KEYS,LKG_REQUIRED):return False
+    if config.get('fallback') is not None and target_problem(config['fallback'],FALLBACK_KEYS,{'provider','model'}):return False
+    return True
+# C2 model manager (docs/C2.md). The plugin owns the catalog; these rules only refuse what the schema forbids.
+MODEL_CAPABILITY='llm_engine.models';MODEL_PLUGIN='llm_engine';MODELS_LIMIT=16;MODEL_TABS=('recommended','custom');MODELS_PAGE=6;MODEL_TOKEN=re.compile(r'[A-Za-z0-9._:/-]{1,64}')
+MODEL_KEYS=frozenset({'id','label','kind','provider','model','tier','license','quantization','sha256','backend','features','certification','cost','latency_hint','min_hardware','offline','custom_url','local_port'})
+FEATURE_KEYS=('streaming','tool_use','vision','cancel');FEATURE_STATES=('supported','unsupported','unknown');CERT_STATES=('certified','candidate','declared','probed')
+CERT_BADGES={'certified':'Certificado','candidate':'Candidato','declared':'Declarado','probed':'Testado'}
+FEATURE_LABELS={'supported':'Suportado','unsupported':'Não suportado','unknown':'Desconhecido'}
+SELFTEST_DEADLINE_MS=10000;MODELS_DEADLINE_MS=5000
+PENDING_MODELS={'list':'Carregando modelos…','selftest':'Testando modelo…','save_custom':'Salvando modelo personalizado…','delete_custom':'Removendo modelo personalizado…'}
+def finite_number(value,limit):return value is None or (type(value) in (int,float) and math.isfinite(value) and 0<=value<=limit)
+def feature_ok(features):
+    if not (isinstance(features,dict) and set(features)==set(FEATURE_KEYS)|{'context_tokens'}):return False
+    return all(features[k] in FEATURE_STATES for k in FEATURE_KEYS) and (features['context_tokens'] is None or is_int(features['context_tokens'],1,2**31-1))
+def date_ok(value):
+    if value is None:return True
+    if not (isinstance(value,str) and len(value)==10):return False
+    try:datetime.date.fromisoformat(value);return True
+    except ValueError:return False
+def text_ok(value,limit):return isinstance(value,str) and bool(value.strip()) and plain_text(value,limit)
+def valid_model(model,tier):
+    """Model schema (docs/C2.md): exact keys, enums, bounds, endpoint per provider; certified needs evidence; cost only when known."""
+    if not (isinstance(model,dict) and set(model)==MODEL_KEYS and model['tier']==tier):return False
+    kind,provider=model['kind'],model['provider']
+    if not (isinstance(model['id'],str) and MODEL_TOKEN.fullmatch(model['id']) and text_ok(model['label'],128)):return False
+    if kind not in ('local','cloud') or provider not in CONFIG_PROVIDERS:return False
+    if (provider in LOCAL_PROVIDERS and kind!='local') or (provider in FIXED_CLOUD_PROVIDERS and kind!='cloud'):return False
+    if not (isinstance(model['model'],str) and MODEL_ID.fullmatch(model['model'])):return False
+    if not (text_ok(model['license'],64) and (model['quantization'] is None or text_ok(model['quantization'],32)) and (model['sha256'] is None or digest(model['sha256'])) and text_ok(model['backend'],64)):return False
+    if not feature_ok(model['features']):return False
+    cert=model['certification']
+    if not (isinstance(cert,dict) and set(cert)=={'state','evidence','date'} and cert['state'] in CERT_STATES):return False
+    if cert['evidence'] is not None and not text_ok(cert['evidence'],256):return False
+    if cert['state']=='certified' and not text_ok(cert['evidence'],256):return False
+    if not date_ok(cert['date']):return False
+    cost=model['cost']
+    if not (isinstance(cost,dict) and set(cost)=={'input_per_mtok','output_per_mtok','currency'}):return False
+    if not (finite_number(cost['input_per_mtok'],1e6) and finite_number(cost['output_per_mtok'],1e6) and cost['currency'] in (None,'USD')):return False
+    if (cost['currency']=='USD')!=(cost['input_per_mtok'] is not None or cost['output_per_mtok'] is not None):return False
+    hw=model['min_hardware']
+    if not (isinstance(hw,dict) and set(hw)=={'ram_gb','gpu'} and finite_number(hw['ram_gb'],4096) and hw['gpu'] in ('none','optional','required','unknown')):return False
+    if model['latency_hint'] not in ('low','medium','high','unknown') or type(model['offline']) is not bool:return False
+    if provider in LOCAL_PROVIDERS:return model['custom_url'] is None and is_int(model['local_port'],LOCAL_PORT_MIN,LOCAL_PORT_MAX)
+    if provider=='custom':return llm_url_ok(model['custom_url']) and model['local_port'] is None
+    return model['custom_url'] is None and model['local_port'] is None
+def fresh_model_pages():
+    """Paging state per tab: total unknown until the first page, next = offset where the next page starts."""
+    return {tab:{'total':None,'next':0} for tab in MODEL_TABS}
+def valid_models_page(output,tab,offset):
+    """Output of action list (paginated, docs/C2.md): exact keys, the requested tab and offset echoed back, at most MODELS_PAGE full Models of that tab with unique ids, total bounded, a page consistent with offset and total, bounded like every capability output (8 KiB). A page may be shorter than MODELS_PAGE (the plugin cuts it to fit 8 KiB); an offset at or past total gives no items."""
+    if not (isinstance(output,dict) and set(output)=={'tab','items','total','offset','selected','hardware'}):return False
+    if tab not in MODEL_TABS or output['tab']!=tab or not is_int(offset,0,2**31-1) or output['offset']!=offset:return False
+    items,total=output['items'],output['total']
+    if not (isinstance(items,list) and len(items)<=MODELS_PAGE and is_int(total,0,MODELS_LIMIT)):return False
+    if not all(valid_model(m,tab) for m in items):return False
+    ids=[m['id'] for m in items]
+    if len(set(ids))!=len(ids):return False
+    if offset>=total:
+        if items:return False
+    elif not items or offset+len(items)>total:return False
+    selected=output['selected']
+    if selected is not None and not (isinstance(selected,dict) and set(selected)=={'provider','model'} and selected['provider'] in CONFIG_PROVIDERS and isinstance(selected['model'],str) and MODEL_ID.fullmatch(selected['model'])):return False
+    hw=output['hardware']
+    if not (isinstance(hw,dict) and set(hw)=={'cpu_cores','ram_gb','gpu'} and is_int(hw['cpu_cores'],1,4096) and finite_number(hw['ram_gb'],65536) and hw['gpu']=='unknown'):return False
+    return bounded_output(output)
+def valid_selftest(output):
+    """Result of action selftest: a probe that passed. Vision is never probed, so it stays unknown."""
+    return isinstance(output,dict) and set(output)=={'ok','latency_ms','features','source'} and output['ok'] is True and is_int(output['latency_ms'],0,600000) and output['source']=='probed' and feature_ok(output['features']) and output['features']['vision']=='unknown' and bounded_output(output)
+def normal_form(form):
+    """QML numbers arrive as doubles; integral values become ints before any rule runs."""
+    if not isinstance(form,dict):return None
+    out=dict(form)
+    if type(out.get('local_port')) is float and out['local_port'].is_integer():out['local_port']=int(out['local_port'])
+    return out
+def custom_form_problem(form):
+    """Rule for 'Adicionar modelo personalizado'; None means the form may be saved. Mirrors valid_model."""
+    form=normal_form(form)
+    if form is None:return 'Formulário inválido'
+    provider,model,url,port,features=form.get('provider'),form.get('model'),form.get('custom_url') or '',form.get('local_port'),form.get('features')
+    if provider not in CONFIG_PROVIDERS:return 'Escolha o provedor'
+    if not (isinstance(model,str) and MODEL_ID.fullmatch(model)):return 'Identificador: letras ASCII, números e . _ : / - (1 a 128 caracteres)'
+    if not isinstance(url,str):return 'URL inválida'
+    if provider in LOCAL_PROVIDERS:
+        if not is_int(port,LOCAL_PORT_MIN,LOCAL_PORT_MAX):return 'Porta local: 1024 a 65535'
+        if url:return 'Provedor local não usa URL'
+    elif provider=='custom':
+        if not (url.startswith('https://') and llm_url_ok(url)):return 'URL: somente https, sem usuário, query ou fragmento (até 200 bytes)'
+        if port is not None:return 'Provedor personalizado não usa porta local'
+    elif url or port is not None:return 'Provedor na nuvem não usa URL nem porta'
+    if not (isinstance(features,dict) and set(features)==set(FEATURE_KEYS) and all(features[k] in FEATURE_STATES for k in FEATURE_KEYS)):return 'Recursos declarados inválidos'
+    return None
+def custom_model(form):
+    """Model saved through save_custom: declared only, never certified, endpoint kept per provider."""
+    form=normal_form(form);provider,model=form['provider'],form['model'];local=provider in LOCAL_PROVIDERS
+    ident='custom-'+hashlib.sha256(f'{provider}:{model}'.encode('utf-8')).hexdigest()[:24]
+    return {'id':ident,'label':model,'kind':'local' if local else 'cloud','provider':provider,'model':model,'tier':'custom',
+            'license':'Não informada','quantization':None,'sha256':None,'backend':{'local':'llama.cpp','ollama':'ollama'}.get(provider,'OpenAI-compatível'),
+            'features':{**{k:form['features'][k] for k in FEATURE_KEYS},'context_tokens':None},'certification':{'state':'declared','evidence':None,'date':None},
+            'cost':{'input_per_mtok':None,'output_per_mtok':None,'currency':None},'latency_hint':'unknown','min_hardware':{'ram_gb':None,'gpu':'unknown'},'offline':local,
+            'custom_url':(form.get('custom_url') or None) if provider=='custom' else None,'local_port':form.get('local_port') if local else None}
+def target_for(model,consent):
+    """The configuration a model becomes; local_port is sent only for local providers, as the Core ignores it elsewhere."""
+    target={'provider':model['provider'],'model':model['model'],'custom_url':model['custom_url'],'cloud_consent':consent}
+    if model['provider'] in LOCAL_PROVIDERS:target['local_port']=model['local_port']
+    return target
+def fallback_for(model):
+    target={'provider':model['provider'],'model':model['model']}
+    if model['provider']=='custom':target['custom_url']=model['custom_url']
+    if model['provider'] in LOCAL_PROVIDERS:target['local_port']=model['local_port']
+    return target
+def model_status(config,models,secrets,testing=False):
+    """Status of the current model: Em teste | Sem chave | Sem consentimento | INDISPONÍVEL: recurso não suportado | Disponível."""
+    if testing:return 'Em teste'
+    if config is None:return 'Sem modelo selecionado'
+    provider=config['provider']
+    if provider in LLM_PROVIDERS and secrets.get(provider) is not True:return 'Sem chave'
+    if provider in LLM_PROVIDERS and config.get('cloud_consent') is not True:return 'Sem consentimento'
+    model=next((m for m in models if m['provider']==provider and m['model']==config['model'] and m['custom_url']==config.get('custom_url') and m['local_port']==config.get('local_port')),None)
+    if model is None:return 'Sem dados do modelo'
+    if model['features']['tool_use']=='unsupported':return 'INDISPONÍVEL: tool_use não suportado'
+    return 'Disponível'
 def bounded_json(value,limit):
     """Any JSON value: at most 4 container levels and `limit` bytes of UTF-8 JSON."""
     def shallow(item,depth=0):
@@ -263,7 +398,8 @@ def validate_snapshot(data,request_id,min_sequence):
         else:require('error' in result and 'output' not in result and result['error'] in CAPABILITY_ERRORS)
         # Model text streams with newlines, so partial is only bounded here; QML shows it as PlainText.
         if 'partial' in result:require(isinstance(result['partial'],str) and utf8_len(result['partial'])<=PARTIAL_LIMIT)
-        if HTTP_STATUS_KEY in result:require(result['ok'] is False and result.get('error')=='http_error' and is_int(result[HTTP_STATUS_KEY],100,599))
+        # model_selftest_failed may carry the provider's HTTP status too (C2); no other code may.
+        if HTTP_STATUS_KEY in result:require(result['ok'] is False and result.get('error') in ('http_error','model_selftest_failed') and is_int(result[HTTP_STATUS_KEY],100,599))
     # Core always sends llm and tool_proposals; top-level partial exists only while an invocation streams.
     require('llm' in data and 'tool_proposals' in data and valid_llm(data['llm']) and valid_tools(data['tool_proposals']))
     partial=data.get('partial')
@@ -366,6 +502,12 @@ CODE_MESSAGES={
     'expired':'Expirou sem decisão',
     'plugin_unavailable':'Plugin indisponível',
     'plugin_crashed':'Plugin encerrou com falha',
+    # C2: model manager. Codes from the Core and the llm_engine.models capability (docs/C2.md).
+    'model_unsupported_feature':'Modelo não suporta o recurso exigido; nada foi enviado ao provedor',
+    'model_not_found':'Modelo não encontrado no catálogo; atualize a lista',
+    'model_selftest_failed':'Teste do modelo falhou',
+    'settings_unavailable':'Armazenamento de configurações do plugin indisponível',
+    'no_lkg':'Não há configuração anterior salva para restaurar',
 }
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
@@ -394,12 +536,16 @@ class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
     preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal()
-    llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal()
+    llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str)
     def __init__(self,root):
         super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
+        # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
+        self.models_req=None;self.models_wait=None;self.models_before=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_message=''
+        # Paging (list is paginated per tab): models_page_req=(tab,offset) awaits the page answer; models_page[tab]={'total','next'} is where the next page starts.
+        self.models_page_req=None;self.models_page=fresh_model_pages()
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
         self.poll=QTimer(self);self.poll.setInterval(1000);self.poll.timeout.connect(self.refresh)
         self.retry=QTimer(self);self.retry.setSingleShot(True);self.retry.timeout.connect(self.connect_core)
@@ -422,7 +568,7 @@ class Bridge(QObject):
         self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=dict.fromkeys(self.results,'');self.hub_target='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         # After abort(): it re-enters _offline synchronously, which clears results; the chat message must survive that.
-        self._chat_reset()
+        self._chat_reset();self._models_reset()
         self._publish(old,self.snapshot)
         self.changed.emit()
         if not self.retry.isActive():self.retry.start(self._backoff);self._backoff=min(5000,self._backoff*2)
@@ -447,6 +593,8 @@ class Bridge(QObject):
     def _settle(self,op,data):
         """Map the Core answer of a finished request to one UI message through the OPS table."""
         code=data.get('code','invalid_message')
+        if self.models_req is not None and self.models_req[1]==op:
+            kind=self.models_req[0];self.models_req=None;self._models_ack(kind,code);return
         if op=='capability_invoke' and self.pending_chat:
             self.pending_chat=False;self._chat_accepted(code);return
         if op=='capability_cancel' and self.pending_chat_cancel:
@@ -490,7 +638,7 @@ class Bridge(QObject):
             # The invocation result arrives later in the snapshot; the Core clears it on every new invoke.
             if self.capability_pending and data.get('capability_result'):self.capability_pending=False;self.results['plugin']=''
             self._apply(data,settled=pending_op in OPS)
-            self._chat_observe()
+            self._chat_observe();self._models_observe()
             self.poll.setInterval(150 if sid is not None else 1000)
             if self.cancel_id is not None:
                 old_id=self.cancel_id;self.cancel_id=None;self._request('cancel',session_id=int(old_id))
@@ -503,6 +651,8 @@ class Bridge(QObject):
                 problem=text_problem(text) or (None if self._text_ready() else 'Entrada de texto indisponível agora')
                 if problem is None:self._request('text',raw=text)
                 else:self.results['text']=problem;self.changed.emit()
+            # Model steps go last: one request in flight at a time, so they never displace a queued request above.
+            if not self.pending:self._models_next()
     @Slot()
     def cancel(self):
         if self.online and self.sessionId:
@@ -561,6 +711,7 @@ class Bridge(QObject):
         if problem is None and (target is None or not self.pluginsAvailable):problem='Motor LLM indisponível'
         if problem is None and (self.chat_inflight is not None or self.chat_request is not None):problem='Aguarde a resposta anterior'
         if problem is None and self.pending:problem=CODE_MESSAGES['busy']
+        if problem is None and self._models_busy_now():problem='Aguarde o gerenciador de modelos'
         messages=chat_messages_for(self.chat_messages,text) if problem is None else None
         if problem is None and messages is None:problem='Mensagem grande demais para o contexto do motor'
         if problem is not None:self.results['chat']=problem;self.chatChanged.emit();return
@@ -636,9 +787,230 @@ class Bridge(QObject):
     def configureLlm(self,provider,model,custom_url,cloud_consent,revision):
         url=custom_url or None
         if not self.llmConfigAvailable:return self._refuse('llm','Motor LLM indisponível agora')
+        if self._models_busy_now():return self._refuse('llm','Aguarde o gerenciador de modelos')
         if revision!=self.llmRevision:return self._refuse('llm',CODE_MESSAGES['stale_llm_revision'])
         if llm_config_problem(provider,model,url,cloud_consent):return self._refuse('llm',CODE_MESSAGES['invalid_config'])
-        self._send('llm','llm_configure',revision=int(revision),provider=provider,model=model,custom_url=url,cloud_consent=bool(cloud_consent))
+        self._send('llm','llm_configure',revision=int(revision),provider=provider,model=model,custom_url=url,cloud_consent=bool(cloud_consent),**self._keep_fallback())
+    # ---- C2 model manager. The plugin owns the catalog; the Core owns config, LKG and keys. Every request has one kind, and every answer is routed by it.
+    def _models_target(self):
+        for item in (self.snapshot.get('plugins') or {}).get('items',[]):
+            if item['state']=='running' and MODEL_CAPABILITY in item['capabilities']:return item['plugin_id']
+        return None
+    def _models_busy_now(self):return self.models_req is not None or self.models_wait is not None or self.models_flow is not None or self.models_want_list
+    def _models_touch(self,catalog=False):
+        if catalog:self.modelsCatalogChanged.emit()
+        self.modelsStateChanged.emit();self.changed.emit()
+    def _models_say(self,message):self.models_message=message;self._models_touch()
+    def _models_blocked(self):
+        """Refuses a new operation and says why; nothing is sent."""
+        if self._models_busy_now():self._models_say('Aguarde a operação anterior do gerenciador');return True
+        if self.chat_inflight is not None or self.chat_request is not None or self.pending_chat:self._models_say('Aguarde a conversa terminar');return True
+        if self._models_target() is None:self._models_say('Modelos LLM indisponíveis: o plugin não está ativo');return True
+        return False
+    def _revision(self):return int((self.snapshot.get('llm') or {}).get('revision',0))
+    def _keep_fallback(self):
+        """llm_configure replaces the whole config, so a missing fallback would clear the saved one: resend it unchanged."""
+        fallback=((self.snapshot.get('llm') or {}).get('config') or {}).get('fallback')
+        return {'fallback':fallback} if fallback is not None else {}
+    def _all_models(self):
+        data=self.models_data or {};return list(data.get('recommended',[]))+list(data.get('custom',[]))
+    def _model_by_id(self,ident):return next((m for m in self._all_models() if m['id']==ident),None)
+    def _result_text(self,result):
+        text=code_message(result.get('error') or 'plugin_error')
+        return f"{text} (HTTP {result[HTTP_STATUS_KEY]})" if HTTP_STATUS_KEY in result else text
+    def _models_send(self,kind,op,**kw):
+        """One Core request on the model channel. Refused while another request is in flight; never queued."""
+        if self.pending:self._models_say(CODE_MESSAGES['busy']);return False
+        if not self._request(op,**kw):self._models_say('Core indisponível');return False
+        self.models_req=(kind,op);return True
+    def _models_capability(self,kind,payload,deadline):
+        if self._models_send(kind,'capability_invoke',capability=MODEL_CAPABILITY,input=payload,deadline_ms=deadline):self.models_message=PENDING_MODELS[kind];self._models_touch()
+    def _models_reset(self):
+        """Connection lost: in-flight model requests end here. A selftest that was running is rolled back once the Core is back."""
+        testing=self.models_wait=='selftest' or (self.models_req is not None and self.models_req[0]=='selftest')
+        active=self._models_busy_now()
+        self.models_recover=self.models_recover or testing
+        self.models_req=None;self.models_wait=None;self.models_before=None;self.models_flow=None;self.models_want_list=False
+        self.models_page_req=None;self.models_page=fresh_model_pages()
+        if testing:self.models_message='Conexão caiu durante o teste; a configuração anterior será restaurada ao reconectar'
+        elif active:self.models_message='Conexão caiu durante a operação; confira o modelo atual'
+        had_catalog=self.models_data is not None;self.models_data=None
+        if had_catalog:self.modelsCatalogChanged.emit()
+        if active or had_catalog:self._models_touch()
+    def _models_ack(self,kind,code):
+        """The Core answered a models request. Capability acks wait for the result; llm ops finish here or queue the next step."""
+        flow=self.models_flow
+        if kind=='selftest' and flow is not None:
+            # A refused selftest is a failed test: the candidate must not stay active untested.
+            if code=='ok':self.models_wait='selftest';self.models_before=self.snapshot.get('capability_result');self.models_message='Testando o modelo no Core…'
+            else:flow.update(next='rollback',reason_text=code_message(code))
+        elif kind=='configure' and flow is not None:
+            if code=='ok':flow['next']='selftest';self.models_message='Modelo salvo; testando…'
+            else:self.models_flow=None;self.models_message=code_message(code)
+        elif kind=='mark' and flow is not None:
+            self.models_flow=None
+            self.models_message=f"Modelo ativo: {flow['label']} · teste ok em {flow['latency']} ms" if code=='ok' else f"Teste ok, mas não marcado como bom: {code_message(code)}"
+        elif kind=='rollback' and flow is not None:
+            self.models_flow=None;reason=flow.get('reason_text') or 'falha no teste'
+            self.models_message=f'Teste falhou ({reason}); configuração anterior restaurada' if code=='ok' else f'Teste falhou ({reason}); reversão não aplicada: {code_message(code)}'
+        elif kind=='fallback':self.models_message='Fallback salvo pelo Core' if code=='ok' else code_message(code)
+        elif kind=='clear':self.models_message='Dados do plugin apagados' if code=='ok' else code_message(code)
+        elif kind in ('list','save_custom','delete_custom'):
+            if code=='ok':self.models_wait=kind;self.models_before=self.snapshot.get('capability_result')
+            else:self.models_message=code_message(code);self.models_page_req=None
+        self._models_touch()
+    def _models_observe(self):
+        """Finishes the one awaited capability answer. The Core clears capability_result on each invoke; a result equal to the one before the invoke is stale."""
+        kind=self.models_wait
+        if kind is None:return
+        result=self.snapshot.get('capability_result')
+        if not result or result.get('capability')!=MODEL_CAPABILITY or result.get('plugin_id')!=self._models_target() or result==self.models_before:return
+        self.models_wait=None;self.models_before=None;ok=result['ok'];output=result.get('output')
+        if kind=='list':
+            req,self.models_page_req=self.models_page_req,None
+            if not ok:self.models_message=self._result_text(result)
+            elif req is None or not valid_models_page(output,req[0],req[1]):self.models_message='Resposta do plugin recusada pelo esquema; catálogo não alterado'
+            elif not self._merge_page(req[0],req[1],output):self.models_message='Página fora de ordem; catálogo não alterado, atualize a lista'
+            else:self.models_message='Catálogo atualizado';self._models_touch(catalog=True);return
+        elif kind in ('save_custom','delete_custom'):
+            if ok:self.models_want_list='custom';self.models_message='Modelo personalizado salvo' if kind=='save_custom' else 'Modelo personalizado removido'
+            else:self.models_message=self._result_text(result)
+        elif kind=='selftest' and self.models_flow is not None:
+            flow=self.models_flow
+            if ok and valid_selftest(output):flow.update(next='mark',latency=output['latency_ms']);self.models_message='Teste ok; marcando como bom…'
+            else:flow.update(next='rollback',reason_text=self._result_text(result) if not ok else 'Resposta do teste recusada pelo esquema')
+        self._models_touch()
+    def _models_next(self):
+        """Sends the next model step when nothing else is in flight: the flow's selftest/mark/rollback, a recovery rollback, or a queued catalog refresh."""
+        if self.pending or not self.online:return
+        flow=self.models_flow
+        if flow is None and self.models_recover:
+            self.models_recover=False;self.models_flow=flow={'label':'','next':'rollback','reason_text':'conexão caiu durante o teste','latency':None}
+        if flow is not None:
+            step,flow['next']=flow.get('next'),None
+            if step=='selftest' and not self._models_send('selftest','capability_invoke',capability=MODEL_CAPABILITY,input={'action':'selftest'},deadline_ms=SELFTEST_DEADLINE_MS):self.models_flow=None
+            elif step in ('mark','rollback') and not self._models_send(step,'llm_mark_good' if step=='mark' else 'llm_rollback',revision=self._revision()):self.models_flow=None
+            return
+        if self.models_want_list and self.models_wait is None and self.models_req is None:
+            tab,self.models_want_list=self.models_want_list,False
+            if self._models_target() is not None:self._models_page_send(tab,0,announce=False)
+    def _models_page_send(self,tab,offset,announce=True):
+        """One page of action list. The tab and offset are kept until the answer, so the page merges where it was asked for. A refresh after a save or delete keeps the message it follows."""
+        if self._models_send('list','capability_invoke',capability=MODEL_CAPABILITY,input={'action':'list','tab':tab,'offset':offset,'limit':MODELS_PAGE},deadline_ms=MODELS_DEADLINE_MS):
+            self.models_page_req=(tab,offset)
+            if announce:self.models_message=PENDING_MODELS['list']
+            self._models_touch()
+    def _merge_page(self,tab,offset,output):
+        """Appends one valid page in order. Offset 0 replaces the tab; any other offset must be where the last page ended (else stale, nothing changes). Duplicate ids are dropped; the total follows the newest page."""
+        state=self.models_page[tab]
+        if offset!=0 and offset!=state['next']:return False
+        data=dict(self.models_data or {'recommended':[],'custom':[]})
+        items=[] if offset==0 else list(data.get(tab,[]))
+        seen={m['id'] for m in items}
+        for model in output['items']:
+            if model['id'] not in seen:seen.add(model['id']);items.append(model)
+        data[tab]=items;data['hardware']=output['hardware'];data['selected']=output['selected']
+        self.models_data=data;self.models_page[tab]={'total':output['total'],'next':offset+len(output['items'])}
+        return True
+    @Slot(str)
+    def listModels(self,tab):
+        """Reloads the first page of one tab ('recommended' or 'custom'); the tab's loaded items are replaced when it arrives. A reload asked while another page is in flight (a tab switch, say) waits for that answer instead of being lost."""
+        if tab not in MODEL_TABS:return
+        if self.models_page_req is not None:self.models_want_list=tab;self._models_touch();return
+        if not self._models_blocked():self._models_page_send(tab,0)
+    @Slot(str)
+    def loadMoreModels(self,tab):
+        """Requests the page after the last one loaded for this tab. Nothing happens when every Model is loaded or a request is in flight."""
+        if tab not in MODEL_TABS or self._models_blocked():return
+        state=self.models_page[tab]
+        if state['total'] is not None and state['next']>=state['total']:return
+        self._models_page_send(tab,state['next'])
+    @Slot(str,str)
+    def useModel(self,ident,revision):
+        """useModel flow: llm_configure -> selftest -> llm_mark_good on success, llm_rollback on any failure. One pass, no retry."""
+        if self._models_blocked():return
+        model=self._model_by_id(ident)
+        if model is None:return self._models_say(CODE_MESSAGES['model_not_found'])
+        if revision!=self.llmRevision:return self._models_say(CODE_MESSAGES['stale_llm_revision'])
+        llm=self.snapshot.get('llm') or {};config=llm.get('config') or {};consent=config.get('cloud_consent') is True
+        if model['provider'] in LLM_PROVIDERS and (llm.get('secrets') or {}).get(model['provider']) is not True:return self._models_say('Sem chave: salve a chave do provedor em Motor LLM')
+        if model['provider'] in LLM_PROVIDERS and not consent:return self._models_say('Sem consentimento: marque o consentimento de nuvem em Motor LLM')
+        self.models_flow={'label':model['label'],'next':None,'reason_text':'','latency':None}
+        if self._models_send('configure','llm_configure',revision=int(revision),**target_for(model,consent),**self._keep_fallback()):self.models_message='Salvando modelo no Core…';self._models_touch()
+        else:self.models_flow=None
+    @Slot('QVariantMap')
+    def saveCustomModel(self,form):
+        problem=custom_form_problem(form)
+        if problem is not None:return self._models_say(problem)
+        model=custom_model(form)
+        if not valid_model(model,'custom'):return self._models_say('Modelo personalizado recusado pelo esquema')
+        if not self._models_blocked():self._models_capability('save_custom',{'action':'save_custom','model':model},MODELS_DEADLINE_MS)
+    @Slot(str)
+    def deleteCustomModel(self,ident):
+        if self._models_blocked():return
+        if not any(m['id']==ident for m in (self.models_data or {}).get('custom',[])):return self._models_say(CODE_MESSAGES['model_not_found'])
+        self._models_capability('delete_custom',{'action':'delete_custom','id':ident},MODELS_DEADLINE_MS)
+    @Slot(str,str)
+    def setFallback(self,ident,revision):self._fallback_change(ident,revision,True)
+    @Slot(str)
+    def clearFallback(self,revision):self._fallback_change(None,revision,False)
+    def _fallback_change(self,ident,revision,enable):
+        """Fallback is a field of llm_configure (C2): the primary stays as it is; a cloud fallback needs saved key and consent."""
+        if self._models_blocked():return
+        llm=self.snapshot.get('llm') or {};config=llm.get('config')
+        if config is None:return self._models_say('Escolha o modelo principal antes do fallback')
+        if revision!=self.llmRevision:return self._models_say(CODE_MESSAGES['stale_llm_revision'])
+        fallback=None
+        if enable:
+            model=self._model_by_id(ident)
+            if model is None:return self._models_say(CODE_MESSAGES['model_not_found'])
+            if model['provider'] in LLM_PROVIDERS and (llm.get('secrets') or {}).get(model['provider']) is not True:return self._models_say('Sem chave: salve a chave do provedor em Motor LLM')
+            if model['provider'] in LLM_PROVIDERS and config.get('cloud_consent') is not True:return self._models_say('Fallback na nuvem exige o consentimento marcado em Motor LLM')
+            fallback=fallback_for(model)
+        primary={'provider':config['provider'],'model':config['model'],'custom_url':config['custom_url'],'cloud_consent':config['cloud_consent']}
+        if config['provider'] in LOCAL_PROVIDERS:primary['local_port']=config.get('local_port')
+        if self._models_send('fallback','llm_configure',revision=int(revision),**primary,fallback=fallback):self.models_message='Salvando fallback no Core…';self._models_touch()
+    @Slot()
+    def clearPluginSettings(self):
+        """Erases the plugin's own settings ledger (C2). The Core config and keys are not touched. The QML asks first."""
+        if self._models_busy_now():return self._models_say('Aguarde a operação anterior do gerenciador')
+        self._models_capability_plain('clear','plugin_settings_clear',plugin_id=MODEL_PLUGIN)
+    def _models_capability_plain(self,kind,op,**kw):
+        if self._models_send(kind,op,**kw):self.models_message='Apagando dados do plugin…';self._models_touch()
+    @Slot('QVariantMap',result=str)
+    def customFormProblem(self,form):return custom_form_problem(form) or ''
+    @Slot(str,result=str)
+    def certificationBadge(self,state):return CERT_BADGES.get(state,'')
+    @Slot(str,result=str)
+    def featureLabel(self,state):return FEATURE_LABELS.get(state,'Desconhecido')
+    @Property(bool,notify=changed)
+    def modelsAvailable(self):return self.online and self._models_target() is not None
+    @Property(bool,notify=changed)
+    def modelsBusy(self):return self._models_busy_now()
+    @Property(str,notify=changed)
+    def modelsResult(self):return self.models_message
+    @Property(str,notify=changed)
+    def modelsStatus(self):
+        llm=self.snapshot.get('llm') or {}
+        return model_status(llm.get('config'),self._all_models(),llm.get('secrets') or {},self.models_flow is not None)
+    @Property('QVariantList',notify=modelsCatalogChanged)
+    def modelsRecommended(self):return list((self.models_data or {}).get('recommended',[]))
+    @Property('QVariantList',notify=modelsCatalogChanged)
+    def modelsCustom(self):return list((self.models_data or {}).get('custom',[]))
+    @Property(int,notify=modelsCatalogChanged)
+    def modelsRecommendedTotal(self):return self.models_page['recommended']['total'] or 0
+    @Property(int,notify=modelsCatalogChanged)
+    def modelsCustomTotal(self):return self.models_page['custom']['total'] or 0
+    @Property('QVariantMap',notify=modelsCatalogChanged)
+    def modelsHardware(self):return dict((self.models_data or {}).get('hardware') or {})
+    @Property('QVariantMap',notify=llmChanged)
+    def modelsSelected(self):
+        config=(self.snapshot.get('llm') or {}).get('config')
+        return {'provider':config['provider'],'model':config['model']} if config else {}
+    @Property('QVariantMap',notify=llmChanged)
+    def modelsFallback(self):
+        config=(self.snapshot.get('llm') or {}).get('config')
+        return dict(config.get('fallback') or {}) if config else {}
     @Property('QVariantList',notify=packChanged)
     def wakeChoices(self):return self.snapshot.get('base_pack',{}).get('wake_phrases',[]) if self.snapshot.get('base_pack') else []
     @Property(str,notify=changed)
