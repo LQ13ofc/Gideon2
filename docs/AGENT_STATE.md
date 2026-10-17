@@ -26,3 +26,6 @@
 
 ## 2026-10-16 — C3 CLOSED (AUTO_VERIFIED)
 - C3 Agent Runtime committed, full matrix green (target/run-matrix-c3.sh), evidence docs/evidence/c3-agent.json. Next: C4.1 screen.observe (needs contract doc docs/C4.md).
+
+## 2026-10-16 — C4 / S3 final CLOSED (AUTO_VERIFIED, synthetic only)
+- Evidence docs/evidence/c4.json; matrix script target/run-matrix-c4.sh. Next: S4 Skills (needs contract docs/S4.md; read Notion S4 page first), then S5 Connections.
