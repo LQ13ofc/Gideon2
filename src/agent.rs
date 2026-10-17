@@ -381,7 +381,7 @@ fn step_state_for(obs: &Value, state: ToolState) -> &'static str {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
-enum SynthOp {
+pub(crate) enum SynthOp {
     Read,
     Inc { epoch: u64 },
     SetText { epoch: u64, text: String },
@@ -397,7 +397,7 @@ fn exact_keys(args: &Map<String, Value>, keys: &[&str]) -> bool {
 }
 
 /// Synthetic tools: exact names, exact keys, typed values. Unknown names are `unknown_tool`.
-fn synth_validate(name: &str, args: &Value) -> Result<(SynthOp, Risk), &'static str> {
+pub(crate) fn synth_validate(name: &str, args: &Value) -> Result<(SynthOp, Risk), &'static str> {
     let risk = tools::synthetic_risk(name).ok_or("unknown_tool")?;
     let object = args.as_object().ok_or("invalid_args")?;
     let epoch = || {
@@ -426,11 +426,11 @@ fn synth_validate(name: &str, args: &Value) -> Result<(SynthOp, Risk), &'static 
     Ok((op, risk))
 }
 
-struct SynthOutcome {
-    state: ToolState,
-    reason: Option<&'static str>,
-    result: Option<String>,
-    observation: Value,
+pub(crate) struct SynthOutcome {
+    pub(crate) state: ToolState,
+    pub(crate) reason: Option<&'static str>,
+    pub(crate) result: Option<String>,
+    pub(crate) observation: Value,
 }
 
 fn synth_failed(code: &'static str) -> SynthOutcome {
@@ -452,7 +452,7 @@ fn synth_stale() -> SynthOutcome {
 }
 
 /// Runs one synthetic operation on the world app. Writes are re-read and compared by `world::mutate`.
-fn synth_exec(op: &SynthOp, dir: &Path, allow_destructive: bool) -> SynthOutcome {
+pub(crate) fn synth_exec(op: &SynthOp, dir: &Path, allow_destructive: bool) -> SynthOutcome {
     let done = |result: Value| SynthOutcome {
         state: ToolState::Executed,
         reason: None,
@@ -546,6 +546,9 @@ impl Core {
         }
         if self.agent.is_active() {
             return "agent_busy";
+        }
+        if self.skills.is_active() {
+            return "skill_busy";
         }
         if goal.is_empty() || goal.len() > GOAL_MAX || goal.chars().any(char::is_control) {
             return "invalid_input";
@@ -784,7 +787,7 @@ impl Core {
     /// Owner of a bridge capability must be running with its permission approved. A missing or
     /// revoked approval is `permission_revoked`; an approved owner that is not running is
     /// `capability_unavailable`.
-    fn bridge_owner(&self, bridge: &tools::Bridge) -> Result<(), &'static str> {
+    pub(crate) fn bridge_owner(&self, bridge: &tools::Bridge) -> Result<(), &'static str> {
         let hub = self
             .hub
             .as_ref()

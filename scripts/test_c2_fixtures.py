@@ -36,6 +36,7 @@ PYTHON = sys.executable
 CLEAN_ENV = {"PATH": "/usr/bin:/bin"}
 CAP = "llm_engine.chat"
 CAP_MODELS = "llm_engine.models"
+CAP_SKILL_DRAFT = "llm_engine.skill_draft"  # added in 1.2.0 (D3)
 PLUGIN_ID = "llm_engine"
 MAX_OUTPUT = 8192
 MAX_SETTINGS = 8192
@@ -444,9 +445,10 @@ class CatalogAndManifestTest(unittest.TestCase):
         spec.loader.exec_module(cls.module)
 
     def test_manifest_declares_1_1_0_models_capability_and_permissions(self):
-        self.assertEqual(self.plugin["semver"], "1.1.0")
-        self.assertEqual(self.plugin["capabilities"], [CAP, CAP_MODELS])
-        self.assertEqual(self.plugin["permissions"], ["network_llm", "storage_settings"])
+        self.assertEqual(self.plugin["semver"], "1.2.0")
+        self.assertEqual(self.plugin["capabilities"], [CAP, CAP_MODELS, CAP_SKILL_DRAFT])
+        self.assertEqual(self.plugin["permissions"],
+                         ["network_llm", "storage_settings", "skills_author"])
         payload = PLUGIN.read_bytes()
         binary = self.plugin["binaries"][0]
         self.assertEqual(binary["sha256"], hashlib.sha256(payload).hexdigest())
@@ -514,8 +516,8 @@ class CatalogAndManifestTest(unittest.TestCase):
 
 
 class ModelsCapabilityTest(C2Base):
-    def test_hello_lists_both_capabilities(self):
-        self.assertEqual(self.hello["capabilities"], [CAP, CAP_MODELS])
+    def test_hello_lists_all_capabilities(self):
+        self.assertEqual(self.hello["capabilities"], [CAP, CAP_MODELS, CAP_SKILL_DRAFT])
 
     def test_list_pages_recommended_with_hardware_and_no_storage_read(self):
         out = self.list_out()

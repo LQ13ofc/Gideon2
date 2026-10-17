@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "fixture_depth_mid2",
+  "name": "Fixture depth middle two",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Installed helper for the depth_3 negative: calls depth_leaf.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["skill:fixture_depth_leaf"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "mid", "call": "skill:fixture_depth_leaf", "args": {}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

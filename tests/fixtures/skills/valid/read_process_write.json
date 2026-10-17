@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "fixture_read_write",
+  "name": "Fixture read and write",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Reads the synthetic screen and writes its text back through the synthetic set-text tool.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": ["fixture read write"],
+  "inputs": {},
+  "outputs": {"epoch": {"type": "int"}, "text": {"type": "string"}},
+  "dependency_capabilities": ["tool:synth_screen_read", "tool:synth_set_text"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "read",
+      "call": "tool:synth_screen_read",
+      "args": {},
+      "save": {"epoch": "epoch", "text": "text"}
+    },
+    {
+      "id": "write",
+      "call": "tool:synth_set_text",
+      "args": {"epoch": "${steps.read.epoch}", "text": "${steps.read.text}"},
+      "idempotent": false,
+      "verify": {"ref": "steps.write.text", "op": "exists"}
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

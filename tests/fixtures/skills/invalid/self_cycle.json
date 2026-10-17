@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "fixture_self_cycle",
+  "name": "Fixture self cycle",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: the skill calls itself.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["skill:fixture_self_cycle"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "again", "call": "skill:fixture_self_cycle", "args": {}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

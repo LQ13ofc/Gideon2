@@ -46,13 +46,15 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
             return Ok(());
         };
         let parsed = serde_json::from_slice::<Request>(&line);
-        // Only capability_invoke may carry the larger 8 KiB input contract.
-        if line.len() > MAX_MESSAGE
-            && !matches!(
-                parsed.as_ref().map(|r| &r.operation),
-                Ok(Operation::CapabilityInvoke { .. })
-            )
-        {
+        // Only capability_invoke (8 KiB input contract) and skill manifests (16 KiB) may be larger.
+        let allowed = match parsed.as_ref().map(|r| &r.operation) {
+            Ok(Operation::CapabilityInvoke { .. }) => line.len() <= MAX_INVOKE_MESSAGE,
+            Ok(Operation::SkillValidate { .. } | Operation::SkillSaveDraft { .. }) => {
+                line.len() <= MAX_SKILL_MESSAGE
+            }
+            _ => line.len() <= MAX_MESSAGE,
+        };
+        if !allowed {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "message too large",
@@ -77,6 +79,8 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
 }
 /// Raw line bound: 8 KiB capability input plus envelope; other operations stay at MAX_MESSAGE.
 const MAX_INVOKE_MESSAGE: usize = 16384;
+/// Raw line bound for skill manifests: 16 KiB manifest plus envelope. Checked per operation in `peer`.
+const MAX_SKILL_MESSAGE: usize = 24576;
 /// Client request line: bounded by MAX_MESSAGE unless it looks like a JSON object (`{"`), in which
 /// case it may reach MAX_INVOKE_MESSAGE; the parsed operation is checked afterwards, and only
 /// capability_invoke may actually exceed MAX_MESSAGE. Garbage without a newline closes at 4 KiB.
@@ -111,7 +115,7 @@ async fn request_frame<R: tokio::io::AsyncBufRead + Unpin>(
             }
         });
         let object_like = first == Some(&b'{') && second == Some(&b'"');
-        if total > MAX_INVOKE_MESSAGE || (total > MAX_MESSAGE && !object_like) {
+        if total > MAX_SKILL_MESSAGE || (total > MAX_MESSAGE && !object_like) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "message too large",
@@ -414,6 +418,7 @@ pub async fn serve(
     storage.set_safe_epoch(epoch);
     core.configure_storage(&storage);
     core.configure_llm(&storage, net_allow_loopback);
+    core.configure_skills(&storage);
     if let Some((path, digest)) = hub_catalog {
         core.configure_hub(
             crate::hub::load(&path, &digest)

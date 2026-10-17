@@ -148,6 +148,51 @@ pub enum Operation {
     },
     /// Test-only: exists solely under `--agent-synthetic`; otherwise refused.
     AgentTestBump,
+    /// S4 skill ops. Manifests travel inline (at most 16 KiB); see `transport` for the frame bound.
+    SkillValidate {
+        manifest: serde_json::Value,
+    },
+    SkillSaveDraft {
+        manifest: serde_json::Value,
+    },
+    SkillDryRun {
+        id: String,
+        version: String,
+        inputs: serde_json::Value,
+    },
+    SkillApprove {
+        id: String,
+        version: String,
+        revision: u64,
+    },
+    SkillEnable {
+        id: String,
+        revision: u64,
+    },
+    SkillDisable {
+        id: String,
+        revision: u64,
+    },
+    SkillRollback {
+        id: String,
+        revision: u64,
+    },
+    SkillRemove {
+        id: String,
+        revision: u64,
+    },
+    SkillRun {
+        id: String,
+        inputs: serde_json::Value,
+    },
+    SkillDecide {
+        run_id: String,
+        step: String,
+        decision: ToolDecision,
+    },
+    SkillCancel {
+        run_id: String,
+    },
 }
 
 /// User decision on a tool proposal. Only a client request can carry it; plugins cannot.
@@ -201,6 +246,7 @@ pub struct Response {
     pub command: Option<crate::commands::Outcome>,
     pub tool_proposals: Vec<crate::tools::View>,
     pub agent: Option<crate::agent::View>,
+    pub skills: Option<crate::skills::View>,
     pub text_input_available: bool,
     pub speech_samples: usize,
     pub speech_status: &'static str,
@@ -436,6 +482,72 @@ enum WireRequest {
     AgentTestBump {
         version: u16,
         request_id: String,
+    },
+    SkillValidate {
+        version: u16,
+        request_id: String,
+        manifest: serde_json::Value,
+    },
+    SkillSaveDraft {
+        version: u16,
+        request_id: String,
+        manifest: serde_json::Value,
+    },
+    SkillDryRun {
+        version: u16,
+        request_id: String,
+        id: String,
+        skill_version: String,
+        inputs: serde_json::Value,
+    },
+    SkillApprove {
+        version: u16,
+        request_id: String,
+        id: String,
+        skill_version: String,
+        revision: u64,
+    },
+    SkillEnable {
+        version: u16,
+        request_id: String,
+        id: String,
+        revision: u64,
+    },
+    SkillDisable {
+        version: u16,
+        request_id: String,
+        id: String,
+        revision: u64,
+    },
+    SkillRollback {
+        version: u16,
+        request_id: String,
+        id: String,
+        revision: u64,
+    },
+    SkillRemove {
+        version: u16,
+        request_id: String,
+        id: String,
+        revision: u64,
+    },
+    SkillRun {
+        version: u16,
+        request_id: String,
+        id: String,
+        inputs: serde_json::Value,
+    },
+    SkillDecide {
+        version: u16,
+        request_id: String,
+        run_id: String,
+        step: String,
+        decision: ToolDecision,
+    },
+    SkillCancel {
+        version: u16,
+        request_id: String,
+        run_id: String,
     },
 }
 impl<'de> Deserialize<'de> for Request {
@@ -796,6 +908,104 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
             } => (version, request_id, Operation::AgentTestBump),
+            WireRequest::SkillValidate {
+                version,
+                request_id,
+                manifest,
+            } => (version, request_id, Operation::SkillValidate { manifest }),
+            WireRequest::SkillSaveDraft {
+                version,
+                request_id,
+                manifest,
+            } => (version, request_id, Operation::SkillSaveDraft { manifest }),
+            WireRequest::SkillDryRun {
+                version,
+                request_id,
+                id,
+                skill_version,
+                inputs,
+            } => (
+                version,
+                request_id,
+                Operation::SkillDryRun {
+                    id,
+                    version: skill_version,
+                    inputs,
+                },
+            ),
+            WireRequest::SkillApprove {
+                version,
+                request_id,
+                id,
+                skill_version,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::SkillApprove {
+                    id,
+                    version: skill_version,
+                    revision,
+                },
+            ),
+            WireRequest::SkillEnable {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (version, request_id, Operation::SkillEnable { id, revision }),
+            WireRequest::SkillDisable {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::SkillDisable { id, revision },
+            ),
+            WireRequest::SkillRollback {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::SkillRollback { id, revision },
+            ),
+            WireRequest::SkillRemove {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (version, request_id, Operation::SkillRemove { id, revision }),
+            WireRequest::SkillRun {
+                version,
+                request_id,
+                id,
+                inputs,
+            } => (version, request_id, Operation::SkillRun { id, inputs }),
+            WireRequest::SkillDecide {
+                version,
+                request_id,
+                run_id,
+                step,
+                decision,
+            } => (
+                version,
+                request_id,
+                Operation::SkillDecide {
+                    run_id,
+                    step,
+                    decision,
+                },
+            ),
+            WireRequest::SkillCancel {
+                version,
+                request_id,
+                run_id,
+            } => (version, request_id, Operation::SkillCancel { run_id }),
         };
         Ok(Self {
             version,

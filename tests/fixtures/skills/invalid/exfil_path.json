@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "fixture_exfil_path",
+  "name": "Fixture exfil path",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: an args string looks like an absolute path.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["dummy_echo.echo"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "echo", "call": "dummy_echo.echo", "args": {"text": "/etc/passwd"}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

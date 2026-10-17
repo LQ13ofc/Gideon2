@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "fixture_branching",
+  "name": "Fixture branching",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Uses when and unless conditions to skip steps.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": ["fixture branch"],
+  "inputs": {
+    "bump": {"type": "bool", "required": false, "default": false},
+    "label": {"type": "string", "required": true, "max": 64}
+  },
+  "outputs": {"text": {"type": "string"}},
+  "dependency_capabilities": ["tool:synth_screen_read", "tool:synth_counter_inc", "tool:synth_set_text"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "read",
+      "call": "tool:synth_screen_read",
+      "args": {},
+      "save": {"epoch": "epoch"}
+    },
+    {
+      "id": "bump",
+      "call": "tool:synth_counter_inc",
+      "args": {"epoch": "${steps.read.epoch}"},
+      "when": {"ref": "input.bump", "op": "eq", "value": true},
+      "retries": 0,
+      "idempotent": false
+    },
+    {
+      "id": "label",
+      "call": "tool:synth_set_text",
+      "args": {"epoch": "${steps.read.epoch}", "text": "fixture"},
+      "unless": {"ref": "input.label", "op": "eq", "value": ""},
+      "idempotent": false,
+      "verify": {"ref": "steps.label.text", "op": "exists"},
+      "save": {"text": "text"}
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

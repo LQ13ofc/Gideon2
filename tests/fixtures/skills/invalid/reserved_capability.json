@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "fixture_reserved_cap",
+  "name": "Fixture reserved capability",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: depends on a reserved Base namespace (core.).",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["core.snapshot"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "snap", "call": "core.snapshot", "args": {}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

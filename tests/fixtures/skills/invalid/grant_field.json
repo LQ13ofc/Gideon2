@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "fixture_grant_field",
+  "name": "Fixture grant field",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: a step tries to carry a permission grant.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["tool:synth_screen_read"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "read", "call": "tool:synth_screen_read", "args": {}, "permission_grant": true}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

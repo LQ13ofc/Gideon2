@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "fixture_unknown_key",
+  "name": "Fixture unknown key",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: an unknown top-level key.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["tool:synth_screen_read"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "read", "call": "tool:synth_screen_read", "args": {}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}],
+  "extra_flag": true
+}

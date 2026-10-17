@@ -35,8 +35,28 @@ ApplicationWindow {
     readonly property string preferencesSuccess: "Preferências salvas pelo Core"
     readonly property bool spacious: width >= 1080 && height >= 760
     readonly property bool packAvailable: core.wakeChoices.length > 0
-    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM", "Percepção e ação"]
-    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub", "permissions"]
+    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM", "Percepção e ação", "Skills"]
+    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub", "permissions", "hub"]
+    // S4 skills: state words live here; codes go through core.codeMessage. Nothing on this page grants a permission.
+    function skillStateText(s) { switch (s) { case "draft": return "rascunho"; case "validated": return "validada"; case "tested": return "testada"; case "approved": return "aprovada"; case "enabled": return "habilitada"; case "disabled": return "desabilitada"; case "revised": return "revisada"; default: return s; } }
+    function skillSourceText(s) { switch (s) { case "created": return "criada"; case "imported": return "importada (publisher não verificado)"; case "llm_draft": return "rascunho do LLM"; default: return s; } }
+    function skillRunText(s) { switch (s) { case "running": return "executando"; case "awaiting_approval": return "aguardando sua decisão"; case "done": return "concluída"; case "failed": return "falhou"; case "cancelled": return "cancelada"; case "rolled_back": return "revertida"; default: return s; } }
+    function skillStepText(s) { switch (s) { case "pending": return "pendente"; case "running": return "em execução"; case "awaiting_approval": return "aguardando sua decisão"; case "done": return "concluído"; case "failed": return "falhou"; case "denied": return "negado"; case "undone": return "desfeito"; case "cancelled": return "cancelado"; default: return s; } }
+    function skillRunActive() { var r = core.skillCurrentRun; return !!r && (r.state === "running" || r.state === "awaiting_approval") }
+    function skillCan(action, s) {
+        if (core.skillsBusy) return false
+        switch (action) {
+        case "approve": return s === "tested"
+        case "enable": return s === "approved" || s === "disabled"
+        case "disable": return s === "enabled"
+        case "export": return s === "approved" || s === "enabled" || s === "disabled"
+        case "run": return s === "enabled" && !skillRunActive()
+        case "dry": case "rollback": case "remove": return true
+        }
+        return false
+    }
+    // The skill whose permissions are shown; a copy of the snapshot row, so it reads as shown when it was picked.
+    property var skillSelected: null
     // C4 test buttons: reads only. Each entry is one allowlisted capability (bridge PERCEPTION_CAPABILITIES) sent with the empty object.
     readonly property var perceptionActions: ({"screen_observe": [{capability: "screen_observe.capture", label: "Capturar"}, {capability: "screen_observe.status", label: "Estado"}], "computer_control": [{capability: "computer_control.tree", label: "Árvore"}, {capability: "computer_control.status", label: "Estado"}], "audio_advanced": [{capability: "audio_advanced.state", label: "Estado"}], "mic_advanced": [{capability: "mic_advanced.state", label: "Estado"}], "camera_gesture": [{capability: "camera_gesture.state", label: "Estado"}], "display_manipulate": [{capability: "display_manipulate.status", label: "Estado"}]})
     function perceptionStateText(state) { return ({running: "em execução", starting: "iniciando", disabled: "desativado", failed: "falhou", stopped: "parado", quarantined: "em quarentena"})[state] || state }
@@ -83,7 +103,7 @@ ApplicationWindow {
         function onChatSent(sent) { if (chatInput.text.trim() === sent) { chatInput.text = ""; window.setDraft("#chat", "text", "") } }
         // The captured model revision follows the user's own operations: refreshed when one settles, never on background changes.
         function onModelsStateChanged() { if (!core.modelsBusy) window.modelsRevisionCaptured = core.llmRevision }
-        function onChanged() { if (window.page === 8 && !core.modelsAvailable) window.page = 0; if (window.page === 9 && !core.perceptionAvailable) window.page = 0 }
+        function onChanged() { if (window.page === 8 && !core.modelsAvailable) window.page = 0; if (window.page === 9 && !core.perceptionAvailable) window.page = 0; if (window.page === 10 && !core.skillsAvailable) window.page = 0 }
     }
     Dialog {
         id: preferences; objectName: "preferencesDialog"
@@ -354,6 +374,22 @@ ApplicationWindow {
             GlowButton { objectName: "confirmClearPluginButton"; text: "Apagar dados"; Accessible.name: "Apagar dados do plugin LLM"; Layout.alignment: Qt.AlignRight; onClicked: clearPluginConfirm.accept() }
         }
     }
+    // Destructive confirmation for a skill: Cancel is the focused default; the explicit action button is the only way to accept.
+    Dialog {
+        id: removeSkillConfirm; objectName: "removeSkillConfirm"
+        property var skill: null
+        title: "Remover skill"; modal: true; anchors.centerIn: parent
+        width: Math.min(400, window.width - 32)
+        standardButtons: Dialog.Cancel
+        background: GlassCard { theme: window.themeIndex }
+        onOpened: { var cancel = standardButton(Dialog.Cancel); if (cancel) { cancel.text = "Cancelar"; cancel.forceActiveFocus() } }
+        onAccepted: { if (skill) core.skillRemove(skill.id) }
+        contentItem: ColumnLayout {
+            width: removeSkillConfirm.availableWidth
+            Label { text: removeSkillConfirm.skill ? "Remover " + removeSkillConfirm.skill.id + " v" + removeSkillConfirm.skill.version + " do Core? Nada é executado." : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            GlowButton { objectName: "confirmRemoveSkillButton"; text: "Remover"; Accessible.name: removeSkillConfirm.skill ? "Remover skill " + removeSkillConfirm.skill.id : "Remover skill"; Layout.alignment: Qt.AlignRight; onClicked: removeSkillConfirm.accept() }
+        }
+    }
     Rectangle {
         id: sidebar
         width: window.width >= 1000 ? 232 : 64
@@ -382,7 +418,7 @@ ApplicationWindow {
                     text: sidebar.width > 100 ? modelData : ""
                     Accessible.name: modelData
                     image: "assets/" + window.navIcons[index] + ".png"
-                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : index === 9 ? core.perceptionAvailable : true
+                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : index === 9 ? core.perceptionAvailable : index === 10 ? core.skillsAvailable : true
                     onClicked: window.page = index
                     ToolTip.visible: hovered && sidebar.width < 100; ToolTip.text: modelData
                 }
@@ -480,7 +516,7 @@ ApplicationWindow {
                     ColumnLayout {
                         anchors.left: parent.left; anchors.leftMargin: 26; anchors.verticalCenter: parent.verticalCenter; width: window.width > 900 ? parent.width - 260 : parent.width - 52; spacing: 10
                         Label { text: window.navigation[window.page]; color: "#f1f5ff"; font.pixelSize: window.width > 900 ? 52 : 24; font.bold: true }
-                        Label { text: window.page === 1 ? "Configure como o Gideon escuta e responde." : window.page === 3 ? "Defina o estilo visual do Gideon." : window.page === 2 ? "Sua voz, seus ajustes de áudio." : window.page === 4 ? "Cada capacidade precisa de autorização." : window.page === 5 ? "Acompanhe o estado real da Base." : window.page === 7 ? "Converse com o motor LLM opcional." : window.page === 8 ? "Escolha, teste e configure o modelo do motor LLM." : window.page === 9 ? "Teste sensores e ações simulados; nada age no seu computador." :"Capacidades opcionais, em um só lugar."; color: "#b7caf3"; font.pixelSize: 17; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: window.page === 1 ? "Configure como o Gideon escuta e responde." : window.page === 3 ? "Defina o estilo visual do Gideon." : window.page === 2 ? "Sua voz, seus ajustes de áudio." : window.page === 4 ? "Cada capacidade precisa de autorização." : window.page === 5 ? "Acompanhe o estado real da Base." : window.page === 7 ? "Converse com o motor LLM opcional." : window.page === 8 ? "Escolha, teste e configure o modelo do motor LLM." : window.page === 9 ? "Teste sensores e ações simulados; nada age no seu computador." : window.page === 10 ? "Procedimentos sobre capacidades instaladas; não concedem permissões." :"Capacidades opcionais, em um só lugar."; color: "#b7caf3"; font.pixelSize: 17; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
                 GlassCard {
@@ -636,6 +672,164 @@ ApplicationWindow {
                             }
                         }
                         Label { objectName: "perceptionResult"; text: core.perceptionResult; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado da percepção: " + text }
+                    }
+                }
+                // Skills (S4): list, manifest editor, LLM draft, dry run, run with per-step decisions, import preview and history. Every value is the Core snapshot 'skills' block; PlainText only.
+                GlassCard {
+                objectName: "skillsPanel"
+                theme: window.themeIndex
+                    visible: window.page === 10 && core.skillsAvailable; Layout.fillWidth: true; implicitHeight: skillsColumn.implicitHeight + 44
+                    ColumnLayout {
+                        id: skillsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        Label { text: "Skills"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        Label { text: "Validar não grava. Simular não chama capacidades. Executar pede sua aprovação em cada passo que muda estado. Skills não concedem permissões."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "skillsResult"; visible: text.length > 0; text: core.skillsResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado das skills: " + text }
+                        ProgressBar { objectName: "skillsProgress"; visible: core.skillsBusy; indeterminate: true; Layout.fillWidth: true; Accessible.name: "Operação de skill em andamento" }
+                        Label { text: "Entradas (JSON de objeto, até 16 KiB) para Simular e Executar"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        TextArea {
+                            id: skillInputs; objectName: "skillInputs"; Layout.fillWidth: true; text: "{}"
+                            textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#dce7ff"; placeholderTextColor: "#a3b6db"
+                            placeholderText: "{ \"campo\": \"valor\" }"; Accessible.name: "Entradas da skill em JSON"
+                            background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
+                        }
+                        Label { text: "Skills instaladas"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                        Label { objectName: "skillsEmpty"; visible: core.skillsItems.length === 0; text: "Nenhuma skill no Core ainda. Crie uma abaixo."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Repeater {
+                            model: core.skillsItems
+                            delegate: Rectangle {
+                                id: skillRow
+                                required property var modelData
+                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
+                                implicitHeight: skillRowColumn.implicitHeight + 20
+                                ColumnLayout {
+                                    id: skillRowColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
+                                    Label { objectName: "skillTitle_" + skillRow.modelData.id + "_" + skillRow.modelData.version; text: skillRow.modelData.name + " · " + skillRow.modelData.id + " v" + skillRow.modelData.version; textFormat: Text.PlainText; color: "#edf2ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                                    Label { objectName: "skillState_" + skillRow.modelData.id + "_" + skillRow.modelData.version; text: "Estado: " + window.skillStateText(skillRow.modelData.state) + " · origem: " + window.skillSourceText(skillRow.modelData.source) + (skillRow.modelData.active ? " · versão ativa" : ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { objectName: "skillDeps_" + skillRow.modelData.id + "_" + skillRow.modelData.version; text: "Dependências: " + (skillRow.modelData.deps_ok ? "ok" : "faltando: " + skillRow.modelData.missing.join(", ")) + " · permissões: " + (skillRow.modelData.permissions_ok ? "aprovadas" : "pendentes"); textFormat: Text.PlainText; color: skillRow.modelData.deps_ok ? "#b0c3e9" : "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Flow {
+                                        Layout.fillWidth: true; spacing: 8
+                                        GlowButton { objectName: "skillDryRun_" + skillRow.modelData.id + "_" + skillRow.modelData.version; text: "Simular"; Accessible.name: "Simular " + skillRow.modelData.id; enabled: window.skillCan("dry", skillRow.modelData.state); onClicked: core.skillDryRun(skillRow.modelData.id, skillRow.modelData.version, skillInputs.text) }
+                                        GlowButton { objectName: "skillApprove_" + skillRow.modelData.id + "_" + skillRow.modelData.version; text: "Aprovar"; Accessible.name: "Aprovar " + skillRow.modelData.id + " v" + skillRow.modelData.version; enabled: window.skillCan("approve", skillRow.modelData.state); onClicked: core.skillApprove(skillRow.modelData.id, skillRow.modelData.version) }
+                                        GlowButton { objectName: "skillEnable_" + skillRow.modelData.id; text: "Habilitar"; Accessible.name: "Habilitar " + skillRow.modelData.id; enabled: window.skillCan("enable", skillRow.modelData.state); onClicked: core.skillEnable(skillRow.modelData.id) }
+                                        GlowButton { objectName: "skillDisable_" + skillRow.modelData.id; text: "Desabilitar"; Accessible.name: "Desabilitar " + skillRow.modelData.id; enabled: window.skillCan("disable", skillRow.modelData.state); onClicked: core.skillDisable(skillRow.modelData.id) }
+                                        GlowButton { objectName: "skillRun_" + skillRow.modelData.id; text: "Executar"; Accessible.name: "Executar " + skillRow.modelData.id; enabled: window.skillCan("run", skillRow.modelData.state); onClicked: core.skillRun(skillRow.modelData.id, skillInputs.text) }
+                                        GlowButton { objectName: "skillRollback_" + skillRow.modelData.id; text: "Reverter versão"; Accessible.name: "Reverter versão de " + skillRow.modelData.id; enabled: window.skillCan("rollback", skillRow.modelData.state); onClicked: core.skillRollback(skillRow.modelData.id) }
+                                        GlowButton { objectName: "skillPermissions_" + skillRow.modelData.id; text: "Permissões"; Accessible.name: "Ver permissões de " + skillRow.modelData.id; onClicked: window.skillSelected = skillRow.modelData }
+                                        GlowButton { objectName: "skillExport_" + skillRow.modelData.id; text: "Exportar"; Accessible.name: "Exportar " + skillRow.modelData.id + " v" + skillRow.modelData.version; enabled: window.skillCan("export", skillRow.modelData.state); onClicked: core.skillExport(skillRow.modelData.id, skillRow.modelData.version) }
+                                        GlowButton { objectName: "skillRemove_" + skillRow.modelData.id; text: "Remover"; Accessible.name: "Remover " + skillRow.modelData.id; enabled: window.skillCan("remove", skillRow.modelData.state); onClicked: { removeSkillConfirm.skill = skillRow.modelData; removeSkillConfirm.open() } }
+                                    }
+                                }
+                            }
+                        }
+                        // Permissões: what the Core reports for the picked row. Required permissions are shown by the import preview, which reads the manifest.
+                        ColumnLayout {
+                            objectName: "skillPermissions"; visible: window.skillSelected !== null; Layout.fillWidth: true; spacing: 4
+                            Label { text: window.skillSelected ? "Permissões de " + window.skillSelected.id + " v" + window.skillSelected.version : ""; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                            Label { text: window.skillSelected ? "Aprovadas no Core: " + (window.skillSelected.permissions_ok ? "sim" : "não") + "\nFaltando: " + (window.skillSelected.missing.length ? window.skillSelected.missing.join(", ") : "nada") : ""; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { text: "Aprovar permissões não concede nada à skill: ela só usa capacidades já instaladas e aprovadas."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        }
+                        // Criar: manifest JSON by hand, or a draft from the LLM plugin when it runs. A draft is never enabled here.
+                        Label { text: "Criar skill (manifest JSON, até 16 KiB)"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                        TextArea {
+                            id: skillManifest; objectName: "skillManifest"; Layout.fillWidth: true
+                            textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#dce7ff"; placeholderTextColor: "#a3b6db"
+                            placeholderText: "schema_version 1, id, name, version, publisher, steps..."; Accessible.name: "Manifest da skill em JSON"
+                            background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            GlowButton { objectName: "skillValidate"; text: "Validar"; Accessible.name: "Validar manifest da skill"; enabled: !core.skillsBusy && skillManifest.text.trim().length > 0; onClicked: core.skillValidate(skillManifest.text) }
+                            GlowButton { objectName: "skillSaveDraft"; text: "Salvar rascunho"; Accessible.name: "Salvar rascunho da skill"; enabled: !core.skillsBusy && skillManifest.text.trim().length > 0; onClicked: core.skillSaveDraft(skillManifest.text) }
+                        }
+                        Label { text: "Gerar com LLM: descreva o que a skill deve fazer (até 1024 bytes)"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: skillDescription; objectName: "skillDescription"; Layout.fillWidth: true; maximumLength: 1024
+                                color: "#dce7ff"; placeholderTextColor: "#a3b6db"; placeholderText: "Ex.: ler uma nota e salvar um resumo"
+                                background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
+                                Accessible.name: "Descrição da skill para o LLM"
+                            }
+                            GlowButton { objectName: "skillDraftWithLlm"; text: "Gerar com LLM"; Accessible.name: "Gerar skill com o LLM"; enabled: core.skillLlmAvailable && !core.skillsBusy && skillDescription.text.trim().length > 0; onClicked: core.skillDraftWithLlm(skillDescription.text) }
+                        }
+                        Label { objectName: "skillLlmUnavailable"; visible: !core.skillLlmAvailable; text: "Gerar com LLM indisponível: o plugin llm_engine não está ativo."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        ColumnLayout {
+                            objectName: "skillDraftOutput"; visible: !!core.skillDraftOutput.draft_id; Layout.fillWidth: true; spacing: 4
+                            Label { text: "Rascunho " + core.skillDraftOutput.draft_id + " · v" + core.skillDraftOutput.version + " · " + window.skillStateText(core.skillDraftOutput.state) + " · nada foi habilitado"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { text: "Requisitos: " + ((core.skillDraftOutput.requirements || []).join(", ") || "nenhum"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { text: "Ambiguidades: " + ((core.skillDraftOutput.ambiguities || []).join("; ") || "nenhuma"); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { text: "Passos previstos:\n" + ((core.skillDraftOutput.preview || []).join("\n") || "nenhum"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { visible: !!core.skillDraftOutput.diff; text: "Diferença:\n" + (core.skillDraftOutput.diff || ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                        }
+                        // Importar: the Core reads only <home>/skill-imports/<name>.gskill and previews it; nothing is installed until the confirmation.
+                        Label { text: "Importar e exportar"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: skillImportName; objectName: "skillImportName"; Layout.fillWidth: true; maximumLength: 64
+                                color: "#dce7ff"; placeholderTextColor: "#a3b6db"; placeholderText: "nome do pacote, sem caminho"
+                                validator: RegularExpressionValidator { regularExpression: /[A-Za-z0-9._-]{1,64}/ }
+                                background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
+                                Accessible.name: "Nome do pacote para importar"
+                            }
+                            GlowButton { objectName: "skillImport"; text: "Pré-visualizar"; Accessible.name: "Pré-visualizar importação de skill"; enabled: !core.skillsBusy && skillImportName.acceptableInput; onClicked: core.skillImport(skillImportName.text) }
+                        }
+                        ColumnLayout {
+                            objectName: "skillImportPreview"; visible: !!core.skillImportPreview.name; Layout.fillWidth: true; spacing: 4
+                            Label { text: "Pacote " + core.skillImportPreview.name + ": " + core.skillImportPreview.id + " v" + core.skillImportPreview.version; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                            Label { text: "Publisher: " + core.skillImportPreview.publisher + " · não verificado"; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Publisher " + core.skillImportPreview.publisher + ", não verificado" }
+                            Label { text: "Permissões exigidas: " + ((core.skillImportPreview.permissions_required || []).join(", ") || "nenhuma") + "\nNovas nesta versão: " + ((core.skillImportPreview.permission_delta || []).join(", ") || "nenhuma"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { visible: core.skillImportPreview.permissions_escalated === true; text: "Escalada de permissões: esta versão pede mais que a anterior; aprove de novo antes de usar."; textFormat: Text.PlainText; color: "#ff9a9a"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { text: "Dependências faltando: " + ((core.skillImportPreview.missing_deps || []).join(", ") || "nenhuma"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { visible: core.skillImportPreview.duplicate === true; text: "Já existe uma skill com este id no Core."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Repeater {
+                                model: core.skillImportPreview.findings || []
+                                delegate: Label {
+                                    required property var modelData
+                                    objectName: "skillFinding_" + modelData.code
+                                    text: "Achado: " + core.codeMessage(modelData.code) + (modelData.field ? " (" + modelData.field + ")" : "")
+                                    textFormat: Text.PlainText; color: "#ff9a9a"; wrapMode: Text.WordWrap; Layout.fillWidth: true
+                                }
+                            }
+                            Label { text: "Importar instala como rascunho e nunca concede permissões. Valide, simule e aprove antes de usar."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            GlowButton { objectName: "skillImportConfirm"; text: "Instalar como rascunho"; Accessible.name: "Instalar como rascunho o pacote " + core.skillImportPreview.name; enabled: !core.skillsBusy && (core.skillImportPreview.findings || []).length === 0; onClicked: core.skillImportConfirm(core.skillImportPreview.name) }
+                        }
+                        // Execução: progress from the Core run; each step that changes state waits for the user's decision here.
+                        ColumnLayout {
+                            objectName: "skillRunView"; visible: !!core.skillCurrentRun.run_id; Layout.fillWidth: true; spacing: 6
+                            Label { objectName: "skillRunState"; text: "Execução " + core.skillCurrentRun.run_id + " · " + core.skillCurrentRun.skill + " · " + window.skillRunText(core.skillCurrentRun.state) + (core.skillCurrentRun.step ? " · passo " + core.skillCurrentRun.step : ""); textFormat: Text.PlainText; color: core.skillCurrentRun.state === "failed" ? "#ff9a9a" : "#f1f5ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true; Accessible.name: "Estado da execução: " + text }
+                            Repeater {
+                                model: core.skillCurrentRun.steps || []
+                                delegate: Rectangle {
+                                    id: stepRow
+                                    required property var modelData
+                                    Layout.fillWidth: true; radius: 12; color: "#132341"; border.color: "#304572"
+                                    implicitHeight: stepColumn.implicitHeight + 16
+                                    ColumnLayout {
+                                        id: stepColumn; anchors.fill: parent; anchors.margins: 8; spacing: 4
+                                        Label { objectName: "skillStep_" + stepRow.modelData.id; text: "Passo " + stepRow.modelData.id + " · " + window.skillStepText(stepRow.modelData.state) + (stepRow.modelData.code ? " · " + core.codeMessage(stepRow.modelData.code) : ""); textFormat: Text.PlainText; color: "#dce7ff"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                        RowLayout {
+                                            visible: stepRow.modelData.state === "awaiting_approval"; Layout.fillWidth: true
+                                            GlowButton { objectName: "skillDeny_" + stepRow.modelData.id; text: "Negar passo"; Accessible.name: "Negar o passo " + stepRow.modelData.id; onClicked: core.skillDecide(core.skillCurrentRun.run_id, stepRow.modelData.id, "deny") }
+                                            GlowButton { objectName: "skillAuthorize_" + stepRow.modelData.id; text: "Autorizar passo"; Accessible.name: "Autorizar o passo " + stepRow.modelData.id; onClicked: core.skillDecide(core.skillCurrentRun.run_id, stepRow.modelData.id, "authorize") }
+                                        }
+                                    }
+                                }
+                            }
+                            Label { objectName: "skillOutputs"; visible: !!core.skillCurrentRun.outputs; text: "Saídas: " + JSON.stringify(core.skillCurrentRun.outputs || {}); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                            GlowButton { objectName: "skillCancel"; text: "Cancelar execução"; Accessible.name: "Cancelar a execução da skill"; enabled: window.skillRunActive(); onClicked: core.skillCancel(core.skillCurrentRun.run_id) }
+                        }
+                        // Histórico: ledger of runs without content; codes and the failed step only.
+                        Label { text: "Histórico de execuções"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                        Label { objectName: "skillHistoryEmpty"; visible: core.skillHistory.length === 0; text: "Nenhuma execução registrada."; textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true }
+                        Repeater {
+                            model: core.skillHistory
+                            delegate: Label {
+                                required property var modelData
+                                text: modelData.run_id + " · " + modelData.skill + " v" + modelData.version + " · " + window.skillRunText(modelData.state) + (modelData.step ? " · passo " + modelData.step : "") + (modelData.codes.length ? " · " + modelData.codes.map(function (c) { return core.codeMessage(c) }).join("; ") : "")
+                                textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+                            }
+                        }
                     }
                 }
                 // Modelos LLM: shown only while llm_engine runs with llm_engine.models; the Base has no models page.

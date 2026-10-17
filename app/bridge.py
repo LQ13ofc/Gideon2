@@ -26,7 +26,7 @@ STAGED_ERRORS=('staged_payload_invalid',)
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
@@ -532,6 +532,8 @@ def validate_snapshot(data,request_id,min_sequence):
     require('llm' in data and 'tool_proposals' in data and valid_llm(data['llm']) and valid_tools(data['tool_proposals']))
     # C3: the agent block is optional while Cores without the runtime omit it; when present it is null or the exact run view.
     if 'agent' in data:require(valid_agent(data['agent']))
+    # S4: the skills block is optional (absent or null while the skill engine is not published); when present it is the exact view of docs/S4.md.
+    if 'skills' in data:require(valid_skills(data['skills']))
     partial=data.get('partial')
     require(partial is None or (isinstance(partial,str) and utf8_len(partial)<=PARTIAL_LIMIT))
     pack=data.get('base_pack')
@@ -674,6 +676,171 @@ CODE_MESSAGES={
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
 def code_message(code):return CODE_MESSAGES.get(code,f'Core recusou a ação: {code}')
+# S4 skills (docs/S4.md D1-D4). The Core owns manifests, the ledger, dependencies and every transition; this layer checks the shape and size of what it shows and sends.
+SKILL_STATES=('draft','validated','tested','approved','enabled','disabled','revised');SKILL_SOURCES=('created','imported','llm_draft')
+SKILL_RUN_STATES=('running','awaiting_approval','done','failed','cancelled','rolled_back');SKILL_STEP_STATES=('pending','running','awaiting_approval','done','failed','denied','undone','cancelled')
+# Validator reasons (skill_invalid:<reason>, docs/S4.md D1). Each one has a Portuguese message in CODE_MESSAGES.
+SKILL_REASON_MESSAGES={
+    'out_of_scope':'Passo chama capability fora das dependências declaradas',
+    'exfiltration':'Manifest tenta enviar dados para fora: caminho, URL, shell ou segredo',
+    'cycle':'Ciclo entre skills; recursão recusada',
+    'depth':'Skill aninhada além do limite de profundidade (2)',
+    'missing_dependency':'Dependência ausente: plugin ou ferramenta indisponível',
+    'oversize':'Manifest ou campo acima do limite de tamanho',
+    'unknown_key':'Campo desconhecido no manifest',
+    'schema_version':'Versão de esquema não suportada (use 1)',
+    'duplicate_id':'Já existe uma skill com este id',
+    'permissions_escalated':'Esta versão pede mais permissões que a anterior; aprove de novo',
+    'min_runtime':'Esta skill exige um Gideon mais novo',
+    'reserved_capability':'Capability reservada da Base; a skill não pode usá-la',
+    'grant_field':'Campo de permissão não é permitido dentro de passos',
+    'unknown_step':'Referência a passo inexistente',
+    'forward_ref':'Referência a passo que ainda não executou',
+    'bad_template':'Template inválido: use só ${input.x} ou ${steps.id.campo}',
+    'too_many_steps':'Mais passos que o limite (16)',
+    'too_many_deps':'Mais dependências que o limite (8)',
+    'bad_manifest':'Manifest malformado',
+    'bad_id':'Id de skill inválido',
+    'bad_version':'Versão inválida: use x.y.z',
+    'bad_publisher':'Publisher inválido',
+    'hash_mismatch':'Hash não confere: pacote adulterado',
+    'corrupt_package':'Pacote corrompido',
+    'symlink':'Link simbólico no pacote; recusado',
+    'file_too_large':'Arquivo grande demais para importar (limite 64 KiB)',
+    'path_not_allowed':'Arquivo fora da pasta de importação',
+    'unverified_publisher':'Publisher não verificado',
+}
+SKILL_REASONS=frozenset(SKILL_REASON_MESSAGES)
+# Operation codes the Core answers with for skill ops (not validator reasons). Codes shared with other channels reuse their CODE_MESSAGES text.
+SKILL_OP_MESSAGES={
+    'stale_skill_revision':'Skills mudaram no Core; atualize e tente de novo',
+    'missing_dependency':'Dependência ausente: execução bloqueada antes de qualquer passo',
+    'skill_busy':'Já existe uma skill em execução; aguarde ou cancele',
+    'unknown_skill':'Skill desconhecida ou já removida',
+    'unknown_skill_run':'Execução de skill desconhecida ou já encerrada',
+    'skill_not_enabled':'Skill não está habilitada; nada foi executado',
+    'skill_not_approved':'Aprove a skill antes de habilitar ou executar',
+    'not_pending':'Este passo não está aguardando decisão',
+    'unknown_step':'Passo desconhecido ou fora de ordem',
+    'invalid_skill_input':'Entrada da skill inválida: confira os campos e os tipos',
+    'invalid_manifest':'Manifest inválido: objeto JSON de até 16 KiB',
+    'duplicate_skill':'Já existe uma skill com este id',
+    'undo_failed':'Desfazer um passo falhou; confira o efeito manualmente',
+    'rolled_back':'Execução revertida: os passos concluídos foram desfeitos',
+    'invalid_import':'Pacote de importação inválido',
+    'import_not_found':'Pacote não encontrado na pasta de importação',
+    'stale_import':'A pré-visualização mudou; importe de novo',
+}
+SKILL_OP_CODES=frozenset(SKILL_OP_MESSAGES)|frozenset({'missing_dependency','permission_denied','verify_failed','capability_unavailable','capability_timeout','timeout','run_deadline','cancelled','denied','user_denied','destructive_disabled','plugin_error','invalid_output','invalid_input','max_steps','executor_unavailable','executor_failed','unknown_tool','llm_unavailable','unknown_service','aborted','awaiting_approval'})
+SKILL_CODES=SKILL_OP_CODES|frozenset('skill_invalid:'+reason for reason in SKILL_REASONS)
+CODE_MESSAGES.update({f'skill_invalid:{reason}':text for reason,text in SKILL_REASON_MESSAGES.items()})
+CODE_MESSAGES.update({code:text for code,text in SKILL_OP_MESSAGES.items() if code not in CODE_MESSAGES})
+SKILL_ID=re.compile(r'[a-z][a-z0-9_]{2,40}');SKILL_STEP_ID=re.compile(r'[a-z][a-z0-9_]{0,23}');SKILL_IMPORT_NAME=re.compile(r'[A-Za-z0-9._-]{1,64}')
+SKILL_SEMVER=re.compile(r'(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})')
+# Limits mirror docs/S4.md: manifest and inputs at most 16 KiB; 16 skills x 3 versions in the ledger; 16 steps; 32 history entries; outputs at most 1 KiB.
+SKILL_JSON_LIMIT=16384;SKILL_DESCRIPTION_LIMIT=1024;SKILL_ITEMS_LIMIT=48;SKILL_STEPS_LIMIT=16;SKILL_HISTORY_LIMIT=32;SKILL_OUTPUTS_LIMIT=1024;SKILL_FINDINGS_LIMIT=16;SKILL_CODES_LIMIT=8;SKILL_DEPS_LIMIT=8
+SKILL_DRAFT_CAPABILITY='llm_engine.skill_draft';SKILL_DRAFT_PLUGIN='llm_engine';SKILL_DRAFT_DEADLINE_MS=30000
+PENDING_SKILL_DRAFT='Gerando skill com o LLM…';SKILL_ARM=object()
+SKILL_OPS=frozenset({'skill_validate','skill_save_draft','skill_dry_run','skill_approve','skill_enable','skill_disable','skill_rollback','skill_remove','skill_run','skill_decide','skill_cancel','skill_export','skill_import','skill_import_confirm'})
+SKILL_ITEM_KEYS=frozenset({'id','name','version','state','source','active','deps_ok','permissions_ok','missing'})
+SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code'})
+SKILL_HISTORY_KEYS=frozenset({'run_id','skill','version','state','step','codes'})
+SKILL_IMPORT_KEYS=frozenset({'name','id','version','publisher','unverified','permissions_required','missing_deps','permission_delta','permissions_escalated','duplicate','findings'})
+SKILL_FINDING_KEYS=frozenset({'code','field'})
+SKILL_DRAFT_KEYS=frozenset({'draft_id','version','state','requirements','ambiguities','preview'});SKILL_DRAFT_OPTIONAL=frozenset({'diff'})
+def skill_json(text):
+    """Local rule for a manifest or the inputs of a run: a JSON object of at most 16 KiB. Returns (value, problem); a None problem means the value may be sent."""
+    try:
+        if not isinstance(text,str):return None,'JSON inválido'
+        if utf8_len(text)>SKILL_JSON_LIMIT:return None,'JSON acima de 16 KiB'
+        value=json.loads(text,parse_constant=_no_constant)
+    except (UnicodeError,ValueError,RecursionError):return None,'Entrada não é JSON válido'
+    if not isinstance(value,dict):return None,'Deve ser um objeto JSON'
+    return value,None
+def skill_id_problem(ident,version=None):
+    if not (isinstance(ident,str) and SKILL_ID.fullmatch(ident)):return 'Id de skill inválido'
+    if version is not None and not (isinstance(version,str) and SKILL_SEMVER.fullmatch(version)):return 'Versão inválida: use x.y.z'
+    return None
+def skill_description_problem(text):
+    """Rule for the LLM draft request: trimmed, 1..=1024 UTF-8 bytes, no control characters (the Core applies the same limit)."""
+    try:
+        if not isinstance(text,str) or not text.strip():return 'Descrição vazia'
+        if utf8_len(text.strip())>SKILL_DESCRIPTION_LIMIT:return 'Descrição acima de 1024 bytes'
+        if any(unicodedata.category(c)=='Cc' for c in text.strip()):return 'Descrição com quebra de linha ou controle não é aceita'
+    except UnicodeError:return 'Descrição inválida'
+    return None
+def skill_code_ok(code):return isinstance(code,str) and code in SKILL_CODES
+def valid_skill_item(item):
+    """One ledger view row (docs/S4.md): exact keys, enums, semver, missing dependencies only as short plain names; deps_ok means nothing is missing; enabled is always active."""
+    if not (isinstance(item,dict) and set(item)==SKILL_ITEM_KEYS):return False
+    if not (isinstance(item['id'],str) and SKILL_ID.fullmatch(item['id']) and text_ok(item['name'],64) and isinstance(item['version'],str) and SKILL_SEMVER.fullmatch(item['version'])):return False
+    if item['state'] not in SKILL_STATES or item['source'] not in SKILL_SOURCES:return False
+    if not all(type(item[k]) is bool for k in ('active','deps_ok','permissions_ok')):return False
+    if item['state']=='enabled' and not item['active']:return False
+    missing=item['missing']
+    if not (isinstance(missing,list) and len(missing)<=SKILL_DEPS_LIMIT and all(isinstance(m,str) and text_ok(m,128) for m in missing)):return False
+    return item['deps_ok']==(not missing)
+def valid_skill_run(run):
+    """Run view (docs/S4.md D2): null, or exact keys with a known state, steps bounded and unique, codes from the allowlist, awaiting approval only with the current step, outputs at most 1 KiB."""
+    if run is None:return True
+    if not (isinstance(run,dict) and SKILL_RUN_KEYS<=set(run)<=SKILL_RUN_KEYS|SKILL_RUN_OPTIONAL):return False
+    if not (run_id_ok(run['run_id']) and isinstance(run['skill'],str) and SKILL_ID.fullmatch(run['skill']) and run['state'] in SKILL_RUN_STATES):return False
+    steps=run['steps']
+    if not (isinstance(steps,list) and len(steps)<=SKILL_STEPS_LIMIT):return False
+    ids=set();awaiting=[]
+    for step in steps:
+        if not (isinstance(step,dict) and {'id','state'}<=set(step)<=SKILL_STEP_KEYS):return False
+        if not (isinstance(step['id'],str) and SKILL_STEP_ID.fullmatch(step['id']) and step['id'] not in ids and step['state'] in SKILL_STEP_STATES):return False
+        if 'code' in step and not skill_code_ok(step['code']):return False
+        ids.add(step['id'])
+        if step['state']=='awaiting_approval':awaiting.append(step['id'])
+    current=run['step']
+    if current is not None and not (isinstance(current,str) and current in ids):return False
+    if (run['state']=='awaiting_approval')!=bool(awaiting) or (awaiting and current not in awaiting):return False
+    if 'outputs' in run and not (isinstance(run['outputs'],dict) and bounded_json(run['outputs'],SKILL_OUTPUTS_LIMIT)):return False
+    return True
+def valid_skill_history(entries):
+    if not (isinstance(entries,list) and len(entries)<=SKILL_HISTORY_LIMIT):return False
+    for entry in entries:
+        if not (isinstance(entry,dict) and set(entry)==SKILL_HISTORY_KEYS and run_id_ok(entry['run_id'])):return False
+        if not (isinstance(entry['skill'],str) and SKILL_ID.fullmatch(entry['skill']) and isinstance(entry['version'],str) and SKILL_SEMVER.fullmatch(entry['version'])):return False
+        if entry['state'] not in SKILL_RUN_STATES or (entry['step'] is not None and not (isinstance(entry['step'],str) and SKILL_STEP_ID.fullmatch(entry['step']))):return False
+        codes=entry['codes']
+        if not (isinstance(codes,list) and len(codes)<=SKILL_CODES_LIMIT and all(skill_code_ok(c) for c in codes)):return False
+    return True
+def valid_skill_import(preview):
+    """Import preview (docs/S4.md D4): always unverified; findings carry validator codes only."""
+    if preview is None:return True
+    if not (isinstance(preview,dict) and set(preview)==SKILL_IMPORT_KEYS):return False
+    if not (isinstance(preview['name'],str) and SKILL_IMPORT_NAME.fullmatch(preview['name']) and isinstance(preview['id'],str) and SKILL_ID.fullmatch(preview['id'])):return False
+    if not (isinstance(preview['version'],str) and SKILL_SEMVER.fullmatch(preview['version']) and text_ok(preview['publisher'],64)):return False
+    if preview['unverified'] is not True or type(preview['duplicate']) is not bool or type(preview['permissions_escalated']) is not bool:return False
+    for key,limit,size in (('permissions_required',SKILL_CODES_LIMIT,64),('missing_deps',SKILL_DEPS_LIMIT,128),('permission_delta',SKILL_CODES_LIMIT,64)):
+        value=preview[key]
+        if not (isinstance(value,list) and len(value)<=limit and all(isinstance(v,str) and text_ok(v,size) for v in value)):return False
+    findings=preview['findings']
+    if not (isinstance(findings,list) and len(findings)<=SKILL_FINDINGS_LIMIT):return False
+    return all(isinstance(f,dict) and set(f)<=SKILL_FINDING_KEYS and 'code' in f and skill_code_ok(f['code']) and ('field' not in f or text_ok(f['field'],64)) for f in findings)
+def valid_skills(block):
+    """Snapshot block skills: null, or revision, items (unique id+version), run and history (docs/S4.md D2); import preview optional."""
+    if block is None:return True
+    if not (isinstance(block,dict) and {'revision','items','run','history'}<=set(block)<=frozenset({'revision','items','run','history','import'})):return False
+    if not is_int(block['revision']):return False
+    items=block['items']
+    if not (isinstance(items,list) and len(items)<=SKILL_ITEMS_LIMIT and all(valid_skill_item(i) for i in items)):return False
+    keys=[(i['id'],i['version']) for i in items]
+    if len(set(keys))!=len(keys):return False
+    return valid_skill_run(block['run']) and valid_skill_history(block['history']) and valid_skill_import(block.get('import'))
+def valid_skill_draft(output):
+    """Output of llm_engine.skill_draft (docs/S4.md D3): bounded PlainText fields; the draft itself is created by the Core, never enabled here."""
+    if not (isinstance(output,dict) and set(output)<=SKILL_DRAFT_KEYS|SKILL_DRAFT_OPTIONAL and SKILL_DRAFT_KEYS<=set(output)):return False
+    # D3: draft_put creates only draft, or revised in draft; an approved or enabled version is never the output of the LLM.
+    if not (text_ok(output['draft_id'],64) and isinstance(output['version'],str) and SKILL_SEMVER.fullmatch(output['version']) and output['state'] in ('draft','revised')):return False
+    for key,limit,size in (('requirements',SKILL_CODES_LIMIT,128),('ambiguities',SKILL_CODES_LIMIT,256),('preview',SKILL_STEPS_LIMIT,256)):
+        value=output[key]
+        if not (isinstance(value,list) and len(value)<=limit and all(isinstance(v,str) and plain_text(v,size) for v in value)):return False
+    if 'diff' in output and not plain_text(output['diff'],2048):return False
+    return bounded_output(output)
 # op -> (result channel, done message or builder). One table drives every Core answer.
 OPS={
     'preferences':('prefs',PREFS_DONE),'rollback_preferences':('prefs',PREFS_DONE),'select_wake':('prefs',PREFS_DONE),'feedback_preferences':('prefs',PREFS_DONE),
@@ -687,22 +854,28 @@ OPS={
     'secret_set':('llm','Chave salva pelo Core'),'secret_clear':('llm','Chave removida pelo Core'),'llm_configure':('llm','Configuração salva pelo Core'),
     'tool_decide':('tools','Decisão enviada ao Core'),
     'agent_start':('agent','Objetivo enviado ao Core'),'agent_abort':('agent','Aborto enviado ao Core'),
+    # S4 skills: the Core's ack code is the result; validator reasons arrive as skill_invalid:<reason>.
+    'skill_validate':('skills','Manifest válido; nada foi gravado'),'skill_save_draft':('skills','Rascunho salvo no Core'),'skill_dry_run':('skills','Simulação concluída; skill marcada como testada'),
+    'skill_approve':('skills','Skill aprovada'),'skill_enable':('skills','Skill habilitada'),'skill_disable':('skills','Skill desabilitada'),'skill_rollback':('skills','Versão anterior restaurada'),'skill_remove':('skills','Skill removida'),
+    'skill_run':('skills','Execução iniciada'),'skill_decide':('skills','Decisão enviada ao Core'),'skill_cancel':('skills','Cancelamento enviado'),
+    'skill_export':('skills','Pacote exportado; publisher não verificado'),'skill_import':('skills','Pré-visualização de importação pronta'),'skill_import_confirm':('skills','Skill importada como rascunho; aprove antes de usar'),
 }
 PENDING={'agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao Core…','hub_approve':'Enviando aprovação ao Core','hub_abort':'Enviando cancelamento ao Core','hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core','plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…','text':'Enviando texto ao Core',
-    'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…'}
+    'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…',
+    'skill_validate':'Validando manifest no Core…','skill_save_draft':'Salvando rascunho no Core…','skill_dry_run':'Simulando skill no Core…','skill_approve':'Aprovando skill no Core…','skill_enable':'Habilitando skill no Core…','skill_disable':'Desabilitando skill no Core…','skill_rollback':'Revertendo versão no Core…','skill_remove':'Removendo skill no Core…','skill_run':'Iniciando skill no Core…','skill_decide':'Enviando decisão do passo ao Core…','skill_cancel':'Cancelando skill no Core…','skill_export':'Exportando pacote pelo Core…','skill_import':'Lendo pacote pelo Core…','skill_import_confirm':'Importando como rascunho pelo Core…'}
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
     preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
-    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal()
+    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
@@ -711,6 +884,8 @@ class Bridge(QObject):
         self.models_page_req=None;self.models_page=fresh_model_pages()
         # C4 perception: one allowlisted capability at a time. perception_req awaits the Core ack; perception_inflight awaits the plugin result; perception_before is the capability_result seen at ack, so a stale answer is never taken for the new one.
         self.perception_req=None;self.perception_inflight=None;self.perception_before=None;self.perception_indicators={'mic':None,'camera':None}
+        # S4 skills: skill_req awaits the Core ack of the LLM draft; skill_inflight awaits the plugin result; skill_before is the capability_result seen at ack (same rule as perception).
+        self.skill_req=None;self.skill_inflight=None;self.skill_before=None;self.skill_draft={}
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
         self.poll=QTimer(self);self.poll.setInterval(1000);self.poll.timeout.connect(self.refresh)
         self.retry=QTimer(self);self.retry.setSingleShot(True);self.retry.timeout.connect(self.connect_core)
@@ -733,7 +908,7 @@ class Bridge(QObject):
         self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=dict.fromkeys(self.results,'');self.hub_target='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         # After abort(): it re-enters _offline synchronously, which clears results; the chat message must survive that.
-        self._chat_reset();self._models_reset();self._perception_reset()
+        self._chat_reset();self._models_reset();self._perception_reset();self._skill_reset()
         self._publish(old,self.snapshot)
         self.changed.emit()
         if not self.retry.isActive():self.retry.start(self._backoff);self._backoff=min(5000,self._backoff*2)
@@ -749,7 +924,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -764,6 +939,11 @@ class Bridge(QObject):
             self.pending_chat=False;self._chat_accepted(code);return
         if op=='capability_cancel' and self.pending_chat_cancel:
             self.pending_chat_cancel=False;self.results['chat']='Cancelamento enviado' if code=='ok' else code_message(code);self.chatChanged.emit()
+        if op=='capability_invoke' and self.skill_req is not None:
+            req,self.skill_req=self.skill_req,None
+            if code=='ok':self.skill_inflight=req;self.skill_before=SKILL_ARM;self.results['skills']=PENDING_SKILL_DRAFT
+            else:self.results['skills']=code_message(code)
+            self._skills_touch();return
         if op=='capability_invoke' and self.perception_req is not None:
             req,self.perception_req=self.perception_req,None
             if code=='ok':self.perception_inflight=req;self.perception_before=PERCEPTION_ARM;self.results['perception']=PENDING['capability_invoke']
@@ -808,7 +988,7 @@ class Bridge(QObject):
             # The invocation result arrives later in the snapshot; the Core clears it on every new invoke.
             if self.capability_pending and data.get('capability_result'):self.capability_pending=False;self.results['plugin']=''
             self._apply(data,settled=pending_op in OPS)
-            self._chat_observe();self._models_observe();self._perception_observe()
+            self._chat_observe();self._models_observe();self._perception_observe();self._skill_observe()
             self.poll.setInterval(150 if sid is not None else 1000)
             if self.cancel_id is not None:
                 old_id=self.cancel_id;self.cancel_id=None;self._request('cancel',session_id=int(old_id))
@@ -1458,3 +1638,132 @@ class Bridge(QObject):
         if self._request('capability_invoke',capability=capability,input=json.loads(text),deadline_ms=PERCEPTION_DEADLINE_MS):self.results['perception']=PENDING['capability_invoke']
         else:self.perception_req=None;self.results['perception']='Core indisponível'
         self._perception_touch()
+    # ---- S4 skills (docs/S4.md). The Core decides every transition and every permission; the bridge refuses what it can see is impossible, sends one bounded request at a time and shows the snapshot 'skills' block.
+    def _skills_ready(self):return self.online and isinstance(self.snapshot.get('skills'),dict)
+    def _skill_block(self):return self.snapshot.get('skills') or {}
+    def _skill_revision(self):return int(self._skill_block().get('revision',0))
+    def _skill_run(self):return self._skill_block().get('run')
+    def _skill_run_active(self):
+        run=self._skill_run();return run is not None and run['state'] in ('running','awaiting_approval')
+    def _skill_import(self):return self._skill_block().get('import')
+    def _skill_busy_now(self):return self.skill_req is not None or self.skill_inflight is not None
+    def _skills_touch(self):self.changed.emit()
+    def _skill_op(self,op,**kw):
+        """One Core request on the skills channel. Refused while unavailable or while another request is in flight; never queued."""
+        if not self._skills_ready():return self._refuse('skills','Skills indisponíveis agora')
+        if self._skill_busy_now():return self._refuse('skills',CODE_MESSAGES['busy'])
+        return self._send('skills',op,**kw)
+    def _skill_by_id(self,op,ident):
+        """Lifecycle ops carry the live ledger revision, like the plugin ops: the Core refuses a revision it no longer has."""
+        problem=skill_id_problem(ident)
+        if problem is not None:return self._refuse('skills',problem)
+        self._skill_op(op,id=ident,revision=self._skill_revision())
+    def _skill_manifest(self,op,text):
+        value,problem=skill_json(text)
+        if problem is not None:return self._refuse('skills',problem)
+        self._skill_op(op,manifest=value)
+    @Slot(str)
+    def skillValidate(self,text):self._skill_manifest('skill_validate',text)
+    @Slot(str)
+    def skillSaveDraft(self,text):self._skill_manifest('skill_save_draft',text)
+    @Slot(str,str,str)
+    def skillDryRun(self,ident,version,inputs):
+        value,problem=skill_json(inputs);problem=skill_id_problem(ident,version) or problem
+        if problem is not None:return self._refuse('skills',problem)
+        self._skill_op('skill_dry_run',id=ident,skill_version=version,inputs=value)
+    @Slot(str,str)
+    def skillApprove(self,ident,version):
+        problem=skill_id_problem(ident,version)
+        if problem is not None:return self._refuse('skills',problem)
+        self._skill_op('skill_approve',id=ident,skill_version=version,revision=self._skill_revision())
+    @Slot(str)
+    def skillEnable(self,ident):self._skill_by_id('skill_enable',ident)
+    @Slot(str)
+    def skillDisable(self,ident):self._skill_by_id('skill_disable',ident)
+    @Slot(str)
+    def skillRollback(self,ident):self._skill_by_id('skill_rollback',ident)
+    @Slot(str)
+    def skillRemove(self,ident):self._skill_by_id('skill_remove',ident)
+    @Slot(str,str)
+    def skillRun(self,ident,inputs):
+        value,problem=skill_json(inputs);problem=skill_id_problem(ident) or problem
+        if problem is None and self._skill_run_active():problem=CODE_MESSAGES['skill_busy']
+        if problem is not None:return self._refuse('skills',problem)
+        self._skill_op('skill_run',id=ident,inputs=value)
+    @Slot(str,str,str)
+    def skillDecide(self,runId,step,decision):
+        """Only a step the Core is waiting on can be decided; authorize and deny are the two answers, as in tool_decide."""
+        run=self._skill_run();states={s['id']:s['state'] for s in (run or {}).get('steps',[])}
+        if decision not in ('authorize','deny') or not run or run['run_id']!=runId or states.get(step)!='awaiting_approval':return self._refuse('skills',CODE_MESSAGES['not_pending'])
+        self._skill_op('skill_decide',run_id=runId,step=step,decision=decision)
+    @Slot(str)
+    def skillCancel(self,runId):
+        run=self._skill_run()
+        if not run or run['run_id']!=runId or not self._skill_run_active():return self._refuse('skills',CODE_MESSAGES['unknown_skill_run'])
+        self._skill_op('skill_cancel',run_id=runId)
+    @Slot(str,str)
+    def skillExport(self,ident,version):
+        problem=skill_id_problem(ident,version)
+        if problem is not None:return self._refuse('skills',problem)
+        self._skill_op('skill_export',id=ident,skill_version=version)
+    @Slot(str)
+    def skillImport(self,name):
+        if not SKILL_IMPORT_NAME.fullmatch(name):return self._refuse('skills','Nome inválido: letras, números, . _ - (até 64)')
+        self._skill_op('skill_import',name=name)
+    @Slot(str)
+    def skillImportConfirm(self,name):
+        preview=self._skill_import()
+        if not preview or preview['name']!=name:return self._refuse('skills',CODE_MESSAGES['stale_import'])
+        self._skill_op('skill_import_confirm',name=name,revision=self._skill_revision())
+    def _skill_llm_available(self):
+        return self.online and any(i['plugin_id']==SKILL_DRAFT_PLUGIN and i['state']=='running' and SKILL_DRAFT_CAPABILITY in i['capabilities'] for i in (self.snapshot.get('plugins') or {}).get('items',[]))
+    @Slot(str)
+    def skillDraftWithLlm(self,description):
+        """llm_engine.skill_draft through capability_invoke (30 s). Only when the LLM plugin runs; the draft is created by the Core as draft, never enabled."""
+        problem=skill_description_problem(description)
+        if problem is None and not self._skill_llm_available():problem=CODE_MESSAGES['capability_unavailable']
+        if problem is None and (self._skill_busy_now() or self.pending or self.capability_pending or self.perception_req is not None or self.perception_inflight is not None or self._models_busy_now() or self._agent_active() or self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem=CODE_MESSAGES['busy']
+        if problem is not None:return self._refuse('skills',problem)
+        self.skill_req={'capability':SKILL_DRAFT_CAPABILITY,'plugin_id':SKILL_DRAFT_PLUGIN};self.skill_draft={}
+        if self._request('capability_invoke',capability=SKILL_DRAFT_CAPABILITY,input={'description':description.strip()},deadline_ms=SKILL_DRAFT_DEADLINE_MS):self.results['skills']=PENDING_SKILL_DRAFT
+        else:self.skill_req=None;self.results['skills']='Core indisponível'
+        self._skills_touch()
+    def _skill_reset(self):
+        """Connection lost: a draft in flight ends here and nothing is re-sent; the Core keeps whatever it already wrote."""
+        self.skill_req=None;self.skill_inflight=None;self.skill_before=None;self.skill_draft={}
+        self._skills_touch()
+    def _skill_observe(self):
+        """Finishes the one awaited draft. The first snapshot after the ack is the baseline (the Core clears the previous answer on each invoke)."""
+        req=self.skill_inflight
+        if req is None:return
+        result=self.snapshot.get('capability_result')
+        if self.skill_before is SKILL_ARM:self.skill_before=result;return
+        if not result or result.get('capability')!=req['capability'] or result.get('plugin_id')!=req['plugin_id'] or result==self.skill_before:return
+        self.skill_inflight=None;self.skill_before=None
+        if not result['ok']:self.skill_draft={};self.results['skills']=code_message(result['error'])
+        elif not valid_skill_draft(result.get('output')):self.skill_draft={};self.results['skills']='Resposta do plugin recusada pelo esquema; nada exibido'
+        else:
+            output=result['output'];self.skill_draft=dict(output)
+            self.results['skills']=f"Rascunho {output['draft_id']} v{output['version']} criado como {output['state']}; revise e valide antes de usar"
+        self._skills_touch()
+    @Property(bool,notify=changed)
+    def skillsAvailable(self):return self._skills_ready()
+    @Property(bool,notify=changed)
+    def skillsBusy(self):return self.pending_op in SKILL_OPS or self._skill_busy_now()
+    @Property(bool,notify=changed)
+    def skillLlmAvailable(self):return self._skill_llm_available()
+    @Property(str,notify=skillsChanged)
+    def skillsRevision(self):return str(self._skill_block().get('revision',0))
+    @Property(str,notify=changed)
+    def skillsResult(self):return self.results['skills']
+    @Property('QVariantList',notify=skillsChanged)
+    def skillsItems(self):return [dict(i) for i in self._skill_block().get('items',[])]
+    # Named skillCurrentRun, not skillRun: the Qt property and the skillRun slot would share one name in QML.
+    @Property('QVariantMap',notify=skillsChanged)
+    def skillCurrentRun(self):return dict(self._skill_run() or {})
+    @Property('QVariantList',notify=skillsChanged)
+    def skillHistory(self):return [dict(e) for e in self._skill_block().get('history',[])]
+    @Property('QVariantMap',notify=skillsChanged)
+    def skillImportPreview(self):return dict(self._skill_import() or {})
+    @Property('QVariantMap',notify=changed)
+    def skillDraftOutput(self):return dict(self.skill_draft)

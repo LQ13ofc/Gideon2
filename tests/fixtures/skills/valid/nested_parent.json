@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "fixture_nested_parent",
+  "name": "Fixture nested parent",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Calls one nested skill (depth 1).",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": ["fixture nested"],
+  "inputs": {},
+  "outputs": {"text": {"type": "string"}},
+  "dependency_capabilities": ["skill:fixture_nested_child"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "child",
+      "call": "skill:fixture_nested_child",
+      "args": {},
+      "save": {"text": "text"}
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "fixture_schema_version",
+  "name": "Fixture bad schema version",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: schema_version is not 1.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["tool:synth_screen_read"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "read", "call": "tool:synth_screen_read", "args": {}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

@@ -397,9 +397,9 @@ def scen_setup(td, fake):
     native_effect(root, 'S1 native before any LLM plugin (wake replay to command)')
     h = req(root)['hub']
     e = entry(h)
-    check('Hub catalog hub-c1.json verified with llm_engine 1.1.0 entry', h['status'] == 'verified' and e is not None
-          and e['runtime'] == 'python3_script' and e['capabilities'] == [CAP, CAP_MODELS]
-          and e['permissions'] == ['network_llm', 'storage_settings'],
+    check('Hub catalog hub-c1.json verified with llm_engine 1.2.0 entry', h['status'] == 'verified' and e is not None
+          and e['runtime'] == 'python3_script' and e['capabilities'] == [CAP, CAP_MODELS, 'llm_engine.skill_draft']
+          and e['permissions'] == ['network_llm', 'storage_settings', 'skills_author'],
           h.get('status'))
     check('catalog sha256 pinned at Core boot', h.get('catalog_sha256') == sha(CATALOG))
     check('llm_engine approve (network_llm) ok', approve(root)['code'] == 'ok')

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "fixture_missing_dep",
+  "name": "Fixture missing dependency",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Depends on a capability no plugin provides. Valid manifest; the run must be blocked with missing_dependency.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["ghost_plugin.run"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "ghost",
+      "call": "ghost_plugin.run",
+      "args": {},
+      "idempotent": true
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

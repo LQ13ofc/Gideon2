@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "fixture_depth_root",
+  "name": "Fixture nesting depth three",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: root -> mid1 -> mid2 -> leaf reaches skill depth 3 (limit 2). Helpers are in catalog/.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["skill:fixture_depth_mid1"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "mid1", "call": "skill:fixture_depth_mid1", "args": {}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

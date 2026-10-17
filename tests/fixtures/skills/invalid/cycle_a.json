@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "fixture_cycle_a",
+  "name": "Fixture cycle A",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: A calls B and B calls A.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["skill:fixture_cycle_b"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [{"id": "call_b", "call": "skill:fixture_cycle_b", "args": {}}],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

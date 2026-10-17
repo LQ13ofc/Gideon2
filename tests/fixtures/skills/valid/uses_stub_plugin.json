@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "fixture_stub_plugin",
+  "name": "Fixture stub plugin call",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Calls the dummy_echo.echo stub plugin capability with the input text.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": ["fixture echo"],
+  "inputs": {"text": {"type": "string", "required": true, "max": 256}},
+  "outputs": {"text": {"type": "string"}, "count": {"type": "int"}},
+  "dependency_capabilities": ["dummy_echo.echo"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "echo",
+      "call": "dummy_echo.echo",
+      "args": {"text": "${input.text}"},
+      "timeout_ms": 2000,
+      "idempotent": true,
+      "save": {"text": "text", "count": "count"}
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

@@ -25,6 +25,15 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
                             the microphone and camera indicators are on the page
     perception-captured     Capturar went through the Core and its result is shown as PlainText from the checked output
     perception-unsupported  Estado of display_manipulate shows UNSUPPORTED; the page ends with ui.png
+  skills phase (S4 UI, needs a real Core with the skill engine and a fixture skill that is tested, approved and enabled, with its
+    dependency plugin running; the gate also installs one file under <home>/skill-imports/fixture-note.gskill, and writes the
+    scripted run so the Core asks for approval on one state-changing step). The phase clicks only the user's own decisions.
+    skills-ready       Skills offered; the enabled fixture row reads 'Estado: habilitada'
+    skills-validated   Validar of the manifest typed in the editor shows the Core answer as PlainText; the skill list does not change
+    skills-awaiting    Executar started a run; the awaiting step shows Autorizar and Negar
+    skills-run         after Autorizar the run state is done and shown as PlainText
+    skills-import      the import preview of fixture-note shows publisher 'não verificado'; Instalar como rascunho is enabled only
+                       with no findings, and clicking it installs a draft (it never enables anything); the page ends with ui.png
 """
 import argparse,json,os,sys,time
 from pathlib import Path
@@ -33,7 +42,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -310,6 +319,46 @@ elif args.phase=='perception':
     wait(lambda:'UNSUPPORTED' in bridge.perceptionResult and not bridge.perceptionBusy,40)
     check('display status shows UNSUPPORTED through the Core',visual_item('perceptionResult').property('text').count('UNSUPPORTED')==1)
     Path(args.artifacts,'perception-unsupported').touch()
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
+elif args.phase=='skills':
+    # Gate protocol (S4 UI): see the module docstring. The phase types the manifest text it is given, and clicks only Validar, Executar, the step decision and Instalar como rascunho.
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    wait(lambda:bridge.skillsAvailable,50)
+    nav=visual_item('nav10');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:window.property('page')==10,3)
+    check('skills panel visible on its page',visual_item('skillsPanel').property('visible'))
+    enabled=next((s for s in bridge.skillsItems if s['state']=='enabled'),None)
+    check('enabled fixture row reads habilitada',enabled is not None and visual_item('skillState_'+enabled['id']+'_'+enabled['version']).property('text').startswith('Estado: habilitada'))
+    Path(args.artifacts,'skills-ready').touch()
+    before=[(s['id'],s['version'],s['state']) for s in bridge.skillsItems]
+    manifest=visual_item('skillManifest');manifest.forceActiveFocus();manifest.setProperty('text','{"schema_version": 2}');QTest.qWait(20)
+    validate=visual_item('skillValidate');validate.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.skillsResult!='' and not bridge.skillsBusy,40)
+    result=visual_item('skillsResult');expression=QQmlExpression(QQmlEngine.contextForObject(result),result,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+    check('validation answer shown as PlainText from the Core',result.property('text')==bridge.skillsResult and plain is True and not expression.hasError())
+    check('validation wrote nothing: the skill list is unchanged',[(s['id'],s['version'],s['state']) for s in bridge.skillsItems]==before)
+    Path(args.artifacts,'skills-validated').touch()
+    run=visual_item('skillRun_'+enabled['id']);run.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.skillCurrentRun.get('state')=='awaiting_approval',60)
+    awaiting=next(s for s in bridge.skillCurrentRun['steps'] if s['state']=='awaiting_approval')
+    check('awaiting step offers Autorizar and Negar',visual_item('skillAuthorize_'+awaiting['id']).property('visible') and visual_item('skillDeny_'+awaiting['id']).property('visible'))
+    Path(args.artifacts,'skills-awaiting').touch()
+    visual_item('skillAuthorize_'+awaiting['id']).forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.skillCurrentRun.get('state') in ('done','failed','cancelled','rolled_back'),90)
+    check('run reached done after the user decision',bridge.skillCurrentRun.get('state')=='done')
+    runline=visual_item('skillRunState');expression=QQmlExpression(QQmlEngine.contextForObject(runline),runline,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+    check('run state shown as PlainText',plain is True and not expression.hasError() and 'concluída' in runline.property('text'))
+    Path(args.artifacts,'skills-run').touch()
+    name=visual_item('skillImportName');name.forceActiveFocus();name.setProperty('text','fixture-note');QTest.qWait(20)
+    visual_item('skillImport').forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bool(bridge.skillImportPreview.get('name')) and not bridge.skillsBusy,40)
+    check('import preview is unverified',bridge.skillImportPreview.get('unverified') is True)
+    confirm=visual_item('skillImportConfirm')
+    check('confirm enabled only with no findings',confirm.property('enabled')==(len(bridge.skillImportPreview.get('findings') or [])==0))
+    if not bridge.skillImportPreview.get('findings'):
+        confirm.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);wait(lambda:not bridge.skillsBusy,40)
+        check('confirmed import is a draft and nothing is enabled',any(s['id']==bridge.skillImportPreview.get('id') and s['state']=='draft' for s in bridge.skillsItems) and not any(s['state']=='enabled' and s['source']=='imported' for s in bridge.skillsItems))
+    Path(args.artifacts,'skills-import').touch()
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':
     # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,

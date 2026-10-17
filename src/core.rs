@@ -60,6 +60,8 @@ pub struct Core {
     tool_source: bool,
     /// C3 agent run (at most one); idle and inert unless a `*.chat` plugin runs.
     pub(crate) agent: crate::agent::Agent,
+    /// S4 skill engine: ledgers, at most one run, idle until a skill is saved and enabled.
+    pub(crate) skills: crate::skills::Engine,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -101,12 +103,14 @@ impl Core {
             tools: Default::default(),
             tool_source: false,
             agent: crate::agent::Agent::new(crate::agent::options()),
+            skills: Default::default(),
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
         self.next_session = seed;
         self.tools.set_epoch(seed);
         self.agent.set_boot_seed(seed);
+        self.skills.set_boot_seed(seed);
     }
     /// True while a voice session holds the Core (agent actions and wake sessions exclude each other).
     pub(crate) fn voice_active(&self) -> bool {
@@ -118,14 +122,19 @@ impl Core {
     }
     /// Earliest wake-up for proposal expiry or the agent run deadline.
     pub fn tool_deadline(&self) -> Option<Instant> {
-        match (self.tools.deadline(), self.agent.deadline()) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        [
+            self.tools.deadline(),
+            self.agent.deadline(),
+            self.skills.deadline(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
     pub fn expire_tools(&mut self, now: Instant) {
         self.tools.expire(now);
         self.agent_expire(now);
+        self.skill_expire(now);
     }
     pub fn take_tool_job(&mut self) -> Option<crate::commands::Job> {
         self.tools.start()
@@ -149,6 +158,7 @@ impl Core {
             None => self.tool_failed(String::new(), &id, "executor_failed"),
         }
         self.agent_settle(&id, None);
+        self.skill_tool_settled(&id);
     }
     pub(crate) fn tool_denied(&mut self, request_id: String, id: &str, code: &'static str) {
         self.tools
@@ -225,6 +235,7 @@ impl Core {
     /// Revoked, disabled or failed plugins lose their pending proposals.
     fn sweep_tools(&mut self) {
         self.agent_guard();
+        self.skill_guard();
         if !self.tools.has_pending() {
             return;
         }
@@ -794,6 +805,7 @@ impl Core {
             events: self.events.iter().cloned().collect(),
             tool_proposals: self.tools.snapshot(),
             agent: self.agent.view(),
+            skills: self.skills_view(),
         }
     }
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
@@ -836,6 +848,7 @@ impl Core {
         if let Some(plugin_id) = result_of {
             self.ingest_result(&plugin_id, now);
             self.agent_on_result();
+            self.skill_on_result();
         }
         self.sweep_tools();
         self.flush_plugin_events("");
@@ -843,6 +856,10 @@ impl Core {
     /// Loads the C1 ledgers (LLM config and vault presence); `allow_loopback` is test-only.
     pub fn configure_llm(&mut self, storage: &crate::storage::Storage, allow_loopback: bool) {
         self.llm = crate::llmcfg::LlmState::load(storage, allow_loopback);
+    }
+    /// Loads the S4 skill ledgers from the private root; a damaged ledger quarantines skills only.
+    pub fn configure_skills(&mut self, storage: &crate::storage::Storage) {
+        self.skills.configure(&storage.root);
     }
     pub fn take_plugin_intents(&mut self) -> Vec<crate::plugins::Intent> {
         self.plugins.take_intents()
@@ -972,6 +989,11 @@ impl Core {
                 if self.agent.is_active() =>
             {
                 "agent_busy"
+            }
+            Operation::CapabilityInvoke { .. } | Operation::CapabilityCancel { .. }
+                if self.skills.is_active() =>
+            {
+                "skill_busy"
             }
             Operation::PluginEnable {
                 revision,
@@ -1504,6 +1526,43 @@ impl Core {
             }
             Operation::AgentAbort { run_id } => self.agent_abort(&run_id),
             Operation::AgentTestBump => self.agent_test_bump(),
+            Operation::SkillValidate { manifest } => {
+                crate::skills::wire_op(self.skill_validate(manifest))
+            }
+            Operation::SkillSaveDraft { manifest } => {
+                crate::skills::wire_op(self.skill_save_draft(manifest))
+            }
+            Operation::SkillDryRun {
+                id,
+                version,
+                inputs,
+            } => crate::skills::wire_op(self.skill_dry_run(&id, &version, inputs)),
+            Operation::SkillApprove {
+                id,
+                version,
+                revision,
+            } => crate::skills::wire_op(self.skill_approve(&id, &version, revision)),
+            Operation::SkillEnable { id, revision } => {
+                crate::skills::wire_op(self.skill_enable(&id, revision))
+            }
+            Operation::SkillDisable { id, revision } => {
+                crate::skills::wire_op(self.skill_disable(&id, revision))
+            }
+            Operation::SkillRollback { id, revision } => {
+                crate::skills::wire_op(self.skill_rollback_version(&id, revision))
+            }
+            Operation::SkillRemove { id, revision } => {
+                crate::skills::wire_op(self.skill_remove(&id, revision))
+            }
+            Operation::SkillRun { id, inputs } => {
+                crate::skills::wire_op(self.skill_run(&id, inputs))
+            }
+            Operation::SkillDecide {
+                run_id,
+                step,
+                decision,
+            } => crate::skills::wire_op(self.skill_decide(&run_id, &step, decision)),
+            Operation::SkillCancel { run_id } => crate::skills::wire_op(self.skill_cancel(&run_id)),
             Operation::Snapshot => unreachable!(),
         };
         self.sweep_tools();

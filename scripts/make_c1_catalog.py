@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build the llm_engine 1.1.0 fixture: embed the recommended model catalog, refresh the manifest.
+"""Build the llm_engine 1.2.0 fixture: embed the recommended model catalog, refresh the manifest.
 
 1. Reads tests/fixtures/llm_models.json (pretty source, validated here) and writes it as a Python
    literal between the GENERATED markers of tests/fixtures/llm_engine.py (the plugin is a single
    file; the catalog ships inside it, no runtime file).
-2. Applies the 1.1.0 manifest fields to the llm_engine entry of tests/fixtures/hub-c1.json
+2. Applies the 1.2.0 manifest fields to the llm_engine entry of tests/fixtures/hub-c1.json
    (semver, permissions, capabilities, release URLs).
 3. Rewrites the linux_x86_64 binary sha256/size from the final llm_engine.py bytes and prints
    the catalog file's own sha256 (the value the Core pins as expected). hub-c0.json is not touched.
@@ -26,9 +26,9 @@ PAYLOAD = FIXTURES / "llm_engine.py"
 TARGET = "linux_x86_64"
 PLUGIN_ID = "llm_engine"
 MANIFEST = {
-    "semver": "1.1.0",
-    "permissions": ["network_llm", "storage_settings"],
-    "capabilities": ["llm_engine.chat", "llm_engine.models"],
+    "semver": "1.2.0",
+    "permissions": ["network_llm", "storage_settings", "skills_author"],
+    "capabilities": ["llm_engine.chat", "llm_engine.models", "llm_engine.skill_draft"],
     "binary_url": "https://github.com/LQ13ofc/Gideon2/releases/download/c2-v1/llm_engine.py",
     "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c2-v1",
 }

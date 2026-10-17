@@ -32,6 +32,8 @@ PYTHON = sys.executable
 CLEAN_ENV = {"PATH": "/usr/bin:/bin"}
 CAP = "llm_engine.chat"
 CAP_MODELS = "llm_engine.models"  # added in 1.1.0 (C2)
+CAP_SKILL_DRAFT = "llm_engine.skill_draft"  # added in 1.2.0 (D3)
+ALL_CAPS = [CAP, CAP_MODELS, CAP_SKILL_DRAFT]
 BRAVE = "com.brave.Browser.desktop"  # the only open_app desktop_id the Core accepts
 MiB = 1024 * 1024
 ALLOWED_HOST_ERRORS = ("permission_denied", "cloud_not_authorized", "provider_not_configured",
@@ -327,7 +329,7 @@ class LlmEngineTest(unittest.TestCase):
         self.assertEqual(self.hello["ok"], True)
         self.assertEqual(self.hello["api"], 1)
         self.assertEqual(self.hello["plugin_id"], "llm_engine")
-        self.assertEqual(self.hello["capabilities"], [CAP, CAP_MODELS])
+        self.assertEqual(self.hello["capabilities"], ALL_CAPS)
 
     def test_unknown_capability(self):
         result = invoke(self.plugin, self.sim, inp(), capability="llm_engine.other")
@@ -681,13 +683,13 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(self.plugin["plugin_id"], "llm_engine")
         self.assertEqual(self.plugin["runtime"], "python3_script")
         self.assertEqual(self.plugin["entrypoint"], "bin/llm_engine.py")
-        self.assertEqual(self.plugin["capabilities"], [CAP, CAP_MODELS])
-        self.assertEqual(self.plugin["semver"], "1.1.0")
+        self.assertEqual(self.plugin["capabilities"], ALL_CAPS)
+        self.assertEqual(self.plugin["semver"], "1.2.0")
         self.assertTrue(all(CAPABILITY_RE.match(c) for c in self.plugin["capabilities"]))
 
     def test_permission_is_valid_hub_id(self):
         perms = self.plugin["permissions"]
-        self.assertEqual(perms, ["network_llm", "storage_settings"])
+        self.assertEqual(perms, ["network_llm", "storage_settings", "skills_author"])
         self.assertTrue(all(VALID_ID_RE.match(p) for p in perms))
         self.assertIsNone(VALID_ID_RE.match("network.llm"))
 

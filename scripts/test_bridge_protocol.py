@@ -8,11 +8,12 @@ from bridge import Bridge,CHAT_STATE_LABELS,CODE_MESSAGES,PREFS_DONE,SECTION_SIG
 from bridge import CERT_BADGES,FEATURE_LABELS,MODEL_CAPABILITY,custom_form_problem,custom_model,fallback_for,model_status,target_for,valid_model,valid_models_page,valid_selftest
 from bridge import AGENT_CODES,AGENT_STATE_LABELS,AGENT_STATES,OPS,PENDING,SNAPSHOT_SECTION_KEYS,agent_goal_problem,valid_agent,valid_tools
 from bridge import CAPABILITY_ERRORS,PERCEPTION_CAPABILITIES,PERCEPTION_DEADLINE_MS,PERCEPTION_INPUT_LIMIT,PERCEPTION_MESSAGES,PERCEPTION_OUTPUTS,PERCEPTION_PLUGINS,perception_code_message,perception_input_problem,perception_text
+from bridge import PENDING_SKILL_DRAFT,SKILL_CODES,SKILL_DRAFT_CAPABILITY,SKILL_DRAFT_DEADLINE_MS,SKILL_HISTORY_LIMIT,SKILL_ITEMS_LIMIT,SKILL_JSON_LIMIT,SKILL_OP_CODES,SKILL_OP_MESSAGES,SKILL_REASON_MESSAGES,SKILL_REASONS,SKILL_SOURCES,SKILL_STATES,SKILL_STEPS_LIMIT,code_message,skill_code_ok,skill_json,valid_skill_draft,valid_skills
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
-QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child']
-APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD) else QCoreApplication([])
+QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child']
+APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
 EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
 BASE={'version':1,'request_id':'r','code':'ok','state':'idle','sequence':1,'session_id':None,'transcript':None,'command':None,'events':[],'text_input_available':True,'speech_samples':0,'speech_status':'idle','wake_status':'unavailable','stt_status':'unavailable','plugins':{'revision':0,'status':'ok','items':[]},'llm':EMPTY_LLM,'tool_proposals':[]}
@@ -1707,8 +1708,258 @@ def qml_perception_child():
             del engine;del bridge
     print(f'qml perception checks ok: {len(checks)}',flush=True)
     return 0
+# ---- S4 skills (docs/S4.md): snapshot block, local input rules, the skills ops over the socket, the LLM draft flow and the Skills page.
+SKILL_MANIFEST={'schema_version':1,'id':'weather_note','name':'Nota do tempo','version':'1.0.0','publisher':{'id':'fixture_pub','name':'Fixture'},'description':'Resume o tempo','license':'MIT','min_runtime':'0.1.0','triggers':[],'inputs':{'city':{'type':'string','required':True}},'outputs':{},'dependency_capabilities':['dummy_echo.echo'],'permissions_required':[],'prerequisites':[],'steps':[{'id':'read','call':'dummy_echo.echo','args':{'text':'${input.city}'}}],'attestations':[]}
+PREVIEW={'name':'pacote-1','id':'imported_note','version':'1.0.0','publisher':'Fixture Pub','unverified':True,'permissions_required':['notes'],'missing_deps':[],'permission_delta':['notes'],'permissions_escalated':False,'duplicate':False,'findings':[]}
+HISTORY_ITEM={'run_id':'run_0_1','skill':'weather_note','version':'1.0.0','state':'done','step':None,'codes':[]}
+def skill_item(ident='weather_note',version='1.0.0',state=None,source='created',deps_ok=True,missing=(),permissions_ok=True):
+    state=state or 'enabled'
+    return {'id':ident,'name':'Nota do tempo','version':version,'state':state,'source':source,'active':state=='enabled','deps_ok':deps_ok,'permissions_ok':permissions_ok,'missing':list(missing)}
+def skill_run(state='running',steps=None,step='read',run_id='run_1_1',outputs=None,skill='weather_note'):
+    run={'run_id':run_id,'skill':skill,'state':state,'step':step,'steps':steps if steps is not None else [{'id':'read','state':'running'},{'id':'write','state':'pending'}]}
+    if outputs is not None:run['outputs']=outputs
+    return run
+def awaiting_run():return skill_run(state='awaiting_approval',step='write',steps=[{'id':'read','state':'done'},{'id':'write','state':'awaiting_approval'}])
+def skills_block(items=(None,),run=None,history=(),imp=None,revision=3):
+    items=[skill_item()] if items==(None,) else list(items)
+    return {'revision':revision,'items':items,'run':run,'history':list(history),'import':imp}
+def llm_engine_hub(state='running'):
+    digest='f'*64
+    entry={'plugin_id':'llm_engine','semver':'1.2.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':['skills_author'],'dependencies':[],'conflicts':[],'download_size':15,'support_policy':'fixture','status':'installed','reason':'none','manifest_sha256':digest,'permissions_approved':True,'payload_staged':False,'runtime':'python3_script','capabilities':[SKILL_DRAFT_CAPABILITY]}
+    record={'plugin_id':'llm_engine','semver':'1.2.0','manifest_sha256':digest,'state':'installed','runtime':state,'previous':None}
+    hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'b'*64,'publisher_verified':False,'orphans':0,'import':None,'approval_revision':1,'install_revision':1,'entries':[entry],'installed':[record]}
+    return hub,{'plugin_id':'llm_engine','semver':'1.2.0','capabilities':[SKILL_DRAFT_CAPABILITY],'state':state,'enabled':True,'restarts':0,'last_error':None}
+def skills_snap(block,llm=False):
+    if not llm:return {**BASE,'skills':block}
+    hub,item=llm_engine_hub();return {**BASE,'hub':hub,'plugins':{'revision':1,'status':'ok','items':[item]},'skills':block}
+def skill_round(bridge,peer,call,snap):
+    """One Core round trip for a skill op: the call must send exactly one request, answered with snap."""
+    call();request=next_request(peer);answer(peer,request,snap);settle(bridge);return request
+class SkillContract(unittest.TestCase):
+    def test_block_is_optional_and_exact(self):
+        for snap in (copy.deepcopy(BASE),{**BASE,'skills':None}):validate_snapshot(snap,'r',0)
+        validate_snapshot(skills_snap(skills_block(run=awaiting_run(),history=[HISTORY_ITEM],imp=PREVIEW)),'r',0)
+        validate_snapshot(skills_snap(skills_block(items=[])),'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({**BASE,'skills':{**skills_block(),'extra':1}},'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({**BASE,'skills':{k:v for k,v in skills_block().items() if k!='history'}},'r',0)
+        with self.assertRaises(ValueError):validate_snapshot({**BASE,'skills':[]},'r',0)
+    def test_every_item_state_and_source_is_accepted(self):
+        for state in SKILL_STATES:
+            for source in SKILL_SOURCES:
+                with self.subTest(state=state,source=source):validate_snapshot(skills_snap(skills_block(items=[skill_item(state=state,source=source)])),'r',0)
+    def test_block_rejects_every_schema_break(self):
+        cases={
+            'revision bool':{'revision':True},
+            'revision negative':{'revision':-1},
+            'state unknown':{'items':[skill_item(state='running')]},
+            'source unknown':{'items':[skill_item(source='downloaded')]},
+            'active not bool':{'items':[{**skill_item(),'active':1}]},
+            'enabled but inactive':{'items':[{**skill_item(),'active':False}]},
+            'deps_ok disagrees with missing':{'items':[{**skill_item(),'deps_ok':False}]},
+            'missing entry too long':{'items':[{**skill_item(deps_ok=False),'missing':['tool:'+'a'*130]}]},
+            'bad id':{'items':[{**skill_item(),'id':'Bad-Id'}]},
+            'bad version':{'items':[{**skill_item(),'version':'1.0'}]},
+            'blank name':{'items':[{**skill_item(),'name':'  '}]},
+            'extra item key':{'items':[{**skill_item(),'path':'/home/x'}]},
+            'duplicate id and version':{'items':[skill_item(),skill_item()]},
+            'too many items':{'items':[skill_item(version=f'1.0.{i}') for i in range(SKILL_ITEMS_LIMIT+1)]},
+            'run unknown state':{'run':skill_run(state='paused')},
+            'run extra key':{'run':{**skill_run(),'path':'x'}},
+            'run awaiting without step':{'run':skill_run(state='awaiting_approval',step='read')},
+            'run current step unknown':{'run':skill_run(step='ghost')},
+            'awaiting step while running':{'run':skill_run(steps=[{'id':'read','state':'awaiting_approval'}],step='read')},
+            'step code unknown':{'run':skill_run(steps=[{'id':'read','state':'failed','code':'Boom'}])},
+            'step ids repeated':{'run':skill_run(steps=[{'id':'read','state':'done'},{'id':'read','state':'done'}])},
+            'too many steps':{'run':skill_run(steps=[{'id':f's{i}','state':'done'} for i in range(SKILL_STEPS_LIMIT+1)],step=None)},
+            'outputs above 1 KiB':{'run':skill_run(state='done',steps=[{'id':'read','state':'done'}],step=None,outputs={'text':'x'*1100})},
+            'outputs not an object':{'run':skill_run(state='done',steps=[{'id':'read','state':'done'}],step=None,outputs='x')},
+            'history too long':{'history':[HISTORY_ITEM]*(SKILL_HISTORY_LIMIT+1)},
+            'history unknown code':{'history':[{**HISTORY_ITEM,'codes':['Boom']}]},
+            'history empty run id':{'history':[{**HISTORY_ITEM,'run_id':''}]},
+            'import not unverified':{'import':{**PREVIEW,'unverified':False}},
+            'import name with path':{'import':{**PREVIEW,'name':'../x'}},
+            'import finding unknown':{'import':{**PREVIEW,'findings':[{'code':'Boom'}]}},
+            'import extra key':{'import':{**PREVIEW,'signature':'abc'}},
+            'import missing key':{'import':{k:v for k,v in PREVIEW.items() if k!='duplicate'}},
+        }
+        for name,change in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ValueError):validate_snapshot(skills_snap({**skills_block(),**change}),'r',0)
+    def test_every_reason_and_op_code_has_portuguese_text(self):
+        for reason in SKILL_REASONS:
+            self.assertEqual(CODE_MESSAGES['skill_invalid:'+reason],SKILL_REASON_MESSAGES[reason])
+            self.assertTrue(skill_code_ok('skill_invalid:'+reason))
+        self.assertFalse(skill_code_ok('skill_invalid:made_up'));self.assertFalse(skill_code_ok('Boom'))
+        self.assertEqual(code_message('skill_invalid:cycle'),SKILL_REASON_MESSAGES['cycle'])
+        for code in SKILL_OP_CODES:
+            self.assertTrue(code_message(code) and not code_message(code).startswith('Core recusou'),code)
+        self.assertEqual(code_message('skill_invalid:out_of_scope'),'Passo chama capability fora das dependências declaradas')
+        self.assertEqual(SKILL_OP_MESSAGES['stale_skill_revision'],CODE_MESSAGES['stale_skill_revision'])
+    def test_manifest_and_input_json_rules(self):
+        self.assertEqual(skill_json('{"a":1}'),({'a':1},None))
+        boundary='{"a":"'+'x'*(SKILL_JSON_LIMIT-8)+'"}'
+        self.assertEqual(len(boundary.encode()),SKILL_JSON_LIMIT);self.assertIsNone(skill_json(boundary)[1])
+        for text,problem in [('[1]','Deve ser um objeto JSON'),('{','Entrada não é JSON válido'),('{"a":NaN}','Entrada não é JSON válido'),('{"a":Infinity}','Entrada não é JSON válido'),('{"a":"\ud800"}','Entrada não é JSON válido'),(boundary+' ','JSON acima de 16 KiB'),(None,'JSON inválido')]:
+            with self.subTest(text=str(text)[:24]):self.assertEqual(skill_json(text),(None,problem))
+    def test_llm_draft_output_is_bounded_plain_text_and_never_enabled(self):
+        draft={'draft_id':'draft_1','version':'1.0.0','state':'draft','requirements':['llm_engine'],'ambiguities':[],'preview':['ler nota'],'diff':'+ read'}
+        self.assertTrue(valid_skill_draft(draft));self.assertTrue(valid_skill_draft({**draft,'state':'revised'}));self.assertTrue(valid_skill_draft({k:v for k,v in draft.items() if k!='diff'}))
+        for key,value in [('state','enabled'),('state','approved'),('draft_id','a\nb'),('requirements',['x']*9),('preview',['x'*257]),('diff','x'*2049),('extra',1)]:
+            with self.subTest(key=key,value=str(value)[:12]):self.assertFalse(valid_skill_draft({**draft,key:value}))
+        self.assertFalse(valid_skill_draft({k:v for k,v in draft.items() if k!='state'}))
+class SkillBridge(unittest.TestCase):
+    def test_every_op_sends_the_exact_payload_with_the_live_revision(self):
+        bridge,peer=connect_bridge(self,skills_snap(skills_block(imp=PREVIEW)))
+        calls=[
+            (lambda:bridge.skillValidate(json.dumps(SKILL_MANIFEST)),'skill_validate',{'manifest':SKILL_MANIFEST}),
+            (lambda:bridge.skillSaveDraft(json.dumps(SKILL_MANIFEST)),'skill_save_draft',{'manifest':SKILL_MANIFEST}),
+            (lambda:bridge.skillDryRun('weather_note','1.0.0','{"city":"Lisboa"}'),'skill_dry_run',{'id':'weather_note','skill_version':'1.0.0','inputs':{'city':'Lisboa'}}),
+            (lambda:bridge.skillApprove('weather_note','1.0.0'),'skill_approve',{'id':'weather_note','skill_version':'1.0.0','revision':3}),
+            (lambda:bridge.skillEnable('weather_note'),'skill_enable',{'id':'weather_note','revision':3}),
+            (lambda:bridge.skillDisable('weather_note'),'skill_disable',{'id':'weather_note','revision':3}),
+            (lambda:bridge.skillRollback('weather_note'),'skill_rollback',{'id':'weather_note','revision':3}),
+            (lambda:bridge.skillRemove('weather_note'),'skill_remove',{'id':'weather_note','revision':3}),
+            (lambda:bridge.skillRun('weather_note','{}'),'skill_run',{'id':'weather_note','inputs':{}}),
+            (lambda:bridge.skillExport('weather_note','1.0.0'),'skill_export',{'id':'weather_note','skill_version':'1.0.0'}),
+            (lambda:bridge.skillImport('pacote-1'),'skill_import',{'name':'pacote-1'}),
+            (lambda:bridge.skillImportConfirm('pacote-1'),'skill_import_confirm',{'name':'pacote-1','revision':3}),
+        ]
+        snap=skills_snap(skills_block(imp=PREVIEW))
+        for call,op,payload in calls:
+            with self.subTest(op=op):
+                request=skill_round(bridge,peer,call,snap)
+                self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':op,**payload})
+                self.assertEqual(bridge.skillsResult,OPS[op][1])
+        self.assertEqual(bridge.skillsRevision,'3');self.assertEqual(bridge.skillImportPreview['name'],'pacote-1')
+    def test_refusals_never_reach_the_core(self):
+        bridge,peer=connect_bridge(self,skills_snap(skills_block(run=skill_run(),imp=PREVIEW)))
+        big='{"a":"'+'x'*SKILL_JSON_LIMIT+'"}'
+        cases=[
+            (lambda:bridge.skillValidate('{'),'Entrada não é JSON válido'),
+            (lambda:bridge.skillValidate('[1]'),'Deve ser um objeto JSON'),
+            (lambda:bridge.skillSaveDraft(big),'JSON acima de 16 KiB'),
+            (lambda:bridge.skillDryRun('Bad-Id','1.0.0','{}'),'Id de skill inválido'),
+            (lambda:bridge.skillDryRun('weather_note','1.0','{}'),'Versão inválida: use x.y.z'),
+            (lambda:bridge.skillDryRun('weather_note','1.0.0','[]'),'Deve ser um objeto JSON'),
+            (lambda:bridge.skillApprove('weather_note','01.0.0'),'Versão inválida: use x.y.z'),
+            (lambda:bridge.skillEnable(''),'Id de skill inválido'),
+            (lambda:bridge.skillRun('weather_note','{}'),CODE_MESSAGES['skill_busy']),
+            (lambda:bridge.skillDecide('run_1_1','write','authorize'),CODE_MESSAGES['not_pending']),
+            (lambda:bridge.skillCancel('other_run'),CODE_MESSAGES['unknown_skill_run']),
+            (lambda:bridge.skillImport('../etc'),'Nome inválido: letras, números, . _ - (até 64)'),
+            (lambda:bridge.skillImportConfirm('outro'),CODE_MESSAGES['stale_import']),
+            (lambda:bridge.skillDraftWithLlm('gerar'),CODE_MESSAGES['capability_unavailable']),
+            (lambda:bridge.skillDraftWithLlm('   '),'Descrição vazia'),
+        ]
+        for call,message in cases:
+            with self.subTest(message=message):
+                call();wait_idle();self.assertFalse(peer.canReadLine());self.assertEqual(bridge.skillsResult,message)
+    def test_unavailable_skills_refuse_every_op(self):
+        bridge,peer=connect_bridge(self,{**BASE,'skills':None})
+        self.assertFalse(bridge.skillsAvailable)
+        for call in (lambda:bridge.skillValidate('{}'),lambda:bridge.skillEnable('weather_note'),lambda:bridge.skillImport('pacote-1')):
+            call();wait_idle();self.assertFalse(peer.canReadLine())
+        self.assertEqual(bridge.skillsResult,'Skills indisponíveis agora')
+    def test_decide_and_cancel_follow_the_step_the_core_awaits(self):
+        bridge,peer=connect_bridge(self,skills_snap(skills_block(run=awaiting_run())))
+        self.assertEqual(bridge.skillCurrentRun['state'],'awaiting_approval');self.assertEqual(bridge.skillCurrentRun['step'],'write')
+        bridge.skillDecide('run_1_1','write','maybe');wait_idle();self.assertFalse(peer.canReadLine())
+        bridge.skillDecide('run_1_1','read','deny');wait_idle();self.assertFalse(peer.canReadLine());self.assertEqual(bridge.skillsResult,CODE_MESSAGES['not_pending'])
+        request=skill_round(bridge,peer,lambda:bridge.skillDecide('run_1_1','write','deny'),skills_snap(skills_block(run=awaiting_run())))
+        self.assertEqual((request['op'],request['run_id'],request['step'],request['decision']),('skill_decide','run_1_1','write','deny'))
+        self.assertEqual(bridge.skillsResult,'Decisão enviada ao Core')
+        request=skill_round(bridge,peer,lambda:bridge.skillCancel('run_1_1'),skills_snap(skills_block(run=skill_run(state='cancelled',steps=[{'id':'read','state':'cancelled'}],step=None))))
+        self.assertEqual((request['op'],request['run_id']),('skill_cancel','run_1_1'))
+        bridge.skillCancel('run_1_1');wait_idle();self.assertFalse(peer.canReadLine());self.assertEqual(bridge.skillsResult,CODE_MESSAGES['unknown_skill_run'])
+    def test_llm_draft_waits_for_the_plugin_result_and_shows_only_valid_output(self):
+        bridge,peer=connect_bridge(self,skills_snap(skills_block(),llm=True))
+        self.assertTrue(bridge.skillLlmAvailable);self.assertEqual(SKILL_DRAFT_DEADLINE_MS,30000)
+        bridge.skillDraftWithLlm('  Ler uma nota  ');request=next_request(peer)
+        self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':'capability_invoke','capability':SKILL_DRAFT_CAPABILITY,'input':{'description':'Ler uma nota'},'deadline_ms':30000})
+        answer(peer,request,skills_snap(skills_block(),llm=True));settle(bridge)
+        self.assertEqual(bridge.skillsResult,PENDING_SKILL_DRAFT);self.assertTrue(bridge.skillsBusy)
+        output={'draft_id':'draft_1','version':'1.0.0','state':'draft','requirements':['llm_engine'],'ambiguities':[],'preview':['ler nota']}
+        capability={'capability':SKILL_DRAFT_CAPABILITY,'plugin_id':'llm_engine','ok':True,'output':output,'elapsed_ms':12}
+        bridge.refresh();answer(peer,next_request(peer),{**skills_snap(skills_block(),llm=True),'capability_result':capability});settle(bridge)
+        self.assertEqual(bridge.skillDraftOutput['draft_id'],'draft_1');self.assertFalse(bridge.skillsBusy);self.assertIn('draft_1',bridge.skillsResult)
+        bridge.skillDraftWithLlm('outra');answer(peer,next_request(peer),skills_snap(skills_block(),llm=True));settle(bridge)
+        bridge.refresh();answer(peer,next_request(peer),{**skills_snap(skills_block(),llm=True),'capability_result':{**capability,'output':{**output,'state':'enabled'}}});settle(bridge)
+        self.assertEqual((bridge.skillDraftOutput,bridge.skillsResult),({},'Resposta do plugin recusada pelo esquema; nada exibido'))
+        bridge.skillDraftWithLlm('terceira');answer(peer,next_request(peer),skills_snap(skills_block(),llm=True));settle(bridge)
+        bridge.refresh();answer(peer,next_request(peer),{**skills_snap(skills_block(),llm=True),'capability_result':{'capability':SKILL_DRAFT_CAPABILITY,'plugin_id':'llm_engine','ok':False,'error':'timeout','elapsed_ms':30000}});settle(bridge)
+        self.assertEqual(bridge.skillsResult,CODE_MESSAGES['timeout'])
+        bridge.skillDraftWithLlm('quarta');answer(peer,next_request(peer),skills_snap(skills_block(),llm=True));settle(bridge)
+        bridge._offline()
+        self.assertEqual((bridge.skillsBusy,bridge.skillDraftOutput,bridge.skillsAvailable),(False,{},False))
+    def test_skills_section_notifies_only_the_skills_consumers(self):
+        bridge=Bridge('/nonexistent-gideon-root');counts=Counter()
+        self.assertEqual(SECTION_SIGNALS['skills'],'skillsChanged')
+        for signal in SECTION_SIGNALS.values():getattr(bridge,signal).connect(lambda n=signal:counts.update([n]))
+        old=skills_snap(skills_block())
+        new=skills_snap(skills_block(run=skill_run(state='done',steps=[{'id':'read','state':'done'}],step=None)))
+        bridge._publish(old,new);self.assertEqual(dict(counts),{'skillsChanged':1})
+        counts.clear();bridge._publish(new,dict(new));self.assertEqual(dict(counts),{})
+class SkillsQml(unittest.TestCase):
+    def test_skills_page_follows_qml_rules(self):
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
+        proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-skills-child'],env=env,capture_output=True,text=True,timeout=240)
+        self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
+def qml_skills_child():
+    from PySide6.QtGui import QAccessible,QGuiApplication
+    from PySide6.QtCore import QCoreApplication,QEvent
+    from PySide6.QtTest import QTest
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    from main import create
+    app=QGuiApplication(sys.argv[:1]);QAccessible.setActive(True);checks=[]
+    def check(name,value):
+        if not value:raise AssertionError(name)
+        checks.append(name)
+    with tempfile.TemporaryDirectory(prefix='gideon-qml-skills-') as td:
+        bridge,engine=create(app,td);window=engine.rootObjects()[0]
+        bridge.retry.stop();bridge.online=True
+        try:
+            def items():
+                stack=[window.contentItem()];found=[]
+                while stack:
+                    current=stack.pop();found.append(current);stack.extend(current.childItems())
+                return found
+            def find(name):
+                item=next((i for i in items() if i.objectName()==name),None)
+                if item is None:raise AssertionError('missing '+name)
+                return item
+            def plain(item):
+                expression=QQmlExpression(QQmlEngine.contextForObject(item),item,'textFormat === Text.PlainText');value=expression.evaluate();value=value[0] if isinstance(value,tuple) else value
+                return value is True and not expression.hasError()
+            weak=skill_item('draft_note',state='draft',source='llm_draft',deps_ok=False,missing=['dummy_echo.echo'])
+            bridge._apply(validate_snapshot(skills_snap(skills_block(items=[skill_item(),weak],run=awaiting_run(),history=[HISTORY_ITEM]),llm=True),'r',0))
+            check('nav10 offered while the skill engine answers',find('nav10').property('visible'))
+            window.setProperty('page',10);QTest.qWait(50)
+            check('skills panel visible on its page',find('skillsPanel').property('visible'))
+            check('enabled skill row names id and version',find('skillTitle_weather_note_1.0.0').property('text').endswith('weather_note v1.0.0'))
+            check('state line shows the Portuguese state',find('skillState_weather_note_1.0.0').property('text').startswith('Estado: habilitada'))
+            check('draft row lists its missing dependency',find('skillDeps_draft_note_1.0.0').property('text').endswith('faltando: dummy_echo.echo · permissões: aprovadas'))
+            check('approve disabled for an enabled skill',find('skillApprove_weather_note_1.0.0').property('enabled') is False)
+            check('disable enabled for an enabled skill',find('skillDisable_weather_note').property('enabled'))
+            check('run disabled while a run is active',find('skillRun_weather_note').property('enabled') is False)
+            check('run view names the run state','aguardando sua decisão' in find('skillRunState').property('text'))
+            check('run view is PlainText',plain(find('skillRunState')))
+            check('awaiting step offers Autorizar and Negar',find('skillAuthorize_write').property('visible') and find('skillDeny_write').property('visible'))
+            check('history line is shown',not find('skillHistoryEmpty').property('visible'))
+            check('import preview hidden without a preview',find('skillImportPreview').property('visible') is False)
+            check('LLM unavailable notice hidden while llm_engine runs',find('skillLlmUnavailable').property('visible') is False)
+            find('skillDescription').setProperty('text','ler uma nota');QTest.qWait(20)
+            check('Gerar com LLM enabled with a description',find('skillDraftWithLlm').property('enabled'))
+            bridge._apply(validate_snapshot(skills_snap(None),'r',0))
+            QTest.qWait(50);check('page falls back when the skill engine is absent',window.property('page')==0)
+        finally:
+            for w in engine.rootObjects():w.close();w.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            del engine;del bridge
+    print(f'qml skills checks ok: {len(checks)}',flush=True)
+    return 0
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
+    if QML_SKILLS_CHILD:sys.exit(qml_skills_child())
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())
     if QML_MODELS_CHILD:sys.exit(qml_models_child())
     if QML_PERCEPTION_CHILD:sys.exit(qml_perception_child())

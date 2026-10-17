@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "fixture_counter_two",
+  "name": "Fixture counter twice",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Increments the synthetic counter twice with the same epoch.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": ["fixture counter"],
+  "inputs": {"epoch": {"type": "int", "required": true, "min": 0}},
+  "outputs": {"first": {"type": "int"}, "second": {"type": "int"}},
+  "dependency_capabilities": ["tool:synth_counter_inc"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "inc_one",
+      "call": "tool:synth_counter_inc",
+      "args": {"epoch": "${input.epoch}"},
+      "retries": 0,
+      "idempotent": false,
+      "save": {"first": "counter"}
+    },
+    {
+      "id": "inc_two",
+      "call": "tool:synth_counter_inc",
+      "args": {"epoch": "${input.epoch}"},
+      "retries": 0,
+      "idempotent": false,
+      "save": {"second": "counter"}
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

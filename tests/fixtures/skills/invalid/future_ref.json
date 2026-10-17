@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "fixture_future_ref",
+  "name": "Fixture future reference",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Negative: step 1 templates the output of step 2, which runs later.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["tool:synth_screen_read", "tool:synth_set_text"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {"id": "write", "call": "tool:synth_set_text", "args": {"epoch": 1, "text": "${steps.read.text}"}},
+    {"id": "read", "call": "tool:synth_screen_read", "args": {}}
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

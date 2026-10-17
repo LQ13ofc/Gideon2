@@ -404,7 +404,7 @@ def install_llm(root, reinstall=False):
     On reinstall the approval may survive hub_remove: `already_approved` is then the valid state."""
     approved = approve(root)
     accepted = ('ok', 'already_approved') if reinstall else ('ok',)
-    check('llm_engine approve (network_llm + storage_settings) ok'
+    check('llm_engine approve (network_llm + storage_settings + skills_author) ok'
           + (' or already approved after hub_remove' if reinstall else ''), approved.get('code') in accepted,
           f"code={approved.get('code')}")
     if reinstall:
@@ -464,9 +464,10 @@ def scen_install_and_models(td):
     native_effect(root, 'S1 native before any LLM plugin (wake replay to command)')
     h = req(root)['hub']
     e = entry(h)
-    check('Hub catalog hub-c1.json verified with llm_engine 1.1.0 (both permissions, both capabilities)',
-          h.get('status') == 'verified' and e is not None and e.get('semver') == '1.1.0'
-          and e['permissions'] == ['network_llm', 'storage_settings'] and e['capabilities'] == [CAP, MODELS],
+    check('Hub catalog hub-c1.json verified with llm_engine 1.2.0 (three permissions, three capabilities)',
+          h.get('status') == 'verified' and e is not None and e.get('semver') == '1.2.0'
+          and e['permissions'] == ['network_llm', 'storage_settings', 'skills_author']
+          and e['capabilities'] == [CAP, MODELS, 'llm_engine.skill_draft'],
           {'status': h.get('status'), 'semver': e and e.get('semver')})
     install_llm(root)
     check('llm_engine running after install and enable', item(req(root))['state'] == 'running')

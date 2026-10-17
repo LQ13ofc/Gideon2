@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "fixture_nested_child",
+  "name": "Fixture nested child",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Leaf skill that reads the synthetic screen.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {"text": {"type": "string"}},
+  "dependency_capabilities": ["tool:synth_screen_read"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "read",
+      "call": "tool:synth_screen_read",
+      "args": {},
+      "save": {"text": "text"}
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}

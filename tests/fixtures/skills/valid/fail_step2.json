@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "fixture_fail_step2",
+  "name": "Fixture fails at step two",
+  "version": "1.0.0",
+  "publisher": {"id": "fixture_pub", "name": "Fixture publisher"},
+  "description": "TEST FIXTURE ONLY. Step 1 writes with an undo hint. Step 2 fails deterministically (sleep_ms out of range), so the run must roll back step 1.",
+  "license": "TEST-ONLY",
+  "min_runtime": "0.1.0",
+  "triggers": [],
+  "inputs": {},
+  "outputs": {},
+  "dependency_capabilities": ["tool:synth_set_text", "dummy_echo.echo"],
+  "permissions_required": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "write",
+      "call": "tool:synth_set_text",
+      "args": {"epoch": 1, "text": "fixture"},
+      "idempotent": false,
+      "undo": {"call": "tool:synth_set_text", "args": {"epoch": 1, "text": ""}}
+    },
+    {
+      "id": "fail",
+      "call": "dummy_echo.echo",
+      "args": {"text": "fail", "sleep_ms": 5001},
+      "retries": 0,
+      "idempotent": true
+    }
+  ],
+  "attestations": [{"kind": "fixture", "text": "synthetic test only, never shipped"}]
+}
