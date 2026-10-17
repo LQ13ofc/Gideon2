@@ -12,7 +12,7 @@
     "bump": {"type": "bool", "required": false, "default": false},
     "label": {"type": "string", "required": true, "max": 64}
   },
-  "outputs": {"text": {"type": "string"}},
+  "outputs": {"epoch": {"type": "int"}, "text": {"type": "string"}},
   "dependency_capabilities": ["tool:synth_screen_read", "tool:synth_counter_inc", "tool:synth_set_text"],
   "permissions_required": [],
   "prerequisites": [],

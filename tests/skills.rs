@@ -1211,3 +1211,94 @@ fn a_denied_decision_fails_the_step_and_rolls_back() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Review fixes: embedded dry-run references, oversize answers, validator precedence
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dry_run_shows_embedded_step_refs_and_the_run_completes() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("embedded_refs");
+    let mut core = Core::boot(&dir, &specs());
+    core.install("skillfix", &specs()[0].payload);
+    core.enable("skillfix");
+    let embedded = manifest(
+        "skill_embed",
+        &SKILLFIX_DEPS,
+        json!([
+            {"id": "read", "call": "skillfix.read", "args": {}, "save": {"route": "route"}},
+            {"id": "echo", "call": "skillfix.process", "args": {"value": "ab-${steps.read.route}"}}
+        ]),
+    );
+    assert_eq!(core.save(embedded), "ok");
+    assert_eq!(core.dry_run("skill_embed", "1.0.0", json!({})), "ok");
+    assert_eq!(core.approve("skill_embed", "1.0.0"), "ok");
+    assert_eq!(core.enable_skill("skill_embed"), "ok");
+    assert_eq!(core.run_skill("skill_embed", json!({})), "ok");
+    core.authorize_until("the run ends", |r| r.is_null());
+    let last = core.history().last().unwrap().clone();
+    assert_eq!(last["state"], "done", "{last}");
+}
+
+#[test]
+fn oversize_skill_manifest_is_answered_and_other_oversize_lines_still_close() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("oversize_line");
+    let mut core = Core::boot(&dir, &specs());
+    let mut big = manifest(
+        "skill_big",
+        &SKILLFIX_DEPS,
+        json!([{"id": "read", "call": "skillfix.read", "args": {}}]),
+    );
+    big["padding"] = json!("x".repeat(30_000));
+    assert_eq!(core.validate(big.clone()), "skill_invalid:oversize");
+    assert_eq!(core.save(big), "skill_invalid:oversize");
+    assert_eq!(
+        core.snap()["code"],
+        "ok",
+        "the socket still answers after the refusal"
+    );
+
+    let mut stream = UnixStream::connect(core.root.join("core.sock")).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let line = format!(
+        "{{\"version\":1,\"request_id\":\"big\",\"op\":\"snapshot\",\"padding\":\"{}\"}}\n",
+        "x".repeat(30_000)
+    );
+    let _ = stream.write_all(line.as_bytes());
+    let mut reply = String::new();
+    let _ = BufReader::new(stream).read_line(&mut reply);
+    assert!(
+        reply.is_empty(),
+        "other operations keep their frame limit: {reply}"
+    );
+}
+
+#[test]
+fn grant_fields_in_steps_are_reported_before_unknown_keys() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("grant_first");
+    let mut core = Core::boot(&dir, &specs());
+    let mut with_unknown_top = manifest(
+        "skill_grant_a",
+        &SKILLFIX_DEPS,
+        json!([{"id": "read", "call": "skillfix.read", "args": {}, "grant": "audio_route"}]),
+    );
+    with_unknown_top["bogus"] = json!(1);
+    assert_eq!(core.validate(with_unknown_top), "skill_invalid:grant_field");
+    let with_permissions = manifest(
+        "skill_grant_b",
+        &SKILLFIX_DEPS,
+        json!([{"id": "read", "call": "skillfix.read", "args": {}, "permissions": ["audio_route"], "extra": 1}]),
+    );
+    assert_eq!(core.validate(with_permissions), "skill_invalid:grant_field");
+    let unknown_only = manifest(
+        "skill_grant_c",
+        &SKILLFIX_DEPS,
+        json!([{"id": "read", "call": "skillfix.read", "args": {}, "extra": 1}]),
+    );
+    assert_eq!(core.validate(unknown_only), "skill_invalid:unknown_key");
+}

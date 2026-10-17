@@ -840,6 +840,18 @@ impl Core {
     }
     /// Host facts: the Core never blocks on plugin processes.
     pub fn plugin_event(&mut self, ev: crate::plugins::Ev, now: Instant) {
+        if let crate::plugins::Ev::Service {
+            plugin_id,
+            service,
+            args,
+            reply,
+        } = ev
+        {
+            // Skill services answer the waiting host at once; a dropped waiter is not an error.
+            let _ = reply.send(self.skill_service(&plugin_id, &service, args));
+            self.flush_plugin_events("");
+            return;
+        }
         let result_of = match &ev {
             crate::plugins::Ev::Result { plugin_id, .. } => Some(plugin_id.clone()),
             _ => None,
@@ -1563,6 +1575,14 @@ impl Core {
                 decision,
             } => crate::skills::wire_op(self.skill_decide(&run_id, &step, decision)),
             Operation::SkillCancel { run_id } => crate::skills::wire_op(self.skill_cancel(&run_id)),
+            Operation::SkillExport { id, version } => {
+                crate::skills::wire_op(self.skill_export(&id, &version))
+            }
+            Operation::Refused { code } => code,
+            Operation::SkillImport { name } => crate::skills::wire_op(self.skill_import(&name)),
+            Operation::SkillImportConfirm { name, revision } => {
+                crate::skills::wire_op(self.skill_import_confirm(&name, revision))
+            }
             Operation::Snapshot => unreachable!(),
         };
         self.sweep_tools();

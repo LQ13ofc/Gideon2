@@ -193,6 +193,24 @@ pub enum Operation {
     SkillCancel {
         run_id: String,
     },
+    /// D4: writes `<home>/skill-exports/<id>-<version>.gskill`.
+    SkillExport {
+        id: String,
+        version: String,
+    },
+    /// D4: reads `<home>/skill-imports/<name>.gskill` and stores a preview only.
+    SkillImport {
+        name: String,
+    },
+    /// D4: installs the previewed package as `draft`; grants nothing.
+    SkillImportConfirm {
+        name: String,
+        revision: u64,
+    },
+    /// Transport-only: a skill manifest line over the frame bound is answered with `code`.
+    Refused {
+        code: &'static str,
+    },
 }
 
 /// User decision on a tool proposal. Only a client request can carry it; plugins cannot.
@@ -548,6 +566,23 @@ enum WireRequest {
         version: u16,
         request_id: String,
         run_id: String,
+    },
+    SkillExport {
+        version: u16,
+        request_id: String,
+        id: String,
+        skill_version: String,
+    },
+    SkillImport {
+        version: u16,
+        request_id: String,
+        name: String,
+    },
+    SkillImportConfirm {
+        version: u16,
+        request_id: String,
+        name: String,
+        revision: u64,
     },
 }
 impl<'de> Deserialize<'de> for Request {
@@ -1006,6 +1041,34 @@ impl<'de> Deserialize<'de> for Request {
                 request_id,
                 run_id,
             } => (version, request_id, Operation::SkillCancel { run_id }),
+            WireRequest::SkillExport {
+                version,
+                request_id,
+                id,
+                skill_version,
+            } => (
+                version,
+                request_id,
+                Operation::SkillExport {
+                    id,
+                    version: skill_version,
+                },
+            ),
+            WireRequest::SkillImport {
+                version,
+                request_id,
+                name,
+            } => (version, request_id, Operation::SkillImport { name }),
+            WireRequest::SkillImportConfirm {
+                version,
+                request_id,
+                name,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::SkillImportConfirm { name, revision },
+            ),
         };
         Ok(Self {
             version,

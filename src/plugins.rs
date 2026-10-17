@@ -184,8 +184,15 @@ pub enum Intent {
     },
 }
 /// Facts reported by the host back to the Core.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Ev {
+    /// A `skills.*` host service of a plugin. The Core answers on `reply` inside the same loop turn.
+    Service {
+        plugin_id: String,
+        service: String,
+        args: Value,
+        reply: tokio::sync::oneshot::Sender<Result<Value, &'static str>>,
+    },
     State {
         plugin_id: String,
         state: &'static str,
@@ -746,6 +753,8 @@ impl PluginView {
                     self.events.push(kind);
                 }
             }
+            // Answered by the Core before it reaches the plugin registry (Core::plugin_event).
+            Ev::Service { .. } => {}
             Ev::Log { .. } => {
                 while self
                     .logs
@@ -983,6 +992,7 @@ impl Host {
             | Ev::Partial { plugin_id, .. }
             | Ev::FallbackUsed { plugin_id, .. }
             | Ev::Audit { plugin_id, .. }
+            | Ev::Service { plugin_id, .. }
             | Ev::Log { plugin_id } => plugin_id.clone(),
         };
         if self.actors.get(&id).is_none_or(|a| a.epoch != wire.epoch) {
@@ -2103,6 +2113,22 @@ impl Session {
                     Err(code) => self.host_error(id, code, None).await,
                 }
             }
+            name if name.starts_with("skills.") => {
+                let outcome = if cancelled {
+                    Err("cancelled")
+                } else if self.host.is_some() {
+                    Err("busy")
+                } else {
+                    skill_service(name, line.args, out).await
+                };
+                match outcome {
+                    Ok(data) => self
+                        .write(&serde_json::json!({"v": 1, "op": "host_reply", "id": id, "done": true, "data": data}))
+                        .await
+                        .map_err(|_| Exit::Crashed),
+                    Err(code) => self.host_error(id, code, None).await,
+                }
+            }
             _ => {
                 let code = if cancelled {
                     "cancelled"
@@ -2195,7 +2221,7 @@ fn bounded_object(output: Value) -> Option<Value> {
     fits.then_some(output)
 }
 /// Plugin error codes that reach clients unchanged (C1, C4 host codes of docs/C4.md). Any other plugin code reads `plugin_error`.
-const PASS_THROUGH_ERRORS: [&str; 29] = [
+const PASS_THROUGH_ERRORS: [&str; 31] = [
     "key_missing",
     "cloud_not_authorized",
     "provider_not_configured",
@@ -2225,7 +2251,38 @@ const PASS_THROUGH_ERRORS: [&str; 29] = [
     "already_recording",
     "not_recording",
     "world_unavailable",
+    "skill_invalid",
+    "model_output_invalid",
 ];
+/// Skill host services the Core answers for an approved `skills_author` plugin (docs/S4.md D3).
+/// Every other `skills.*` name, including approve, enable, export, import, run and publish, is
+/// `unknown_service` and never leaves the transport.
+const SKILL_SERVICES: [&str; 4] = [
+    "skills.validate",
+    "skills.draft_put",
+    "skills.dry_run",
+    "skills.list",
+];
+/// Longest wait for the Core's answer. The Core answers in the same loop turn, so this only bounds
+/// a Core that stopped answering.
+const SERVICE_DEADLINE: Duration = Duration::from_secs(2);
+/// Plugin-side skill service. Unknown names fail here; known names go to the Core and back.
+async fn skill_service(service: &str, args: Value, out: &Out) -> Result<Value, &'static str> {
+    if !SKILL_SERVICES.contains(&service) {
+        return Err("unknown_service");
+    }
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    out.send(Ev::Service {
+        plugin_id: out.plugin_id.clone(),
+        service: service.to_owned(),
+        args,
+        reply,
+    });
+    match tokio::time::timeout(SERVICE_DEADLINE, answer).await {
+        Ok(Ok(outcome)) => outcome,
+        _ => Err("skills_unavailable"),
+    }
+}
 fn pass_through(code: &str) -> &'static str {
     PASS_THROUGH_ERRORS
         .iter()

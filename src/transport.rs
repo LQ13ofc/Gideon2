@@ -41,25 +41,50 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
     let (read, mut write) = stream.into_split();
     let mut read = BufReader::new(read);
     loop {
-        let line = tokio::time::timeout(Duration::from_secs(5), request_frame(&mut read)).await??;
-        let Some(line) = line else {
+        let frame =
+            tokio::time::timeout(Duration::from_secs(5), request_frame(&mut read)).await??;
+        let Some((line, oversized)) = frame else {
             return Ok(());
         };
         let parsed = serde_json::from_slice::<Request>(&line);
-        // Only capability_invoke (8 KiB input contract) and skill manifests (16 KiB) may be larger.
-        let allowed = match parsed.as_ref().map(|r| &r.operation) {
-            Ok(Operation::CapabilityInvoke { .. }) => line.len() <= MAX_INVOKE_MESSAGE,
-            Ok(Operation::SkillValidate { .. } | Operation::SkillSaveDraft { .. }) => {
-                line.len() <= MAX_SKILL_MESSAGE
+        let parsed = if oversized {
+            // Only a skill manifest gets an answer; its line was read and discarded in full.
+            match parsed {
+                Ok(Request {
+                    version,
+                    request_id,
+                    operation: Operation::SkillValidate { .. } | Operation::SkillSaveDraft { .. },
+                }) => Ok(Request {
+                    version,
+                    request_id,
+                    operation: Operation::Refused {
+                        code: "skill_invalid:oversize",
+                    },
+                }),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "message too large",
+                    ))
+                }
             }
-            _ => line.len() <= MAX_MESSAGE,
+        } else {
+            // Only capability_invoke (8 KiB input contract) and skill manifests (16 KiB) may be larger.
+            let allowed = match parsed.as_ref().map(|r| &r.operation) {
+                Ok(Operation::CapabilityInvoke { .. }) => line.len() <= MAX_INVOKE_MESSAGE,
+                Ok(Operation::SkillValidate { .. } | Operation::SkillSaveDraft { .. }) => {
+                    line.len() <= MAX_SKILL_MESSAGE
+                }
+                _ => line.len() <= MAX_MESSAGE,
+            };
+            if !allowed {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "message too large",
+                ));
+            }
+            parsed
         };
-        if !allowed {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "message too large",
-            ));
-        }
         let response = match parsed {
             Ok(request) => {
                 let (reply, rx) = oneshot::channel();
@@ -81,12 +106,16 @@ async fn peer(stream: UnixStream, tx: mpsc::Sender<Call>) -> io::Result<()> {
 const MAX_INVOKE_MESSAGE: usize = 16384;
 /// Raw line bound for skill manifests: 16 KiB manifest plus envelope. Checked per operation in `peer`.
 const MAX_SKILL_MESSAGE: usize = 24576;
+/// Largest object line read in full. Past MAX_SKILL_MESSAGE the line is only read and discarded,
+/// so `peer` can answer a skill manifest with `skill_invalid:oversize`; anything else closes.
+const MAX_DISCARD_MESSAGE: usize = 65536;
 /// Client request line: bounded by MAX_MESSAGE unless it looks like a JSON object (`{"`), in which
 /// case it may reach MAX_INVOKE_MESSAGE; the parsed operation is checked afterwards, and only
 /// capability_invoke may actually exceed MAX_MESSAGE. Garbage without a newline closes at 4 KiB.
+/// Returns the line and whether it was over MAX_SKILL_MESSAGE (read in full, discarded by `peer`).
 async fn request_frame<R: tokio::io::AsyncBufRead + Unpin>(
     read: &mut R,
-) -> io::Result<Option<Vec<u8>>> {
+) -> io::Result<Option<(Vec<u8>, bool)>> {
     let mut bytes = Vec::new();
     loop {
         let chunk = read.fill_buf().await?;
@@ -115,7 +144,7 @@ async fn request_frame<R: tokio::io::AsyncBufRead + Unpin>(
             }
         });
         let object_like = first == Some(&b'{') && second == Some(&b'"');
-        if total > MAX_SKILL_MESSAGE || (total > MAX_MESSAGE && !object_like) {
+        if total > MAX_DISCARD_MESSAGE || (total > MAX_MESSAGE && !object_like) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "message too large",
@@ -125,7 +154,8 @@ async fn request_frame<R: tokio::io::AsyncBufRead + Unpin>(
         bytes.extend_from_slice(&chunk[..size]);
         read.consume(size);
         if done {
-            return Ok(Some(bytes));
+            let oversized = bytes.len() > MAX_SKILL_MESSAGE;
+            return Ok(Some((bytes, oversized)));
         }
     }
 }

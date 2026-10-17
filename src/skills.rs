@@ -57,6 +57,14 @@ const GRANT_KEYS: [&str; 10] = [
     "allowed",
 ];
 const SECRET_KEYS: [&str; 4] = ["key", "token", "secret", "password"];
+/// Approved plugin permission that allows the D3 host services (`skills.*`). Never a grant itself.
+const SKILLS_AUTHOR: &str = "skills_author";
+/// D4 package format and its size limit (import reads at most this many bytes).
+const PACKAGE_FORMAT: u64 = 1;
+const PACKAGE_MAX: u64 = 64 * 1024;
+const EXPORT_DIR: &str = "skill-exports";
+const IMPORT_DIR: &str = "skill-imports";
+const MANIFEST_FILE: &str = "skill.json";
 
 // Validator reasons. Each one is a complete static code, so responses never allocate.
 const E_SCHEMA: &str = "skill_invalid:schema_version";
@@ -88,6 +96,18 @@ const E_SAVE: &str = "skill_invalid:invalid_save";
 const E_SKILL_LIMIT: &str = "skill_invalid:skill_limit";
 const E_VERSION_LIMIT: &str = "skill_invalid:version_limit";
 const E_LOCKED: &str = "skill_invalid:version_locked";
+const E_DUPLICATE: &str = "skill_invalid:duplicate_id";
+// Package scan findings (D4). Each one is a bridge validator reason.
+const F_HASH: &str = "skill_invalid:hash_mismatch";
+const F_CORRUPT: &str = "skill_invalid:corrupt_package";
+const F_SYMLINK: &str = "skill_invalid:symlink";
+const F_TOO_LARGE: &str = "skill_invalid:file_too_large";
+const F_PATH: &str = "skill_invalid:path_not_allowed";
+const F_ESCALATED: &str = "skill_invalid:permissions_escalated";
+/// Operation reasons of the import path (bridge messages: invalid_import, import_not_found).
+const E_IMPORT_INVALID: &str = "invalid_import";
+const E_IMPORT_NOT_FOUND: &str = "import_not_found";
+const E_STALE_IMPORT: &str = "stale_import";
 
 /// Lifecycle of one version. `draft` is reserved for drafts created outside the Core (D3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -400,12 +420,17 @@ fn skill_id_ok(id: &str) -> bool {
     slug(id, 3, 41, false)
 }
 
+/// `x.y.z` with each part 0 or up to 5 digits without a leading zero: the same rule as the bridge
+/// (app/bridge.py SKILL_SEMVER), so every version the Core stores can be shown in the snapshot.
 fn semver_ok(value: &str) -> bool {
     let parts: Vec<&str> = value.split('.').collect();
     parts.len() == 3
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.len() <= 9 && p.bytes().all(|b| b.is_ascii_digit()))
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.len() <= 5
+                && p.bytes().all(|b| b.is_ascii_digit())
+                && (*p == "0" || !p.starts_with('0'))
+        })
 }
 
 fn sha_ok(value: &str) -> bool {
@@ -955,6 +980,7 @@ fn lookup(reference: &Ref, frame: &Frame) -> Option<Value> {
 /// Renders one string. A string that is exactly one template keeps the referenced value's type.
 fn render(
     text: &str,
+    lenient: bool,
     value_of: &dyn Fn(&Ref) -> Result<Value, &'static str>,
 ) -> Result<Value, &'static str> {
     if let Some(inner) = text
@@ -974,6 +1000,8 @@ fn render(
             Value::String(s) => out.push_str(&s),
             Value::Number(n) => out.push_str(&n.to_string()),
             Value::Bool(b) => out.push_str(if b { "true" } else { "false" }),
+            // Dry run only: a result that does not exist yet shows as a visible placeholder.
+            Value::Null if lenient => out.push_str(&format!("<{}>", &after[..end])),
             _ => return Err("invalid_template"),
         }
         rest = &after[end + 1..];
@@ -988,11 +1016,15 @@ fn resolve(value: &Value, frame: &Frame, lenient: bool) -> Result<Value, &'stati
     match value {
         Value::String(text) => {
             let rendered = if text.contains("${") {
-                render(text, &|reference: &Ref| match lookup(reference, frame) {
-                    Some(found) => Ok(found),
-                    None if lenient && matches!(reference, Ref::Step(..)) => Ok(Value::Null),
-                    None => Err("unresolved_ref"),
-                })?
+                render(
+                    text,
+                    lenient,
+                    &|reference: &Ref| match lookup(reference, frame) {
+                        Some(found) => Ok(found),
+                        None if lenient && matches!(reference, Ref::Step(..)) => Ok(Value::Null),
+                        None => Err("unresolved_ref"),
+                    },
+                )?
             } else {
                 value.clone()
             };
@@ -1186,6 +1218,39 @@ pub struct View {
     pub items: Vec<Item>,
     pub run: Option<RunView>,
     pub history: Vec<RunRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import: Option<ImportView>,
+}
+
+/// One scan finding: a validator reason (`skill_invalid:<reason>`) and the part it refers to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Finding {
+    pub code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<&'static str>,
+}
+
+/// Snapshot `skills.import` (D4): an unverified preview of a package. Never grants anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportView {
+    pub name: String,
+    pub id: String,
+    pub version: String,
+    pub publisher: String,
+    pub unverified: bool,
+    pub permissions_required: Vec<String>,
+    pub missing_deps: Vec<String>,
+    pub permission_delta: Vec<String>,
+    pub permissions_escalated: bool,
+    pub duplicate: bool,
+    pub findings: Vec<Finding>,
+}
+
+#[derive(Debug, Clone)]
+struct ImportState {
+    name: String,
+    package_sha256: String,
+    view: ImportView,
 }
 
 /// Core-owned skill state. Idle and inert until a skill is created.
@@ -1198,6 +1263,8 @@ pub(crate) struct Engine {
     run: Option<Run>,
     started: u64,
     epoch: u64,
+    /// Last import preview (D4). Memory only: a restart drops it, and confirm rescans the file.
+    import: Option<ImportState>,
 }
 
 impl Engine {
@@ -1646,33 +1713,27 @@ impl Core {
         }
     }
 
-    /// Simulation: resolves dependencies, checks the preview and the inputs, and resolves every
-    /// template that does not depend on a previous result. Makes zero capability calls.
-    pub(crate) fn skill_dry_run(&mut self, id: &str, version: &str, inputs: Value) -> &'static str {
-        if let Err(code) = self.skills_ready() {
-            return code;
-        }
-        let Some(record) = self
+    /// Simulation checks: dependencies, the destructive switch, the inputs, and every template that
+    /// does not depend on a previous result. Makes zero capability calls and writes nothing.
+    /// Returns the version state and the number of steps.
+    fn dry_run_check(
+        &self,
+        id: &str,
+        version: &str,
+        inputs: Value,
+    ) -> Result<(State, usize), &'static str> {
+        self.skills_ready()?;
+        let record = self
             .skills
             .entry(id)
             .and_then(|e| e.versions.iter().find(|v| v.version == version))
             .cloned()
-        else {
-            return "unknown_version";
-        };
-        let manifest = match self.load_manifest(id, &record) {
-            Ok(manifest) => manifest,
-            Err(code) => return code,
-        };
-        let inputs = match resolve_inputs(&manifest.inputs, &inputs) {
-            Ok(inputs) => inputs,
-            Err(code) => return code,
-        };
-        if let Err(code) = self.deps_ready(&manifest) {
-            return code;
-        }
+            .ok_or("unknown_version")?;
+        let manifest = self.load_manifest(id, &record)?;
+        let inputs = resolve_inputs(&manifest.inputs, &inputs)?;
+        self.deps_ready(&manifest)?;
         if self.destructive_blocked(&manifest) {
-            return "destructive_disabled";
+            return Err("destructive_disabled");
         }
         let frame = Frame {
             skill: id.to_owned(),
@@ -1685,11 +1746,18 @@ impl Core {
         };
         for step in &manifest.steps {
             let args = step.args.clone().unwrap_or_else(|| json!({}));
-            if let Err(code) = resolve(&args, &frame, true) {
-                return code;
-            }
+            resolve(&args, &frame, true)?;
         }
-        if record.state == State::Validated {
+        Ok((record.state, manifest.steps.len()))
+    }
+
+    /// User simulation (`skill_dry_run`). A passing run marks a draft or validated version `tested`.
+    pub(crate) fn skill_dry_run(&mut self, id: &str, version: &str, inputs: Value) -> &'static str {
+        let (state, _) = match self.dry_run_check(id, version, inputs) {
+            Ok(checked) => checked,
+            Err(code) => return code,
+        };
+        if matches!(state, State::Draft | State::Validated) {
             let mut next = self.skills.ledger.clone();
             if let Some(v) = entry_mut(&mut next, id).and_then(|e| version_mut(e, version)) {
                 v.state = State::Tested;
@@ -2745,6 +2813,7 @@ impl Core {
             items,
             run,
             history: self.skills.runs.runs.clone(),
+            import: self.skills.import.as_ref().map(|p| p.view.clone()),
         })
     }
 
@@ -2841,6 +2910,555 @@ pub(crate) fn wire_op(code: &'static str) -> &'static str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// D3: host services for an approved `skills_author` plugin (docs/S4.md D3). Only drafts are
+// created; nothing here approves, enables, exports, runs or publishes, and a plugin dry run only
+// reads state. Plugin errors are the plugin codes of `plugin_code`.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestArgs {
+    manifest: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DryRunArgs {
+    id: String,
+    version: String,
+    inputs: Value,
+}
+
+/// Core reason to the code a plugin sees. Validator reasons all read `skill_invalid`.
+pub(crate) fn plugin_code(code: &'static str) -> &'static str {
+    match code {
+        "permission_revoked" | "permission_denied" => "permission_denied",
+        "unknown_service" => "unknown_service",
+        "invalid_host_call" => "invalid_host_call",
+        "skills_unavailable" | "skills_storage_error" => "skills_unavailable",
+        "missing_dependency" => "missing_dependency",
+        "unknown_skill" => "unknown_skill",
+        "unknown_version" => "unknown_version",
+        "skill_busy" | "busy" => "busy",
+        "invalid_input" | "oversize" | "invalid_skill_input" => "invalid_input",
+        _ => "skill_invalid",
+    }
+}
+
+impl Core {
+    /// Approved `skills_author` permission of a plugin, read from the verified hub at call time.
+    fn plugin_holds_skills_author(&self, plugin_id: &str) -> bool {
+        self.hub
+            .as_ref()
+            .filter(|h| h.status == "verified")
+            .is_some_and(|hub| {
+                hub.entries.iter().any(|e| {
+                    e.plugin_id == plugin_id
+                        && e.permissions_approved
+                        && e.permissions.iter().any(|p| p == SKILLS_AUTHOR)
+                })
+            })
+    }
+
+    /// Core side of one `skills.*` host service. Only the four D3 names reach this point.
+    pub(crate) fn skill_service(
+        &mut self,
+        plugin_id: &str,
+        service: &str,
+        args: Value,
+    ) -> Result<Value, &'static str> {
+        if !self.plugin_holds_skills_author(plugin_id) {
+            self.emit(String::new(), None, "skill_service_denied");
+            return Err("permission_denied");
+        }
+        let outcome = match service {
+            "skills.validate" => self.plugin_validate(args),
+            "skills.draft_put" => self.plugin_draft_put(args),
+            "skills.dry_run" => self.plugin_dry_run(args),
+            "skills.list" => self.plugin_list(args),
+            _ => Err("unknown_service"),
+        };
+        outcome.map_err(plugin_code)
+    }
+
+    /// `skills.validate {manifest}` => `{ok}`. Validation only; nothing is written.
+    fn plugin_validate(&mut self, args: Value) -> Result<Value, &'static str> {
+        let ManifestArgs { manifest } =
+            serde_json::from_value(args).map_err(|_| "invalid_host_call")?;
+        self.skills_ready()?;
+        let ok = match self.skill_checked(&manifest) {
+            Ok(_) => true,
+            Err(code) if code.starts_with("skill_invalid:") => false,
+            Err(code) => return Err(code),
+        };
+        self.emit(String::new(), None, "skill_plugin_validate");
+        Ok(json!({ "ok": ok }))
+    }
+
+    /// `skills.draft_put {manifest}` => `{draft_id, version, state}`. Creates one new `draft`
+    /// version from `llm_draft`; `state` is `revised` when the skill already has versions. An
+    /// existing version, approved, enabled or not, is never replaced.
+    fn plugin_draft_put(&mut self, args: Value) -> Result<Value, &'static str> {
+        let ManifestArgs { manifest } =
+            serde_json::from_value(args).map_err(|_| "invalid_host_call")?;
+        self.skills_ready()?;
+        let checked = self.skill_checked(&manifest)?;
+        let id = checked.manifest.id.clone();
+        let version = checked.manifest.version.clone();
+        let revised = self.install(checked, Source::LlmDraft, State::Draft)?;
+        self.emit(String::new(), None, "skill_draft_put");
+        Ok(json!({
+            "draft_id": format!("{id}@{version}"),
+            "version": version,
+            "state": if revised { "revised" } else { "draft" },
+        }))
+    }
+
+    /// `skills.dry_run {id, version, inputs}` => `{ok, steps}`. Same checks as the user dry run,
+    /// but a plugin never moves a version to `tested`.
+    fn plugin_dry_run(&mut self, args: Value) -> Result<Value, &'static str> {
+        let DryRunArgs {
+            id,
+            version,
+            inputs,
+        } = serde_json::from_value(args).map_err(|_| "invalid_host_call")?;
+        let (_, steps) = self.dry_run_check(&id, &version, inputs)?;
+        self.emit(String::new(), None, "skill_plugin_dry_run");
+        Ok(json!({ "ok": true, "steps": steps }))
+    }
+
+    /// `skills.list {}` => `{items:[{id, version, state, source, active}]}`. No content, no paths.
+    fn plugin_list(&mut self, args: Value) -> Result<Value, &'static str> {
+        if !args.as_object().is_some_and(Map::is_empty) {
+            return Err("invalid_host_call");
+        }
+        self.skills_ready()?;
+        let items: Vec<Value> = self
+            .skills
+            .ledger
+            .skills
+            .iter()
+            .flat_map(|entry| {
+                let active = entry.active.clone();
+                entry.versions.iter().map(move |v| {
+                    json!({
+                        "id": entry.id,
+                        "version": v.version,
+                        "state": v.state,
+                        "source": v.source,
+                        "active": active.as_deref() == Some(v.version.as_str()),
+                    })
+                })
+            })
+            .collect();
+        self.emit(String::new(), None, "skill_plugin_list");
+        Ok(json!({ "items": items }))
+    }
+
+    /// Stores one new version as `state` from `source`. Never touches `active` or another version.
+    /// Returns true when the skill already existed, which makes this version a revision of it.
+    fn install(
+        &mut self,
+        checked: Checked,
+        source: Source,
+        state: State,
+    ) -> Result<bool, &'static str> {
+        let root = self.skills.root.clone().ok_or("skills_unavailable")?;
+        let id = checked.manifest.id.clone();
+        let version = checked.manifest.version.clone();
+        let mut next = self.skills.ledger.clone();
+        let revised = next.skills.iter().any(|s| s.id == id);
+        if !revised {
+            if next.skills.len() >= SKILLS_MAX {
+                return Err(E_SKILL_LIMIT);
+            }
+            next.skills.push(SkillEntry {
+                id: id.clone(),
+                versions: Vec::new(),
+                active: None,
+            });
+        }
+        let entry = entry_mut(&mut next, &id).ok_or("skills_storage_error")?;
+        if entry.versions.iter().any(|v| v.version == version) {
+            return Err(E_DUPLICATE);
+        }
+        if entry.versions.len() >= VERSIONS_MAX {
+            return Err(E_VERSION_LIMIT);
+        }
+        entry.versions.push(VersionEntry {
+            version: version.clone(),
+            manifest_sha256: checked.sha256.clone(),
+            state,
+            source,
+            approved_at_rev: None,
+        });
+        write_private(&manifest_path(&root, &id, &version), &checked.bytes)
+            .map_err(|_| "skills_storage_error")?;
+        self.skills_commit(next)?;
+        Ok(revised)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// D4: `.gskill` packages. Export writes under `<home>/skill-exports`; import reads only
+// `<home>/skill-imports/<name>.gskill`, previews it, and installs a confirmed preview as `draft`.
+// ---------------------------------------------------------------------------
+
+/// The package file. `package_sha256` covers the whole package with that field set to "".
+/// `signature` must stay null: publisher signatures are not implemented.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Package {
+    format: u64,
+    manifest: Value,
+    readme: Option<String>,
+    license: String,
+    author: String,
+    version: String,
+    files: Vec<PackageFile>,
+    package_sha256: String,
+    publisher_id: String,
+    signature: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PackageFile {
+    path: String,
+    sha256: String,
+}
+
+fn package_digest(package: &Package) -> String {
+    let mut copy = package.clone();
+    copy.package_sha256 = String::new();
+    serde_json::to_vec(&copy).map_or_else(|_| String::new(), |bytes| sha256_hex(&bytes))
+}
+
+/// Private directory for packages: created 0700 when missing; a symlink or non-directory is refused.
+fn private_dir(path: &Path) -> Result<(), &'static str> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(F_PATH),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+            .map_err(|_| "skills_storage_error"),
+        Err(_) => Err("skills_storage_error"),
+    }
+}
+
+/// Import name: 1 to 64 bytes of letters, digits, `.`, `_` or `-`, starting with a letter or digit.
+fn import_name_ok(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name.as_bytes()[0].is_ascii_alphanumeric()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// Reads `<home>/skill-imports/<name>.gskill`: a regular file, never through a symlink, at most
+/// 64 KiB. Any other path, file type or size is refused before its content is parsed.
+fn read_package(name: &str) -> Result<Vec<u8>, &'static str> {
+    let dir = crate::transport::home().join(IMPORT_DIR);
+    match fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => return Err(F_PATH),
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(E_IMPORT_NOT_FOUND),
+        Err(_) => return Err(E_IMPORT_INVALID),
+    }
+    let path = dir.join(format!("{name}.gskill"));
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&path)
+        .map_err(|error| match (error.kind(), error.raw_os_error()) {
+            (_, Some(libc::ELOOP)) => F_SYMLINK,
+            (io::ErrorKind::NotFound, _) => E_IMPORT_NOT_FOUND,
+            _ => E_IMPORT_INVALID,
+        })?;
+    let meta = file.metadata().map_err(|_| E_IMPORT_INVALID)?;
+    if !meta.is_file() {
+        return Err(F_PATH);
+    }
+    if meta.len() > PACKAGE_MAX {
+        return Err(F_TOO_LARGE);
+    }
+    let mut bytes = Vec::new();
+    file.take(PACKAGE_MAX + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| E_IMPORT_INVALID)?;
+    if bytes.len() as u64 > PACKAGE_MAX {
+        return Err(F_TOO_LARGE);
+    }
+    Ok(bytes)
+}
+
+/// Prose fields (description, readme, triggers, prerequisites, attestations) must not carry a
+/// path, a URL, a key or a secret. Narrower than the args rule, since prose may contain `;`.
+fn prose_leak(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    [
+        "://",
+        "/home/",
+        "/etc/",
+        "/root/",
+        "~/",
+        "private key",
+        "api_key",
+        "apikey",
+        "token=",
+        "password=",
+        "secret=",
+        "sk-proj-",
+        "sk-ant-",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+/// Result of one package scan. `view` is exactly what the snapshot shows.
+struct Scan {
+    package_sha256: String,
+    view: ImportView,
+    checked: Checked,
+}
+
+impl Core {
+    /// Export of one installed version. Writes `<home>/skill-exports/<id>-<version>.gskill` (0600).
+    pub(crate) fn skill_export(&mut self, id: &str, version: &str) -> &'static str {
+        if let Err(code) = self.skills_ready() {
+            return code;
+        }
+        let Some(record) = self
+            .skills
+            .entry(id)
+            .and_then(|e| e.versions.iter().find(|v| v.version == version))
+            .cloned()
+        else {
+            return "unknown_version";
+        };
+        let bytes = match self
+            .skills
+            .read_checked(id, &record.version, &record.manifest_sha256)
+        {
+            Ok(bytes) => bytes,
+            Err(code) => return code,
+        };
+        let (Ok(value), Ok(typed)) = (
+            serde_json::from_slice::<Value>(&bytes),
+            serde_json::from_slice::<Manifest>(&bytes),
+        ) else {
+            return "manifest_unavailable";
+        };
+        let mut package = Package {
+            format: PACKAGE_FORMAT,
+            manifest: value,
+            readme: typed.readme.clone(),
+            license: typed.license.clone(),
+            author: typed.publisher.name.clone(),
+            version: typed.version.clone(),
+            files: vec![PackageFile {
+                path: MANIFEST_FILE.to_owned(),
+                sha256: record.manifest_sha256.clone(),
+            }],
+            package_sha256: String::new(),
+            publisher_id: typed.publisher.id.clone(),
+            signature: None,
+        };
+        package.package_sha256 = package_digest(&package);
+        let Ok(out) = serde_json::to_vec(&package) else {
+            return "skills_storage_error";
+        };
+        if out.len() as u64 > PACKAGE_MAX {
+            return F_TOO_LARGE;
+        }
+        let dir = crate::transport::home().join(EXPORT_DIR);
+        if let Err(code) = private_dir(&dir) {
+            return code;
+        }
+        let path = dir.join(format!("{id}-{version}.gskill"));
+        if write_private(&path, &out).is_err() {
+            return "skills_storage_error";
+        }
+        self.emit(String::new(), None, "skill_exported");
+        "ok"
+    }
+
+    /// Reads and scans one package. Malformed packages are refused; findings are returned in the
+    /// view so the user sees every problem with a package that parses.
+    fn scan_package(&self, name: &str) -> Result<Scan, &'static str> {
+        let bytes = read_package(name)?;
+        let package: Package = serde_json::from_slice(&bytes).map_err(|_| E_IMPORT_INVALID)?;
+        if package.format != PACKAGE_FORMAT || package.signature.is_some() {
+            return Err(E_IMPORT_INVALID);
+        }
+        let checked = self.skill_checked(&package.manifest)?;
+        let manifest = &checked.manifest;
+        let mut findings: Vec<Finding> = Vec::new();
+        if package.package_sha256 != package_digest(&package) {
+            findings.push(Finding {
+                code: F_HASH,
+                field: Some("package_sha256"),
+            });
+        }
+        let expected = [PackageFile {
+            path: MANIFEST_FILE.to_owned(),
+            sha256: checked.sha256.clone(),
+        }];
+        if package.files != expected {
+            findings.push(Finding {
+                code: F_HASH,
+                field: Some("files"),
+            });
+        }
+        if package.version != manifest.version
+            || package.publisher_id != manifest.publisher.id
+            || package.license != manifest.license
+            || package.readme != manifest.readme
+            || package.author != manifest.publisher.name
+        {
+            findings.push(Finding {
+                code: F_CORRUPT,
+                field: Some("envelope"),
+            });
+        }
+        let mut prose: Vec<&str> = vec![
+            manifest.description.as_str(),
+            manifest.publisher.name.as_str(),
+        ];
+        prose.extend(manifest.readme.as_deref());
+        prose.extend(manifest.triggers.iter().map(String::as_str));
+        prose.extend(manifest.prerequisites.iter().map(String::as_str));
+        prose.extend(manifest.attestations.iter().map(|a| a.text.as_str()));
+        if prose.iter().any(|text| prose_leak(text)) {
+            findings.push(Finding {
+                code: E_EXFIL,
+                field: Some("text"),
+            });
+        }
+        let existing = self.skills.entry(&manifest.id);
+        let duplicate =
+            existing.is_some_and(|e| e.versions.iter().any(|v| v.version == manifest.version));
+        if duplicate {
+            findings.push(Finding {
+                code: E_DUPLICATE,
+                field: Some("version"),
+            });
+        }
+        // Permissions compare with the version the skill would replace: the active one, else the last.
+        let previous = existing.and_then(|e| {
+            e.active
+                .as_ref()
+                .and_then(|active| e.versions.iter().find(|v| &v.version == active))
+                .or_else(|| e.versions.last())
+        });
+        let before: Vec<String> = previous
+            .and_then(|v| {
+                self.skills
+                    .read_checked(&manifest.id, &v.version, &v.manifest_sha256)
+                    .ok()
+            })
+            .and_then(|bytes| serde_json::from_slice::<Manifest>(&bytes).ok())
+            .map(|m| m.permissions_required)
+            .unwrap_or_default();
+        let permission_delta: Vec<String> = manifest
+            .permissions_required
+            .iter()
+            .filter(|p| !before.contains(p))
+            .cloned()
+            .collect();
+        let escalated = existing.is_some() && !permission_delta.is_empty();
+        if escalated {
+            findings.push(Finding {
+                code: F_ESCALATED,
+                field: Some("permissions_required"),
+            });
+        }
+        let view = ImportView {
+            name: name.to_owned(),
+            id: manifest.id.clone(),
+            version: manifest.version.clone(),
+            publisher: manifest.publisher.name.clone(),
+            unverified: true,
+            permissions_required: manifest.permissions_required.clone(),
+            missing_deps: self.missing_for(manifest),
+            permission_delta,
+            permissions_escalated: escalated,
+            duplicate,
+            findings,
+        };
+        Ok(Scan {
+            package_sha256: sha256_hex(&bytes),
+            view,
+            checked,
+        })
+    }
+
+    /// `skill_import{name}`: scans the package and stores the preview. Installs nothing.
+    pub(crate) fn skill_import(&mut self, name: &str) -> &'static str {
+        if let Err(code) = self.skills_ready() {
+            return code;
+        }
+        if !import_name_ok(name) {
+            self.skills.import = None;
+            return E_IMPORT_INVALID;
+        }
+        match self.scan_package(name) {
+            Ok(scan) => {
+                self.skills.import = Some(ImportState {
+                    name: name.to_owned(),
+                    package_sha256: scan.package_sha256,
+                    view: scan.view,
+                });
+                self.emit(String::new(), None, "skill_import_previewed");
+                "ok"
+            }
+            Err(code) => {
+                self.skills.import = None;
+                code
+            }
+        }
+    }
+
+    /// `skill_import_confirm{name, revision}`: rescans the file and installs it as `draft` only if
+    /// it still matches the preview and has no blocking finding. Permissions are never granted.
+    pub(crate) fn skill_import_confirm(&mut self, name: &str, revision: u64) -> &'static str {
+        if let Err(code) = self.check_revision(revision) {
+            return code;
+        }
+        let Some(pending) = self.skills.import.clone().filter(|p| p.name == name) else {
+            return E_STALE_IMPORT;
+        };
+        let scan = match self.scan_package(name) {
+            Ok(scan) => scan,
+            Err(code) => return code,
+        };
+        if scan.package_sha256 != pending.package_sha256 || scan.view != pending.view {
+            self.skills.import = None;
+            return E_STALE_IMPORT;
+        }
+        if let Some(code) = scan
+            .view
+            .findings
+            .iter()
+            .find(|f| f.code != F_ESCALATED)
+            .map(|f| f.code)
+        {
+            return code;
+        }
+        match self.install(scan.checked, Source::Imported, State::Draft) {
+            Ok(_) => {
+                self.skills.import = None;
+                self.emit(String::new(), None, "skill_imported");
+                "ok"
+            }
+            Err(code) => code,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2908,10 +3526,43 @@ mod tests {
     }
 
     #[test]
+    fn embedded_refs_are_real_values_at_run_time_and_placeholders_in_dry_run() {
+        let mut frame = Frame {
+            skill: "skill_t".into(),
+            inputs: Map::new(),
+            next: 0,
+            results: BTreeMap::new(),
+            outputs: Map::new(),
+            parent: None,
+            root_view: None,
+        };
+        frame.results.insert("read".into(), json!({"text": "hi"}));
+        assert_eq!(
+            resolve(&json!("ab-${steps.read.text}"), &frame, false).unwrap(),
+            json!("ab-hi")
+        );
+        assert_eq!(
+            resolve(&json!("ab-${steps.later.text}"), &frame, true).unwrap(),
+            json!("ab-<steps.later.text>")
+        );
+        assert_eq!(
+            resolve(&json!("ab-${steps.later.text}"), &frame, false),
+            Err("unresolved_ref")
+        );
+        assert_eq!(
+            resolve(&json!("${steps.later.text}"), &frame, true).unwrap(),
+            Value::Null
+        );
+    }
+
+    #[test]
     fn semver_and_runtime_comparison() {
         assert!(semver_ok("1.2.3"));
         assert!(!semver_ok("1.2"));
         assert!(!semver_ok("1.2.3-rc1"));
+        assert!(!semver_ok("01.2.3"));
+        assert!(!semver_ok("100000.0.0"));
+        assert!(semver_ok("99999.0.0"));
         assert_eq!(semver_tuple("0.1.0"), Some((0, 1, 0)));
         assert!(semver_tuple("0.2.0") > Some(runtime_version()));
     }
