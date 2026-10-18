@@ -290,6 +290,9 @@ pub struct View {
     pub run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<u32>,
+    /// `connection` for S5 operation proposals; their owner is the Core, not a plugin.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
 }
 
 struct Entry {
@@ -397,6 +400,7 @@ impl Ledger {
                 result: None,
                 run_id: None,
                 step: None,
+                kind: None,
             },
             created: now,
             seq: self.sequence,
@@ -410,6 +414,16 @@ impl Ledger {
             }
         }
         proposal_id
+    }
+    /// Marks a proposal as a Connection Manager operation (S5). Unknown ids are ignored.
+    pub fn set_kind(&mut self, proposal_id: &str, kind: &'static str) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.view.proposal_id == proposal_id)
+        {
+            entry.view.kind = Some(kind);
+        }
     }
     /// Marks a proposal as owned by an agent run and step (C3). Unknown ids are ignored.
     pub fn tag(&mut self, proposal_id: &str, run_id: &str, step: u32) {
@@ -487,9 +501,13 @@ impl Ledger {
             }
         }
     }
-    /// Cancels pending proposals whose plugin is not enabled and running.
+    /// Cancels pending proposals whose plugin is not enabled and running. Connection proposals
+    /// have no plugin owner and are kept (their owner is the Core).
     pub fn cancel_unavailable(&mut self, running: &HashSet<String>) {
         for entry in self.entries.iter_mut() {
+            if entry.view.kind == Some("connection") {
+                continue;
+            }
             if entry.view.state == State::Pending && !running.contains(&entry.view.plugin_id) {
                 entry.view.state = State::Cancelled;
                 entry.view.reason = Some("plugin_unavailable");

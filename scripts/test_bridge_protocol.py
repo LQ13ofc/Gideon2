@@ -9,11 +9,12 @@ from bridge import CERT_BADGES,FEATURE_LABELS,MODEL_CAPABILITY,custom_form_probl
 from bridge import AGENT_CODES,AGENT_STATE_LABELS,AGENT_STATES,OPS,PENDING,SNAPSHOT_SECTION_KEYS,agent_goal_problem,valid_agent,valid_tools
 from bridge import CAPABILITY_ERRORS,PERCEPTION_CAPABILITIES,PERCEPTION_DEADLINE_MS,PERCEPTION_INPUT_LIMIT,PERCEPTION_MESSAGES,PERCEPTION_OUTPUTS,PERCEPTION_PLUGINS,perception_code_message,perception_input_problem,perception_text
 from bridge import PENDING_SKILL_DRAFT,SKILL_CODES,SKILL_DRAFT_CAPABILITY,SKILL_DRAFT_DEADLINE_MS,SKILL_HISTORY_LIMIT,SKILL_ITEMS_LIMIT,SKILL_JSON_LIMIT,SKILL_OP_CODES,SKILL_OP_MESSAGES,SKILL_REASON_MESSAGES,SKILL_REASONS,SKILL_SOURCES,SKILL_STATES,SKILL_STEPS_LIMIT,code_message,skill_code_ok,skill_json,valid_skill_draft,valid_skills
+from bridge import CONN_ACCESS,CONN_ARGS_LIMIT,CONN_CODES,CONN_MESSAGES,CONN_STATUSES,conn_label_problem
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
-QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child']
-APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD) else QCoreApplication([])
+QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child'];QML_CONNECTIONS_CHILD=sys.argv[1:2]==['--qml-connections-child']
+APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
 EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
 BASE={'version':1,'request_id':'r','code':'ok','state':'idle','sequence':1,'session_id':None,'transcript':None,'command':None,'events':[],'text_input_available':True,'speech_samples':0,'speech_status':'idle','wake_status':'unavailable','stt_status':'unavailable','plugins':{'revision':0,'status':'ok','items':[]},'llm':EMPTY_LLM,'tool_proposals':[]}
@@ -1958,8 +1959,237 @@ def qml_skills_child():
             del engine;del bridge
     print(f'qml skills checks ok: {len(checks)}',flush=True)
     return 0
+# S5 connections (docs/S5.md E1, UI). Catalog and accounts are shaped as the Core snapshot block: providers carry scopes and operations; accounts carry granted and pending scopes only.
+CONN_GITHUB={'id':'github','scopes':[{'id':'repo:read','label':'Ler repositórios','access':'read'},{'id':'issues:write','label':'Criar issues','access':'write'}],'operations':[{'name':'repos.list','scope':'repo:read','risk':'read'},{'name':'issues.create','scope':'issues:write','risk':'write'}]}
+CONN_HA={'id':'homeassistant','scopes':[{'id':'states:read','label':'Ler estados','access':'read'},{'id':'service:call','label':'Chamar serviços','access':'destructive'}],'operations':[{'name':'states.list','scope':'states:read','risk':'read'},{'name':'service.call','scope':'service:call','risk':'destructive'}]}
+def conn_item(ident='gh_1',provider='github',label='Trabalho',status='connected',granted=('repo:read',),pending=('issues:write',),**extra):
+    return {'id':ident,'provider':provider,'label':label,'status':status,'granted_scopes':list(granted),'pending_scopes':list(pending),**extra}
+def conns_block(items=None,providers=None,revision=4,last_call=None):
+    if items is None:items=[conn_item(),conn_item('ha_1','homeassistant','Casa',granted=('states:read',),pending=()),conn_item('gh_2','github','Parado',status='disconnected',granted=(),pending=())]
+    block={'revision':revision,'items':items,'providers':[CONN_GITHUB,CONN_HA] if providers is None else providers}
+    if last_call is not None:block['last_call']=last_call
+    return block
+def conns_snap(block=None):return {**BASE,'connections':conns_block() if block is None else block}
+def conn_snap_with(tools,block=None):return {**conns_snap(block),'tool_proposals':list(tools)}
+def conn_proposal(pid='conn_1',connection='gh_1',op='issues.create',risk='write',state='pending',**change):
+    return {**tool_item(pid,'github_create_issue',state,{'title':'Bug'}),'kind':'connection','connection_id':connection,'operation':op,'risk':risk,**change}
+class ConnectionsContract(unittest.TestCase):
+    def test_block_is_optional_and_exact(self):
+        validate_snapshot(copy.deepcopy(BASE),'r',0);validate_snapshot({**BASE,'connections':None},'r',0)
+        validate_snapshot(conns_snap(),'r',0);validate_snapshot(conns_snap(conns_block(items=[])),'r',0);validate_snapshot(conns_snap({'revision':0,'items':[],'providers':[]}),'r',0)
+        for block in ({**conns_block(),'extra':1},{k:v for k,v in conns_block().items() if k!='providers'},{k:v for k,v in conns_block().items() if k!='revision'},[],'x'):
+            with self.subTest(block=str(block)[:30]):
+                with self.assertRaises(ValueError):validate_snapshot({**BASE,'connections':block},'r',0)
+    def test_every_status_and_scope_access_is_accepted(self):
+        for status in CONN_STATUSES:
+            with self.subTest(status=status):validate_snapshot(conns_snap(conns_block(items=[conn_item(status=status)])),'r',0)
+        for access in CONN_ACCESS:
+            provider={**CONN_GITHUB,'scopes':[{'id':'repo:read','label':'Ler','access':access}],'operations':[]}
+            with self.subTest(access=access):validate_snapshot(conns_snap(conns_block(items=[],providers=[provider])),'r',0)
+    def test_block_rejects_every_schema_break(self):
+        cases={
+            'revision bool':{**conns_block(),'revision':True},
+            'revision negative':{**conns_block(),'revision':-1},
+            'status unknown':conns_block(items=[conn_item(status='paused')]),
+            'provider not in catalog':conns_block(items=[conn_item(provider='dropbox')]),
+            'label with newline':conns_block(items=[conn_item(label='a\nb')]),
+            'label too long':conns_block(items=[conn_item(label='x'*65)]),
+            'label blank':conns_block(items=[conn_item(label='  ')]),
+            'granted scope not in catalog':conns_block(items=[conn_item(granted=('admin',))]),
+            'granted not a list':conns_block(items=[{**conn_item(),'granted_scopes':'repo:read'}]),
+            'pending overlaps granted':conns_block(items=[conn_item(granted=('repo:read',),pending=('repo:read',))]),
+            'pending scope not in catalog':conns_block(items=[conn_item(pending=('ghost',))]),
+            'pending null':conns_block(items=[{**conn_item(),'pending_scopes':None}]),
+            'secret field':conns_block(items=[conn_item(token='abc')]),
+            'access token field':conns_block(items=[conn_item(access_token='abc')]),
+            'fake not bool':conns_block(items=[conn_item(fake='yes')]),
+            'account_ref too long':conns_block(items=[conn_item(account_ref='x'*129)]),
+            'user_code too long':conns_block(items=[conn_item(user_code='x'*33)]),
+            'too many accounts':conns_block(items=[conn_item(f'gh_{i}') for i in range(9)]),
+            'duplicate account ids':conns_block(items=[conn_item(),conn_item()]),
+            'account id with space':conns_block(items=[conn_item('gh 1')]),
+            'provider repeated':conns_block(providers=[CONN_GITHUB,CONN_GITHUB]),
+            'provider id not allowed':conns_block(providers=[{**CONN_GITHUB,'id':'dropbox'}]),
+            'scope access unknown':conns_block(providers=[{**CONN_GITHUB,'scopes':[{'id':'repo:read','label':'Ler','access':'admin'}]}]),
+            'operation scope unknown':conns_block(providers=[{**CONN_GITHUB,'operations':[{'name':'repos.list','scope':'ghost','risk':'read'}]}]),
+            'operation risk unknown':conns_block(providers=[{**CONN_GITHUB,'operations':[{'name':'repos.list','scope':'repo:read','risk':'admin'}]}]),
+            'operation name repeated':conns_block(providers=[{**CONN_GITHUB,'operations':[CONN_GITHUB['operations'][0],CONN_GITHUB['operations'][0]]}]),
+            'operation extra key':conns_block(providers=[{**CONN_GITHUB,'operations':[{**CONN_GITHUB['operations'][0],'method':'GET'}]}]),
+            'too many operations':conns_block(providers=[{**CONN_GITHUB,'operations':[{'name':f'op.n{i}','scope':'repo:read','risk':'read'} for i in range(17)]}]),
+            'last_call outcome not snake':conns_block(last_call={'operation':'repos.list','outcome':'Fail'}),
+            'last_call code not snake':conns_block(last_call={'operation':'repos.list','outcome':'denied','code':'Scope Not'}),
+            'last_call extra key':conns_block(last_call={'operation':'repos.list','outcome':'ok','body':'x'}),
+            'last_call without operation':conns_block(last_call={'outcome':'ok'}),
+        }
+        for name,block in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ValueError):validate_snapshot(conns_snap(block),'r',0)
+    def test_connection_proposals_need_their_fields_and_no_agent_run(self):
+        validate_snapshot(conn_snap_with([conn_proposal()]),'r',0)
+        validate_snapshot(conn_snap_with([conn_proposal(reason='scope_not_granted',state='denied')]),'r',0)
+        validate_snapshot(conn_snap_with([conn_proposal(risk='public')]),'r',0)
+        cases={
+            'connection fields without kind':lambda:{k:v for k,v in conn_proposal().items() if k!='kind'},
+            'kind unknown':lambda:conn_proposal(kind='other'),
+            'risk missing':lambda:{k:v for k,v in conn_proposal().items() if k!='risk'},
+            'risk unknown':lambda:conn_proposal(risk='admin'),
+            'agent run on a connection proposal':lambda:conn_proposal(run_id='run_1',step=1),
+            'connection id malformed':lambda:conn_proposal(connection='gh 1'),
+            'operation malformed':lambda:conn_proposal(op='Issues Create'),
+            'tool kind with connection fields':lambda:{**tool_item('tool_9'),'kind':'tool','operation':'repos.list'},
+            'reason not a code':lambda:conn_proposal(reason='Boom'),
+        }
+        for name,make in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ValueError):validate_snapshot(conn_snap_with([make()]),'r',0)
+    def test_codes_and_labels_have_portuguese_text(self):
+        for code in ('scope_not_granted','rate_limited','unauthorized','forbidden_scope','account_mismatch','provider_unreachable','real_backend_unsupported','reauth_required','public_pending'):
+            with self.subTest(code=code):
+                self.assertEqual(CODE_MESSAGES[code],CONN_MESSAGES[code]);self.assertFalse(code_message(code).startswith('Core recusou'))
+        for code in CONN_CODES:
+            with self.subTest(code=code):self.assertFalse(code_message(code).startswith('Core recusou'))
+    def test_account_name_rule(self):
+        self.assertIsNone(conn_label_problem(' Casa '));self.assertIsNone(conn_label_problem('é'*32))
+        self.assertEqual(conn_label_problem('  '),'Nome da conta vazio');self.assertEqual(conn_label_problem('é'*33),'Nome acima de 64 bytes')
+        self.assertEqual(conn_label_problem('a\nb'),'Nome com quebra de linha ou controle não é aceito')
+class ConnectionsBridge(unittest.TestCase):
+    def test_every_op_sends_the_exact_payload_with_the_live_revision(self):
+        bridge,peer=connect_bridge(self,conns_snap());snap=conns_snap()
+        calls=[
+            (lambda:bridge.connectionAdd('github',' Casa '),'connection_add',{'provider':'github','label':'Casa','revision':4}),
+            (lambda:bridge.connectionConnect('gh_2'),'connection_connect',{'id':'gh_2','revision':4}),
+            (lambda:bridge.connectionConsent('gh_1','["issues:write"]'),'connection_consent',{'id':'gh_1','scopes':['issues:write'],'revision':4}),
+            (lambda:bridge.connectionRefresh('gh_1'),'connection_refresh',{'id':'gh_1','revision':4}),
+            (lambda:bridge.connectionDisconnect('gh_1'),'connection_disconnect',{'id':'gh_1','revision':4}),
+            (lambda:bridge.connectionRevoke('gh_1'),'connection_revoke',{'id':'gh_1','revision':4}),
+            (lambda:bridge.connectionRemove('gh_2'),'connection_remove',{'id':'gh_2','revision':4}),
+            (lambda:bridge.connectionCall('gh_1','repos.list','{"per_page": 5}'),'connection_call',{'id':'gh_1','operation':'repos.list','args':{'per_page':5}}),
+        ]
+        for call,op,payload in calls:
+            with self.subTest(op=op):
+                request=skill_round(bridge,peer,call,snap)
+                self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':op,**payload})
+                self.assertEqual(bridge.connectionsResult,OPS[op][1])
+        self.assertEqual(bridge.connectionsRevision,'4')
+    def test_refusals_never_reach_the_core(self):
+        bridge,peer=connect_bridge(self,conns_snap())
+        big='{"a":"'+'x'*CONN_ARGS_LIMIT+'"}';consent=CONN_MESSAGES['connection_consent_required']
+        cases=[
+            (lambda:bridge.connectionAdd('dropbox','Casa'),CODE_MESSAGES['invalid_provider']),
+            (lambda:bridge.connectionAdd('github','  '),'Nome da conta vazio'),
+            (lambda:bridge.connectionAdd('github','a\nb'),'Nome com quebra de linha ou controle não é aceito'),
+            (lambda:bridge.connectionConnect('../x'),'Id de conta inválido'),
+            (lambda:bridge.connectionConnect('ghost'),CONN_MESSAGES['unknown_connection']),
+            (lambda:bridge.connectionConsent('gh_1','[]'),consent),
+            (lambda:bridge.connectionConsent('gh_1','["repo:read"]'),consent),
+            (lambda:bridge.connectionConsent('gh_1','["issues:write","issues:write"]'),consent),
+            (lambda:bridge.connectionConsent('gh_1','{"a":1}'),consent),
+            (lambda:bridge.connectionConsent('gh_1','issues'),consent),
+            (lambda:bridge.connectionCall('gh_1','repos.list','[]'),CONN_MESSAGES['connection_args_invalid']),
+            (lambda:bridge.connectionCall('gh_1','repos.list',big),CONN_MESSAGES['connection_args_invalid']),
+            (lambda:bridge.connectionCall('gh_1','ghost.op','{}'),CONN_MESSAGES['unknown_operation']),
+            (lambda:bridge.connectionCall('gh_1','issues.create','{}'),CONN_MESSAGES['scope_not_granted']),
+            (lambda:bridge.connectionCall('ha_1','service.call','{}'),CONN_MESSAGES['scope_not_granted']),
+            (lambda:bridge.connectionCall('gh_2','repos.list','{}'),CONN_MESSAGES['not_connected']),
+        ]
+        for call,message in cases:
+            with self.subTest(message=message):
+                call();wait_idle();self.assertFalse(peer.canReadLine());self.assertEqual(bridge.connectionsResult,message)
+    def test_unavailable_connections_refuse_every_op(self):
+        bridge,peer=connect_bridge(self,{**BASE,'connections':None})
+        self.assertFalse(bridge.connectionsAvailable)
+        for call in (lambda:bridge.connectionConnect('gh_1'),lambda:bridge.connectionCall('gh_1','repos.list','{}')):
+            call();wait_idle();self.assertFalse(peer.canReadLine())
+        bridge.connectionAdd('github','Casa');wait_idle();self.assertFalse(peer.canReadLine())
+        self.assertEqual(bridge.connectionsResult,CONN_MESSAGES['connection_unavailable'])
+    def test_snapshot_exposes_items_providers_and_last_call_without_secrets(self):
+        bridge=Bridge('/nonexistent-gideon-root');counts=Counter()
+        self.assertEqual(SECTION_SIGNALS['connections'],'connectionsChanged')
+        for signal in SECTION_SIGNALS.values():getattr(bridge,signal).connect(lambda n=signal:counts.update([n]))
+        old=conns_snap();last={'operation':'repos.list','outcome':'denied','code':'rate_limited'}
+        new=conns_snap(conns_block(revision=5,last_call=last))
+        bridge._publish(old,new);self.assertEqual(dict(counts),{'connectionsChanged':1})
+        counts.clear();bridge._publish(new,dict(new));self.assertEqual(dict(counts),{})
+        bridge._apply(validate_snapshot(copy.deepcopy(new),'r',0))
+        self.assertEqual(bridge.connectionLastCall,last);self.assertEqual(bridge.connectionsRevision,'5')
+        self.assertEqual([i['id'] for i in bridge.connectionsItems],['gh_1','ha_1','gh_2']);self.assertEqual([p['id'] for p in bridge.connectionsProviders],['github','homeassistant'])
+        self.assertFalse(any(k in str(bridge.connectionsItems) for k in ('token','secret','refresh')))
+class ConnectionsQml(unittest.TestCase):
+    def test_connections_page_follows_qml_rules(self):
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
+        proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-connections-child'],env=env,capture_output=True,text=True,timeout=240)
+        self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
+def qml_connections_child():
+    from PySide6.QtGui import QAccessible,QGuiApplication
+    from PySide6.QtCore import QCoreApplication,QEvent,Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    from main import create
+    app=QGuiApplication(sys.argv[:1]);QAccessible.setActive(True);checks=[]
+    def check(name,value):
+        if not value:raise AssertionError(name)
+        checks.append(name)
+    with tempfile.TemporaryDirectory(prefix='gideon-qml-connections-') as td:
+        bridge,engine=create(app,td);window=engine.rootObjects()[0]
+        bridge.retry.stop();bridge.online=True
+        try:
+            def items():
+                stack=[window.contentItem()];found=[]
+                while stack:
+                    current=stack.pop();found.append(current);stack.extend(current.childItems())
+                return found
+            def find(name):
+                item=next((i for i in items() if i.objectName()==name),None)
+                if item is None:raise AssertionError('missing '+name)
+                return item
+            def plain(item):
+                expression=QQmlExpression(QQmlEngine.contextForObject(item),item,'textFormat === Text.PlainText');value=expression.evaluate();value=value[0] if isinstance(value,tuple) else value
+                return value is True and not expression.hasError()
+            gh=conn_item('gh_1',label='Trabalho',granted=('repo:read',),pending=('issues:write',),account_ref='octo-user',fake=True)
+            ha=conn_item('ha_1','homeassistant','Casa',status='connecting',granted=(),pending=('states:read',),user_code='WDJB-MJHT')
+            parado=conn_item('gh_2',label='Parado',status='disconnected',granted=(),pending=(),fake=False)
+            last={'operation':'repos.list','outcome':'denied','code':'rate_limited'}
+            bridge._apply(validate_snapshot(conns_snap(conns_block(items=[gh,ha,parado],last_call=last)),'r',0))
+            check('nav11 offered while connections answer',find('nav11').property('visible'))
+            window.setProperty('page',11);QTest.qWait(50)
+            check('connections panel visible on its page',find('connectionsPanel').property('visible'))
+            check('account title names label and provider',find('connTitle_gh_1').property('text')=='Trabalho · GitHub')
+            check('fake label shown for a fake account',find('connFake_gh_1').property('visible'))
+            check('fake label shown when fake is absent',find('connFake_ha_1').property('visible'))
+            check('fake label hidden when fake is false',find('connFake_gh_2').property('visible') is False)
+            check('status badge text is Portuguese',find('connStatus_ha_1').property('text')=='Estado: conectando (aguardando confirmação)')
+            check('user code shown while connecting',find('connUserCode_ha_1').property('visible') and find('connUserCode_ha_1').property('text').endswith('WDJB-MJHT'))
+            check('user code hidden when connected',find('connUserCode_gh_1').property('visible') is False)
+            check('granted and requested scopes are named',find('connGranted_gh_1').property('text')=='Escopos concedidos: repo:read' and find('connPending_gh_1').property('visible'))
+            box=find('connScope_gh_1_issues:write');check('consent checkbox starts unchecked',box.property('checked') is False)
+            check('consent button disabled while nothing is ticked',find('connConsent_gh_1').property('enabled') is False)
+            box.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);QTest.qWait(20)
+            check('ticking one scope enables consent',find('connConsent_gh_1').property('enabled') is True)
+            check('Conectar disabled for a connected account',find('connConnect_gh_1').property('enabled') is False)
+            check('Conectar enabled for a disconnected account',find('connConnect_gh_2').property('enabled') is True)
+            check('Desconectar enabled while connecting',find('connDisconnect_ha_1').property('enabled') is True)
+            check('Remover disabled while connecting',find('connRemove_ha_1').property('enabled') is False)
+            check('read test enabled for a granted read operation',find('connTest_gh_1_repos.list').property('enabled') is True)
+            check('write operation names its risk and missing scope',find('connOp_gh_1_issues.create').property('text')=='issues.create · '+'escrita (pede aprovação) · escopo não concedido')
+            check('write operation has no test button',find('connTest_gh_1_issues.create').property('visible') is False)
+            check('last call names the operation and code text',find('connLastCall').property('text').startswith('Última chamada: repos.list · Limite de chamadas'))
+            check('last call is PlainText',plain(find('connLastCall')))
+            summary=QQmlExpression(QQmlEngine.contextForObject(window),window,"connProposalText({connection_id:'gh_1',operation:'issues.create',risk:'write'})");text=summary.evaluate();text=text[0] if isinstance(text,tuple) else text
+            check('connection proposal names provider, account, operation and risk',text=='Conexão: GitHub · conta Trabalho (octo-user) · operação issues.create · risco escrita (pede aprovação)' and not summary.hasError())
+            check('account name field refuses a blank name',find('connectionAdd').property('enabled') is False)
+            find('connectionLabel').setProperty('text','Casa');QTest.qWait(20)
+            check('account add enabled with a valid name',find('connectionAdd').property('enabled') is True)
+            bridge._apply(validate_snapshot({**BASE,'connections':None},'r',0))
+            QTest.qWait(50);check('page falls back when connections are absent',window.property('page')==0)
+        finally:
+            for w in engine.rootObjects():w.close();w.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            del engine;del bridge
+    print(f'qml connections checks ok: {len(checks)}',flush=True)
+    return 0
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
+    if QML_CONNECTIONS_CHILD:sys.exit(qml_connections_child())
     if QML_SKILLS_CHILD:sys.exit(qml_skills_child())
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())
     if QML_MODELS_CHILD:sys.exit(qml_models_child())

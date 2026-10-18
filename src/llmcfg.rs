@@ -602,6 +602,55 @@ impl LlmState {
         self.secrets = next;
         Ok(())
     }
+    /// S5 connection token of one account slot (`access` or `refresh`). Core-internal only.
+    pub(crate) fn connection_token(&self, account: &str, slot: &str) -> Option<String> {
+        if self.quarantined {
+            return None;
+        }
+        self.secrets
+            .connection_token(account, slot)
+            .map(str::to_owned)
+    }
+    /// Replaces the access and refresh slots of one account in `secrets.json` (write-only).
+    pub(crate) fn set_connection_tokens(
+        &mut self,
+        storage: &Storage,
+        account: &str,
+        access: Option<String>,
+        refresh: Option<String>,
+    ) -> Result<(), &'static str> {
+        if self.quarantined {
+            return Err("secrets_storage_error");
+        }
+        let mut next = self.secrets.clone();
+        next.set_connection_token(account, "access", access);
+        next.set_connection_token(account, "refresh", refresh);
+        if !next.validate() {
+            return Err("invalid_token");
+        }
+        storage
+            .save_llm_secrets(&next)
+            .map_err(|_| "secrets_storage_error")?;
+        self.secrets = next;
+        Ok(())
+    }
+    /// Removes both slots of one account from `secrets.json`.
+    pub(crate) fn clear_connection(
+        &mut self,
+        storage: &Storage,
+        account: &str,
+    ) -> Result<(), &'static str> {
+        if self.quarantined {
+            return Err("secrets_storage_error");
+        }
+        let mut next = self.secrets.clone();
+        next.clear_connection(account);
+        storage
+            .save_llm_secrets(&next)
+            .map_err(|_| "secrets_storage_error")?;
+        self.secrets = next;
+        Ok(())
+    }
     /// Snapshot for one invocation. `permission` and `settings` are the approved grants.
     pub fn host_auth(&self, permission: bool, settings: bool) -> HostAuth {
         let config = self.config.as_ref().filter(|_| !self.quarantined);

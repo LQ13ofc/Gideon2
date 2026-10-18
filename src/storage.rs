@@ -144,6 +144,9 @@ impl Default for Generations {
         }
     }
 }
+/// Size caps of the private ledgers. `secrets.json` also holds S5 connection tokens (<= 8 accounts).
+const SECRETS_LIMIT: u64 = 16384;
+const CONNECTIONS_LIMIT: u64 = 16384;
 /// Private C1 ledgers: bounded, strict and 0600, read through the same guards as plugin state.
 fn read_private_bounded(root: &Path, name: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
     let path = root.join(name);
@@ -575,15 +578,32 @@ impl Storage {
         self.replace_json("llm-config.json", &serde_json::to_vec(ledger)?)?;
         File::open(&self.root)?.sync_all()
     }
+    pub(crate) fn connections_ledger(&self) -> io::Result<crate::connections::Ledger> {
+        match read_private_bounded(&self.root, "connections.json", CONNECTIONS_LIMIT)? {
+            Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            None => Ok(Default::default()),
+        }
+    }
+    pub(crate) fn save_connections_ledger(
+        &self,
+        ledger: &crate::connections::Ledger,
+    ) -> io::Result<()> {
+        let bytes = serde_json::to_vec(ledger)?;
+        if bytes.len() as u64 > CONNECTIONS_LIMIT {
+            return Err(io::Error::other("connections ledger too large"));
+        }
+        self.replace_json("connections.json", &bytes)?;
+        File::open(&self.root)?.sync_all()
+    }
     pub(crate) fn llm_secrets(&self) -> io::Result<crate::secrets::Secrets> {
-        match read_private_bounded(&self.root, "secrets.json", 4096)? {
+        match read_private_bounded(&self.root, "secrets.json", SECRETS_LIMIT)? {
             Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
             None => Ok(Default::default()),
         }
     }
     pub(crate) fn save_llm_secrets(&self, secrets: &crate::secrets::Secrets) -> io::Result<()> {
         let bytes = serde_json::to_vec(secrets)?;
-        if bytes.len() > 4096 {
+        if bytes.len() as u64 > SECRETS_LIMIT {
             return Err(io::Error::other("secrets too large"));
         }
         self.replace_json("secrets.json", &bytes)?;
@@ -759,8 +779,35 @@ impl Storage {
         }
         Ok(())
     }
+    /// Connection audit: a closed vocabulary only (kind, operation, risk, outcome). No account ids,
+    /// arguments, tokens or response content can reach this line.
+    pub fn audit_connection(
+        &self,
+        sequence: u64,
+        kind: &str,
+        operation: &str,
+        risk: &str,
+        outcome: &str,
+    ) -> io::Result<()> {
+        let closed = |text: &str| {
+            !text.is_empty()
+                && text.len() <= 64
+                && text
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.".contains(&b))
+        };
+        if ![kind, operation, risk, outcome].iter().all(|t| closed(t)) {
+            return Err(io::Error::other("audit vocabulary"));
+        }
+        self.append_audit(&format!(
+            "{{\"version\":1,\"sequence\":{sequence},\"event\":\"{kind}\",\"operation\":\"{operation}\",\"risk\":\"{risk}\",\"outcome\":\"{outcome}\"}}"
+        ))
+    }
     /// Metadata only: no PCM, transcript, arbitrary client ID or arguments in logs.
     pub fn audit(&self, sequence: u64) -> io::Result<()> {
+        self.append_audit(&format!("{{\"version\":1,\"sequence\":{sequence}}}"))
+    }
+    fn append_audit(&self, line: &str) -> io::Result<()> {
         let path = self.root.join("audit.log");
         let mut f = open_private(&path)?;
         private_metadata(&path, false)?;
@@ -773,7 +820,7 @@ impl Storage {
         }
         use std::io::{Seek, SeekFrom};
         f.seek(SeekFrom::End(0))?;
-        writeln!(f, "{{\"version\":1,\"sequence\":{sequence}}}")
+        writeln!(f, "{line}")
     }
 }
 

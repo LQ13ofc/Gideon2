@@ -23,6 +23,9 @@ struct Session {
 }
 
 /// Single owner for sessions, events and authority; no detached action tasks.
+/// Owner name of Connection Manager proposals in the ledger (the Core, never a plugin).
+const CONNECTION_OWNER: &str = "connections";
+
 pub struct Core {
     base_pack: Option<crate::pack::Snapshot>,
     pub(crate) hub: Option<crate::hub::Snapshot>,
@@ -62,6 +65,8 @@ pub struct Core {
     pub(crate) agent: crate::agent::Agent,
     /// S4 skill engine: ledgers, at most one run, idle until a skill is saved and enabled.
     pub(crate) skills: crate::skills::Engine,
+    /// S5 Connection Manager: accounts, device logins and the single network slot.
+    pub(crate) connections: crate::connections::Manager,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -104,6 +109,7 @@ impl Core {
             tool_source: false,
             agent: crate::agent::Agent::new(crate::agent::options()),
             skills: Default::default(),
+            connections: Default::default(),
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -126,6 +132,7 @@ impl Core {
             self.tools.deadline(),
             self.agent.deadline(),
             self.skills.deadline(),
+            self.connections.deadline(),
         ]
         .into_iter()
         .flatten()
@@ -260,6 +267,19 @@ impl Core {
         let Some(view) = self.tools.view(proposal_id).cloned() else {
             return "unknown_proposal";
         };
+        if view.kind == Some("connection") && view.state == State::Pending {
+            if decision == ToolDecision::Deny {
+                self.tools
+                    .set(proposal_id, State::Denied, Some("user_denied"), None);
+                self.emit(request_id, None, "tool_denied");
+                self.agent_settle(proposal_id, None);
+                return "ok";
+            }
+            if self.tools.busy() {
+                return "busy";
+            }
+            return self.connection_authorize(request_id, proposal_id, &view);
+        }
         match view.state {
             State::Pending => {}
             State::Expired => return "proposal_expired",
@@ -806,6 +826,7 @@ impl Core {
             tool_proposals: self.tools.snapshot(),
             agent: self.agent.view(),
             skills: self.skills_view(),
+            connections: self.connections.view(),
         }
     }
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
@@ -872,6 +893,189 @@ impl Core {
     /// Loads the S4 skill ledgers from the private root; a damaged ledger quarantines skills only.
     pub fn configure_skills(&mut self, storage: &crate::storage::Storage) {
         self.skills.configure(&storage.root);
+    }
+    /// Loads `connections.json`; a damaged ledger disables account writes, nothing else.
+    pub fn configure_connections(&mut self, storage: &crate::storage::Storage) {
+        self.connections.configure(storage);
+    }
+    /// Next network job for the single slot; transport runs it and returns the reply.
+    pub fn take_connection_job(&mut self) -> Option<(u64, crate::connections::Job)> {
+        self.connections.take_job()
+    }
+    /// Settles a finished network job: tokens, statuses, and the proposal it was serving.
+    pub fn connection_reply(
+        &mut self,
+        storage: &crate::storage::Storage,
+        done: crate::connections::Done,
+        now: Instant,
+    ) {
+        let first = self.connections.settle(storage, &mut self.llm, done, now);
+        let mut settled: Vec<crate::connections::Settled> = first.into_iter().collect();
+        settled.extend(self.connections.take_settled());
+        self.connection_flush(settled);
+    }
+    /// Timer step of the Connection Manager: expiries and due device polls.
+    pub fn connections_tick(&mut self, storage: &crate::storage::Storage, now: Instant) {
+        self.connections.tick(storage, now);
+        let settled = self.connections.take_settled();
+        self.connection_flush(settled);
+    }
+    /// Transport reports a connection task that ended without a reply.
+    pub fn connection_abandoned(&mut self, id: u64) {
+        self.connections.abandon(id);
+    }
+    /// Audit records of connection work since the last drain (closed vocabulary only).
+    pub fn take_connection_audit(&mut self) -> Vec<crate::connections::Audit> {
+        self.connections.take_audit()
+    }
+    fn connection_flush(&mut self, settled: Vec<crate::connections::Settled>) {
+        for kind in self.connections.take_events() {
+            self.emit(String::new(), None, kind);
+        }
+        for outcome in settled {
+            let kind = if outcome.state == crate::tools::State::Executed {
+                "tool_executed"
+            } else {
+                "tool_failed"
+            };
+            self.tools.set(
+                &outcome.proposal,
+                outcome.state,
+                outcome.reason,
+                outcome.result,
+            );
+            self.emit(String::new(), None, kind);
+            self.agent_settle(&outcome.proposal, None);
+            self.skill_tool_settled(&outcome.proposal);
+        }
+    }
+    /// Runs one connection operation with the storage it needs, then flushes its events.
+    fn connection_op(
+        &mut self,
+        storage: Option<&crate::storage::Storage>,
+        op: impl FnOnce(
+            &mut crate::connections::Manager,
+            &mut crate::llmcfg::LlmState,
+            &crate::storage::Storage,
+        ) -> &'static str,
+    ) -> &'static str {
+        let Some(storage) = storage else {
+            return "connections_unavailable";
+        };
+        let code = op(&mut self.connections, &mut self.llm, storage);
+        let settled = self.connections.take_settled();
+        self.connection_flush(settled);
+        code
+    }
+    /// Operation call from the UI or a test: reads run now; writes and public calls wait for the
+    /// user's approval card in the proposal ledger (kind `connection`).
+    fn connection_call(
+        &mut self,
+        request_id: String,
+        id: &str,
+        operation: &str,
+        args: &serde_json::Value,
+        revision: Option<u64>,
+        now: Instant,
+    ) -> &'static str {
+        use crate::connections::Access;
+        if let Err(code) = self.connections.check_revision(revision) {
+            return code;
+        }
+        let (provider, op) = match self.connections.op_for(id, operation) {
+            Ok(found) => found,
+            Err(code) => return code,
+        };
+        let plan = match self.connections.plan(provider, op, Some(id), args) {
+            Ok(plan) => plan,
+            Err(code) => return code,
+        };
+        if plan.risk == Access::Read {
+            return match self.connections.start(&self.llm, plan, None, now) {
+                Ok(()) => "ok",
+                Err(code) => code,
+            };
+        }
+        let name = format!("conn:{}.{}", provider.id, op.name);
+        let proposal = self
+            .tools
+            .propose(CONNECTION_OWNER, String::new(), name, plan.wrap(), now);
+        self.tools.set_kind(&proposal, "connection");
+        self.connections.pending_approval(op.name, proposal.clone());
+        self.emit(request_id, None, "tool_proposed");
+        "pending_approval"
+    }
+    /// Authorize of a connection proposal (user card, agent, or the same flow for both).
+    /// A refusal that the user can retry (`busy`, `public_disabled`, `rate_limited`) keeps the
+    /// proposal pending; anything else denies it.
+    fn connection_authorize(
+        &mut self,
+        request_id: String,
+        proposal_id: &str,
+        view: &crate::tools::View,
+    ) -> &'static str {
+        let owned = self.agent_owns(view);
+        if owned && !self.agent_awaits(proposal_id) {
+            return "unknown_proposal";
+        }
+        if self.session.is_some() {
+            return "busy";
+        }
+        let plan = match self.connections.plan_proposal(&view.args) {
+            Ok(plan) => plan,
+            Err(code) => {
+                self.tool_denied(request_id, proposal_id, code);
+                if owned {
+                    self.agent_settle(proposal_id, None);
+                }
+                return "ok";
+            }
+        };
+        let destructive = plan.tool_risk() == crate::tools::Risk::Destructive;
+        if owned && destructive && !crate::agent::options().allow_destructive {
+            return "destructive_disabled";
+        }
+        match self.connections.start(
+            &self.llm,
+            plan,
+            Some(proposal_id.to_owned()),
+            Instant::now(),
+        ) {
+            Ok(()) => {
+                self.tools
+                    .set(proposal_id, crate::tools::State::Authorized, None, None);
+                self.emit(request_id, None, "tool_authorized");
+                "ok"
+            }
+            Err(code @ ("public_disabled" | "busy" | "rate_limited")) => code,
+            Err(code) => {
+                self.tool_denied(request_id, proposal_id, code);
+                if owned {
+                    self.agent_settle(proposal_id, None);
+                }
+                "ok"
+            }
+        }
+    }
+    /// Validated plan of a fixed agent tool name (`github_*`), for the current account rules.
+    pub(crate) fn connections_plan(
+        &self,
+        name: &str,
+        args: &serde_json::Value,
+    ) -> Result<crate::connections::Plan, &'static str> {
+        let tool = crate::connections::agent_tool(name).ok_or("unknown_tool")?;
+        let provider = crate::connections::provider_by_id(tool.provider).ok_or("unknown_tool")?;
+        let op = crate::connections::operation(provider, tool.operation).ok_or("unknown_tool")?;
+        self.connections.plan(provider, op, None, args)
+    }
+    /// Starts a plan that a proposal (agent or skill) is waiting for.
+    pub(crate) fn connections_start(
+        &mut self,
+        plan: crate::connections::Plan,
+        proposal: String,
+    ) -> Result<(), &'static str> {
+        self.connections
+            .start(&self.llm, plan, Some(proposal), Instant::now())
     }
     pub fn take_plugin_intents(&mut self) -> Vec<crate::plugins::Intent> {
         self.plugins.take_intents()
@@ -1580,6 +1784,53 @@ impl Core {
             }
             Operation::Refused { code } => code,
             Operation::SkillImport { name } => crate::skills::wire_op(self.skill_import(&name)),
+            Operation::ConnectionCall { .. } if self.session.is_some() => "busy",
+            Operation::ConnectionCall {
+                id,
+                operation,
+                args,
+                revision,
+            } => self.connection_call(
+                req.request_id.clone(),
+                &id,
+                &operation,
+                &args,
+                revision,
+                now,
+            ),
+            Operation::ConnectionAdd {
+                provider,
+                label,
+                revision,
+            } => self.connection_op(storage.as_deref(), |c, _, st| {
+                c.add(st, &provider, &label, revision)
+            }),
+            Operation::ConnectionConnect { id, revision } => {
+                self.connection_op(storage.as_deref(), |c, _, st| c.connect(st, &id, revision))
+            }
+            Operation::ConnectionConsent {
+                id,
+                scopes,
+                revision,
+            } => self.connection_op(storage.as_deref(), |c, _, _| {
+                c.consent(&id, scopes, revision)
+            }),
+            Operation::ConnectionRefresh { id, revision } => self
+                .connection_op(storage.as_deref(), |c, l, st| {
+                    c.refresh(st, l, &id, revision)
+                }),
+            Operation::ConnectionDisconnect { id, revision } => self
+                .connection_op(storage.as_deref(), |c, l, st| {
+                    c.disconnect(st, l, &id, revision)
+                }),
+            Operation::ConnectionRevoke { id, revision } => self
+                .connection_op(storage.as_deref(), |c, l, st| {
+                    c.revoke(st, l, &id, revision)
+                }),
+            Operation::ConnectionRemove { id, revision } => self
+                .connection_op(storage.as_deref(), |c, l, st| {
+                    c.remove(st, l, &id, revision)
+                }),
             Operation::SkillImportConfirm { name, revision } => {
                 crate::skills::wire_op(self.skill_import_confirm(&name, revision))
             }

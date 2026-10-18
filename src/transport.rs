@@ -393,6 +393,24 @@ fn pump_plugins(
         }
     }
 }
+/// Connection audit lines: a closed vocabulary written with the current response sequence.
+fn write_connection_audit(core: &mut Core, storage: &Storage) {
+    let audits = core.take_connection_audit();
+    if audits.is_empty() {
+        return;
+    }
+    let sequence = core.response(String::new(), "ok").sequence;
+    for audit in audits {
+        // Vocabulary is static and closed; a failed append never stops the Core.
+        let _ = storage.audit_connection(
+            sequence,
+            audit.kind,
+            audit.operation,
+            audit.risk,
+            audit.outcome,
+        );
+    }
+}
 #[allow(clippy::too_many_arguments)]
 pub async fn serve(
     mut storage: Storage,
@@ -448,6 +466,7 @@ pub async fn serve(
     storage.set_safe_epoch(epoch);
     core.configure_storage(&storage);
     core.configure_llm(&storage, net_allow_loopback);
+    core.configure_connections(&storage);
     core.configure_skills(&storage);
     if let Some((path, digest)) = hub_catalog {
         core.configure_hub(
@@ -458,8 +477,11 @@ pub async fn serve(
     }
     let (plugin_events_tx, mut plugin_events) = mpsc::unbounded_channel();
     let broker_script = home().join("scripts/net_broker.py");
-    let mut plugins =
-        crate::plugins::Host::new(plugin_python.clone(), broker_script, plugin_events_tx);
+    let mut plugins = crate::plugins::Host::new(
+        plugin_python.clone(),
+        broker_script.clone(),
+        plugin_events_tx,
+    );
     core.configure_plugins(&storage, plugin_python.is_some());
     pump_plugins(
         &mut core,
@@ -557,6 +579,9 @@ pub async fn serve(
     if tts.is_some() {
         core.enable_tts();
     }
+    // S5 connection job: at most one network job at a time (the Manager enforces it).
+    let mut connection_task: Option<(u64, tokio::task::JoinHandle<crate::connections::Done>)> =
+        None;
     let mut speech_task: Option<(
         u64,
         tokio::task::JoinHandle<io::Result<crate::tts::Summary>>,
@@ -602,6 +627,16 @@ pub async fn serve(
             },
             _ = async { match tool_deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => {
                 core.expire_tools(std::time::Instant::now());
+                core.connections_tick(&storage, std::time::Instant::now());
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
+            result = async { (&mut connection_task.as_mut().expect("active connection task").1).await }, if connection_task.is_some() => {
+                let (id, _) = connection_task.take().expect("active connection task");
+                match result {
+                    Ok(done) => core.connection_reply(&storage, done, std::time::Instant::now()),
+                    // A job that ended without a reply must not hold the single network slot.
+                    Err(_) => core.connection_abandoned(id),
+                }
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             result = async { (&mut tool_task.as_mut().expect("active tool task").1).await }, if tool_task.is_some() => {
@@ -699,6 +734,20 @@ pub async fn serve(
             let pending = job.clone();
             tool_task = Some((job, tokio::spawn(crate::commands::execute(pending))));
         }
+        if connection_task.is_none() {
+            if let Some((id, job)) = core.take_connection_job() {
+                let python = plugin_python.clone().unwrap_or_default();
+                connection_task = Some((
+                    id,
+                    tokio::spawn(crate::connections::execute(
+                        id,
+                        job,
+                        python,
+                        broker_script.clone(),
+                    )),
+                ));
+            }
+        }
         if speech_task
             .as_ref()
             .is_some_and(|(id, _)| !core.speech_is_active(*id))
@@ -721,6 +770,7 @@ pub async fn serve(
             &storage.root,
             std::time::Instant::now(),
         );
+        write_connection_audit(&mut core, &storage);
         for request in core.take_stt_requests() {
             if stt_tx.try_send(request).is_err() {
                 core.stt_failed();
@@ -741,6 +791,10 @@ pub async fn serve(
         let _ = task.await;
     }
     if let Some((_, task)) = tool_task.take() {
+        task.abort();
+        let _ = task.await;
+    }
+    if let Some((_, task)) = connection_task.take() {
         task.abort();
         let _ = task.await;
     }

@@ -3,6 +3,7 @@ pub mod audio;
 pub mod broker;
 pub mod capture;
 pub mod commands;
+pub mod connections;
 pub mod core;
 pub mod hub;
 pub mod llmcfg;

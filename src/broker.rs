@@ -226,6 +226,30 @@ struct Line {
     status: Option<u16>,
     #[serde(default)]
     error: Option<String>,
+    /// Connections only: `X-Account` of a successful response (printable, <= 128 bytes).
+    #[serde(default)]
+    account: Option<String>,
+    /// Connections only: `Retry-After` seconds of a 429/503-style response (<= 3600).
+    #[serde(default)]
+    retry_after: Option<u64>,
+    /// Connections only: snake_case `error` token of a small JSON error body.
+    #[serde(default)]
+    provider_error: Option<String>,
+}
+
+/// Terminal metadata beyond the reply itself. Only connections read it; C1 ignores it.
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub(crate) struct Meta {
+    pub account: Option<String>,
+    pub retry_after: Option<u64>,
+    pub provider_error: Option<String>,
+}
+
+/// One broker line, with metadata when it is terminal.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Parsed {
+    pub reply: Reply,
+    pub meta: Meta,
 }
 
 fn code(name: &str) -> &'static str {
@@ -241,19 +265,38 @@ fn code(name: &str) -> &'static str {
 
 /// Strict: exactly one of chunk / done+2xx status / error. Anything else is a broker failure.
 pub(crate) fn parse(bytes: &[u8]) -> Reply {
-    let Ok(line) = serde_json::from_slice::<Line>(bytes) else {
-        return Reply::Error("network_unavailable", None);
+    parse_full(bytes).reply
+}
+
+/// Like `parse`, also returning the terminal metadata. Metadata on a chunk line is a failure.
+pub(crate) fn parse_full(bytes: &[u8]) -> Parsed {
+    let failure = || Parsed {
+        reply: Reply::Error("network_unavailable", None),
+        meta: Meta::default(),
     };
-    match (line.chunk, line.done, line.status, line.error) {
-        (Some(text), None, None, None) if text.chars().count() <= MAX_CHUNK_CHARS => {
-            Reply::Chunk(text)
+    let Ok(line) = serde_json::from_slice::<Line>(bytes) else {
+        return failure();
+    };
+    let meta = Meta {
+        account: line.account.clone(),
+        retry_after: line.retry_after,
+        provider_error: line.provider_error.clone(),
+    };
+    let has_meta = meta != Meta::default();
+    let reply = match (line.chunk, line.done, line.status, line.error) {
+        (Some(text), None, None, None) if !has_meta && text.chars().count() <= MAX_CHUNK_CHARS => {
+            return Parsed {
+                reply: Reply::Chunk(text),
+                meta: Meta::default(),
+            }
         }
         (None, Some(true), Some(status), None) if (200..300).contains(&status) => {
             Reply::Done(status)
         }
         (None, None, status, Some(name)) => Reply::Error(code(&name), status),
-        _ => Reply::Error("network_unavailable", None),
-    }
+        _ => return failure(),
+    };
+    Parsed { reply, meta }
 }
 
 /// Reads broker lines until a terminal line, EOF or a violation; no line is ever trusted raw.
@@ -269,6 +312,55 @@ pub(crate) async fn read_replies(stdout: ChildStdout, tx: mpsc::UnboundedSender<
             return;
         }
     }
+}
+
+/// Reads one broker line at a time for connections, which need the terminal metadata.
+pub(crate) async fn read_parsed<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R) -> Parsed {
+    match bounded_frame(reader, MAX_BROKER_LINE).await {
+        Ok(Some(bytes)) => parse_full(&bytes),
+        Ok(None) | Err(_) => Parsed {
+            reply: Reply::Closed,
+            meta: Meta::default(),
+        },
+    }
+}
+
+/// Generic request for connections: any allowlisted method, extra headers and an optional key.
+/// The key travels only on the second line; `None` sends no Authorization header (keyless).
+pub(crate) fn request_payload(
+    target: &Target,
+    method: &str,
+    headers: &[(&str, String)],
+    body: &str,
+    key: Option<&str>,
+    timeout_s: u64,
+) -> Result<Payload, &'static str> {
+    if body.len() > MAX_BODY {
+        return Err("invalid_host_call");
+    }
+    let mut header_map = serde_json::Map::new();
+    for (name, value) in headers {
+        header_map.insert((*name).to_owned(), serde_json::Value::String(value.clone()));
+    }
+    let request = serde_json::json!({
+        "url": target.url,
+        "method": method,
+        "headers": header_map,
+        "body": body,
+        "timeout_s": timeout_s,
+        "expected_host": target.host,
+        "allow_http": !target.https && target.loopback,
+        "allow_loopback": target.loopback,
+    });
+    let mut line = serde_json::to_vec(&request).map_err(|_| "invalid_host_call")?;
+    line.push(b'\n');
+    let key_value = match key {
+        Some(key) => serde_json::json!({"key": key}),
+        None => serde_json::json!({"key": null}),
+    };
+    let mut key_line = serde_json::to_vec(&key_value).map_err(|_| "invalid_host_call")?;
+    key_line.push(b'\n');
+    Ok(Payload { line, key_line })
 }
 
 /// Writes the two broker input lines; the caller closes stdin by dropping it.

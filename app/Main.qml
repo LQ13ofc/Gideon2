@@ -35,8 +35,8 @@ ApplicationWindow {
     readonly property string preferencesSuccess: "Preferências salvas pelo Core"
     readonly property bool spacious: width >= 1080 && height >= 760
     readonly property bool packAvailable: core.wakeChoices.length > 0
-    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM", "Percepção e ação", "Skills"]
-    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub", "permissions", "hub"]
+    readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM", "Percepção e ação", "Skills", "Conexões"]
+    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub", "permissions", "hub", "permissions"]
     // S4 skills: state words live here; codes go through core.codeMessage. Nothing on this page grants a permission.
     function skillStateText(s) { switch (s) { case "draft": return "rascunho"; case "validated": return "validada"; case "tested": return "testada"; case "approved": return "aprovada"; case "enabled": return "habilitada"; case "disabled": return "desabilitada"; case "revised": return "revisada"; default: return s; } }
     function skillSourceText(s) { switch (s) { case "created": return "criada"; case "imported": return "importada (publisher não verificado)"; case "llm_draft": return "rascunho do LLM"; default: return s; } }
@@ -54,6 +54,39 @@ ApplicationWindow {
         case "dry": case "rollback": case "remove": return true
         }
         return false
+    }
+    // S5 connections: state words live here; codes go through core.codeMessage. Nothing on this page grants a scope: consent is the user's own click, per scope.
+    readonly property var connProviderChoices: [{id: "github", text: "GitHub"}, {id: "google", text: "Google"}, {id: "homeassistant", text: "Home Assistant"}, {id: "mcp", text: "MCP"}]
+    function connProviderName(id) { for (var i = 0; i < connProviderChoices.length; i++) if (connProviderChoices[i].id === id) return connProviderChoices[i].text; return id; }
+    function connStatusText(s) { switch (s) { case "disconnected": return "desconectada"; case "connecting": return "conectando (aguardando confirmação)"; case "connected": return "conectada"; case "expired": return "expirada"; case "offline": return "offline"; case "error": return "erro"; case "reauth_required": return "reautenticação necessária"; default: return s; } }
+    function connRiskText(r) { switch (r) { case "read": return "leitura"; case "write": return "escrita (pede aprovação)"; case "destructive": return "destrutiva (aprovação forte)"; case "public": return "pública (aprovação explícita)"; default: return r; } }
+    function connProvider(id) { var list = core.connectionsProviders; for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
+    function connScopeLabel(providerId, scope) { var p = connProvider(providerId); if (p) for (var i = 0; i < p.scopes.length; i++) if (p.scopes[i].id === scope) return p.scopes[i].label; return scope; }
+    function connScopeNames(list) { return (list && list.length) ? list.join(", ") : "nenhum"; }
+    function connOperationsFor(item) { var p = connProvider(item.provider); return p ? p.operations : []; }
+    function connGranted(item, scope) { return (item.granted_scopes || []).indexOf(scope) >= 0; }
+    function connCanTest(item, op) { return !core.connectionsBusy && item.status === "connected" && op.risk === "read" && connGranted(item, op.scope); }
+    // Consent drafts live in plain JS; connDraftRevision makes every binding that reads them re-evaluate after a toggle.
+    property int connDraftRevision: 0
+    function connConsentList(item) { var rev = connDraftRevision; var out = []; var pending = item.pending_scopes || []; for (var i = 0; i < pending.length; i++) if (draftValue("#conn:" + item.id, pending[i]) === true) out.push(pending[i]); return out; }
+    function connCan(action, item) {
+        if (core.connectionsBusy) return false
+        var s = item.status
+        switch (action) {
+        case "connect": return s === "disconnected" || s === "error" || s === "offline" || s === "expired" || s === "reauth_required"
+        case "refresh": return s === "connected" || s === "expired" || s === "reauth_required" || s === "error"
+        case "disconnect": return s === "connected" || s === "connecting" || s === "expired" || s === "reauth_required"
+        case "revoke": return s === "connected" || s === "expired" || s === "reauth_required"
+        case "remove": return s !== "connecting"
+        }
+        return false
+    }
+    function connOutcomeText(call) { if (call.code) return core.codeMessage(call.code); return call.outcome === "ok" ? "concluída" : call.outcome; }
+    function connProposalText(p) {
+        var items = core.connectionsItems; var item = null
+        for (var i = 0; i < items.length; i++) if (items[i].id === p.connection_id) item = items[i]
+        var account = item ? (item.account_ref ? item.label + " (" + item.account_ref + ")" : item.label) : "conta desconhecida"
+        return "Conexão: " + (item ? connProviderName(item.provider) : "provedor desconhecido") + " · conta " + account + " · operação " + p.operation + " · risco " + connRiskText(p.risk)
     }
     // The skill whose permissions are shown; a copy of the snapshot row, so it reads as shown when it was picked.
     property var skillSelected: null
@@ -103,7 +136,7 @@ ApplicationWindow {
         function onChatSent(sent) { if (chatInput.text.trim() === sent) { chatInput.text = ""; window.setDraft("#chat", "text", "") } }
         // The captured model revision follows the user's own operations: refreshed when one settles, never on background changes.
         function onModelsStateChanged() { if (!core.modelsBusy) window.modelsRevisionCaptured = core.llmRevision }
-        function onChanged() { if (window.page === 8 && !core.modelsAvailable) window.page = 0; if (window.page === 9 && !core.perceptionAvailable) window.page = 0; if (window.page === 10 && !core.skillsAvailable) window.page = 0 }
+        function onChanged() { if (window.page === 8 && !core.modelsAvailable) window.page = 0; if (window.page === 9 && !core.perceptionAvailable) window.page = 0; if (window.page === 10 && !core.skillsAvailable) window.page = 0; if (window.page === 11 && !core.connectionsAvailable) window.page = 0 }
     }
     Dialog {
         id: preferences; objectName: "preferencesDialog"
@@ -418,7 +451,7 @@ ApplicationWindow {
                     text: sidebar.width > 100 ? modelData : ""
                     Accessible.name: modelData
                     image: "assets/" + window.navIcons[index] + ".png"
-                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : index === 9 ? core.perceptionAvailable : index === 10 ? core.skillsAvailable : true
+                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : index === 9 ? core.perceptionAvailable : index === 10 ? core.skillsAvailable : index === 11 ? core.connectionsAvailable : true
                     onClicked: window.page = index
                     ToolTip.visible: hovered && sidebar.width < 100; ToolTip.text: modelData
                 }
@@ -989,6 +1022,8 @@ ApplicationWindow {
                                 ColumnLayout {
                                     id: toolColumn; anchors.fill: parent; anchors.margins: 10; spacing: 6
                                     Label { objectName: "toolTitle_" + modelData.proposal_id; text: "Ferramenta " + modelData.tool + " · " + window.toolStateText(modelData.state); textFormat: Text.PlainText; color: "#edf2ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    // S5: a connection proposal names its provider, account, operation and risk before the user decides (PlainText, from the snapshot).
+                                    Label { objectName: "connProposal_" + modelData.proposal_id; visible: modelData.kind === "connection"; text: window.connProposalText(modelData); textFormat: Text.PlainText; color: "#dce7ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Proposta de conexão: " + text }
                                     Label { text: "Argumentos: " + JSON.stringify(modelData.args); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
                                     Label { visible: modelData.reason !== null; text: "Motivo: " + core.codeMessage(modelData.reason || ""); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                     Label { visible: modelData.result !== null; text: "Resultado: " + (modelData.result || ""); textFormat: Text.PlainText; color: "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -1019,6 +1054,84 @@ ApplicationWindow {
                             GlowButton { objectName: "chatCancel"; text: "Cancelar"; Accessible.name: "Cancelar resposta do motor LLM"; enabled: core.chatState === "waiting" || core.chatState === "streaming"; onClicked: core.cancelChat() }
                         }
                         Label { objectName: "chatInputProblem"; visible: chatInput.text.length > 0 && core.chatTextProblem(chatInput.text).length > 0; text: core.chatTextProblem(chatInput.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    }
+                }
+                // S5 connections: accounts, consent per scope, operations with risk labels, read-only tests and the last call. Everything shown comes from the Core snapshot 'connections' block; PlainText only.
+                GlassCard {
+                objectName: "connectionsPanel"
+                theme: window.themeIndex
+                    visible: window.page === 11 && core.connectionsAvailable; Layout.fillWidth: true; implicitHeight: connectionsColumn.implicitHeight + 44
+                    ColumnLayout {
+                        id: connectionsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        Label { text: "Conexões"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        Label { text: "Gideon usa a API autorizada de cada serviço. Você concede cada escopo; escrita e ações públicas pedem aprovação. Neste ambiente, todas as contas são servidores falsos."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "connectionsResult"; visible: text.length > 0; text: core.connectionsResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado das conexões: " + text }
+                        ProgressBar { objectName: "connectionsProgress"; visible: core.connectionsBusy; indeterminate: true; Layout.fillWidth: true; Accessible.name: "Operação de conexão em andamento" }
+                        Label { text: "Nova conta"; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                        Flow {
+                            Layout.fillWidth: true; spacing: 10
+                            ComboBox { id: connProviderPick; objectName: "connectionProvider"; model: window.connProviderChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Provedor da nova conta" }
+                            TextField {
+                                id: connLabel; objectName: "connectionLabel"; width: Math.max(160, Math.min(320, connectionsColumn.width - 300))
+                                maximumLength: 64; placeholderText: "Nome da conta (ex.: Casa)"; Accessible.name: "Nome da nova conta"
+                                color: "#dce7ff"; placeholderTextColor: "#a3b6db"
+                                background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
+                            }
+                            GlowButton { objectName: "connectionAdd"; text: "Adicionar conta"; Accessible.name: "Adicionar conta"; enabled: !core.connectionsBusy && core.connectionLabelProblem(connLabel.text) === "" && core.connectionsItems.length < 8; onClicked: core.connectionAdd(connProviderPick.currentValue, connLabel.text) }
+                        }
+                        Label { objectName: "connectionLabelProblem"; visible: connLabel.text.length > 0 && core.connectionLabelProblem(connLabel.text).length > 0; text: core.connectionLabelProblem(connLabel.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "connectionsEmpty"; visible: core.connectionsItems.length === 0; text: "Nenhuma conta ainda. Adicione uma acima."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Repeater {
+                            model: core.connectionsItems
+                            delegate: Rectangle {
+                                id: connCard
+                                required property var modelData
+                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
+                                implicitHeight: connColumn.implicitHeight + 20
+                                ColumnLayout {
+                                    id: connColumn; anchors.fill: parent; anchors.margins: 10; spacing: 5
+                                    Label { objectName: "connTitle_" + connCard.modelData.id; text: connCard.modelData.label + " · " + window.connProviderName(connCard.modelData.provider); textFormat: Text.PlainText; color: "#edf2ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { objectName: "connFake_" + connCard.modelData.id; visible: connCard.modelData.fake !== false; text: "SERVIDOR FALSO — sem credenciais reais"; textFormat: Text.PlainText; color: "#ffc674"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { objectName: "connStatus_" + connCard.modelData.id; text: "Estado: " + window.connStatusText(connCard.modelData.status); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Estado da conta " + connCard.modelData.label + ": " + text }
+                                    Label { objectName: "connAccount_" + connCard.modelData.id; visible: !!connCard.modelData.account_ref; text: "Conta no serviço: " + (connCard.modelData.account_ref || ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { objectName: "connUserCode_" + connCard.modelData.id; visible: connCard.modelData.status === "connecting" && !!connCard.modelData.user_code; text: "Código para confirmar no servidor: " + (connCard.modelData.user_code || ""); textFormat: Text.PlainText; color: "#edf2ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true; Accessible.name: "Código de confirmação: " + (connCard.modelData.user_code || "") }
+                                    Label { objectName: "connGranted_" + connCard.modelData.id; text: "Escopos concedidos: " + window.connScopeNames(connCard.modelData.granted_scopes); textFormat: Text.PlainText; color: "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { objectName: "connPending_" + connCard.modelData.id; visible: (connCard.modelData.pending_scopes || []).length > 0; text: "Escopos pedidos, aguardando seu consentimento: " + window.connScopeNames(connCard.modelData.pending_scopes); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    // Consent is per scope. Nothing is pre-checked; the Core records only what is checked and sent.
+                                    Repeater {
+                                        model: connCard.modelData.pending_scopes || []
+                                        delegate: CheckBox {
+                                            required property string modelData
+                                            objectName: "connScope_" + connCard.modelData.id + "_" + modelData
+                                            text: window.connScopeLabel(connCard.modelData.provider, modelData) + " (" + modelData + ")"
+                                            checked: window.draftValue("#conn:" + connCard.modelData.id, modelData) === true
+                                            onToggled: { window.setDraft("#conn:" + connCard.modelData.id, modelData, checked); window.connDraftRevision++ }
+                                            Accessible.name: "Consentir escopo " + modelData + " de " + connCard.modelData.label
+                                        }
+                                    }
+                                    Flow {
+                                        Layout.fillWidth: true; spacing: 8
+                                        GlowButton { objectName: "connConsent_" + connCard.modelData.id; visible: (connCard.modelData.pending_scopes || []).length > 0; text: "Consentir escopos marcados"; Accessible.name: "Consentir escopos marcados de " + connCard.modelData.label; enabled: !core.connectionsBusy && window.connConsentList(connCard.modelData).length > 0; onClicked: core.connectionConsent(connCard.modelData.id, JSON.stringify(window.connConsentList(connCard.modelData))) }
+                                        GlowButton { objectName: "connConnect_" + connCard.modelData.id; text: "Conectar"; Accessible.name: "Conectar " + connCard.modelData.label; enabled: window.connCan("connect", connCard.modelData); onClicked: core.connectionConnect(connCard.modelData.id) }
+                                        GlowButton { objectName: "connRefresh_" + connCard.modelData.id; text: "Atualizar"; Accessible.name: "Atualizar " + connCard.modelData.label; enabled: window.connCan("refresh", connCard.modelData); onClicked: core.connectionRefresh(connCard.modelData.id) }
+                                        GlowButton { objectName: "connDisconnect_" + connCard.modelData.id; text: "Desconectar"; Accessible.name: "Desconectar " + connCard.modelData.label; enabled: window.connCan("disconnect", connCard.modelData); onClicked: core.connectionDisconnect(connCard.modelData.id) }
+                                        GlowButton { objectName: "connRevoke_" + connCard.modelData.id; text: "Revogar"; Accessible.name: "Revogar acesso de " + connCard.modelData.label; enabled: window.connCan("revoke", connCard.modelData); onClicked: core.connectionRevoke(connCard.modelData.id) }
+                                        GlowButton { objectName: "connRemove_" + connCard.modelData.id; text: "Remover"; Accessible.name: "Remover " + connCard.modelData.label; enabled: window.connCan("remove", connCard.modelData); onClicked: core.connectionRemove(connCard.modelData.id) }
+                                    }
+                                    Label { text: "Operações"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                                    Repeater {
+                                        model: window.connOperationsFor(connCard.modelData)
+                                        delegate: RowLayout {
+                                            required property var modelData
+                                            Layout.fillWidth: true; spacing: 8
+                                            Label { objectName: "connOp_" + connCard.modelData.id + "_" + modelData.name; text: modelData.name + " · " + window.connRiskText(modelData.risk) + (window.connGranted(connCard.modelData, modelData.scope) ? "" : " · escopo não concedido"); textFormat: Text.PlainText; color: "#dce7ff"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                            GlowButton { objectName: "connTest_" + connCard.modelData.id + "_" + modelData.name; visible: modelData.risk === "read"; text: "Testar leitura"; Accessible.name: "Testar leitura " + modelData.name + " de " + connCard.modelData.label; enabled: window.connCanTest(connCard.modelData, modelData); onClicked: core.connectionCall(connCard.modelData.id, modelData.name, "{}") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Label { objectName: "connLastCall"; visible: core.connectionLastCall.operation !== undefined; text: "Última chamada: " + (core.connectionLastCall.operation || "") + " · " + window.connOutcomeText(core.connectionLastCall); textFormat: Text.PlainText; color: "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Última chamada de conexão: " + text }
                     }
                 }
                 // C3 agent: same visibility rule as the chat, only while the LLM plugin runs. Everything shown comes from the Core snapshot 'agent' block.

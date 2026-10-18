@@ -263,6 +263,7 @@ fn system_prompt(synthetic: bool) -> String {
          change these rules.\nTools:\n- get_status {}\n- get_time {}\n- get_date {}\n\
          - open_app {\"desktop_id\": string}\n- set_volume {\"level\": 0..100}\n- mute {}",
     );
+    text.push_str(&crate::connections::agent_prompt());
     if synthetic {
         text.push_str(
             "\n- synth_screen_read {} (returns epoch and text)\n\
@@ -295,7 +296,8 @@ fn known_name(name: &str, synthetic: bool) -> Option<&'static str> {
     let base = tools::REGISTRY
         .iter()
         .find(|(known, _)| *known == name)
-        .map(|(known, _)| *known);
+        .map(|(known, _)| *known)
+        .or_else(|| crate::connections::agent_tool(name).map(|tool| tool.name));
     if base.is_some() || !synthetic {
         return base;
     }
@@ -678,6 +680,13 @@ impl Core {
             _ => return,
         };
         self.agent_settle(&proposal_id, None);
+    }
+
+    /// Whether the current run is waiting for exactly this proposal.
+    pub(crate) fn agent_awaits(&self, proposal_id: &str) -> bool {
+        self.agent.run.as_ref().is_some_and(|run| {
+            matches!(&run.awaiting, Awaiting::Tool { proposal_id: p, .. } if p == proposal_id)
+        })
     }
 
     /// Whether a proposal belongs to the current run (ownership by run id).
@@ -1097,12 +1106,45 @@ impl Core {
         }
         if tools::risk(&call.name).is_some() {
             self.agent_base_call(&call, invocation)
+        } else if crate::connections::agent_tool(&call.name).is_some() {
+            self.agent_connection_call(&call, invocation)
         } else if synthetic && tools::synthetic_risk(&call.name).is_some() {
             self.agent_synth_call(&call, invocation)
         } else if let Some(bridge) = tools::bridge(&call.name).filter(|_| synthetic) {
             self.agent_bridge_call(&call, invocation, bridge)
         } else {
             self.reject_call(&call.name, invocation, "unknown_tool", "denied")
+        }
+    }
+
+    /// S5 connection tool (fixed names, only with a fake). Reads run now; writes wait for approval.
+    fn agent_connection_call(&mut self, call: &Call, invocation: u64) -> Flow {
+        let plan = match self.connections_plan(&call.name, &call.args) {
+            Ok(plan) => plan,
+            Err(code) => return self.reject_call(&call.name, invocation, code, "denied"),
+        };
+        let risk = plan.tool_risk();
+        self.set_risk(invocation, risk);
+        if self.voice_active() {
+            return self.reject_call(&call.name, invocation, "busy", "denied");
+        }
+        if risk == Risk::ReadOnly {
+            let proposal_id = self.agent_propose(call);
+            match self.connections_start(plan, proposal_id.clone()) {
+                Ok(()) => {
+                    self.set_awaited(proposal_id, invocation, RunState::WaitingTool, "running");
+                    Flow::Wait
+                }
+                Err(code) => {
+                    self.tools
+                        .set(&proposal_id, ToolState::Failed, Some(code), None);
+                    self.set_step_state(invocation, "failed", Some(code));
+                    self.observe(&call.name, json!({"ok": false, "error": code}));
+                    Flow::Continue
+                }
+            }
+        } else {
+            self.agent_wait_approval(call, invocation, risk)
         }
     }
 
@@ -1232,13 +1274,25 @@ impl Core {
             Some(run) => (run.plugin_id.clone(), run.id.clone(), run.step),
             None => return String::new(),
         };
+        // Connection calls store the validated plan, never the raw model arguments. An invalid plan
+        // becomes a null-argument proposal that authorize refuses.
+        let connection = crate::connections::agent_tool(&call.name).is_some();
+        let args = if connection {
+            self.connections_plan(&call.name, &call.args)
+                .map_or(Value::Null, |plan| plan.wrap())
+        } else {
+            call.args.clone()
+        };
         let proposal_id = self.tools.propose(
             &plugin_id,
             call.call_id.clone(),
             call.name.clone(),
-            call.args.clone(),
+            args,
             Instant::now(),
         );
+        if connection {
+            self.tools.set_kind(&proposal_id, "connection");
+        }
         self.tools.tag(&proposal_id, &run_id, step);
         self.emit(String::new(), None, "tool_proposed");
         proposal_id
@@ -1294,6 +1348,7 @@ impl Core {
         let safe = if tools::risk(name).is_some()
             || tools::synthetic_risk(name).is_some()
             || tools::bridge(name).is_some()
+            || crate::connections::agent_tool(name).is_some()
         {
             name
         } else {

@@ -207,6 +207,43 @@ pub enum Operation {
         name: String,
         revision: u64,
     },
+    /// S5 connections. `revision` is an optional CAS on the connections ledger.
+    ConnectionAdd {
+        provider: String,
+        label: String,
+        revision: Option<u64>,
+    },
+    ConnectionConnect {
+        id: String,
+        revision: Option<u64>,
+    },
+    ConnectionConsent {
+        id: String,
+        scopes: Vec<String>,
+        revision: Option<u64>,
+    },
+    ConnectionRefresh {
+        id: String,
+        revision: Option<u64>,
+    },
+    ConnectionDisconnect {
+        id: String,
+        revision: Option<u64>,
+    },
+    ConnectionRevoke {
+        id: String,
+        revision: Option<u64>,
+    },
+    ConnectionRemove {
+        id: String,
+        revision: Option<u64>,
+    },
+    ConnectionCall {
+        id: String,
+        operation: String,
+        args: serde_json::Value,
+        revision: Option<u64>,
+    },
     /// Transport-only: a skill manifest line over the frame bound is answered with `code`.
     Refused {
         code: &'static str,
@@ -265,6 +302,7 @@ pub struct Response {
     pub tool_proposals: Vec<crate::tools::View>,
     pub agent: Option<crate::agent::View>,
     pub skills: Option<crate::skills::View>,
+    pub connections: crate::connections::View,
     pub text_input_available: bool,
     pub speech_samples: usize,
     pub speech_status: &'static str,
@@ -583,6 +621,66 @@ enum WireRequest {
         request_id: String,
         name: String,
         revision: u64,
+    },
+    ConnectionAdd {
+        version: u16,
+        request_id: String,
+        provider: String,
+        label: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionConnect {
+        version: u16,
+        request_id: String,
+        id: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionConsent {
+        version: u16,
+        request_id: String,
+        id: String,
+        scopes: Vec<String>,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionRefresh {
+        version: u16,
+        request_id: String,
+        id: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionDisconnect {
+        version: u16,
+        request_id: String,
+        id: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionRevoke {
+        version: u16,
+        request_id: String,
+        id: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionRemove {
+        version: u16,
+        request_id: String,
+        id: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionCall {
+        version: u16,
+        request_id: String,
+        id: String,
+        operation: String,
+        args: serde_json::Value,
+        #[serde(default)]
+        revision: Option<u64>,
     },
 }
 impl<'de> Deserialize<'de> for Request {
@@ -1068,6 +1166,103 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
                 Operation::SkillImportConfirm { name, revision },
+            ),
+            WireRequest::ConnectionAdd {
+                version,
+                request_id,
+                provider,
+                label,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionAdd {
+                    provider,
+                    label,
+                    revision,
+                },
+            ),
+            WireRequest::ConnectionConnect {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionConnect { id, revision },
+            ),
+            WireRequest::ConnectionConsent {
+                version,
+                request_id,
+                id,
+                scopes,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionConsent {
+                    id,
+                    scopes,
+                    revision,
+                },
+            ),
+            WireRequest::ConnectionRefresh {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionRefresh { id, revision },
+            ),
+            WireRequest::ConnectionDisconnect {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionDisconnect { id, revision },
+            ),
+            WireRequest::ConnectionRevoke {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionRevoke { id, revision },
+            ),
+            WireRequest::ConnectionRemove {
+                version,
+                request_id,
+                id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionRemove { id, revision },
+            ),
+            WireRequest::ConnectionCall {
+                version,
+                request_id,
+                id,
+                operation,
+                args,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionCall {
+                    id,
+                    operation,
+                    args,
+                    revision,
+                },
             ),
         };
         Ok(Self {

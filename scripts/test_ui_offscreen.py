@@ -36,6 +36,13 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
     skills-run         after Autorizar the run state is done and shown as PlainText
     skills-import      the import preview of fixture-note shows publisher 'não verificado'; Instalar como rascunho is enabled only
                        with no findings, and clicking it installs a draft (it never enables anything); the page ends with ui.png
+  connections phase (S5 UI, needs a real Core with the connection manager running and the fake servers of the gate (--connections-fake):
+    at least one connected account with a granted read operation, and one account waiting for consent (pending_scopes).
+    The phase clicks only Testar leitura and the user's own consent; it never adds an account, never revokes or removes one.
+    connections-ready      Conexões offered; every account served by the fake shows 'SERVIDOR FALSO — sem credenciais reais'
+    connections-read       Testar leitura of a connected account went through the Core; Última chamada is shown as PlainText
+    connections-consented  the ticked pending scope was sent with Consentir escopos marcados; the Core lists it as granted
+    The page ends with ui.png
 """
 import argparse,json,os,sys,time
 from pathlib import Path
@@ -44,7 +51,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--llm',choices=['yes','no'],default='no',help='skills phase: yes = llm_engine runs (Gerar com LLM is used), no = plugin absent (the button must say so)');parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--llm',choices=['yes','no'],default='no',help='skills phase: yes = llm_engine runs (Gerar com LLM is used), no = plugin absent (the button must say so)');parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills','connections'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -382,6 +389,34 @@ elif args.phase=='skills':
         confirm.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);wait(lambda:not bridge.skillsBusy and not bridge.skillImportPreview.get('name'),40)
         check('confirmed import is a draft and nothing is enabled',any(s['id']==imported_id and s['state']=='draft' and s['source']=='imported' for s in bridge.skillsItems) and not any(s['state']=='enabled' and s['source']=='imported' for s in bridge.skillsItems))
     Path(args.artifacts,'skills-import').touch()
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
+elif args.phase=='connections':
+    # Gate protocol (S5 UI): see the module docstring. The phase clicks only the read test and the user's own consent; it never adds, revokes or removes an account.
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    wait(lambda:bridge.connectionsAvailable,50)
+    nav=visual_item('nav11');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:window.property('page')==11,3)
+    check('connections panel visible on its page',visual_item('connectionsPanel').property('visible'))
+    fake_accounts=[c for c in bridge.connectionsItems if c.get('fake') is not False]
+    check('every account served by the fake carries the SERVIDOR FALSO label',bool(fake_accounts) and all(visual_item('connFake_'+c['id']).property('visible') and visual_item('connFake_'+c['id']).property('text')=='SERVIDOR FALSO — sem credenciais reais' for c in fake_accounts))
+    Path(args.artifacts,'connections-ready').touch()
+    providers={p['id']:p for p in bridge.connectionsProviders}
+    readable=next(((c,o) for c in bridge.connectionsItems if c['status']=='connected' for o in providers[c['provider']]['operations'] if o['risk']=='read' and o['scope'] in c['granted_scopes']),None)
+    check('a connected account has a granted read operation for the test',readable is not None)
+    account,operation=readable
+    test_button=visual_item('connTest_'+account['id']+'_'+operation['name']);test_button.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.connectionLastCall.get('operation')==operation['name'] and not bridge.connectionsBusy,60)
+    last=visual_item('connLastCall');expression=QQmlExpression(QQmlEngine.contextForObject(last),last,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+    check('read test outcome shown as PlainText from the Core snapshot',plain is True and not expression.hasError() and last.property('text').startswith('Última chamada: '+operation['name']))
+    Path(args.artifacts,'connections-read').touch()
+    waiting=next(((c,s) for c in bridge.connectionsItems for s in c['pending_scopes']),None)
+    check('an account waits for consent',waiting is not None)
+    account,scope=waiting
+    box=visual_item('connScope_'+account['id']+'_'+scope);box.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);QTest.qWait(20)
+    consent=visual_item('connConsent_'+account['id']);check('consent offered once the scope is ticked',consent.property('enabled'));consent.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:not bridge.connectionsBusy and scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'],60)
+    check('the Core lists the consented scope as granted',scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'])
+    Path(args.artifacts,'connections-consented').touch()
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':
     # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,

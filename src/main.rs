@@ -22,6 +22,9 @@ async fn main() -> io::Result<()> {
     let mut home = None;
     let mut plugin_python = None;
     let mut net_allow_loopback = false;
+    // Test/dev only: S5 provider fakes on loopback (`provider=http://127.0.0.1:port`, repeatable).
+    let mut connection_fakes = std::collections::BTreeMap::new();
+    let mut connections_allow_public = false;
     let mut agent = gideon_base::agent::Options::default();
     while let Some(option) = args.next() {
         match option.as_str() {
@@ -80,6 +83,19 @@ async fn main() -> io::Result<()> {
             }
             // Test/dev only: lets the LLM broker reach loopback HTTP servers. Never set in packages.
             "--net-allow-loopback" if !net_allow_loopback => net_allow_loopback = true,
+            "--connections-fake" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| io::Error::other("invalid --connections-fake"))?;
+                let (provider, url) = gideon_base::connections::parse_fake(&raw)
+                    .map_err(|_| io::Error::other("invalid --connections-fake"))?;
+                if connection_fakes.insert(provider, url).is_some() {
+                    return Err(io::Error::other("duplicate --connections-fake"));
+                }
+            }
+            "--connections-allow-public" if !connections_allow_public => {
+                connections_allow_public = true
+            }
             "--virtual-input" if !virtual_input => virtual_input = true,
             "--commands-sandbox" if !commands_sandbox => commands_sandbox = true,
             "--tts-virtual" if tts.is_none() => {
@@ -140,6 +156,17 @@ async fn main() -> io::Result<()> {
         gideon_base::plugins::plugin_runtime_check(python, transport::home(), user_home.as_deref())
             .map_err(|code| io::Error::other(format!("--plugin-python refused: {code}")))?;
     }
+    // Fakes need the broker interpreter; without fakes nothing in S5 can reach a network.
+    if !connection_fakes.is_empty() && plugin_python.is_none() {
+        return Err(io::Error::other(
+            "--connections-fake requires --plugin-python",
+        ));
+    }
+    gideon_base::connections::configure(gideon_base::connections::Options {
+        fakes: connection_fakes,
+        allow_public: connections_allow_public,
+    })
+    .map_err(|_| io::Error::other("connections options already set"))?;
     if tts.is_some() && !commands_sandbox {
         return Err(io::Error::other("TTS requires command profile"));
     }

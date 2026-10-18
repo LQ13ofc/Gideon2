@@ -399,6 +399,8 @@ enum Target {
     Capability(String),
     Tool(String),
     Skill(String),
+    /// S5 operation `conn:<provider>.<operation>`, resolved by the Connection Manager.
+    Connection(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -456,6 +458,13 @@ pub fn runtime_version() -> (u64, u64, u64) {
 }
 
 fn parse_target(call: &str) -> Result<Target, &'static str> {
+    if call.starts_with("conn:") {
+        return if crate::connections::parse_call(call).is_some() {
+            Ok(Target::Connection(call.to_owned()))
+        } else {
+            Err(E_FIELD)
+        };
+    }
     if let Some(name) = call.strip_prefix("tool:") {
         return if slug(name, 2, 41, false) {
             Ok(Target::Tool(name.to_owned()))
@@ -725,7 +734,7 @@ fn fields(m: &Manifest, env: &Env) -> Result<(), &'static str> {
                     return Err(E_CYCLE);
                 }
             }
-            Target::Capability(_) => {}
+            Target::Capability(_) | Target::Connection(_) => {}
         }
     }
     if m.permissions_required.len() > LIST_MAX
@@ -764,7 +773,7 @@ fn call_target(call: &str, m: &Manifest, env: &Env) -> Result<Target, &'static s
                 return Err(E_CYCLE);
             }
         }
-        Target::Capability(_) => {}
+        Target::Capability(_) | Target::Connection(_) => {}
     }
     if !m.dependency_capabilities.iter().any(|d| d == call) {
         return Err(E_OUT_OF_SCOPE);
@@ -901,6 +910,8 @@ fn steps(m: &Manifest, env: &Env) -> Result<(), &'static str> {
                 Target::Capability(_) => {
                     call_target(&undo.call, m, env)?;
                 }
+                // Connection operations are never undone: a write has no automatic inverse.
+                Target::Connection(_) => return Err(E_FIELD),
             }
             let mut allowed = earlier.clone();
             allowed.push(step.id.clone());
@@ -1525,6 +1536,7 @@ impl Core {
             .filter(|dep| match parse_target(dep) {
                 Ok(Target::Capability(name)) => self.capability_owner(&name).is_err(),
                 Ok(Target::Tool(name)) => !self.tool_known(&name),
+                Ok(Target::Connection(call)) => !self.connection_ready(&call),
                 Ok(Target::Skill(id)) => self
                     .skills
                     .entry(&id)
@@ -1545,6 +1557,11 @@ impl Core {
                 }
                 Target::Tool(name) => {
                     if !self.tool_known(&name) {
+                        return Err("missing_dependency");
+                    }
+                }
+                Target::Connection(call) => {
+                    if !self.connection_ready(&call) {
                         return Err("missing_dependency");
                     }
                 }
@@ -1569,6 +1586,9 @@ impl Core {
                 tool_risk(&name, crate::agent::options().synthetic).ok_or("unknown_tool")
             }
             Target::Capability(name) => Ok(capability_risk(&name)),
+            Target::Connection(call) => crate::connections::parse_call(&call)
+                .map(|(_, op)| op.risk.tool_risk())
+                .ok_or("invalid_call"),
             Target::Skill(_) => Ok(Risk::ReadOnly),
         }
     }
@@ -2408,7 +2428,50 @@ impl Core {
                 }
             }
             Ok(Target::Tool(name)) => self.exec_tool(&name, args, view),
+            Ok(Target::Connection(call)) => self.exec_connection(&call, args, view),
             _ => Dispatch::Done(Err("invalid_call")),
+        }
+    }
+
+    /// Whether a `conn:` dependency has a connected grant for its scope right now.
+    fn connection_ready(&self, call: &str) -> bool {
+        crate::connections::parse_call(call)
+            .is_some_and(|(provider, op)| self.connections.dependency_ready(provider.id, op.name))
+    }
+
+    /// S5 operation from a skill step. The skill's own decision already approved the step, so the
+    /// call starts now; its proposal settles through `skill_tool_settled` like a registry tool.
+    fn exec_connection(&mut self, call: &str, args: Value, view: Option<usize>) -> Dispatch {
+        let Some((provider, op)) = crate::connections::parse_call(call) else {
+            return Dispatch::Done(Err("invalid_call"));
+        };
+        let plan = match self.connections.plan(provider, op, None, &args) {
+            Ok(plan) => plan,
+            Err(code) => return Dispatch::Done(Err(code)),
+        };
+        let proposal = self.tools.propose(
+            ENGINE_OWNER,
+            String::new(),
+            call.to_owned(),
+            plan.wrap(),
+            Instant::now(),
+        );
+        self.tools.set_kind(&proposal, "connection");
+        match self
+            .connections
+            .start(&self.llm, plan, Some(proposal.clone()), Instant::now())
+        {
+            Ok(()) => {
+                self.tools
+                    .set(&proposal, tools::State::Authorized, None, None);
+                self.set_awaiting(Await::Tool { proposal, view });
+                Dispatch::Waiting
+            }
+            Err(code) => {
+                self.tools
+                    .set(&proposal, tools::State::Failed, Some(code), None);
+                Dispatch::Done(Err(code))
+            }
         }
     }
 

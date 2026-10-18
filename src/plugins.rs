@@ -1465,7 +1465,7 @@ pub(crate) fn resolve_interpreter(python: &Path) -> PathBuf {
 }
 
 /// Process count of the real uid (threads included, as RLIMIT_NPROC counts them) plus headroom.
-fn process_budget() -> u64 {
+pub(crate) fn process_budget() -> u64 {
     // SAFETY: getuid has no preconditions and does not change process state.
     let uid = unsafe { libc::getuid() };
     let mut tasks = 0u64;

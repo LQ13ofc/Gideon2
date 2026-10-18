@@ -7,8 +7,11 @@ stdin, line 2: {"key": "..."}; the key never appears in argv, env, stdout or std
 The keyless form {"key": null} is for local loopback providers only: it sends no Authorization
 header and only IP-literal loopback targets are accepted (no name resolution).
 stdout: JSON lines only: {"chunk": str<=16384 chars}, then exactly one terminal line:
-{"done":true,"status":2xx} or {"error": code[, "status": N]}. Headers and bodies of
-failed responses are never printed. Redirects are refused, never followed.
+{"done":true,"status":2xx[,"account": str][,"retry_after": int]} or
+{"error": code[, "status": N][, "retry_after": int][, "provider_error": snake_str]}.
+Bodies of failed responses are never printed; the only body fact kept is a snake_case
+"error" token of a small JSON object (provider_error). Redirects are refused, never followed.
+Connections (C-S5) use GET/POST/PATCH with an Idempotency-Key header; C1 uses POST only.
 """
 import codecs
 import http.client
@@ -25,14 +28,18 @@ MAX_KEY_LINE = 4096
 MAX_BODY = 512 * 1024
 MAX_CHUNK = 16384
 MAX_TOTAL = 4 * 1024 * 1024
-ALLOWED_HEADERS = {"content-type", "accept"}
+MAX_ERROR_BODY = 4096
+ALLOWED_HEADERS = {"content-type", "accept", "idempotency-key"}
+ALLOWED_METHODS = ("GET", "POST", "PATCH")
+ACCOUNT_MAX = 128
 
 
 class Stop(Exception):
-    def __init__(self, code, status=None):
+    def __init__(self, code, status=None, extra=None):
         super().__init__(code)
         self.code = code
         self.status = status
+        self.extra = extra or {}
 
 
 def emit(obj):
@@ -54,7 +61,7 @@ def read_request():
     if not isinstance(request, dict) or set(request) != expected:
         raise Stop("invalid_request")
     headers = request["headers"]
-    if (request["method"] != "POST" or not isinstance(request["url"], str)
+    if (request["method"] not in ALLOWED_METHODS or not isinstance(request["url"], str)
             or not isinstance(request["body"], str) or len(request["body"]) > MAX_BODY
             or not isinstance(request["timeout_s"], int) or not 1 <= request["timeout_s"] <= 120
             or not isinstance(request["expected_host"], str)
@@ -104,6 +111,33 @@ def check_target(request, keyless=False):
     return parts, host, port
 
 
+def retry_after(response):
+    raw = response.getheader("Retry-After")
+    if raw is None or not raw.strip().isdigit():
+        return None
+    return min(int(raw.strip()), 3600)
+
+
+def account_of(response):
+    raw = response.getheader("X-Account")
+    if raw is None or len(raw) > ACCOUNT_MAX or not raw.isprintable() or not raw:
+        return None
+    return raw
+
+
+def provider_code(raw):
+    try:
+        body = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return None
+    if not isinstance(body, dict) or not isinstance(body.get("error"), str):
+        return None
+    code = body["error"]
+    if not 1 <= len(code) <= 40 or not all(c.islower() or c == "_" for c in code):
+        return None
+    return code
+
+
 def stream(request, key):
     parts, host, port = check_target(request, keyless=key is None)
     deadline = time.monotonic() + request["timeout_s"]
@@ -117,14 +151,21 @@ def stream(request, key):
     if key is not None:
         headers["Authorization"] = "Bearer " + key
     try:
-        connection.request("POST", parts.path or "/", body=request["body"].encode("utf-8"),
+        connection.request(request["method"], parts.path or "/", body=request["body"].encode("utf-8"),
                            headers=headers)
         response = connection.getresponse()
         status = response.status
         if 300 <= status < 400:
             raise Stop("redirect_refused", status)
         if not 200 <= status < 300:
-            raise Stop("http_error", status)
+            extra = {}
+            wait = retry_after(response)
+            if wait is not None:
+                extra["retry_after"] = wait
+            code = provider_code(response.read(MAX_ERROR_BODY))
+            if code is not None:
+                extra["provider_error"] = code
+            raise Stop("http_error", status, extra)
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         total = 0
         while True:
@@ -142,7 +183,14 @@ def stream(request, key):
         tail = decoder.decode(b"", final=True)
         if tail:
             emit({"chunk": tail})
-        emit({"done": True, "status": status})
+        done = {"done": True, "status": status}
+        account = account_of(response)
+        if account is not None:
+            done["account"] = account
+        wait = retry_after(response)
+        if wait is not None:
+            done["retry_after"] = wait
+        emit(done)
     finally:
         connection.close()
 
@@ -155,6 +203,7 @@ def main():
         fail = {"error": stop.code}
         if stop.status is not None:
             fail["status"] = stop.status
+        fail.update(stop.extra)
         emit(fail)
     except (socket.timeout, TimeoutError):
         emit({"error": "timeout"})

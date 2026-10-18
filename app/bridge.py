@@ -26,7 +26,7 @@ STAGED_ERRORS=('staged_payload_invalid',)
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
@@ -82,6 +82,36 @@ AGENT_CODES=frozenset({'agent_busy','llm_unavailable','unknown_run','invalid_inp
  'permission_revoked','awaiting_approval'})  # the last two are named by docs/C3.md (the Core emits them when that path exists)
 # C3: a proposal cancelled or refused by an agent run carries the run's code (or run_ended), and synthetic tools refuse with their own codes.
 TOOL_REASONS=TOOL_REASONS|AGENT_CODES|{'run_ended','denied','destructive_disabled','app_unavailable','app_write_failed','verify_failed','stale_screen','aborted','revoked'}
+# S5 connections (docs/S5.md E1). Providers, statuses and limits mirror the Core; the snapshot block 'connections' is refused when it breaks them. No secret, token or endpoint is ever part of it.
+CONN_PROVIDERS=('github','google','homeassistant','mcp');CONN_STATUSES=('disconnected','connecting','connected','expired','offline','error','reauth_required');CONN_ACCESS=('read','write','destructive','public')
+CONN_ITEMS_LIMIT=8;CONN_SCOPES_LIMIT=8;CONN_OPERATIONS_LIMIT=16;CONN_ARGS_LIMIT=4096;CONN_LABEL_LIMIT=64;CONN_ACCOUNT_LIMIT=128;CONN_USER_CODE_LIMIT=32
+CONN_ID=re.compile(r'[A-Za-z0-9_-]{1,64}');CONN_NAME=re.compile(r'[a-z][a-z0-9_.:]{0,63}')
+CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake'})
+CONN_PROPOSAL_KEYS=frozenset({'kind','connection_id','operation','risk'})
+# Core codes for connection ops and for connection proposals (kind 'connection'). Each one has a Portuguese text in CONN_MESSAGES.
+CONN_MESSAGES={
+    'scope_not_granted':'Escopo não concedido: conceda o escopo antes de usar esta operação; nenhuma chamada foi feita',
+    'rate_limited':'Limite de chamadas do servidor atingido; tente de novo em instantes',
+    'unauthorized':'Autorização recusada pelo servidor; reconecte a conta',
+    'forbidden_scope':'O servidor recusou o escopo pedido para esta operação',
+    'account_mismatch':'A conta devolvida pelo servidor não confere; chamada recusada',
+    'provider_unreachable':'Servidor do provedor inacessível neste ambiente',
+    'real_backend_unsupported':'Backend real não suportado neste ambiente; use o servidor falso',
+    'reauth_required':'Reautenticação necessária: conecte a conta de novo',
+    'public_pending':'Ação pública aguarda sua aprovação explícita; nada foi publicado',
+    'provider_error':'O provedor devolveu erro; nada foi confirmado',
+    'unknown_connection':'Conta desconhecida ou já removida',
+    'stale_connection_revision':'Contas mudaram no Core; atualize e tente de novo',
+    'invalid_connection':'Dados da conta recusados pelo Core',
+    'connection_limit':'Limite de 8 contas atingido; remova uma conta antes',
+    'not_connected':'Conta não está conectada',
+    'unknown_operation':'Operação desconhecida para este provedor',
+    'connection_consent_required':'Escolha ao menos um escopo pedido para consentir',
+    'connection_args_invalid':'Argumentos devem ser um objeto JSON de até 4 KiB',
+    'connection_unavailable':'Conexões indisponíveis agora',
+}
+CONN_CODES=frozenset(CONN_MESSAGES)
+TOOL_REASONS=TOOL_REASONS|CONN_CODES
 AGENT_STATE_LABELS={'thinking':'Pensando','waiting_tool':'Executando ferramenta','awaiting_approval':'Aguardando sua aprovação','done':'Concluído','failed':'Falhou','aborted':'Abortado','blocked':'Bloqueado'}
 AGENT_MAX_STEPS=6;AGENT_CHAT_STEPS=12;AGENT_TOOL_STEPS=25;AGENT_TOTAL_TOKENS=4096;AGENT_GOAL_LIMIT=1024;AGENT_ANSWER_LIMIT=4096
 AGENT_RUN_KEYS=frozenset({'run_id','state','goal_len','step','max_steps','started_ms_ago','steps','budget'});AGENT_STEP_KEYS=frozenset({'n','invocation_id','kind','tool','risk','state','code'});AGENT_PROPOSAL_KEYS=frozenset({'run_id','step'})
@@ -259,7 +289,7 @@ def valid_tools(items):
     if not (isinstance(items,list) and len(items)<=TOOL_ITEMS):return False
     ids=set()
     for item in items:
-        if not (isinstance(item,dict) and TOOL_KEYS<=set(item)<=TOOL_KEYS|AGENT_PROPOSAL_KEYS):return False
+        if not (isinstance(item,dict) and TOOL_KEYS<=set(item)<=TOOL_KEYS|AGENT_PROPOSAL_KEYS|CONN_PROPOSAL_KEYS):return False
         pid=item['proposal_id']
         if not (isinstance(pid,str) and PROPOSAL_ID.fullmatch(pid) and pid not in ids):return False
         ids.add(pid)
@@ -273,7 +303,13 @@ def valid_tools(items):
         # C3: a proposal made by an agent run carries its run_id and step together; a chat or tool-only proposal carries neither.
         if ('run_id' in item)!=('step' in item):return False
         if 'run_id' in item and not (run_id_ok(item['run_id']) and is_int(item['step'],1,AGENT_MAX_STEPS)):return False
+        if not valid_conn_proposal(item):return False
     return True
+def valid_conn_proposal(item):
+    """S5 (docs/S5.md E1): kind 'connection' carries connection_id, operation and risk, never an agent run; any other proposal carries none of them."""
+    if 'kind' in item and item['kind'] not in ('tool','connection'):return False
+    if item.get('kind')!='connection':return not set(item)&(CONN_PROPOSAL_KEYS-{'kind'})
+    return {'connection_id','operation','risk'}<=set(item) and 'run_id' not in item and conn_id_ok(item['connection_id']) and isinstance(item['operation'],str) and CONN_NAME.fullmatch(item['operation']) is not None and item['risk'] in CONN_ACCESS
 def agent_goal_problem(goal):
     """Rule for agentStart (docs/C3.md): trimmed, 1..=1024 UTF-8 bytes, no control characters. None means the goal may be sent (the trimmed text)."""
     try:
@@ -534,6 +570,8 @@ def validate_snapshot(data,request_id,min_sequence):
     if 'agent' in data:require(valid_agent(data['agent']))
     # S4: the skills block is optional (absent or null while the skill engine is not published); when present it is the exact view of docs/S4.md.
     if 'skills' in data:require(valid_skills(data['skills']))
+    # S5: the connections block is optional (absent or null while the connection manager is not published); when present it is the exact view of docs/S5.md E1.
+    if 'connections' in data:require(valid_connections(data['connections']))
     partial=data.get('partial')
     require(partial is None or (isinstance(partial,str) and utf8_len(partial)<=PARTIAL_LIMIT))
     pack=data.get('base_pack')
@@ -736,6 +774,7 @@ SKILL_CODES=SKILL_OP_CODES|frozenset('skill_invalid:'+reason for reason in SKILL
 CODE_MESSAGES.update({f'skill_invalid:{reason}':text for reason,text in SKILL_REASON_MESSAGES.items()})
 CODE_MESSAGES.update({code:text for code,text in SKILL_OP_MESSAGES.items() if code not in CODE_MESSAGES})
 CODE_MESSAGES.update({'skill_invalid':'Skill recusada pela validação do Core; nada foi gravado','model_output_invalid':'O modelo não devolveu um manifest JSON válido'}) 
+CODE_MESSAGES.update(CONN_MESSAGES)
 SKILL_ID=re.compile(r'[a-z][a-z0-9_]{2,40}');SKILL_STEP_ID=re.compile(r'[a-z][a-z0-9_]{0,23}');SKILL_IMPORT_NAME=re.compile(r'[A-Za-z0-9._-]{1,64}')
 SKILL_SEMVER=re.compile(r'(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})')
 # Limits mirror docs/S4.md: manifest and inputs at most 16 KiB; 16 skills x 3 versions in the ledger; 16 steps; 32 history entries; outputs at most 1 KiB.
@@ -848,6 +887,69 @@ def valid_skill_draft(output):
     if 'diff' in output and not plain_text(output['diff'],2048):return False
     if 'validation' in output and output['validation']!={'ok':True}:return False
     return bounded_output(output)
+# S5 connections: local rules for what the page sends and shows. Each rule mirrors docs/S5.md; the Core remains the authority.
+def conn_id_ok(value):return isinstance(value,str) and CONN_ID.fullmatch(value) is not None
+def conn_text_ok(value,limit):return plain_text(value,limit) and bool(value.strip())
+def conn_label_problem(text):
+    """Account name: trimmed, 1..64 UTF-8 bytes, no control characters. None means the name may be sent (the trimmed text is sent)."""
+    try:
+        if not isinstance(text,str) or not text.strip():return 'Nome da conta vazio'
+        if utf8_len(text.strip())>CONN_LABEL_LIMIT:return 'Nome acima de 64 bytes'
+        if any(unicodedata.category(c)=='Cc' for c in text.strip()):return 'Nome com quebra de linha ou controle não é aceito'
+    except UnicodeError:return 'Nome inválido'
+    return None
+def conn_provider_problem(provider):return None if provider in CONN_PROVIDERS else CODE_MESSAGES['invalid_provider']
+def conn_scope_list(value):
+    return isinstance(value,list) and len(value)<=CONN_SCOPES_LIMIT and all(isinstance(s,str) and CONN_NAME.fullmatch(s) is not None for s in value) and len(set(value))==len(value)
+def valid_conn_provider(provider):
+    """Catalog entry (docs/S5.md E1): exact keys, unique scope and operation names, every operation names one of its provider's scopes."""
+    if not (isinstance(provider,dict) and set(provider)=={'id','scopes','operations'} and provider['id'] in CONN_PROVIDERS):return False
+    scopes=provider['scopes']
+    if not (isinstance(scopes,list) and len(scopes)<=CONN_SCOPES_LIMIT):return False
+    scope_ids=[]
+    for scope in scopes:
+        if not (isinstance(scope,dict) and set(scope)=={'id','label','access'} and isinstance(scope['id'],str) and CONN_NAME.fullmatch(scope['id']) and conn_text_ok(scope['label'],CONN_LABEL_LIMIT) and scope['access'] in CONN_ACCESS):return False
+        scope_ids.append(scope['id'])
+    if len(set(scope_ids))!=len(scope_ids):return False
+    operations=provider['operations']
+    if not (isinstance(operations,list) and len(operations)<=CONN_OPERATIONS_LIMIT):return False
+    names=[]
+    for operation in operations:
+        if not (isinstance(operation,dict) and set(operation)=={'name','scope','risk'} and isinstance(operation['name'],str) and CONN_NAME.fullmatch(operation['name']) and operation['scope'] in scope_ids and operation['risk'] in CONN_ACCESS):return False
+        names.append(operation['name'])
+    return len(set(names))==len(names)
+def valid_conn_item(item,catalog):
+    """One account (docs/S5.md E1). Scopes are granted or pending, never both, and only among the provider's scopes. No secret field exists."""
+    if not (isinstance(item,dict) and CONN_ITEM_REQUIRED<=set(item)<=CONN_ITEM_REQUIRED|CONN_ITEM_OPTIONAL):return False
+    if not (conn_id_ok(item['id']) and item['provider'] in catalog and conn_text_ok(item['label'],CONN_LABEL_LIMIT) and item['status'] in CONN_STATUSES):return False
+    scopes={scope['id'] for scope in catalog[item['provider']]['scopes']}
+    granted=item['granted_scopes'];pending=item.get('pending_scopes',[])
+    if not (conn_scope_list(granted) and conn_scope_list(pending) and set(granted)<=scopes and set(pending)<=scopes and not set(granted)&set(pending)):return False
+    if 'account_ref' in item and not conn_text_ok(item['account_ref'],CONN_ACCOUNT_LIMIT):return False
+    if 'user_code' in item and not conn_text_ok(item['user_code'],CONN_USER_CODE_LIMIT):return False
+    return 'fake' not in item or type(item['fake']) is bool
+def valid_conn_last_call(call):
+    if not (isinstance(call,dict) and {'operation','outcome'}<=set(call)<={'operation','outcome','code'}):return False
+    if not (isinstance(call['operation'],str) and CONN_NAME.fullmatch(call['operation']) and isinstance(call['outcome'],str) and SNAKE_CODE.fullmatch(call['outcome'])):return False
+    return 'code' not in call or (isinstance(call['code'],str) and SNAKE_CODE.fullmatch(call['code']) is not None)
+def valid_connections(block):
+    """Snapshot block connections: null, or revision, providers (the fixed catalog), items (at most 8, unique ids) and an optional last_call."""
+    if block is None:return True
+    if not (isinstance(block,dict) and {'revision','items','providers'}<=set(block)<=CONN_BLOCK_KEYS and is_int(block['revision'])):return False
+    providers=block['providers']
+    if not (isinstance(providers,list) and len(providers)<=len(CONN_PROVIDERS)):return False
+    catalog={}
+    for provider in providers:
+        if not valid_conn_provider(provider) or provider['id'] in catalog:return False
+        catalog[provider['id']]=provider
+    items=block['items']
+    if not (isinstance(items,list) and len(items)<=CONN_ITEMS_LIMIT):return False
+    ids=[]
+    for item in items:
+        if not valid_conn_item(item,catalog):return False
+        ids.append(item['id'])
+    if len(set(ids))!=len(ids):return False
+    return 'last_call' not in block or valid_conn_last_call(block['last_call'])
 # op -> (result channel, done message or builder). One table drives every Core answer.
 OPS={
     'preferences':('prefs',PREFS_DONE),'rollback_preferences':('prefs',PREFS_DONE),'select_wake':('prefs',PREFS_DONE),'feedback_preferences':('prefs',PREFS_DONE),
@@ -870,19 +972,31 @@ OPS={
 PENDING={'agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao Core…','hub_approve':'Enviando aprovação ao Core','hub_abort':'Enviando cancelamento ao Core','hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core','plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…','text':'Enviando texto ao Core',
     'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…',
     'skill_validate':'Validando manifest no Core…','skill_save_draft':'Salvando rascunho no Core…','skill_dry_run':'Simulando skill no Core…','skill_approve':'Aprovando skill no Core…','skill_enable':'Habilitando skill no Core…','skill_disable':'Desabilitando skill no Core…','skill_rollback':'Revertendo versão no Core…','skill_remove':'Removendo skill no Core…','skill_run':'Iniciando skill no Core…','skill_decide':'Enviando decisão do passo ao Core…','skill_cancel':'Cancelando skill no Core…','skill_export':'Exportando pacote pelo Core…','skill_import':'Lendo pacote pelo Core…','skill_import_confirm':'Importando como rascunho pelo Core…'}
+# S5 connection ops: the Core's ack code is the result; refusals of accounts and consent arrive as codes from CONN_MESSAGES.
+CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_remove','connection_call'})
+OPS.update({
+    'connection_add':('connections','Conta criada (desconectada)'),'connection_connect':('connections','Conexão iniciada: confirme o código no servidor e consinta os escopos'),
+    'connection_consent':('connections','Escopos concedidos pelo usuário'),'connection_refresh':('connections','Atualização da conta solicitada'),
+    'connection_disconnect':('connections','Conta desconectada; segredos apagados'),'connection_revoke':('connections','Acesso revogado no servidor'),
+    'connection_remove':('connections','Conta removida'),'connection_call':('connections','Chamada enviada ao Core; resultado em Última chamada'),
+})
+PENDING.update({
+    'connection_add':'Criando conta no Core…','connection_connect':'Iniciando conexão no Core…','connection_consent':'Enviando consentimento ao Core…','connection_refresh':'Atualizando conta no Core…',
+    'connection_disconnect':'Desconectando conta no Core…','connection_revoke':'Revogando acesso no Core…','connection_remove':'Removendo conta no Core…','connection_call':'Chamando operação pelo Core…',
+})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
     preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
-    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal()
+    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
@@ -931,7 +1045,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -1774,3 +1888,77 @@ class Bridge(QObject):
     def skillImportPreview(self):return dict(self._skill_import() or {})
     @Property('QVariantMap',notify=changed)
     def skillDraftOutput(self):return dict(self.skill_draft)
+    # ---- S5 connections (docs/S5.md E1, UI). The Core owns accounts, consent, secrets and every call. The bridge refuses what it can see is impossible, sends one bounded request per click and shows the snapshot 'connections' block.
+    def _conn_block(self):return self.snapshot.get('connections') or {}
+    def _conn_ready(self):return self.online and isinstance(self.snapshot.get('connections'),dict)
+    def _conn_revision(self):return int(self._conn_block().get('revision',0))
+    def _conn_item(self,ident):return next((i for i in self._conn_block().get('items',[]) if i['id']==ident),None)
+    def _conn_op(self,op,**kw):
+        """One Core request on the connections channel: refused while unavailable or while another request is in flight; never queued."""
+        if not self._conn_ready():self._refuse('connections',CONN_MESSAGES['connection_unavailable']);return
+        if self.pending:self._refuse('connections',CODE_MESSAGES['busy']);return
+        self._send('connections',op,**kw)
+    def _conn_unknown(self,ident):
+        """True when the id is malformed or not in the live block (refused here, so it never reaches the Core)."""
+        if not conn_id_ok(ident):self._refuse('connections','Id de conta inválido');return True
+        if self._conn_item(ident) is None:self._refuse('connections',CONN_MESSAGES['unknown_connection']);return True
+        return False
+    @Slot(str,str)
+    def connectionAdd(self,provider,label):
+        problem=conn_provider_problem(provider) or conn_label_problem(label)
+        if problem is not None:self._refuse('connections',problem);return
+        if len(self._conn_block().get('items',[]))>=CONN_ITEMS_LIMIT:self._refuse('connections',CONN_MESSAGES['connection_limit']);return
+        self._conn_op('connection_add',provider=provider,label=label.strip(),revision=self._conn_revision())
+    @Slot(str)
+    def connectionConnect(self,ident):
+        if self._conn_unknown(ident):return
+        self._conn_op('connection_connect',id=ident,revision=self._conn_revision())
+    @Slot(str,str)
+    def connectionConsent(self,ident,scopes):
+        """Consent is per scope: a non-empty subset of the scopes the account is waiting for, nothing else."""
+        if self._conn_unknown(ident):return
+        try:value=json.loads(scopes,parse_constant=_no_constant)
+        except (ValueError,RecursionError):self._refuse('connections',CONN_MESSAGES['connection_consent_required']);return
+        pending=set(self._conn_item(ident).get('pending_scopes') or [])
+        if not conn_scope_list(value) or not value or not set(value)<=pending:self._refuse('connections',CONN_MESSAGES['connection_consent_required']);return
+        self._conn_op('connection_consent',id=ident,scopes=value,revision=self._conn_revision())
+    def _conn_lifecycle(self,op,ident):
+        if self._conn_unknown(ident):return
+        self._conn_op(op,id=ident,revision=self._conn_revision())
+    @Slot(str)
+    def connectionRefresh(self,ident):self._conn_lifecycle('connection_refresh',ident)
+    @Slot(str)
+    def connectionDisconnect(self,ident):self._conn_lifecycle('connection_disconnect',ident)
+    @Slot(str)
+    def connectionRevoke(self,ident):self._conn_lifecycle('connection_revoke',ident)
+    @Slot(str)
+    def connectionRemove(self,ident):self._conn_lifecycle('connection_remove',ident)
+    @Slot(str,str,str)
+    def connectionCall(self,ident,operation,args):
+        """Operation call for an account. Refused here when the account is not connected, the operation is unknown or its scope is not granted: no network call happens for those."""
+        if self._conn_unknown(ident):return
+        item=self._conn_item(ident);provider=next((p for p in self._conn_block().get('providers',[]) if p['id']==item['provider']),{})
+        try:value=json.loads(args,parse_constant=_no_constant)
+        except (ValueError,RecursionError,TypeError):self._refuse('connections',CONN_MESSAGES['connection_args_invalid']);return
+        if not isinstance(value,dict) or not bounded_json(value,CONN_ARGS_LIMIT):self._refuse('connections',CONN_MESSAGES['connection_args_invalid']);return
+        spec=next((o for o in provider.get('operations',[]) if isinstance(operation,str) and o['name']==operation),None)
+        if spec is None:self._refuse('connections',CONN_MESSAGES['unknown_operation']);return
+        if item['status']!='connected':self._refuse('connections',CONN_MESSAGES['not_connected']);return
+        if spec['scope'] not in item['granted_scopes']:self._refuse('connections',CONN_MESSAGES['scope_not_granted']);return
+        self._conn_op('connection_call',id=ident,operation=operation,args=value)
+    @Slot(str,result=str)
+    def connectionLabelProblem(self,label):return conn_label_problem(label) or ''
+    @Property(bool,notify=changed)
+    def connectionsAvailable(self):return self._conn_ready()
+    @Property(bool,notify=changed)
+    def connectionsBusy(self):return self.pending_op in CONN_OPS
+    @Property(str,notify=changed)
+    def connectionsResult(self):return self.results['connections']
+    @Property(str,notify=connectionsChanged)
+    def connectionsRevision(self):return str(self._conn_block().get('revision',0))
+    @Property('QVariantList',notify=connectionsChanged)
+    def connectionsItems(self):return [dict(i) for i in self._conn_block().get('items',[])]
+    @Property('QVariantList',notify=connectionsChanged)
+    def connectionsProviders(self):return [dict(p) for p in self._conn_block().get('providers',[])]
+    @Property('QVariantMap',notify=connectionsChanged)
+    def connectionLastCall(self):return dict(self._conn_block().get('last_call') or {})
