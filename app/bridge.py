@@ -86,7 +86,7 @@ TOOL_REASONS=TOOL_REASONS|AGENT_CODES|{'run_ended','denied','destructive_disable
 CONN_PROVIDERS=('github','google','homeassistant','mcp');CONN_STATUSES=('disconnected','connecting','connected','expired','offline','error','reauth_required');CONN_ACCESS=('read','write','destructive','public')
 CONN_ITEMS_LIMIT=8;CONN_SCOPES_LIMIT=8;CONN_OPERATIONS_LIMIT=16;CONN_ARGS_LIMIT=4096;CONN_LABEL_LIMIT=64;CONN_ACCOUNT_LIMIT=128;CONN_USER_CODE_LIMIT=32
 CONN_ID=re.compile(r'[A-Za-z0-9_-]{1,64}');CONN_NAME=re.compile(r'[a-z][a-z0-9_.:]{0,63}')
-CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call','storage_error'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake'})
+CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call','storage_error'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake','tools'});CONN_TOOLS_LIMIT=16;CONN_TOOL_STATES=('trusted','needs_reapproval','rejected');CONN_TOOL_RISKS=('write','destructive');CONN_TOOL_DESCRIPTION_LIMIT=1024;CONN_TOOL_KEYS=frozenset({'name','risk','state','description'});CONN_TRUST_LIMIT=16
 CONN_PROPOSAL_KEYS=frozenset({'kind','connection_id','operation','risk'})
 # Core codes for connection ops and for connection proposals (kind 'connection'). Each one has a Portuguese text in CONN_MESSAGES.
 CONN_MESSAGES={
@@ -118,6 +118,18 @@ CONN_MESSAGES={
     'consent_required':'Consinta os escopos antes de enviar o token; nada foi enviado ao servidor',
     'invalid_token':'Token inválido: use o token de longa duração do Home Assistant (16 a 256 caracteres, sem espaços)',
     'invalid_state':'Esta conta não está aguardando um token agora',
+    'tool_trust_invalid':'Escolha ao menos uma ferramenta que aguarda sua confiança',
+    'tool_not_trusted':'Ferramenta nova ou alterada: confie nela na página Conexões antes de chamar; nada foi executado',
+    'tool_rejected':'Ferramenta recusada pelo Core (esquema fora do subconjunto simples ou grande demais); nada foi executado',
+    'mcp_not_running':'Servidor MCP não está rodando; conecte a conta de novo',
+    'mcp_crashed':'Servidor MCP parou de responder; a conta ficou com erro e o Core segue normal',
+    'mcp_protocol':'Servidor MCP respondeu fora do protocolo; a conta ficou com erro',
+    'mcp_too_large':'Servidor MCP enviou linha grande demais; a conta ficou com erro',
+    'mcp_start_failed':'Servidor MCP não iniciou no sandbox',
+    'mcp_tool_error':'A ferramenta MCP devolveu erro; nada foi confirmado',
+    'mcp_rpc_error':'O servidor MCP recusou a chamada; nada foi confirmado',
+    'mcp_too_many_tools':'Servidor MCP listou ferramentas demais (máximo 16); lista anterior mantida',
+    'mcp_restart_limit':'Limite de reinícios do servidor MCP atingido; reinicie o Core para tentar de novo',
 }
 CONN_CODES=frozenset(CONN_MESSAGES)
 TOOL_REASONS=TOOL_REASONS|CONN_CODES
@@ -939,11 +951,23 @@ def valid_conn_item(item,catalog):
     if not (conn_scope_list(granted) and conn_scope_list(pending) and set(granted)<=scopes and set(pending)<=scopes and not set(granted)&set(pending)):return False
     if 'account_ref' in item and not conn_text_ok(item['account_ref'],CONN_ACCOUNT_LIMIT):return False
     if 'user_code' in item and not conn_text_ok(item['user_code'],CONN_USER_CODE_LIMIT):return False
-    return 'fake' not in item or type(item['fake']) is bool
+    if 'fake' in item and type(item['fake']) is not bool:return False
+    return 'tools' not in item or (item['provider']=='mcp' and valid_conn_tools(item['tools']))
+def valid_conn_tools(tools):
+    """S5 E2.4: discovered MCP tools. Name, risk and trust state are fixed vocabularies; the description is server text and is shown only as PlainText, never used as an instruction."""
+    if not (isinstance(tools,list) and 0<len(tools)<=CONN_TOOLS_LIMIT):return False
+    names=[]
+    for tool in tools:
+        if not (isinstance(tool,dict) and CONN_TOOL_KEYS<=set(tool)<=CONN_TOOL_KEYS|{'reason'} and conn_id_ok(tool['name']) and tool['risk'] in CONN_TOOL_RISKS and tool['state'] in CONN_TOOL_STATES):return False
+        if not (isinstance(tool['description'],str) and plain_text(tool['description'],CONN_TOOL_DESCRIPTION_LIMIT)):return False
+        if 'reason' in tool and not (isinstance(tool['reason'],str) and SNAKE_CODE.fullmatch(tool['reason']) is not None):return False
+        names.append(tool['name'])
+    return len(set(names))==len(names)
 def valid_conn_last_call(call):
     """Operation, outcome and code (docs/S5.md), plus the two fields a write or a rate limit needs: the proposal id of a
     card the user must decide (also listed in tool_proposals) and retry_after in seconds (Core clamps it to 1..60)."""
-    if not (isinstance(call,dict) and {'operation','outcome'}<=set(call)<={'operation','outcome','code','retry_after','proposal_id'}):return False
+    if not (isinstance(call,dict) and {'operation','outcome'}<=set(call)<={'operation','outcome','code','retry_after','proposal_id','untrusted'}):return False
+    if 'untrusted' in call and call['untrusted'] is not True:return False
     if not (isinstance(call['operation'],str) and CONN_NAME.fullmatch(call['operation']) and isinstance(call['outcome'],str) and SNAKE_CODE.fullmatch(call['outcome'])):return False
     if 'code' in call and not (isinstance(call['code'],str) and SNAKE_CODE.fullmatch(call['code']) is not None):return False
     if 'retry_after' in call and not is_int(call['retry_after'],0,3600):return False
@@ -990,18 +1014,19 @@ PENDING={'agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao C
     'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…',
     'skill_validate':'Validando manifest no Core…','skill_save_draft':'Salvando rascunho no Core…','skill_dry_run':'Simulando skill no Core…','skill_approve':'Aprovando skill no Core…','skill_enable':'Habilitando skill no Core…','skill_disable':'Desabilitando skill no Core…','skill_rollback':'Revertendo versão no Core…','skill_remove':'Removendo skill no Core…','skill_run':'Iniciando skill no Core…','skill_decide':'Enviando decisão do passo ao Core…','skill_cancel':'Cancelando skill no Core…','skill_export':'Exportando pacote pelo Core…','skill_import':'Lendo pacote pelo Core…','skill_import_confirm':'Importando como rascunho pelo Core…'}
 # S5 connection ops: the Core's ack code is the result; refusals of accounts and consent arrive as codes from CONN_MESSAGES.
-CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_remove','connection_call','connection_set_token'})
+CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_remove','connection_call','connection_set_token','connection_trust_tools'})
 OPS.update({
     'connection_add':('connections','Conta criada (desconectada)'),'connection_connect':('connections','Conexão iniciada: confirme o código no servidor e consinta os escopos'),
     'connection_consent':('connections','Escopos concedidos pelo usuário'),'connection_refresh':('connections','Atualização da conta solicitada'),
     'connection_disconnect':('connections','Conta desconectada; segredos apagados'),'connection_revoke':('connections','Acesso revogado no servidor'),
     'connection_remove':('connections','Conta removida'),'connection_call':('connections','Chamada enviada ao Core; resultado em Última chamada'),
     'connection_set_token':('connections','Token enviado ao Core para validação; o campo foi limpo'),
+    'connection_trust_tools':('connections','Ferramentas confiadas pelo usuário; cada chamada ainda pede aprovação'),
 })
 PENDING.update({
     'connection_add':'Criando conta no Core…','connection_connect':'Iniciando conexão no Core…','connection_consent':'Enviando consentimento ao Core…','connection_refresh':'Atualizando conta no Core…',
     'connection_disconnect':'Desconectando conta no Core…','connection_revoke':'Revogando acesso no Core…','connection_remove':'Removendo conta no Core…','connection_call':'Chamando operação pelo Core…',
-    'connection_set_token':'Validando token no Core…',
+    'connection_set_token':'Validando token no Core…','connection_trust_tools':'Confiando nas ferramentas no Core…',
 })
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
@@ -1973,6 +1998,17 @@ class Bridge(QObject):
         if not conn_token_ok(token):self._refuse('connections',CONN_MESSAGES['invalid_token']);return
         if self._conn_item(ident)['provider']!='homeassistant':self._refuse('connections',CONN_MESSAGES['invalid_state']);return
         self._conn_op('connection_set_token',id=ident,token=token,revision=self._conn_revision())
+    @Slot(str,str)
+    def connectionTrustTools(self,ident,names):
+        """MCP (docs/S5.md E2.4): the user re-approves discovered tools by name. Only tools the snapshot lists as needs_reapproval are sent; trusting never grants a scope and every call still needs its own approval."""
+        if self._conn_unknown(ident):return
+        item=self._conn_item(ident)
+        if item['provider']!='mcp':self._refuse('connections',CONN_MESSAGES['invalid_state']);return
+        try:value=json.loads(names,parse_constant=_no_constant)
+        except (ValueError,RecursionError,TypeError):self._refuse('connections',CONN_MESSAGES['connection_args_invalid']);return
+        waiting={t['name'] for t in item.get('tools',[]) if t['state']=='needs_reapproval'}
+        if not (isinstance(value,list) and 0<len(value)<=CONN_TRUST_LIMIT and all(isinstance(n,str) for n in value) and len(set(value))==len(value) and set(value)<=waiting):self._refuse('connections',CONN_MESSAGES['tool_trust_invalid']);return
+        self._conn_op('connection_trust_tools',id=ident,tools=value,revision=self._conn_revision())
     @Slot(str,result=str)
     def connectionLabelProblem(self,label):return conn_label_problem(label) or ''
     @Property(bool,notify=changed)

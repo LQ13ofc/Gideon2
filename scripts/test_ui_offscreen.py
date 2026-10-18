@@ -423,6 +423,29 @@ elif args.phase=='connections':
         wait(lambda:not bridge.connectionsBusy and scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'],60)
         check('the Core lists the consented scope as granted',scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'])
     Path(args.artifacts,'connections-consented').touch()
+    if os.environ.get('GIDEON_E24_MCP'):
+        # S5 E2.4: discovered tools of an mcp account. Descriptions are server text shown as PlainText; Confiar re-approves one tool by name.
+        def plain_of(item):
+            expression=QQmlExpression(QQmlEngine.contextForObject(item),item,'textFormat === Text.PlainText');value=expression.evaluate();value=value[0] if isinstance(value,tuple) else value
+            return value is True and not expression.hasError()
+        mcp=next((c for c in bridge.connectionsItems if c['provider']=='mcp' and c['status']=='connected' and any(t['state']=='needs_reapproval' for t in c.get('tools') or [])),None)
+        check('a connected mcp account lists a tool that needs re-approval',mcp is not None)
+        tool=next(t for t in mcp['tools'] if t['state']=='needs_reapproval')
+        title=visual_item('connToolsTitle_'+mcp['id']);check('the tools section is visible and PlainText',title.property('visible') and plain_of(title))
+        row=visual_item('connTool_'+mcp['id']+'_'+tool['name'])
+        check('the tool row names the tool, its risk and the re-approval state as PlainText',plain_of(row) and tool['name'] in row.property('text') and 'precisa de nova aprovação' in row.property('text') and 'escrita' in row.property('text'))
+        trusted=[t for t in mcp['tools'] if t['state']=='trusted']
+        check('a trusted tool is listed as confiável and offers no Confiar',bool(trusted) and 'confiável' in visual_item('connTool_'+mcp['id']+'_'+trusted[0]['name']).property('text') and not visual_item('connTrust_'+mcp['id']+'_'+trusted[0]['name']).property('visible'))
+        destructive=[t for t in mcp['tools'] if t['risk']=='destructive']
+        if destructive:check('a destructive tool is labelled destrutiva',all('destrutiva' in visual_item('connTool_'+mcp['id']+'_'+t['name']).property('text') for t in destructive))
+        description=visual_item('connToolDesc_'+mcp['id']+'_'+tool['name']);check('the server description is shown as PlainText with its own label',plain_of(description) and description.property('text').startswith('Descrição do servidor: '))
+        trust=visual_item('connTrust_'+mcp['id']+'_'+tool['name']);check('Confiar is offered for the tool awaiting re-approval',trust.property('visible') and trust.property('enabled'))
+        trust.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        wait(lambda:not bridge.connectionsBusy and next(t for t in next(c for c in bridge.connectionsItems if c['id']==mcp['id'])['tools'] if t['name']==tool['name'])['state']=='trusted',60)
+        check('the Core trusted the tool after the click',next(t for t in next(c for c in bridge.connectionsItems if c['id']==mcp['id'])['tools'] if t['name']==tool['name'])['state']=='trusted')
+        QTest.qWait(50)
+        check('the row now says confiável and Confiar is gone','confiável' in visual_item('connTool_'+mcp['id']+'_'+tool['name']).property('text') and not visual_item('connTrust_'+mcp['id']+'_'+tool['name']).property('visible'))
+        Path(args.artifacts,'connections-mcp').touch()
     ha_token=os.environ.get('GIDEON_E23_HA_TOKEN')
     if ha_token:
         # S5 E2.3 set-token path: the token is typed into the hidden field, sent once, and the field is cleared.

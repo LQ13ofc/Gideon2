@@ -42,3 +42,8 @@
 - Descriptor homeassistant (3 scopes, 3 operations), connection_set_token (one GET /api/states probe, token only in the vault), dangerous services (lock.unlock, lock.open, alarm_control_panel.*, cover.open_cover, cover.close_cover) destructive with services.dangerous, agent tools ha_get_state / ha_call_service with the fake flag. Gate scripts/verify_e23_ha.py 101/0 (4 documented skips); evidence target/evidence/e23-ha.json. Regression: verify_e1_connections 119/0, verify_e22_google 111/0, cargo test green (fmt, clippy -D warnings), snapshot contract 11/11, bridge protocol 156, fixtures 129 + 86.
 - Open point for the owner: garage_door.* is not in the dangerous list (five patterns requested). Details and wire differences: docs/S5.md "Resultado E2.3 homeassistant".
 - Next: E3 registry (src/registry.rs) or E2.4 mcp, per owner order.
+
+## 2026-10-18 — E2.4 mcp (AUTO_VERIFIED against the fake, UNCOMMITTED)
+
+- Sandboxed fake stdio MCP server managed by the Core (fixed registration `--connections-fake-mcp`), mcp.discover with schema validation and per-tool sha256, per-call approval, untrusted prefixed output, connection_trust_tools, mcp_call agent tool. Gate scripts/verify_e24_mcp.py 188/0 (4 skips); details and wire differences: docs/S5.md "Resultado E2.4 mcp".
+- Next: E3 registry (src/registry.rs).

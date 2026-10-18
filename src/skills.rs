@@ -2449,6 +2449,13 @@ impl Core {
             Ok(plan) => plan,
             Err(code) => return Dispatch::Done(Err(code)),
         };
+        // An MCP tool that deletes or removes never runs from a skill step unless destructive runs are enabled.
+        if provider.id == "mcp"
+            && plan.tool_risk() == Risk::Destructive
+            && !crate::agent::options().allow_destructive
+        {
+            return Dispatch::Done(Err("destructive_disabled"));
+        }
         let proposal = self.tools.propose(
             ENGINE_OWNER,
             String::new(),

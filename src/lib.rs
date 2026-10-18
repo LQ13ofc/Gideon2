@@ -7,6 +7,7 @@ pub mod connections;
 pub mod core;
 pub mod hub;
 pub mod llmcfg;
+pub mod mcp;
 pub mod pack;
 pub mod plugins;
 pub mod protocol;

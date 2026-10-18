@@ -1492,6 +1492,17 @@ pub(crate) fn sandbox_command(
     payload: &Path,
     processes: u64,
 ) -> io::Result<Command> {
+    sandbox_command_with(python, payload, processes, &[])
+}
+
+/// Same sandbox with fixed extra arguments after the script (S5 MCP: `--profile <name>`). The
+/// arguments come from Core constants, never from the UI, a skill or the service.
+pub(crate) fn sandbox_command_with(
+    python: &Path,
+    payload: &Path,
+    processes: u64,
+    extra: &[&str],
+) -> io::Result<Command> {
     if !python.is_absolute() || !payload.is_absolute() {
         return Err(io::Error::other("absolute paths required"));
     }
@@ -1551,6 +1562,7 @@ pub(crate) fn sandbox_command(
         .args(["--remount-ro", "/", "--chdir", "/tmp", "--"])
         .arg(&interpreter)
         .args(["-I", "/plugin/main.py"])
+        .args(extra)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

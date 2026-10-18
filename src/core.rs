@@ -996,7 +996,7 @@ impl Core {
                 Err(code) => code,
             };
         }
-        let name = format!("conn:{}.{}", provider.id, op.name);
+        let name = crate::connections::call_name(provider, op);
         let proposal = self
             .tools
             .propose(CONNECTION_OWNER, String::new(), name, plan.wrap(), now);
@@ -1016,6 +1016,14 @@ impl Core {
         view: &crate::tools::View,
     ) -> &'static str {
         let owned = self.agent_owns(view);
+        // The agent never runs a destructive or public action without the switch: same answer as for every
+        // other registry tool, whether or not the run still waits for this proposal.
+        if owned
+            && matches!(view.risk, Some("destructive" | "public"))
+            && !crate::agent::options().allow_destructive
+        {
+            return "destructive_disabled";
+        }
         if owned && !self.agent_awaits(proposal_id) {
             return "unknown_proposal";
         }
@@ -1067,6 +1075,14 @@ impl Core {
         let tool = crate::connections::agent_tool(name).ok_or("unknown_tool")?;
         let provider = crate::connections::provider_by_id(tool.provider).ok_or("unknown_tool")?;
         let op = crate::connections::operation(provider, tool.operation).ok_or("unknown_tool")?;
+        // Model tool calls are flat objects: `mcp_call {"tool": name, <the tool's own scalar arguments>}`.
+        let nested;
+        let args = if tool.name == "mcp_call" {
+            nested = crate::connections::mcp_nest(args)?;
+            &nested
+        } else {
+            args
+        };
         self.connections.plan(provider, op, None, args)
     }
     /// Starts a plan that a proposal (agent or skill) is waiting for.
@@ -1813,8 +1829,15 @@ impl Core {
                 id,
                 scopes,
                 revision,
-            } => self.connection_op(storage.as_deref(), |c, _, _| {
-                c.consent(&id, scopes, revision)
+            } => self.connection_op(storage.as_deref(), |c, _, st| {
+                c.consent(st, &id, scopes, revision)
+            }),
+            Operation::ConnectionTrustTools {
+                id,
+                tools,
+                revision,
+            } => self.connection_op(storage.as_deref(), |c, _, st| {
+                c.trust_tools(st, &id, &tools, revision)
             }),
             Operation::ConnectionRefresh { id, revision } => self
                 .connection_op(storage.as_deref(), |c, l, st| {

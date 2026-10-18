@@ -238,6 +238,12 @@ pub enum Operation {
         id: String,
         revision: Option<u64>,
     },
+    /// S5 E2.4: the user trusts (re-approves) discovered MCP tools by name.
+    ConnectionTrustTools {
+        id: String,
+        tools: Vec<String>,
+        revision: Option<u64>,
+    },
     ConnectionCall {
         id: String,
         operation: String,
@@ -676,6 +682,14 @@ enum WireRequest {
         version: u16,
         request_id: String,
         id: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionTrustTools {
+        version: u16,
+        request_id: String,
+        id: String,
+        tools: Vec<String>,
         #[serde(default)]
         revision: Option<u64>,
     },
@@ -1260,6 +1274,21 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
                 Operation::ConnectionRemove { id, revision },
+            ),
+            WireRequest::ConnectionTrustTools {
+                version,
+                request_id,
+                id,
+                tools,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionTrustTools {
+                    id,
+                    tools,
+                    revision,
+                },
             ),
             WireRequest::ConnectionCall {
                 version,

@@ -60,7 +60,9 @@ ApplicationWindow {
     function connProviderName(id) { for (var i = 0; i < connProviderChoices.length; i++) if (connProviderChoices[i].id === id) return connProviderChoices[i].text; return id; }
     function connStatusText(s) { switch (s) { case "disconnected": return "desconectada"; case "connecting": return "conectando (aguardando confirmação)"; case "connected": return "conectada"; case "expired": return "expirada"; case "offline": return "offline"; case "error": return "erro"; case "reauth_required": return "reautenticação necessária"; default: return s; } }
     // S5 E2.2: short Portuguese label of an operation name (the name itself stays visible for the tests and the wire).
-    function connOpLabel(name) { switch (name) { case "repos.list": return "listar repositórios"; case "repo.get": return "ver repositório"; case "issues.create": return "criar issue"; case "issues.update": return "editar issue"; case "pulls.get": return "ver pull request"; case "pulls.comment": return "comentar pull request"; case "actions.list": return "listar actions"; case "gmail.messages.list": return "listar e-mails"; case "gmail.send": return "enviar e-mail"; case "gmail.messages.delete": return "apagar e-mail"; case "calendar.events.list": return "listar eventos"; case "calendar.events.create": return "criar evento"; case "drive.files.list": return "listar arquivos"; case "drive.files.create": return "criar arquivo"; case "states.list": return "listar estados"; case "state.get": return "ver estado"; case "service.call": return "chamar serviço"; default: return name; } }
+    function connOpLabel(name) { switch (name) { case "repos.list": return "listar repositórios"; case "repo.get": return "ver repositório"; case "issues.create": return "criar issue"; case "issues.update": return "editar issue"; case "pulls.get": return "ver pull request"; case "pulls.comment": return "comentar pull request"; case "actions.list": return "listar actions"; case "gmail.messages.list": return "listar e-mails"; case "gmail.send": return "enviar e-mail"; case "gmail.messages.delete": return "apagar e-mail"; case "calendar.events.list": return "listar eventos"; case "calendar.events.create": return "criar evento"; case "drive.files.list": return "listar arquivos"; case "drive.files.create": return "criar arquivo"; case "states.list": return "listar estados"; case "state.get": return "ver estado"; case "service.call": return "chamar serviço"; case "mcp.discover": return "listar ferramentas"; case "mcp.call": return "chamar ferramenta (aprovação a cada chamada)"; default: return name; } }
+    function connToolRiskText(r) { return r === "destructive" ? "destrutiva (aprovação forte)" : "escrita (pede aprovação)"; }
+    function connToolStateText(s) { switch (s) { case "trusted": return "confiável"; case "needs_reapproval": return "precisa de nova aprovação"; case "rejected": return "recusada"; default: return s; } }
     function connRiskText(r) { switch (r) { case "read": return "leitura"; case "write": return "escrita (pede aprovação)"; case "destructive": return "destrutiva (aprovação forte)"; case "public": return "pública (aprovação explícita)"; default: return r; } }
     function connProvider(id) { var list = core.connectionsProviders; for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
     function connScopeLabel(providerId, scope) { var p = connProvider(providerId); if (p) for (var i = 0; i < p.scopes.length; i++) if (p.scopes[i].id === scope) return p.scopes[i].label; return scope; }
@@ -76,8 +78,8 @@ ApplicationWindow {
         var s = item.status
         switch (action) {
         case "connect": return s === "disconnected" || s === "error" || s === "offline" || s === "expired" || s === "reauth_required"
-        case "refresh": return s === "connected" || s === "expired" || s === "reauth_required" || s === "error"
-        case "disconnect": return s === "connected" || s === "connecting" || s === "expired" || s === "reauth_required"
+        case "refresh": return item.provider !== "mcp" && (s === "connected" || s === "expired" || s === "reauth_required" || s === "error")
+        case "disconnect": return s === "connected" || s === "connecting" || (item.provider === "mcp" && s === "error") || s === "expired" || s === "reauth_required"
         case "revoke": return s === "connected" || s === "expired" || s === "reauth_required"
         case "remove": return s !== "connecting"
         }
@@ -1133,6 +1135,22 @@ ApplicationWindow {
                                         GlowButton { objectName: "connDisconnect_" + connCard.modelData.id; text: "Desconectar"; Accessible.name: "Desconectar " + connCard.modelData.label; enabled: window.connCan("disconnect", connCard.modelData); onClicked: core.connectionDisconnect(connCard.modelData.id) }
                                         GlowButton { objectName: "connRevoke_" + connCard.modelData.id; text: "Revogar"; Accessible.name: "Revogar acesso de " + connCard.modelData.label; enabled: window.connCan("revoke", connCard.modelData); onClicked: core.connectionRevoke(connCard.modelData.id) }
                                         GlowButton { objectName: "connRemove_" + connCard.modelData.id; text: "Remover"; Accessible.name: "Remover " + connCard.modelData.label; enabled: window.connCan("remove", connCard.modelData); onClicked: core.connectionRemove(connCard.modelData.id) }
+                                    }
+                                    // S5 E2.4: tools the MCP server listed. Names, risk and trust come from the Core; the description is server text, shown as PlainText and never sent to the model.
+                                    Label { objectName: "connToolsTitle_" + connCard.modelData.id; visible: (connCard.modelData.tools || []).length > 0; text: "Ferramentas descobertas (a descrição vem do servidor e é só texto)"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Repeater {
+                                        model: connCard.modelData.tools || []
+                                        delegate: ColumnLayout {
+                                            id: toolRow
+                                            required property var modelData
+                                            Layout.fillWidth: true; spacing: 2
+                                            RowLayout {
+                                                Layout.fillWidth: true; spacing: 8
+                                                Label { objectName: "connTool_" + connCard.modelData.id + "_" + toolRow.modelData.name; text: toolRow.modelData.name + " · " + window.connToolRiskText(toolRow.modelData.risk) + " · " + window.connToolStateText(toolRow.modelData.state) + (toolRow.modelData.reason ? " (" + toolRow.modelData.reason + ")" : ""); textFormat: Text.PlainText; color: toolRow.modelData.state === "trusted" ? "#78debc" : "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                                GlowButton { objectName: "connTrust_" + connCard.modelData.id + "_" + toolRow.modelData.name; visible: toolRow.modelData.state === "needs_reapproval"; text: "Confiar"; Accessible.name: "Confiar na ferramenta " + toolRow.modelData.name + " de " + connCard.modelData.label; enabled: !core.connectionsBusy; onClicked: core.connectionTrustTools(connCard.modelData.id, JSON.stringify([toolRow.modelData.name])) }
+                                            }
+                                            Label { objectName: "connToolDesc_" + connCard.modelData.id + "_" + toolRow.modelData.name; visible: toolRow.modelData.description.length > 0; text: "Descrição do servidor: " + toolRow.modelData.description; textFormat: Text.PlainText; color: "#a6b9df"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                        }
                                     }
                                     Label { text: "Operações"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
                                     Repeater {

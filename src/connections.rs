@@ -50,6 +50,9 @@ pub struct Options {
     pub fakes: BTreeMap<String, String>,
     /// Lets public and destructive operations execute after approval (test only).
     pub allow_public: bool,
+    /// Fixed MCP registration (test only): the profile of the fake server the Core launches under the
+    /// plugin sandbox. `None` is production: `mcp` connect answers `real_backend_unsupported`.
+    pub fake_mcp: Option<String>,
 }
 
 static OPTIONS: OnceLock<Options> = OnceLock::new();
@@ -64,6 +67,29 @@ pub fn options() -> &'static Options {
 
 fn fake_base(provider: &str) -> Option<&'static str> {
     options().fakes.get(provider).map(String::as_str)
+}
+
+/// Profile of the fixed fake MCP registration, if any.
+pub fn mcp_profile() -> Option<&'static str> {
+    options().fake_mcp.as_deref()
+}
+
+/// Whether the provider has a test backend: an HTTP fake, or the fixed fake MCP server.
+fn has_fake(provider: &str) -> bool {
+    if provider == "mcp" {
+        mcp_profile().is_some()
+    } else {
+        fake_base(provider).is_some()
+    }
+}
+
+/// `--connections-fake-mcp` value: one of the fixture profiles.
+pub fn parse_fake_mcp(raw: &str) -> Result<String, &'static str> {
+    if crate::mcp::PROFILES.contains(&raw) {
+        Ok(raw.to_owned())
+    } else {
+        Err("invalid_connections_fake_mcp")
+    }
 }
 
 /// `provider=http://127.0.0.1:<port>` with a known provider and a loopback IP literal, no path.
@@ -147,6 +173,8 @@ pub enum Kind {
     Slug,
     /// Integer 0..=255 (light brightness).
     Byte,
+    /// MCP tool arguments: a JSON object of scalars up to 4 KiB (checked again against the tool schema).
+    Args,
 }
 
 #[derive(Clone, Copy)]
@@ -570,8 +598,70 @@ const HA_OPERATIONS: [OpDef; 3] = [
     },
 ];
 
+const MCP_TOOL: Field = Field {
+    name: "tool",
+    kind: Kind::Id,
+    required: true,
+};
+const MCP_ARGS: Field = Field {
+    name: "args",
+    kind: Kind::Args,
+    required: false,
+};
+
+/// MCP scopes (docs/S5.md E2.4). Discover lists tools; each call still needs its own approval.
+const MCP_SCOPES: [ScopeDef; 3] = [
+    ScopeDef {
+        id: "mcp.discover",
+        label: "Listar as ferramentas do servidor MCP",
+        access: Access::Read,
+    },
+    ScopeDef {
+        id: "mcp.call",
+        label: "Chamar ferramentas MCP (aprovação a cada chamada)",
+        access: Access::Write,
+    },
+    ScopeDef {
+        id: "mcp.call_destructive",
+        label: "Ferramentas que apagam (aprovação a cada chamada)",
+        access: Access::Destructive,
+    },
+];
+
+/// No HTTP here: the Core talks to the sandboxed server over stdio (`mcp.rs`), so `method` and `path` are unused.
+const MCP_OPERATIONS: [OpDef; 2] = [
+    OpDef {
+        name: "mcp.discover",
+        scope: "mcp.discover",
+        risk: Access::Read,
+        method: "MCP",
+        path: "",
+        params: &[],
+        body: &[],
+        idempotent: false,
+        project: &[],
+    },
+    OpDef {
+        name: "mcp.call",
+        scope: "mcp.call",
+        // Write by default; `effective_risk` makes a tool that deletes or removes destructive.
+        risk: Access::Write,
+        method: "MCP",
+        path: "",
+        params: &[MCP_TOOL],
+        body: &[MCP_ARGS],
+        idempotent: false,
+        project: &[],
+    },
+];
+
 /// Providers whose account takes one token pasted by the user (`connection_set_token`), not a device login.
 const TOKEN_PROVIDERS: &[&str] = &["homeassistant"];
+
+/// The provider whose server is a Core-managed sandboxed process: connect starts it, consent grants scopes.
+fn uses_process(provider: &str) -> bool {
+    provider == "mcp"
+}
 
 fn uses_token(provider: &str) -> bool {
     TOKEN_PROVIDERS.contains(&provider)
@@ -601,6 +691,9 @@ fn required_scopes(op: &OpDef, shape: &Shape) -> Vec<&'static str> {
     if is_dangerous_call(op, shape) {
         needed.push("services.dangerous");
     }
+    if op.name == "mcp.call" && shape.mcp_destructive {
+        needed.push("mcp.call_destructive");
+    }
     needed
 }
 
@@ -609,10 +702,7 @@ fn ha_token_ok(token: &str) -> bool {
     (16..=256).contains(&token.len()) && token.bytes().all(|b| b.is_ascii_graphic())
 }
 
-const NO_SCOPES: [ScopeDef; 0] = [];
-const NO_OPERATIONS: [OpDef; 0] = [];
-
-/// Fixed registry. Empty entries are valid descriptors that await their E2 connector.
+/// Fixed registry.
 const PROVIDERS: [Provider; 4] = [
     Provider {
         id: "github",
@@ -635,8 +725,8 @@ const PROVIDERS: [Provider; 4] = [
     Provider {
         id: "mcp",
         label: "MCP",
-        scopes: &NO_SCOPES,
-        operations: &NO_OPERATIONS,
+        scopes: &MCP_SCOPES,
+        operations: &MCP_OPERATIONS,
     },
 ];
 
@@ -659,7 +749,12 @@ pub struct AgentTool {
     pub operation: &'static str,
 }
 
-const AGENT_TOOLS: [AgentTool; 7] = [
+const AGENT_TOOLS: [AgentTool; 8] = [
+    AgentTool {
+        name: "mcp_call",
+        provider: "mcp",
+        operation: "mcp.call",
+    },
     AgentTool {
         name: "ha_get_state",
         provider: "homeassistant",
@@ -700,16 +795,13 @@ const AGENT_TOOLS: [AgentTool; 7] = [
 pub fn agent_tool(name: &str) -> Option<&'static AgentTool> {
     AGENT_TOOLS
         .iter()
-        .find(|tool| tool.name == name && fake_base(tool.provider).is_some())
+        .find(|tool| tool.name == name && has_fake(tool.provider))
 }
 
 /// Prompt lines for the agent, only for tools whose provider has a fake. Argument names are exact.
 pub fn agent_prompt() -> String {
     let mut text = String::new();
-    for tool in AGENT_TOOLS
-        .iter()
-        .filter(|t| fake_base(t.provider).is_some())
-    {
+    for tool in AGENT_TOOLS.iter().filter(|t| has_fake(t.provider)) {
         match tool.name {
             "github_list_repos" => text.push_str("\n- github_list_repos {}"),
             "github_create_issue" => text.push_str(
@@ -726,6 +818,9 @@ pub fn agent_prompt() -> String {
             "ha_call_service" => text.push_str(
                 "\n- ha_call_service {\"domain\": string, \"service\": string, \"entity_id\": \"domain.object\", \"brightness\": integer 0..255, optional}",
             ),
+            "mcp_call" => text.push_str(
+                "\n- mcp_call {\"tool\": tool name, plus that tool's own arguments as flat string, number or boolean fields} (output arrives as data prefixed [mcp_output:NAME])",
+            ),
             _ => {}
         }
     }
@@ -737,8 +832,32 @@ pub fn parse_call(call: &str) -> Option<(&'static Provider, &'static OpDef)> {
     let rest = call.strip_prefix("conn:")?;
     let (provider, name) = rest.split_once('.')?;
     let provider = provider_by_id(provider)?;
-    let op = operation(provider, name)?;
+    // MCP operations carry the provider in their own name (`mcp.call`), so `conn:mcp.call` is the full name.
+    let prefixed = format!("{}.", provider.id);
+    let op = operation(provider, rest)
+        .or_else(|| operation(provider, name).filter(|op| !op.name.starts_with(&prefixed)))?;
     Some((provider, op))
+}
+
+/// `mcp_call {"tool": name, field: scalar, ...}` (the only shape a model can send, tool calls are flat)
+/// becomes the operation form `{"tool": name, "args": {field: scalar, ...}}`.
+pub fn mcp_nest(flat: &Value) -> Result<Value, &'static str> {
+    let object = flat.as_object().ok_or("invalid_args")?;
+    let tool = object.get("tool").ok_or("invalid_args")?;
+    let rest: Map<String, Value> = object
+        .iter()
+        .filter(|(key, _)| key.as_str() != "tool")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    Ok(json!({"tool": tool, "args": Value::Object(rest)}))
+}
+
+/// The `conn:` form of an operation, the tool name of its proposal cards (`conn:github.repos.list`, `conn:mcp.call`).
+pub fn call_name(provider: &Provider, op: &OpDef) -> String {
+    match op.name.strip_prefix(provider.id) {
+        Some(rest) if rest.starts_with('.') => format!("conn:{}", op.name),
+        _ => format!("conn:{}.{}", provider.id, op.name),
+    }
 }
 
 fn random_hex(bytes: usize) -> String {
@@ -811,7 +930,21 @@ fn kind_value(kind: Kind, value: &Value) -> Option<Value> {
         Kind::EntityId => value.as_str().filter(|s| entity_ok(s)).map(Value::from),
         Kind::Slug => value.as_str().filter(|s| slug_ok(s)).map(Value::from),
         Kind::Byte => value.as_u64().filter(|n| *n <= 255).map(Value::from),
+        Kind::Args => value
+            .as_object()
+            .filter(|object| mcp_args_ok(object))
+            .map(|object| Value::Object(object.clone())),
     }
+}
+
+/// MCP arguments before the tool schema is known: scalar values only, names as in the schema subset.
+fn mcp_args_ok(object: &Map<String, Value>) -> bool {
+    object.len() <= 16
+        && serde_json::to_vec(object).is_ok_and(|b| b.len() <= crate::mcp::ARGS_MAX)
+        && object.iter().all(|(key, value)| {
+            crate::mcp::name_ok(key)
+                && matches!(value, Value::String(_) | Value::Number(_) | Value::Bool(_))
+        })
 }
 
 /// `domain.object`: both parts 1..=64 bytes of lowercase letters, digits and `_` (the domain has no digits).
@@ -924,6 +1057,8 @@ pub struct Shape {
     pub path: String,
     pub body: Option<Value>,
     pub repo: Option<String>,
+    /// `mcp.call` of a tool classed destructive (set by the planner from the stored catalog).
+    pub mcp_destructive: bool,
 }
 
 pub fn validate(op: &OpDef, args: &Value) -> Result<Shape, &'static str> {
@@ -974,6 +1109,7 @@ pub fn validate(op: &OpDef, args: &Value) -> Result<Shape, &'static str> {
         path,
         body,
         repo,
+        mcp_destructive: false,
     })
 }
 
@@ -1067,6 +1203,12 @@ pub struct Account {
     pub created: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ok: Option<u64>,
+    /// MCP: tools of the last accepted `tools/list`, with their trust state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<crate::mcp::ToolRec>,
+    /// MCP: a catalog was accepted once (later changes need re-approval).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub catalog: bool,
 }
 
 /// `connections.json`: version 1, strict, CAS on `revision`.
@@ -1107,6 +1249,9 @@ impl Ledger {
                     .granted_scopes
                     .iter()
                     .all(|scope| provider.scopes.iter().any(|s| s.id == scope))
+                && account.tools.len() <= crate::mcp::MAX_TOOLS
+                && (account.tools.is_empty() || uses_process(&account.provider))
+                && account.tools.iter().all(crate::mcp::ToolRec::valid)
         })
     }
 }
@@ -1209,6 +1354,36 @@ pub enum Job {
         base: String,
         token: String,
     },
+    /// MCP: start the sandboxed server, list its tools, or call one tool.
+    Mcp(Box<McpJob>),
+}
+
+/// What an MCP job does. Debug never prints arguments.
+pub enum McpWork {
+    Start,
+    Discover,
+    Call {
+        tool: String,
+        args: Map<String, Value>,
+        /// Access class for the audit line (`write` or `destructive`).
+        risk: &'static str,
+    },
+}
+
+/// One MCP job. The command is fixed (`script`, `profile` come from the Core options).
+pub struct McpJob {
+    account: String,
+    proposal: Option<String>,
+    script: PathBuf,
+    profile: String,
+    work: McpWork,
+}
+
+/// Result of an MCP job before the Core applies it.
+pub enum McpDone {
+    Started(String),
+    Listed(Value),
+    Output(String),
 }
 
 impl std::fmt::Debug for Job {
@@ -1220,6 +1395,7 @@ impl std::fmt::Debug for Job {
             Job::Revoke { .. } => "Job::Revoke",
             Job::Call(_) => "Job::Call",
             Job::Probe { .. } => "Job::Probe",
+            Job::Mcp(_) => "Job::Mcp",
         })
     }
 }
@@ -1267,6 +1443,10 @@ pub enum Reply {
         account: String,
         token: String,
         outcome: Result<String, Failure>,
+    },
+    Mcp {
+        job: Box<McpJob>,
+        outcome: Result<McpDone, Failure>,
     },
 }
 
@@ -1697,8 +1877,34 @@ pub async fn execute(id: u64, job: Job, python: PathBuf, script: PathBuf) -> Don
                 outcome,
             }
         }
+        Job::Mcp(job) => {
+            let outcome = run_mcp(&job, &python).await;
+            Reply::Mcp { job, outcome }
+        }
     };
     Done { id, reply }
+}
+
+/// Runs one MCP job on the sandboxed server (`mcp.rs`). Output is projected here, before the Core sees it.
+async fn run_mcp(job: &McpJob, python: &Path) -> Result<McpDone, Failure> {
+    mcp_work(job, python).await.map_err(Failure::new)
+}
+
+async fn mcp_work(job: &McpJob, python: &Path) -> Result<McpDone, &'static str> {
+    use crate::mcp;
+    match &job.work {
+        McpWork::Start => mcp::start(&job.account, python, &job.script, &job.profile)
+            .await
+            .map(McpDone::Started),
+        McpWork::Discover => mcp::request(&job.account, "tools/list", json!({}))
+            .await
+            .map(McpDone::Listed),
+        McpWork::Call { tool, args, .. } => {
+            let params = json!({"name": tool, "arguments": args});
+            let result = mcp::request(&job.account, "tools/call", params).await?;
+            mcp::project_output(&result).map(McpDone::Output)
+        }
+    }
 }
 
 /// Device login state of one account while it is `connecting`. The device code stays in memory.
@@ -1732,6 +1938,9 @@ pub struct LastCall {
     pub retry_after: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proposal_id: Option<String>,
+    /// Fixed marker: `true` when the call returned MCP output, which is data and never an instruction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub untrusted: Option<bool>,
 }
 
 /// One audit record: a closed vocabulary, no account id, arguments, tokens or content.
@@ -1804,6 +2013,20 @@ pub struct ItemView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_code: Option<String>,
     pub fake: bool,
+    /// MCP accounts: discovered tools. Descriptions are server text for the user to read as PlainText.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ToolView>>,
+}
+
+/// One discovered MCP tool: its risk class and trust state, never its schema.
+#[derive(Debug, Serialize)]
+pub struct ToolView {
+    pub name: String,
+    pub risk: &'static str,
+    pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub description: String,
 }
 
 /// Snapshot block `connections`. No tokens, device codes, arguments or response content.
@@ -1825,6 +2048,10 @@ pub struct Manager {
     devices: BTreeMap<String, Device>,
     /// Token accounts (`uses_token`) in `connecting`: the scopes the user consented to, awaiting the token.
     token_wait: BTreeMap<String, Vec<String>>,
+    /// MCP accounts in `connecting` whose server answered `initialize` (the server name), awaiting consent.
+    mcp_ready: BTreeMap<String, String>,
+    /// Server starts per MCP account in this Core lifetime (restart limit).
+    mcp_starts: BTreeMap<String, u32>,
     errors: BTreeMap<String, &'static str>,
     /// Account to repo (`owner/name`) to `private`, learned from `repo.get` results only.
     visibility: BTreeMap<String, BTreeMap<String, bool>>,
@@ -1871,6 +2098,7 @@ fn job_account(job: &Job) -> Option<&str> {
         }
         Job::Call(call) => Some(&call.account),
         Job::Probe { account, .. } => Some(account),
+        Job::Mcp(job) => Some(&job.account),
         Job::Revoke { .. } => None,
     }
 }
@@ -1887,6 +2115,11 @@ impl Manager {
             if account.status == Status::Connecting {
                 account.status = Status::Disconnected;
             }
+            // The sandboxed MCP server does not survive a Core restart: the account must connect again.
+            if uses_process(&account.provider) && account.status != Status::Disconnected {
+                account.status = Status::Disconnected;
+                account.granted_scopes.clear();
+            }
         }
     }
 
@@ -1899,11 +2132,34 @@ impl Manager {
                 let connecting = account.status == Status::Connecting;
                 let device = self.devices.get(&account.id).filter(|_| connecting);
                 // A token account waits for its consent and token: every scope of the provider is pending.
-                let token_pending = (connecting && uses_token(&account.provider)).then(|| {
+                // An MCP account asks for consent only once its server answered `initialize`.
+                let token_pending = (connecting
+                    && (uses_token(&account.provider)
+                        || (uses_process(&account.provider)
+                            && self.mcp_ready.contains_key(&account.id))))
+                .then(|| {
                     provider_by_id(&account.provider)
                         .map(|p| p.scopes.iter().map(|s| s.id.to_owned()).collect())
                         .unwrap_or_default()
                 });
+                let tools =
+                    (uses_process(&account.provider) && !account.tools.is_empty()).then(|| {
+                        account
+                            .tools
+                            .iter()
+                            .map(|t| ToolView {
+                                name: t.name.clone(),
+                                risk: if t.destructive {
+                                    "destructive"
+                                } else {
+                                    "write"
+                                },
+                                state: t.state.name(),
+                                reason: t.reason.clone(),
+                                description: t.description.clone(),
+                            })
+                            .collect()
+                    });
                 ItemView {
                     id: account.id.clone(),
                     provider: account.provider.clone(),
@@ -1913,7 +2169,8 @@ impl Manager {
                     granted_scopes: account.granted_scopes.clone(),
                     pending_scopes: token_pending.or_else(|| device.map(|d| d.requested.clone())),
                     user_code: device.map(|d| d.user_code.clone()),
-                    fake: fake_base(&account.provider).is_some(),
+                    fake: has_fake(&account.provider),
+                    tools,
                 }
             })
             .collect();
@@ -2152,6 +2409,8 @@ impl Manager {
             granted_scopes: Vec::new(),
             created: unix_now(),
             last_ok: None,
+            tools: Vec::new(),
+            catalog: false,
         });
         match self.commit(storage, next) {
             Ok(()) => {
@@ -2170,6 +2429,9 @@ impl Manager {
             return "unknown_connection";
         };
         let provider = provider_by_id(&self.ledger.accounts[index].provider).expect("validated");
+        if uses_process(provider.id) {
+            return self.connect_process(storage, id);
+        }
         let Some(base) = fake_base(provider.id) else {
             return "real_backend_unsupported";
         };
@@ -2198,9 +2460,134 @@ impl Manager {
         "ok"
     }
 
+    /// MCP: connect starts the fixed fake server in the sandbox and runs `initialize`; consent follows.
+    /// Without the fake registration nothing is started (`real_backend_unsupported`). Restarts are limited.
+    fn connect_process(&mut self, storage: &Storage, id: &str) -> &'static str {
+        let Some(profile) = mcp_profile() else {
+            return "real_backend_unsupported";
+        };
+        match self.status_of(id) {
+            Some(Status::Connecting) => return "already_connecting",
+            Some(Status::Connected) => return "already_connected",
+            _ => {}
+        }
+        if self.mcp_starts.get(id).copied().unwrap_or(0) >= crate::mcp::START_LIMIT {
+            return "mcp_restart_limit";
+        }
+        if self.busy() {
+            return "busy";
+        }
+        if let Err(code) = self.set_status(storage, id, Status::Connecting, None) {
+            return code;
+        }
+        *self.mcp_starts.entry(id.to_owned()).or_insert(0) += 1;
+        self.mcp_ready.remove(id);
+        self.push(Job::Mcp(Box::new(McpJob {
+            account: id.to_owned(),
+            proposal: None,
+            script: crate::transport::home().join(crate::mcp::FAKE_SCRIPT),
+            profile: profile.to_owned(),
+            work: McpWork::Start,
+        })));
+        "ok"
+    }
+
+    /// MCP consent: the server already answered `initialize`; the chosen scopes are granted at once and
+    /// the account is connected. No scope is granted before the user chooses it.
+    fn consent_process(
+        &mut self,
+        storage: &Storage,
+        id: &str,
+        scopes: Vec<String>,
+    ) -> &'static str {
+        let Some(name) = self.mcp_ready.get(id).cloned() else {
+            return "invalid_state";
+        };
+        let Some(provider) = provider_by_id(self.provider_of(id)) else {
+            return "invalid_state";
+        };
+        if scopes.is_empty() {
+            return "invalid_args";
+        }
+        if scopes
+            .iter()
+            .any(|scope| !provider.scopes.iter().any(|s| s.id == scope))
+        {
+            return "scope_not_requested";
+        }
+        let granted: Vec<String> = provider
+            .scopes
+            .iter()
+            .filter(|s| scopes.iter().any(|c| c == s.id))
+            .map(|s| s.id.to_owned())
+            .collect();
+        let Some(index) = self.index(id) else {
+            return "unknown_connection";
+        };
+        let mut next = self.ledger.clone();
+        {
+            let account = &mut next.accounts[index];
+            account.status = Status::Connected;
+            account.account_ref = Some(name);
+            account.granted_scopes = granted;
+            account.last_ok = Some(unix_now());
+        }
+        if let Err(code) = self.commit(storage, next) {
+            return code;
+        }
+        self.mcp_ready.remove(id);
+        self.errors.remove(id);
+        self.log("connection_consented", "none", "none", "ok");
+        self.log("connection_connected", "none", "none", "ok");
+        "ok"
+    }
+
+    /// Re-approval of discovered tools by the user: `needs_reapproval` tools named here become `trusted`.
+    /// A rejected tool can never be trusted; an unknown name refuses the whole request.
+    pub fn trust_tools(
+        &mut self,
+        storage: &Storage,
+        id: &str,
+        tools: &[String],
+        revision: Option<u64>,
+    ) -> &'static str {
+        if let Err(code) = self.check_revision(revision) {
+            return code;
+        }
+        let Some(index) = self.index(id) else {
+            return "unknown_connection";
+        };
+        if !uses_process(&self.ledger.accounts[index].provider) {
+            return "invalid_state";
+        }
+        if tools.is_empty() || tools.len() > crate::mcp::MAX_TOOLS {
+            return "invalid_args";
+        }
+        let mut next = self.ledger.clone();
+        for name in tools {
+            let Some(tool) = next.accounts[index]
+                .tools
+                .iter_mut()
+                .find(|t| &t.name == name)
+            else {
+                return "unknown_tool";
+            };
+            match tool.state {
+                crate::mcp::ToolState::Rejected => return "tool_rejected",
+                _ => tool.state = crate::mcp::ToolState::Trusted,
+            }
+        }
+        if let Err(code) = self.commit(storage, next) {
+            return code;
+        }
+        self.log("connection_trusted", "mcp.call", "write", "ok");
+        "ok"
+    }
+
     /// Consent per scope: a non-empty subset of the scopes the device login requested.
     pub fn consent(
         &mut self,
+        storage: &Storage,
         id: &str,
         scopes: Vec<String>,
         revision: Option<u64>,
@@ -2213,6 +2600,9 @@ impl Manager {
         }
         if uses_token(self.provider_of(id)) {
             return self.consent_token(id, scopes);
+        }
+        if uses_process(self.provider_of(id)) {
+            return self.consent_process(storage, id, scopes);
         }
         let Some(device) = self.devices.get(id) else {
             return "invalid_state";
@@ -2360,15 +2750,18 @@ impl Manager {
         let mut kept = VecDeque::new();
         for (job_id, job) in self.queue.drain(..) {
             if job_account(&job) == Some(id) {
-                if let Job::Call(call) = job {
-                    if let Some(proposal) = call.proposal {
-                        self.settled.push(Settled {
-                            proposal,
-                            state: tools::State::Failed,
-                            reason: Some("not_connected"),
-                            result: None,
-                        });
-                    }
+                let proposal = match job {
+                    Job::Call(call) => call.proposal,
+                    Job::Mcp(job) => job.proposal,
+                    _ => None,
+                };
+                if let Some(proposal) = proposal {
+                    self.settled.push(Settled {
+                        proposal,
+                        state: tools::State::Failed,
+                        reason: Some("not_connected"),
+                        result: None,
+                    });
                 }
             } else {
                 kept.push_back((job_id, job));
@@ -2377,6 +2770,9 @@ impl Manager {
         self.queue = kept;
         self.devices.remove(id);
         self.token_wait.remove(id);
+        self.mcp_ready.remove(id);
+        // The sandboxed server dies with the account's access, whether or not a job is using it.
+        crate::mcp::stop(id);
         vault.clear_connection(storage, id)?;
         Ok(())
     }
@@ -2423,6 +2819,18 @@ impl Manager {
         if let Err(code) = self.set_status(storage, id, Status::Disconnected, None) {
             return code;
         }
+        // Revoking also forgets what the user trusted: tools must be discovered and trusted again.
+        if let Some(index) = self.index(id).filter(|i| {
+            let a = &self.ledger.accounts[*i];
+            a.catalog || !a.tools.is_empty()
+        }) {
+            let mut next = self.ledger.clone();
+            next.accounts[index].tools.clear();
+            next.accounts[index].catalog = false;
+            if let Err(code) = self.commit(storage, next) {
+                return code;
+            }
+        }
         self.log("connection_revoked", "none", "none", "ok");
         "ok"
     }
@@ -2451,6 +2859,7 @@ impl Manager {
         self.errors.remove(id);
         self.visibility.remove(id);
         self.budget.remove(id);
+        self.mcp_starts.remove(id);
         self.log("connection_removed", "none", "none", "ok");
         "ok"
     }
@@ -2475,6 +2884,7 @@ impl Manager {
             code: None,
             retry_after: None,
             proposal_id: Some(proposal),
+            untrusted: None,
         });
     }
 
@@ -2488,6 +2898,9 @@ impl Manager {
         args: &Value,
     ) -> Result<Plan, &'static str> {
         let shape = validate(op, args)?;
+        if uses_process(provider.id) {
+            return self.plan_process(provider, op, account, shape);
+        }
         let needed = required_scopes(op, &shape);
         let account = match account {
             Some(id) => {
@@ -2507,6 +2920,62 @@ impl Manager {
             provider,
             op,
             account,
+            shape,
+            risk,
+        })
+    }
+
+    /// MCP plan. Gates in order: account status and operation scope, the tool (known, not rejected,
+    /// trusted), its arguments against the stored schema, then the destructive scope when the tool
+    /// deletes or removes. A tool that is new or changed since the user last looked is not callable.
+    fn plan_process(
+        &self,
+        provider: &'static Provider,
+        op: &'static OpDef,
+        account: Option<&str>,
+        mut shape: Shape,
+    ) -> Result<Plan, &'static str> {
+        let id = match account {
+            Some(id) => id.to_owned(),
+            None => self.resolve(provider, &[op.scope])?,
+        };
+        let found = self.account(&id).ok_or("unknown_connection")?;
+        if found.provider != provider.id {
+            return Err("unknown_connection");
+        }
+        account_gate(found, op.scope)?;
+        if op.name == "mcp.call" {
+            let name = shape
+                .input
+                .get("tool")
+                .and_then(Value::as_str)
+                .ok_or("invalid_args")?;
+            let tool = found
+                .tools
+                .iter()
+                .find(|t| t.name == name)
+                .ok_or("unknown_tool")?;
+            match tool.state {
+                crate::mcp::ToolState::Rejected => return Err("tool_rejected"),
+                crate::mcp::ToolState::NeedsReapproval => return Err("tool_not_trusted"),
+                crate::mcp::ToolState::Trusted => {}
+            }
+            let empty = Map::new();
+            let args = match shape.input.get("args") {
+                Some(Value::Object(args)) => args,
+                _ => &empty,
+            };
+            crate::mcp::check_args(tool, args)?;
+            shape.mcp_destructive = tool.destructive;
+            for scope in required_scopes(op, &shape) {
+                account_gate(found, scope)?;
+            }
+        }
+        let risk = self.effective_risk(&id, op, &shape);
+        Ok(Plan {
+            provider,
+            op,
+            account: id,
             shape,
             risk,
         })
@@ -2558,6 +3027,9 @@ impl Manager {
     /// Public when a write targets a repo not known to be private. Unknown visibility is public.
     fn effective_risk(&self, account: &str, op: &OpDef, shape: &Shape) -> Access {
         if op.name == "service.call" && is_dangerous_call(op, shape) {
+            return Access::Destructive;
+        }
+        if op.name == "mcp.call" && shape.mcp_destructive {
             return Access::Destructive;
         }
         if op.name == "issues.create" {
@@ -2612,6 +3084,7 @@ impl Manager {
                 code: Some(code),
                 retry_after,
                 proposal_id: proposal,
+                untrusted: None,
             });
             return Err(code);
         }
@@ -2627,6 +3100,9 @@ impl Manager {
     ) -> Result<(), &'static str> {
         if matches!(plan.risk, Access::Public | Access::Destructive) && !options().allow_public {
             return Err("public_disabled");
+        }
+        if uses_process(plan.provider.id) {
+            return self.start_process(plan, proposal, now);
         }
         let base = fake_base(plan.provider.id).ok_or("real_backend_unsupported")?;
         let found = self.account(&plan.account).ok_or("unknown_connection")?;
@@ -2663,8 +3139,69 @@ impl Manager {
             code: None,
             retry_after: None,
             proposal_id: proposal,
+            untrusted: None,
         });
         self.push(Job::Call(Box::new(call)));
+        Ok(())
+    }
+
+    /// Queues an MCP discover or call on the account's running server.
+    fn start_process(
+        &mut self,
+        plan: &Plan,
+        proposal: Option<String>,
+        now: Instant,
+    ) -> Result<(), &'static str> {
+        let profile = mcp_profile().ok_or("real_backend_unsupported")?;
+        let found = self.account(&plan.account).ok_or("unknown_connection")?;
+        for scope in required_scopes(plan.op, &plan.shape) {
+            account_gate(found, scope)?;
+        }
+        if !crate::mcp::running(&plan.account) {
+            return Err("mcp_not_running");
+        }
+        if self.busy() {
+            return Err("busy");
+        }
+        self.spend(&plan.account, now).map_err(|wait| {
+            self.last_wait = wait;
+            "rate_limited"
+        })?;
+        let work = if plan.op.name == "mcp.call" {
+            let tool = plan
+                .shape
+                .input
+                .get("tool")
+                .and_then(Value::as_str)
+                .ok_or("invalid_args")?
+                .to_owned();
+            let args = match plan.shape.input.get("args") {
+                Some(Value::Object(args)) => args.clone(),
+                _ => Map::new(),
+            };
+            McpWork::Call {
+                tool,
+                args,
+                risk: plan.risk.name(),
+            }
+        } else {
+            McpWork::Discover
+        };
+        self.last_call = Some(LastCall {
+            operation: plan.op.name,
+            outcome: "queued",
+            code: None,
+            retry_after: None,
+            proposal_id: proposal.clone(),
+            untrusted: None,
+        });
+        self.push(Job::Mcp(Box::new(McpJob {
+            account: plan.account.clone(),
+            proposal,
+            script: crate::transport::home().join(crate::mcp::FAKE_SCRIPT),
+            profile: profile.to_owned(),
+            work,
+        })));
         Ok(())
     }
 
@@ -2700,6 +3237,11 @@ impl Manager {
             a.provider == provider.id
                 && a.status == Status::Connected
                 && a.granted_scopes.iter().any(|s| s == op.scope)
+                // A skill may depend on `conn:mcp.call` only once the user trusts at least one tool.
+                && (op.name != "mcp.call"
+                    || a.tools
+                        .iter()
+                        .any(|t| t.state == crate::mcp::ToolState::Trusted))
         })
     }
 
@@ -2713,6 +3255,7 @@ impl Manager {
                 code: Some("provider_unreachable"),
                 retry_after: None,
                 proposal_id: None,
+                untrusted: None,
             });
         }
     }
@@ -2813,7 +3356,155 @@ impl Manager {
                 self.settle_probe(storage, vault, &account, token, outcome);
                 None
             }
+            Reply::Mcp { job, outcome } => self.settle_mcp(storage, *job, outcome),
         }
+    }
+
+    /// Process-level MCP failure: the server is gone or unusable, so the account goes to `error`
+    /// (a timeout, a crash, a protocol break or an oversized line). Core keeps running.
+    fn mcp_failed(&mut self, storage: &Storage, id: &str, code: &'static str) {
+        if crate::mcp::fatal(code) {
+            crate::mcp::stop(id);
+            self.mcp_ready.remove(id);
+            let _ = self.set_status(storage, id, Status::Error, Some(code));
+        }
+    }
+
+    fn mcp_fail_call(
+        &mut self,
+        operation: &'static str,
+        risk: &'static str,
+        proposal: Option<String>,
+        code: &'static str,
+    ) -> Option<Settled> {
+        self.log("connection_call", operation, risk, code);
+        self.last_call = Some(LastCall {
+            operation,
+            outcome: "failed",
+            code: Some(code),
+            retry_after: None,
+            proposal_id: proposal.clone(),
+            untrusted: None,
+        });
+        proposal.map(|proposal| Settled {
+            proposal,
+            state: tools::State::Failed,
+            reason: Some(code),
+            result: None,
+        })
+    }
+
+    fn settle_mcp(
+        &mut self,
+        storage: &Storage,
+        job: McpJob,
+        outcome: Result<McpDone, Failure>,
+    ) -> Option<Settled> {
+        let id = job.account.clone();
+        match job.work {
+            McpWork::Start => {
+                if self.status_of(&id) != Some(Status::Connecting) {
+                    crate::mcp::stop(&id);
+                    return None;
+                }
+                match outcome {
+                    Ok(McpDone::Started(name)) => {
+                        self.mcp_ready.insert(id, name);
+                    }
+                    Ok(_) => {}
+                    Err(failure) => {
+                        crate::mcp::stop(&id);
+                        let _ = self.set_status(storage, &id, Status::Error, Some(failure.code));
+                    }
+                }
+                None
+            }
+            McpWork::Discover => {
+                let operation = "mcp.discover";
+                if self.status_of(&id) != Some(Status::Connected) {
+                    return self.mcp_fail_call(operation, "read", job.proposal, "not_connected");
+                }
+                let listed = match outcome {
+                    Ok(McpDone::Listed(value)) => value,
+                    Ok(_) => return self.mcp_fail_call(operation, "read", None, "mcp_protocol"),
+                    Err(failure) => {
+                        self.mcp_failed(storage, &id, failure.code);
+                        return self.mcp_fail_call(operation, "read", job.proposal, failure.code);
+                    }
+                };
+                let index = self.index(&id)?;
+                let account = &self.ledger.accounts[index];
+                let catalog =
+                    match crate::mcp::build_catalog(&listed, &account.tools, !account.catalog) {
+                        Ok(catalog) => catalog,
+                        Err(code) => {
+                            if code == "mcp_protocol" {
+                                self.mcp_failed(storage, &id, code);
+                            }
+                            return self.mcp_fail_call(operation, "read", job.proposal, code);
+                        }
+                    };
+                // An identical catalog writes nothing: the ledger revision (a CAS for the UI) stays put.
+                if account.tools != catalog || !account.catalog {
+                    let mut next = self.ledger.clone();
+                    next.accounts[index].tools = catalog;
+                    next.accounts[index].catalog = true;
+                    if let Err(code) = self.commit(storage, next) {
+                        return self.mcp_fail_call(operation, "read", job.proposal, code);
+                    }
+                }
+                self.last_call = Some(LastCall {
+                    operation,
+                    outcome: "ok",
+                    code: None,
+                    retry_after: None,
+                    proposal_id: job.proposal.clone(),
+                    untrusted: None,
+                });
+                self.log("connection_call", operation, "read", "ok");
+                job.proposal.map(|proposal| Settled {
+                    proposal,
+                    state: tools::State::Executed,
+                    reason: None,
+                    result: Some(json!({"tools": self.tool_count(&id)}).to_string()),
+                })
+            }
+            McpWork::Call { tool, risk, .. } => {
+                let operation = "mcp.call";
+                if self.status_of(&id) != Some(Status::Connected) {
+                    return self.mcp_fail_call(operation, risk, job.proposal, "not_connected");
+                }
+                match outcome {
+                    Ok(McpDone::Output(text)) => {
+                        let value = crate::mcp::wrap_output(&tool, &text);
+                        self.last_call = Some(LastCall {
+                            operation,
+                            outcome: "ok",
+                            code: None,
+                            retry_after: None,
+                            proposal_id: job.proposal.clone(),
+                            untrusted: Some(true),
+                        });
+                        self.log("connection_call", operation, risk, "ok");
+                        job.proposal.map(|proposal| Settled {
+                            proposal,
+                            state: tools::State::Executed,
+                            reason: None,
+                            result: Some(value.to_string()),
+                        })
+                    }
+                    Ok(_) => self.mcp_fail_call(operation, risk, job.proposal, "mcp_protocol"),
+                    Err(failure) => {
+                        self.mcp_failed(storage, &id, failure.code);
+                        self.mcp_fail_call(operation, risk, job.proposal, failure.code)
+                    }
+                }
+            }
+        }
+    }
+
+    fn tool_count(&self, id: &str) -> usize {
+        self.account(id).map_or(0, |a| a.tools.len())
     }
 
     /// Token account probe answered. Success stores the token in the vault and connects with the consented
@@ -3055,6 +3746,7 @@ impl Manager {
             code: Some(code),
             retry_after: None,
             proposal_id: call.proposal.clone(),
+            untrusted: None,
         });
         call.proposal.map(|proposal| Settled {
             proposal,
@@ -3092,6 +3784,7 @@ impl Manager {
                     code: None,
                     retry_after: None,
                     proposal_id: call.proposal.clone(),
+                    untrusted: None,
                 });
                 self.log("connection_call", op, risk, "ok");
                 call.proposal.map(|proposal| Settled {
@@ -3148,6 +3841,7 @@ impl Manager {
                     code: Some(code),
                     retry_after: failure.retry_after,
                     proposal_id: call.proposal.clone(),
+                    untrusted: None,
                 });
                 call.proposal.map(|proposal| Settled {
                     proposal,
@@ -3180,9 +3874,14 @@ mod tests {
     fn descriptors_are_fixed_and_empty_providers_are_valid() {
         let ids: Vec<&str> = PROVIDERS.iter().map(|p| p.id).collect();
         assert_eq!(ids, ["github", "google", "homeassistant", "mcp"]);
-        assert!(PROVIDERS[3..]
+        let mcp = provider_by_id("mcp").unwrap();
+        assert_eq!(mcp.scopes.len(), 3);
+        let names: Vec<&str> = mcp.operations.iter().map(|o| o.name).collect();
+        assert_eq!(names, ["mcp.discover", "mcp.call"]);
+        assert!(mcp
+            .operations
             .iter()
-            .all(|p| p.scopes.is_empty() && p.operations.is_empty()));
+            .all(|o| mcp.scopes.iter().any(|s| s.id == o.scope)));
         let ha = provider_by_id("homeassistant").unwrap();
         assert_eq!(ha.scopes.len(), 3);
         assert_eq!(ha.operations.len(), 3);
@@ -3485,6 +4184,159 @@ mod tests {
         assert!(!ha_token_ok("token com espaco 0123456789"));
         assert!(!ha_token_ok("token\ncom-controle-0123456"));
         assert!(!ha_token_ok("token-ação-0123456789abc"));
+    }
+
+    fn mcp_manager(scopes: &[&str]) -> Manager {
+        let listed = json!({"tools": [
+            {"name": "echo_note", "description": "Return the note.", "inputSchema": {
+                "type": "object", "properties": {"text": {"type": "string", "maxLength": 32}},
+                "required": ["text"], "additionalProperties": false}},
+            {"name": "delete_note", "description": "Delete a note.",
+             "annotations": {"destructiveHint": true}, "inputSchema": {
+                "type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+            {"name": "nested", "description": "x", "inputSchema": {
+                "type": "object", "properties": {"i": {"$ref": "#/d"}}}},
+        ]});
+        let mut tools = crate::mcp::build_catalog(&listed, &[], true).unwrap();
+        tools.push(
+            crate::mcp::build_catalog(
+                &json!({"tools": [{"name": "late", "description": "new", "inputSchema":
+                    {"type": "object"}}]}),
+                &[],
+                false,
+            )
+            .unwrap()
+            .remove(0),
+        );
+        let mut manager = Manager::default();
+        manager.ledger.accounts.push(Account {
+            id: "conn_m".into(),
+            provider: "mcp".into(),
+            label: "m".into(),
+            account_ref: Some("fake-mcp".into()),
+            status: Status::Connected,
+            granted_scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
+            created: 0,
+            last_ok: None,
+            tools,
+            catalog: true,
+        });
+        manager
+    }
+
+    #[test]
+    fn mcp_calls_are_gated_by_tool_state_arguments_and_destructive_scope() {
+        let mcp = provider_by_id("mcp").unwrap();
+        let call = operation(mcp, "mcp.call").unwrap();
+        let manager = mcp_manager(&["mcp.discover", "mcp.call"]);
+        let plan = |tool: &str, args: Value| {
+            manager.plan(
+                mcp,
+                call,
+                Some("conn_m"),
+                &json!({"tool": tool, "args": args}),
+            )
+        };
+        let ok = plan("echo_note", json!({"text": "oi"})).unwrap();
+        assert_eq!(ok.risk, Access::Write);
+        assert_eq!(plan("echo_note", json!({})).err(), Some("invalid_args"));
+        assert_eq!(
+            plan("echo_note", json!({"text": "x".repeat(33)})).err(),
+            Some("invalid_args")
+        );
+        assert_eq!(plan("nope", json!({})).err(), Some("unknown_tool"));
+        assert_eq!(plan("nested", json!({})).err(), Some("tool_rejected"));
+        assert_eq!(plan("late", json!({})).err(), Some("tool_not_trusted"));
+        assert_eq!(
+            plan("delete_note", json!({"id": "n1"})).err(),
+            Some("scope_not_granted"),
+            "a destructive tool needs the destructive scope"
+        );
+        let both = mcp_manager(&["mcp.discover", "mcp.call", "mcp.call_destructive"]);
+        let destructive = both
+            .plan(
+                mcp,
+                call,
+                None,
+                &json!({"tool": "delete_note", "args": {"id": "n1"}}),
+            )
+            .unwrap();
+        assert_eq!(destructive.risk, Access::Destructive);
+        assert_eq!(destructive.tool_risk(), tools::Risk::Destructive);
+        // Arguments the schema does not know, or nested values, never reach the server.
+        for bad in [
+            json!({"tool": "echo_note", "args": {"text": "a", "x": 1}}),
+            json!({"tool": "echo_note", "args": {"text": {"a": 1}}}),
+            json!({"tool": "echo_note", "args": [1]}),
+            json!({"tool": "echo/note", "args": {}}),
+        ] {
+            assert!(
+                manager.plan(mcp, call, Some("conn_m"), &bad).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(both.dependency_ready("mcp", "mcp.call"));
+        assert!(!mcp_manager(&["mcp.discover"]).dependency_ready("mcp", "mcp.call"));
+    }
+
+    #[test]
+    fn mcp_call_forms_names_and_flat_model_arguments() {
+        let (provider, op) = parse_call("conn:mcp.call").unwrap();
+        assert_eq!((provider.id, op.name), ("mcp", "mcp.call"));
+        assert_eq!(
+            parse_call("conn:mcp.discover").unwrap().1.name,
+            "mcp.discover"
+        );
+        assert!(parse_call("conn:mcp.delete").is_none());
+        assert!(parse_call("conn:mcp.mcp.call").is_none());
+        assert_eq!(call_name(provider, op), "conn:mcp.call");
+        let github = github();
+        assert_eq!(
+            call_name(github, operation(github, "repos.list").unwrap()),
+            "conn:github.repos.list"
+        );
+        let nested = mcp_nest(&json!({"tool": "echo_note", "text": "oi", "n": 2})).unwrap();
+        assert_eq!(
+            nested,
+            json!({"tool": "echo_note", "args": {"text": "oi", "n": 2}})
+        );
+        assert_eq!(
+            mcp_nest(&json!({"text": "oi"})),
+            Err("invalid_args"),
+            "a call without a tool name is refused"
+        );
+        assert_eq!(mcp_nest(&json!(["x"])), Err("invalid_args"));
+    }
+
+    #[test]
+    fn every_scope_label_fits_the_ui_limit_of_64_bytes() {
+        for provider in PROVIDERS.iter() {
+            for scope in provider.scopes {
+                assert!(
+                    (1..=LABEL_MAX).contains(&scope.label.len()),
+                    "{}.{} label is {} bytes",
+                    provider.id,
+                    scope.id,
+                    scope.label.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mcp_agent_tool_and_fake_registration_are_strict() {
+        assert!(agent_tool("mcp_call").is_some() == mcp_profile().is_some());
+        assert_eq!(parse_fake_mcp("good").as_deref(), Ok("good"));
+        assert_eq!(parse_fake_mcp("evil").as_deref(), Ok("evil"));
+        assert_eq!(
+            parse_fake_mcp("changed_tools").as_deref(),
+            Ok("changed_tools")
+        );
+        for bad in ["", "Good", "good ", "sh -c id", "../mcp_server.py", "ultra"] {
+            assert!(parse_fake_mcp(bad).is_err(), "{bad:?}");
+        }
+        // The prompt line names no tool and carries no server text.
+        assert!(!agent_prompt().contains("IGNORE"));
     }
 
     #[test]

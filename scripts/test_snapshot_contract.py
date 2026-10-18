@@ -764,5 +764,63 @@ class SnapshotContract(unittest.TestCase):
         self.assertTrue(any('proposal' in label for label in c.validated), c.validated)
         c.stop()
 
+    def test_mcp_snapshots_validate_against_real_core(self):
+        # S5 E2.4 (docs/S5.md, "E2.4 mcp"): the Core starts the fake stdio MCP server in the plugin sandbox from the fixed
+        # registration. Every mcp state (connecting, tools with their trust states, call proposals, the untrusted
+        # marker in last_call) passes the bridge validator; tool descriptions arrive as plain data.
+        self.core.extra = ['--connections-fake-mcp', 'changed_tools']
+        self.core.start()
+        c = self.core
+        c.snap('mcp: nothing added yet')
+        self.assertEqual(self.ok_op('connection_add', provider='mcp', label='contrato mcp')['code'], 'ok')
+        cid = c.snap('mcp account added')['connections']['items'][0]['id']
+        self.assertEqual(self.ok_op('connection_connect', id=cid)['code'], 'ok')
+        c.wait(lambda s: bool(next(i for i in s['connections']['items'] if i['id'] == cid).get('pending_scopes')), 20,
+               'mcp server answered initialize')
+        pending = next(i for i in c.snap('mcp connecting: three pending scopes, no user_code')['connections']['items']
+                       if i['id'] == cid)
+        self.assertEqual(set(pending['pending_scopes']), {'mcp.discover', 'mcp.call', 'mcp.call_destructive'})
+        self.assertNotIn('user_code', pending)
+        self.assertEqual(self.ok_op('connection_consent', id=cid, scopes=['mcp.discover', 'mcp.call'])['code'], 'ok')
+        connected = c.snap('mcp connected with the consented scopes')
+        item = next(i for i in connected['connections']['items'] if i['id'] == cid)
+        self.assertEqual((item['status'], item['account_ref']), ('connected', 'fake-mcp'))
+
+        def discover():
+            self.assertEqual(self.ok_op('connection_call', id=cid, operation='mcp.discover', args={})['code'], 'ok')
+            c.wait(lambda s: (s['connections'].get('last_call') or {}).get('outcome') == 'ok', 20, 'discover finished')
+        discover()
+        first = next(i for i in c.snap('first discover: tools trusted')['connections']['items'] if i['id'] == cid)
+        self.assertEqual({t['state'] for t in first['tools']}, {'trusted'})
+        discover()
+        second = next(i for i in c.snap('second discover: a new tool needs re-approval')['connections']['items']
+                      if i['id'] == cid)
+        states = {t['name']: t['state'] for t in second['tools']}
+        self.assertEqual(states['export_notes'], 'needs_reapproval')
+        self.assertNotIn('inputSchema', json.dumps(second))
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='mcp.call',
+                                    args={'tool': 'echo_note', 'args': {'text': 'contrato'}})['code'], 'pending_approval')
+        pid = c.snap('mcp call proposal pending')['connections']['last_call']['proposal_id']
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=pid, decision='authorize')['code'], 'ok')
+        c.wait(lambda s: any(p['proposal_id'] == pid and p['state'] == 'executed' for p in s['tool_proposals']), 20,
+               'mcp call executed')
+        done = c.snap('mcp call executed: untrusted marker and prefixed output')
+        proposal = next(p for p in done['tool_proposals'] if p['proposal_id'] == pid)
+        self.assertEqual(proposal['tool'], 'conn:mcp.call')
+        self.assertEqual(json.loads(proposal['result'])['output'], '[mcp_output:echo_note] contrato')
+        self.assertTrue(done['connections']['last_call']['untrusted'])
+        self.assertEqual(self.ok_op('connection_trust_tools', id=cid, tools=['export_notes'])['code'], 'ok')
+        trusted = next(i for i in c.snap('export_notes trusted')['connections']['items'] if i['id'] == cid)
+        self.assertEqual({t['name']: t['state'] for t in trusted['tools']}['export_notes'], 'trusted')
+
+        self.assertEqual(self.ok_op('connection_disconnect', id=cid)['code'], 'ok')
+        c.snap('mcp disconnected (tools kept)')
+        self.assertEqual(self.ok_op('connection_remove', id=cid)['code'], 'ok')
+        c.snap('mcp removed')
+        self.assertGreaterEqual(len(c.validated), 9, c.validated)
+        self.assertTrue(any('proposal' in label for label in c.validated), c.validated)
+        c.stop()
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

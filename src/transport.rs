@@ -807,6 +807,8 @@ pub async fn serve(
         let _ = task.await;
     }
     plugins.shutdown().await;
+    // Sandboxed MCP servers die with the Core.
+    crate::mcp::stop_all();
     core.shutdown();
     storage.audit(core.response(String::new(), "ok").sequence)?;
     peers.abort_all();

@@ -146,7 +146,7 @@ impl Default for Generations {
 }
 /// Size caps of the private ledgers. `secrets.json` also holds S5 connection tokens (<= 8 accounts).
 const SECRETS_LIMIT: u64 = 16384;
-const CONNECTIONS_LIMIT: u64 = 16384;
+const CONNECTIONS_LIMIT: u64 = 131_072;
 /// Private C1 ledgers: bounded, strict and 0600, read through the same guards as plugin state.
 fn read_private_bounded(root: &Path, name: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
     let path = root.join(name);

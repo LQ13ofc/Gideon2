@@ -381,6 +381,9 @@ impl Core {
         }
     }
     fn start(&mut self, fakes: &[String], allow_public: bool) {
+        self.start_with(fakes, allow_public, &[]);
+    }
+    fn start_with(&mut self, fakes: &[String], allow_public: bool, extra: &[&str]) {
         let log = fs::File::create(&self.log).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_gideon-base"));
         command
@@ -394,6 +397,7 @@ impl Core {
         if allow_public {
             command.arg("--connections-allow-public");
         }
+        command.args(extra);
         let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -2050,4 +2054,396 @@ fn ha_revoke_wipes_the_token_locally_and_calls_stop() {
         core.call(json!({"op": "connection_set_token", "id": id, "token": HA_TOKEN}))["code"],
         "invalid_state"
     );
+}
+
+// ---- S5 E2.4 mcp: the Core launches the fake stdio server itself, inside the plugin sandbox ----
+
+fn mcp_core(dir: &Path, profile: &str, allow_public: bool) -> Core {
+    let mut core = Core::new(dir);
+    core.start_with(&[], allow_public, &["--connections-fake-mcp", profile]);
+    core
+}
+
+/// Server processes of the MCP fixture (the sandboxed interpreter), found by their command line.
+fn mcp_servers() -> Vec<u32> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir("/proc").unwrap().flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(raw) = fs::read(entry.path().join("cmdline")) else {
+            continue;
+        };
+        let argv: Vec<&[u8]> = raw.split(|b| *b == 0).filter(|a| !a.is_empty()).collect();
+        let has = |needle: &[u8]| argv.iter().any(|a| *a == needle);
+        let interpreter = argv
+            .first()
+            .is_some_and(|a| a.windows(6).any(|w| w == b"python"));
+        if interpreter && has(b"-I") && has(b"/plugin/main.py") && has(b"--profile") {
+            found.push(pid);
+        }
+    }
+    found
+}
+
+fn mcp_login(core: &mut Core, id: &str, consent: &[&str]) -> Value {
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "ok"
+    );
+    wait_until("mcp server answered initialize", || {
+        core.item(id)["pending_scopes"].is_array()
+    });
+    assert_eq!(
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": consent}))["code"],
+        "ok"
+    );
+    core.wait_status(id, "connected")
+}
+
+fn mcp_discover(core: &mut Core, id: &str) -> Value {
+    assert_eq!(core.op(id, "mcp.discover", json!({}))["code"], "ok");
+    wait_until("discover finished", || {
+        core.last_call()["operation"] == "mcp.discover" && core.last_call()["outcome"] == "ok"
+    });
+    core.item(id)["tools"].clone()
+}
+
+fn mcp_tool<'a>(tools: &'a Value, name: &str) -> &'a Value {
+    tools
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == name)
+        .unwrap_or_else(|| panic!("tool {name} not listed: {tools}"))
+}
+
+fn mcp_call_card(core: &mut Core, id: &str, tool: &str, args: Value, risk: &str) -> String {
+    let code = core.op(id, "mcp.call", json!({"tool": tool, "args": args}))["code"].clone();
+    assert_eq!(code, "pending_approval", "{tool}");
+    let pid = core.last_call()["proposal_id"].as_str().unwrap().to_owned();
+    let card = core.proposal(&pid);
+    assert_eq!(card["kind"], "connection");
+    assert_eq!(card["tool"], "conn:mcp.call");
+    assert_eq!(card["risk"], risk);
+    pid
+}
+
+fn settled(core: &mut Core, pid: &str) -> Value {
+    wait_until_value("proposal settled", || {
+        let card = core.proposal(pid);
+        (card["state"] != "pending" && card["state"] != "authorized").then_some(card)
+    })
+}
+
+#[test]
+fn mcp_without_the_fixed_registration_starts_nothing_and_the_flag_is_strict() {
+    let (_guard, dir) = fresh();
+    let mut core = Core::new(&dir);
+    core.start(&[], false);
+    let id = core.add("mcp", "sem registro");
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "real_backend_unsupported"
+    );
+    assert_eq!(core.item(&id)["status"], "disconnected");
+    assert_eq!(core.item(&id)["fake"], false);
+    assert!(mcp_servers().is_empty());
+    drop(core);
+    for args in [
+        vec![
+            "--connections-fake-mcp",
+            "sh -c id",
+            "--plugin-python",
+            PYTHON,
+        ],
+        vec!["--connections-fake-mcp", "good"],
+        vec![
+            "--connections-fake-mcp",
+            "good",
+            "--connections-fake-mcp",
+            "evil",
+            "--plugin-python",
+            PYTHON,
+        ],
+    ] {
+        let status = Command::new(env!("CARGO_BIN_EXE_gideon-base"))
+            .arg("--root")
+            .arg(dir.join("flags"))
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(!status.success(), "{args:?}");
+    }
+}
+
+#[test]
+fn mcp_connect_consents_per_scope_and_discover_lists_validated_tools() {
+    let (_guard, dir) = fresh();
+    let mut core = mcp_core(&dir, "good", false);
+    let id = core.add("mcp", "bom");
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "ok"
+    );
+    wait_until("pending scopes", || {
+        core.item(&id)["pending_scopes"].is_array()
+    });
+    let item = core.item(&id);
+    assert_eq!(item["fake"], true);
+    assert_eq!(item["pending_scopes"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        mcp_servers().len(),
+        1,
+        "one sandboxed server for the account"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": ["admin"]}))["code"],
+        "scope_not_requested"
+    );
+    assert_eq!(
+        core.call(
+            json!({"op": "connection_consent", "id": id, "scopes": ["mcp.discover", "mcp.call"]})
+        )["code"],
+        "ok"
+    );
+    let item = core.wait_status(&id, "connected");
+    assert_eq!(item["granted_scopes"], json!(["mcp.discover", "mcp.call"]));
+    assert_eq!(item["account_ref"], "fake-mcp");
+    let tools = mcp_discover(&mut core, &id);
+    assert_eq!(tools.as_array().unwrap().len(), 3);
+    assert_eq!(mcp_tool(&tools, "echo_note")["state"], "trusted");
+    assert_eq!(mcp_tool(&tools, "delete_note")["risk"], "destructive");
+    assert_eq!(mcp_tool(&tools, "echo_note")["risk"], "write");
+    let text = tools.to_string();
+    assert!(!text.contains("inputSchema") && !text.contains("sha256"));
+}
+
+#[test]
+fn mcp_call_waits_for_approval_and_returns_prefixed_untrusted_data() {
+    let (_guard, dir) = fresh();
+    let mut core = mcp_core(&dir, "good", false);
+    let id = core.add("mcp", "bom");
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    mcp_discover(&mut core, &id);
+    let pid = mcp_call_card(&mut core, &id, "echo_note", json!({"text": "oi"}), "write");
+    assert_eq!(core.last_call()["outcome"], "pending_approval");
+    assert!(core.proposal(&pid)["result"].is_null(), "nothing ran yet");
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}))
+            ["code"],
+        "ok"
+    );
+    let card = settled(&mut core, &pid);
+    assert_eq!(card["state"], "executed", "{card}");
+    let result: Value = serde_json::from_str(card["result"].as_str().unwrap()).unwrap();
+    assert_eq!(result["output"], "[mcp_output:echo_note] oi");
+    assert_eq!(result["untrusted"], true);
+    assert_eq!(core.last_call()["untrusted"], true);
+    // Arguments the schema does not allow never become a proposal.
+    for (tool, args) in [
+        ("echo_note", json!({})),
+        ("echo_note", json!({"text": 1})),
+        ("echo_note", json!({"text": "a", "x": 1})),
+        ("add_numbers", json!({"a": 1.5, "b": 2})),
+        ("nope", json!({})),
+    ] {
+        let code = core.op(&id, "mcp.call", json!({"tool": tool, "args": args}))["code"].clone();
+        assert!(
+            code == "invalid_args" || code == "unknown_tool",
+            "{tool} {args}: {code}"
+        );
+    }
+    let nested = core.op(
+        &id,
+        "mcp.call",
+        json!({"tool": "echo_note", "args": {"text": {"a": 1}}}),
+    );
+    assert_eq!(nested["code"], "invalid_args");
+}
+
+#[test]
+fn mcp_destructive_tool_needs_its_scope_and_never_runs_without_the_switch() {
+    let (_guard, dir) = fresh();
+    let mut core = mcp_core(&dir, "good", false);
+    let basic = core.add("mcp", "basico");
+    mcp_login(&mut core, &basic, &["mcp.discover", "mcp.call"]);
+    mcp_discover(&mut core, &basic);
+    assert_eq!(
+        core.op(
+            &basic,
+            "mcp.call",
+            json!({"tool": "delete_note", "args": {"id": "n1"}})
+        )["code"],
+        "scope_not_granted"
+    );
+    let full = core.add("mcp", "completo");
+    mcp_login(
+        &mut core,
+        &full,
+        &["mcp.discover", "mcp.call", "mcp.call_destructive"],
+    );
+    mcp_discover(&mut core, &full);
+    let pid = mcp_call_card(
+        &mut core,
+        &full,
+        "delete_note",
+        json!({"id": "n1"}),
+        "destructive",
+    );
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}))
+            ["code"],
+        "public_disabled"
+    );
+    assert_eq!(core.proposal(&pid)["state"], "pending");
+}
+
+#[test]
+fn mcp_changed_tools_need_reapproval_until_the_user_trusts_them() {
+    let (_guard, dir) = fresh();
+    let mut core = mcp_core(&dir, "changed_tools", false);
+    let id = core.add("mcp", "mutante");
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    let first = mcp_discover(&mut core, &id);
+    assert!(first
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["state"] == "trusted"));
+    let second = mcp_discover(&mut core, &id);
+    assert_eq!(
+        mcp_tool(&second, "export_notes")["state"],
+        "needs_reapproval"
+    );
+    assert_eq!(mcp_tool(&second, "echo_note")["state"], "trusted");
+    assert_eq!(
+        core.op(&id, "mcp.call", json!({"tool": "export_notes", "args": {}}))["code"],
+        "tool_not_trusted"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_trust_tools", "id": id, "tools": ["nope"]}))["code"],
+        "unknown_tool"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_trust_tools", "id": id, "tools": ["export_notes"]}))
+            ["code"],
+        "ok"
+    );
+    let pid = mcp_call_card(&mut core, &id, "export_notes", json!({}), "write");
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}))
+            ["code"],
+        "ok"
+    );
+    let card = settled(&mut core, &pid);
+    let result: Value = serde_json::from_str(card["result"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        result["output"],
+        "[mcp_output:export_notes] exported 2 notes"
+    );
+}
+
+#[test]
+fn mcp_evil_profile_rejects_big_and_nested_schemas_and_keeps_text_as_data() {
+    let (_guard, dir) = fresh();
+    let mut core = mcp_core(&dir, "evil", false);
+    let id = core.add("mcp", "malicioso");
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    let tools = mcp_discover(&mut core, &id);
+    assert_eq!(tools.as_array().unwrap().len(), 6);
+    let big = mcp_tool(&tools, "oversized_schema");
+    assert_eq!(
+        (big["state"].as_str(), big["reason"].as_str()),
+        (Some("rejected"), Some("tool_too_large"))
+    );
+    let nested = mcp_tool(&tools, "nested_ref");
+    assert_eq!(
+        (nested["state"].as_str(), nested["reason"].as_str()),
+        (Some("rejected"), Some("schema_not_simple"))
+    );
+    assert!(mcp_tool(&tools, "lookup_note")["description"]
+        .as_str()
+        .unwrap()
+        .contains("IGNORE PREVIOUS INSTRUCTIONS"));
+    for name in ["oversized_schema", "nested_ref"] {
+        assert_eq!(
+            core.op(&id, "mcp.call", json!({"tool": name, "args": {}}))["code"],
+            "tool_rejected"
+        );
+        assert_eq!(
+            core.call(json!({"op": "connection_trust_tools", "id": id, "tools": [name]}))["code"],
+            "tool_rejected"
+        );
+    }
+    // The description text did not grant anything or start anything.
+    assert_eq!(
+        core.item(&id)["granted_scopes"],
+        json!(["mcp.discover", "mcp.call"])
+    );
+    assert!(core.snap()["tool_proposals"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn mcp_disconnect_kills_the_server_a_crash_is_an_error_and_revoke_forgets_the_trust() {
+    let (_guard, dir) = fresh();
+    let mut core = mcp_core(&dir, "good", false);
+    let id = core.add("mcp", "ciclo");
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    mcp_discover(&mut core, &id);
+    let running = mcp_servers();
+    assert_eq!(running.len(), 1);
+    assert_eq!(
+        core.call(json!({"op": "connection_disconnect", "id": id}))["code"],
+        "ok"
+    );
+    wait_until("server gone after disconnect", || mcp_servers().is_empty());
+    assert_eq!(
+        core.op(&id, "mcp.discover", json!({}))["code"],
+        "not_connected"
+    );
+    assert!(
+        core.item(&id)["tools"].is_array(),
+        "trust is kept on disconnect"
+    );
+    // crash
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    let pid_server = mcp_servers()[0];
+    // SAFETY: SIGKILL to the sandboxed interpreter this test just started.
+    unsafe { libc_kill(pid_server as i32, 9) };
+    wait_until("server gone after the kill", || mcp_servers().is_empty());
+    let card = mcp_call_card(&mut core, &id, "echo_note", json!({"text": "x"}), "write");
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": card, "decision": "authorize"}))
+            ["code"],
+        "ok"
+    );
+    let done = settled(&mut core, &card);
+    assert_eq!(done["state"], "failed");
+    assert_eq!(done["reason"], "mcp_crashed");
+    assert_eq!(core.item(&id)["status"], "error");
+    assert!(
+        core.snap()["connections"].is_object(),
+        "the Core keeps serving"
+    );
+    // reconnect, then revoke forgets the tools
+    mcp_login(&mut core, &id, &["mcp.discover"]);
+    assert_eq!(
+        core.call(json!({"op": "connection_revoke", "id": id}))["code"],
+        "ok"
+    );
+    wait_until("server gone after revoke", || mcp_servers().is_empty());
+    assert!(core.item(&id)["tools"].is_null());
+}
+
+extern "C" {
+    #[link_name = "kill"]
+    fn libc_kill(pid: i32, sig: i32) -> i32;
 }

@@ -25,6 +25,7 @@ async fn main() -> io::Result<()> {
     // Test/dev only: S5 provider fakes on loopback (`provider=http://127.0.0.1:port`, repeatable).
     let mut connection_fakes = std::collections::BTreeMap::new();
     let mut connections_allow_public = false;
+    let mut connection_fake_mcp: Option<String> = None;
     let mut agent = gideon_base::agent::Options::default();
     while let Some(option) = args.next() {
         match option.as_str() {
@@ -92,6 +93,17 @@ async fn main() -> io::Result<()> {
                 if connection_fakes.insert(provider, url).is_some() {
                     return Err(io::Error::other("duplicate --connections-fake"));
                 }
+            }
+            // Test/dev only: the fixed fake MCP registration (profile of tests/fixtures/connections/mcp_server.py).
+            // No command is ever accepted from the UI or a skill; without this flag `mcp` connect is unsupported.
+            "--connections-fake-mcp" if connection_fake_mcp.is_none() => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| io::Error::other("invalid --connections-fake-mcp"))?;
+                connection_fake_mcp = Some(
+                    gideon_base::connections::parse_fake_mcp(&raw)
+                        .map_err(|_| io::Error::other("invalid --connections-fake-mcp"))?,
+                );
             }
             "--connections-allow-public" if !connections_allow_public => {
                 connections_allow_public = true
@@ -162,9 +174,16 @@ async fn main() -> io::Result<()> {
             "--connections-fake requires --plugin-python",
         ));
     }
+    // The fake MCP server runs in the plugin sandbox, so it needs the same interpreter.
+    if connection_fake_mcp.is_some() && plugin_python.is_none() {
+        return Err(io::Error::other(
+            "--connections-fake-mcp requires --plugin-python",
+        ));
+    }
     gideon_base::connections::configure(gideon_base::connections::Options {
         fakes: connection_fakes,
         allow_public: connections_allow_public,
+        fake_mcp: connection_fake_mcp,
     })
     .map_err(|_| io::Error::other("connections options already set"))?;
     if tts.is_some() && !commands_sandbox {
