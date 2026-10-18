@@ -1802,9 +1802,10 @@ class SkillContract(unittest.TestCase):
         for text,problem in [('[1]','Deve ser um objeto JSON'),('{','Entrada não é JSON válido'),('{"a":NaN}','Entrada não é JSON válido'),('{"a":Infinity}','Entrada não é JSON válido'),('{"a":"\ud800"}','Entrada não é JSON válido'),(boundary+' ','JSON acima de 16 KiB'),(None,'JSON inválido')]:
             with self.subTest(text=str(text)[:24]):self.assertEqual(skill_json(text),(None,problem))
     def test_llm_draft_output_is_bounded_plain_text_and_never_enabled(self):
-        draft={'draft_id':'draft_1','version':'1.0.0','state':'draft','requirements':['llm_engine'],'ambiguities':[],'preview':['ler nota'],'diff':'+ read'}
+        # preview is one {id, call} per manifest step (the llm_engine 1.2.0 shape, verify_s4_share.py D3); validation is {ok: true}.
+        draft={'draft_id':'draft_1','version':'1.0.0','state':'draft','requirements':['llm_engine'],'ambiguities':[],'preview':[{'id':'read','call':'tool:get_time'}],'diff':'+ read','validation':{'ok':True}}
         self.assertTrue(valid_skill_draft(draft));self.assertTrue(valid_skill_draft({**draft,'state':'revised'}));self.assertTrue(valid_skill_draft({k:v for k,v in draft.items() if k!='diff'}))
-        for key,value in [('state','enabled'),('state','approved'),('draft_id','a\nb'),('requirements',['x']*9),('preview',['x'*257]),('diff','x'*2049),('extra',1)]:
+        for key,value in [('state','enabled'),('state','approved'),('draft_id','a\nb'),('requirements',['x']*9),('preview',['ler nota']),('preview',[{'id':'read','call':'x'*129}]),('preview',[{'id':'read','call':'tool:get_time','args':{}}]),('preview',[{'id':'Read','call':'tool:get_time'}]),('validation',{'ok':False}),('validation',{'ok':True,'extra':1}),('diff','x'*2049),('extra',1)]:
             with self.subTest(key=key,value=str(value)[:12]):self.assertFalse(valid_skill_draft({**draft,key:value}))
         self.assertFalse(valid_skill_draft({k:v for k,v in draft.items() if k!='state'}))
 class SkillBridge(unittest.TestCase):
@@ -1878,7 +1879,7 @@ class SkillBridge(unittest.TestCase):
         self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':'capability_invoke','capability':SKILL_DRAFT_CAPABILITY,'input':{'description':'Ler uma nota'},'deadline_ms':30000})
         answer(peer,request,skills_snap(skills_block(),llm=True));settle(bridge)
         self.assertEqual(bridge.skillsResult,PENDING_SKILL_DRAFT);self.assertTrue(bridge.skillsBusy)
-        output={'draft_id':'draft_1','version':'1.0.0','state':'draft','requirements':['llm_engine'],'ambiguities':[],'preview':['ler nota']}
+        output={'draft_id':'draft_1','version':'1.0.0','state':'draft','requirements':['llm_engine'],'ambiguities':[],'preview':[{'id':'read','call':'tool:get_time'}],'validation':{'ok':True}}
         capability={'capability':SKILL_DRAFT_CAPABILITY,'plugin_id':'llm_engine','ok':True,'output':output,'elapsed_ms':12}
         bridge.refresh();answer(peer,next_request(peer),{**skills_snap(skills_block(),llm=True),'capability_result':capability});settle(bridge)
         self.assertEqual(bridge.skillDraftOutput['draft_id'],'draft_1');self.assertFalse(bridge.skillsBusy);self.assertIn('draft_1',bridge.skillsResult)

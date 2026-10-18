@@ -30,6 +30,8 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
     scripted run so the Core asks for approval on one state-changing step). The phase clicks only the user's own decisions.
     skills-ready       Skills offered; the enabled fixture row reads 'Estado: habilitada'
     skills-validated   Validar of the manifest typed in the editor shows the Core answer as PlainText; the skill list does not change
+    skills-draft       --llm yes: Gerar com LLM turns the typed description into a draft the Core created (state draft, never enabled);
+                       --llm no: the button is disabled and the page says llm_engine is not running
     skills-awaiting    Executar started a run; the awaiting step shows Autorizar and Negar
     skills-run         after Autorizar the run state is done and shown as PlainText
     skills-import      the import preview of fixture-note shows publisher 'não verificado'; Instalar como rascunho is enabled only
@@ -42,7 +44,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--llm',choices=['yes','no'],default='no',help='skills phase: yes = llm_engine runs (Gerar com LLM is used), no = plugin absent (the button must say so)');parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -338,16 +340,36 @@ elif args.phase=='skills':
     check('validation answer shown as PlainText from the Core',result.property('text')==bridge.skillsResult and plain is True and not expression.hasError())
     check('validation wrote nothing: the skill list is unchanged',[(s['id'],s['version'],s['state']) for s in bridge.skillsItems]==before)
     Path(args.artifacts,'skills-validated').touch()
+    if args.llm=='yes':
+        check('Gerar com LLM is offered while llm_engine runs',bridge.skillLlmAvailable)
+        description=visual_item('skillDescription');description.forceActiveFocus();description.setProperty('text','Lista a hora atual');QTest.qWait(20)
+        draft=visual_item('skillDraftWithLlm');check('Gerar com LLM enabled once a description is typed',draft.property('enabled'));draft.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        wait(lambda:bool(bridge.skillDraftOutput.get('draft_id')) and not bridge.skillsBusy,90)
+        output=bridge.skillDraftOutput
+        draft_id=output['draft_id'].split('@')[0]
+        check('LLM draft created by the Core as a draft (never enabled, never active)',output['state']=='draft' and any(s['id']==draft_id and s['state']=='draft' and s['source']=='llm_draft' and s['active'] is False for s in bridge.skillsItems))
+        header=None;stack=[window.contentItem()]
+        while stack and header is None:
+            current=stack.pop()
+            if str(current.property('text') or '').startswith('Rascunho '+output['draft_id']):header=current
+            stack.extend(current.childItems())
+        check('LLM draft output shown as PlainText from the Core answer',header is not None and header.property('visible'))
+        expression=QQmlExpression(QQmlEngine.contextForObject(header),header,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+        check('draft header is PlainText',plain is True and not expression.hasError())
+    else:
+        check('Gerar com LLM says llm_engine is not running and stays disabled',not bridge.skillLlmAvailable and visual_item('skillLlmUnavailable').property('visible') and not visual_item('skillDraftWithLlm').property('enabled'))
+    Path(args.artifacts,'skills-draft').touch()
     run=visual_item('skillRun_'+enabled['id']);run.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bridge.skillCurrentRun.get('state')=='awaiting_approval',60)
     awaiting=next(s for s in bridge.skillCurrentRun['steps'] if s['state']=='awaiting_approval')
     check('awaiting step offers Autorizar and Negar',visual_item('skillAuthorize_'+awaiting['id']).property('visible') and visual_item('skillDeny_'+awaiting['id']).property('visible'))
     Path(args.artifacts,'skills-awaiting').touch()
     visual_item('skillAuthorize_'+awaiting['id']).forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
-    wait(lambda:bridge.skillCurrentRun.get('state') in ('done','failed','cancelled','rolled_back'),90)
-    check('run reached done after the user decision',bridge.skillCurrentRun.get('state')=='done')
-    runline=visual_item('skillRunState');expression=QQmlExpression(QQmlEngine.contextForObject(runline),runline,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
-    check('run state shown as PlainText',plain is True and not expression.hasError() and 'concluída' in runline.property('text'))
+    # The Core drops the run block when a run ends (docs/S4.md D2): the outcome is the newest Histórico row.
+    wait(lambda:not bridge.skillCurrentRun.get('run_id') and bool(bridge.skillHistory) and bridge.skillHistory[-1]['state'] in ('done','failed','cancelled','rolled_back'),90)
+    check('run reached done after the user decision',bridge.skillHistory[-1]['state']=='done' and bridge.skillHistory[-1]['skill']==enabled['id'])
+    runline=visual_item('skillHistory_'+str(len(bridge.skillHistory)-1));expression=QQmlExpression(QQmlEngine.contextForObject(runline),runline,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
+    check('run outcome shown as PlainText in Histórico',plain is True and not expression.hasError() and 'concluída' in runline.property('text'))
     Path(args.artifacts,'skills-run').touch()
     name=visual_item('skillImportName');name.forceActiveFocus();name.setProperty('text','fixture-note');QTest.qWait(20)
     visual_item('skillImport').forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
@@ -356,8 +378,9 @@ elif args.phase=='skills':
     confirm=visual_item('skillImportConfirm')
     check('confirm enabled only with no findings',confirm.property('enabled')==(len(bridge.skillImportPreview.get('findings') or [])==0))
     if not bridge.skillImportPreview.get('findings'):
-        confirm.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);wait(lambda:not bridge.skillsBusy,40)
-        check('confirmed import is a draft and nothing is enabled',any(s['id']==bridge.skillImportPreview.get('id') and s['state']=='draft' for s in bridge.skillsItems) and not any(s['state']=='enabled' and s['source']=='imported' for s in bridge.skillsItems))
+        imported_id=bridge.skillImportPreview.get('id')
+        confirm.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);wait(lambda:not bridge.skillsBusy and not bridge.skillImportPreview.get('name'),40)
+        check('confirmed import is a draft and nothing is enabled',any(s['id']==imported_id and s['state']=='draft' and s['source']=='imported' for s in bridge.skillsItems) and not any(s['state']=='enabled' and s['source']=='imported' for s in bridge.skillsItems))
     Path(args.artifacts,'skills-import').touch()
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':

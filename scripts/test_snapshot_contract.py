@@ -459,5 +459,78 @@ class SnapshotContract(unittest.TestCase):
         self.assertTrue(data['command']['receipt']['verified'])
         self.core.stop()
 
+    def test_skill_lifecycle_snapshots_validate_against_real_core(self):
+        # S4 (docs/S4.md D2, D4): every snapshot of a skill lifecycle on the real Core must pass the bridge validator,
+        # the skills block and the import preview included. Synthetic registry tools only (no plugin), private home.
+        home = self.td / 'home'
+        home.mkdir()
+        self.core.extra = ['--agent-synthetic', '--home', str(home)]
+        self.core.start()
+        skill = 'skill_contract_rw'
+        manifest = {'schema_version': 1, 'id': skill, 'name': 'Skill de contrato', 'version': '1.0.0',
+                    'publisher': {'id': 'gideon-test', 'name': 'Gideon test'},
+                    'description': 'Skill sintetica do teste de contrato', 'license': 'TEST-ONLY',
+                    'min_runtime': '0.1.0', 'triggers': [], 'inputs': {},
+                    'outputs': {'epoch': {'type': 'int'}, 'text': {'type': 'string'}},
+                    'dependency_capabilities': ['tool:synth_screen_read', 'tool:synth_set_text'],
+                    'permissions_required': [], 'prerequisites': [],
+                    'attestations': [{'kind': 'test', 'text': 'synthetic test only, never shipped'}],
+                    'steps': [
+                        {'id': 'read', 'call': 'tool:synth_screen_read', 'args': {},
+                         'save': {'epoch': 'epoch', 'text': 'text'}},
+                        {'id': 'write', 'call': 'tool:synth_set_text',
+                         'args': {'epoch': '${steps.read.epoch}', 'text': 'contrato'}}]}
+
+        def rev():
+            return self.core.req()['skills']['revision']
+
+        def ok(reply):
+            self.assertEqual(reply['code'], 'ok', reply)
+
+        self.core.snap('skills empty')
+        ok(self.core.req('skill_save_draft', manifest=manifest))
+        self.core.snap('skill draft saved')
+        ok(self.core.req('skill_dry_run', id=skill, skill_version='1.0.0', inputs={}))
+        self.core.snap('skill tested by dry run')
+        ok(self.core.req('skill_approve', id=skill, skill_version='1.0.0', revision=rev()))
+        self.core.snap('skill approved')
+        ok(self.core.req('skill_enable', id=skill, revision=rev()))
+        self.core.snap('skill enabled')
+        ok(self.core.req('skill_run', id=skill, inputs={}))
+        waiting = self.core.wait(lambda s: s['skills']['run'] is not None
+                                 and s['skills']['run']['state'] == 'awaiting_approval', 20, 'skill step awaiting')
+        self.core.snap('skill run awaiting approval of a state-changing step')
+        ok(self.core.req('skill_decide', run_id=waiting['skills']['run']['run_id'],
+                         step=waiting['skills']['run']['step'], decision='authorize'))
+        self.core.wait(lambda s: s['skills']['run'] is None, 20, 'skill run finished')
+        self.core.snap('skill run finished')
+        self.assertEqual(self.core.req()['skills']['history'][-1]['state'], 'done')
+        ok(self.core.req('skill_export', id=skill, skill_version='1.0.0'))
+        package = home / 'skill-exports' / f'{skill}-1.0.0.gskill'
+        self.assertTrue(package.exists())
+        self.core.snap('skill exported')
+        ok(self.core.req('skill_remove', id=skill, revision=rev()))
+        self.core.snap('skill removed')
+        imports = home / 'skill-imports'
+        imports.mkdir()
+        (imports / 'contract.gskill').write_bytes(package.read_bytes())
+        ok(self.core.req('skill_import', name='contract'))
+        preview = self.core.snap('import preview')['skills']['import']
+        self.assertTrue(preview['unverified'])
+        self.assertEqual(preview['findings'], [])
+        ok(self.core.req('skill_import_confirm', name='contract', revision=rev()))
+        self.core.snap('import confirmed as draft')
+        tampered = json.loads(package.read_bytes())
+        tampered['manifest']['description'] = 'Descricao trocada depois da exportacao'
+        (imports / 'tampered.gskill').write_text(json.dumps(tampered), encoding='utf-8')
+        ok(self.core.req('skill_import', name='tampered'))
+        finding = self.core.snap('import preview with hash_mismatch finding')['skills']['import']
+        # The confirmed import is still in the ledger, so the same id is also a duplicate (both findings are real).
+        # Two hash checks fail (the manifest digest and the package digest), so the codes are a set, not a list.
+        self.assertEqual({f['code'] for f in finding['findings']},
+                         {'skill_invalid:duplicate_id', 'skill_invalid:hash_mismatch'})
+        self.assertTrue(finding['duplicate'])
+        self.core.stop()
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

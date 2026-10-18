@@ -758,7 +758,7 @@ ApplicationWindow {
                             Label { text: "Rascunho " + core.skillDraftOutput.draft_id + " · v" + core.skillDraftOutput.version + " · " + window.skillStateText(core.skillDraftOutput.state) + " · nada foi habilitado"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Label { text: "Requisitos: " + ((core.skillDraftOutput.requirements || []).join(", ") || "nenhum"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Label { text: "Ambiguidades: " + ((core.skillDraftOutput.ambiguities || []).join("; ") || "nenhuma"); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            Label { text: "Passos previstos:\n" + ((core.skillDraftOutput.preview || []).join("\n") || "nenhum"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Label { text: "Passos previstos:\n" + ((core.skillDraftOutput.preview || []).map(function (p) { return p.id + " → " + p.call }).join("\n") || "nenhum"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Label { visible: !!core.skillDraftOutput.diff; text: "Diferença:\n" + (core.skillDraftOutput.diff || ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
                         }
                         // Importar: the Core reads only <home>/skill-imports/<name>.gskill and previews it; nothing is installed until the confirmation.
@@ -826,6 +826,8 @@ ApplicationWindow {
                             model: core.skillHistory
                             delegate: Label {
                                 required property var modelData
+                                required property int index
+                                objectName: "skillHistory_" + index
                                 text: modelData.run_id + " · " + modelData.skill + " v" + modelData.version + " · " + window.skillRunText(modelData.state) + (modelData.step ? " · passo " + modelData.step : "") + (modelData.codes.length ? " · " + modelData.codes.map(function (c) { return core.codeMessage(c) }).join("; ") : "")
                                 textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
                             }

@@ -17,7 +17,7 @@ RUNTIME_STATES=('disabled','starting','running','failed','stopped')
 # Codes Core writes to plugin last_error (src/plugins.rs runtime start, violation and crash paths).
 PLUGIN_LAST_ERRORS=frozenset({'plugin_crashed','plugin_cpu_exceeded','plugin_output_invalid','plugin_start_failed','plugin_not_runnable','plugin_quarantined','handshake_timeout','handshake_mismatch'})
 # Codes a capability_result can carry (src/plugins.rs PASS_THROUGH_ERRORS plus Core-owned results).
-CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable','opt_in_required','stale_screen','unsupported','unknown_service'})  # C4 codes (docs/C4.md): plugin answers, never Core-owned
+CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable','opt_in_required','stale_screen','unsupported','unknown_service','unknown_element','no_focus','unknown_route','unknown_app','indicator_off','already_recording','not_recording','world_unavailable','skill_invalid','model_output_invalid'})  # C4/S4 codes: plugin answers that the Core passes through unchanged (src/plugins.rs PASS_THROUGH_ERRORS)
 # Tool proposal reasons (src/tools.rs and src/core.rs tool_denied/tool_failed).
 TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_failed','executor_unavailable','user_denied','invalid_args','unknown_tool','busy'})
 HUB_REASONS=('ledger_missing','ledger_invalid')
@@ -735,6 +735,7 @@ SKILL_OP_CODES=frozenset(SKILL_OP_MESSAGES)|frozenset({'missing_dependency','per
 SKILL_CODES=SKILL_OP_CODES|frozenset('skill_invalid:'+reason for reason in SKILL_REASONS)
 CODE_MESSAGES.update({f'skill_invalid:{reason}':text for reason,text in SKILL_REASON_MESSAGES.items()})
 CODE_MESSAGES.update({code:text for code,text in SKILL_OP_MESSAGES.items() if code not in CODE_MESSAGES})
+CODE_MESSAGES.update({'skill_invalid':'Skill recusada pela validação do Core; nada foi gravado','model_output_invalid':'O modelo não devolveu um manifest JSON válido'}) 
 SKILL_ID=re.compile(r'[a-z][a-z0-9_]{2,40}');SKILL_STEP_ID=re.compile(r'[a-z][a-z0-9_]{0,23}');SKILL_IMPORT_NAME=re.compile(r'[A-Za-z0-9._-]{1,64}')
 SKILL_SEMVER=re.compile(r'(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})')
 # Limits mirror docs/S4.md: manifest and inputs at most 16 KiB; 16 skills x 3 versions in the ledger; 16 steps; 32 history entries; outputs at most 1 KiB.
@@ -747,7 +748,7 @@ SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OP
 SKILL_HISTORY_KEYS=frozenset({'run_id','skill','version','state','step','codes'})
 SKILL_IMPORT_KEYS=frozenset({'name','id','version','publisher','unverified','permissions_required','missing_deps','permission_delta','permissions_escalated','duplicate','findings'})
 SKILL_FINDING_KEYS=frozenset({'code','field'})
-SKILL_DRAFT_KEYS=frozenset({'draft_id','version','state','requirements','ambiguities','preview'});SKILL_DRAFT_OPTIONAL=frozenset({'diff'})
+SKILL_DRAFT_KEYS=frozenset({'draft_id','version','state','requirements','ambiguities','preview'});SKILL_DRAFT_OPTIONAL=frozenset({'diff','validation'})
 def skill_json(text):
     """Local rule for a manifest or the inputs of a run: a JSON object of at most 16 KiB. Returns (value, problem); a None problem means the value may be sent."""
     try:
@@ -836,10 +837,16 @@ def valid_skill_draft(output):
     if not (isinstance(output,dict) and set(output)<=SKILL_DRAFT_KEYS|SKILL_DRAFT_OPTIONAL and SKILL_DRAFT_KEYS<=set(output)):return False
     # D3: draft_put creates only draft, or revised in draft; an approved or enabled version is never the output of the LLM.
     if not (text_ok(output['draft_id'],64) and isinstance(output['version'],str) and SKILL_SEMVER.fullmatch(output['version']) and output['state'] in ('draft','revised')):return False
-    for key,limit,size in (('requirements',SKILL_CODES_LIMIT,128),('ambiguities',SKILL_CODES_LIMIT,256),('preview',SKILL_STEPS_LIMIT,256)):
+    for key,limit,size in (('requirements',SKILL_CODES_LIMIT,128),('ambiguities',SKILL_CODES_LIMIT,256)):
         value=output[key]
         if not (isinstance(value,list) and len(value)<=limit and all(isinstance(v,str) and plain_text(v,size) for v in value)):return False
+    # preview: one {id, call} per manifest step (the plugin's _preview shape), both PlainText.
+    preview=output['preview']
+    if not (isinstance(preview,list) and len(preview)<=SKILL_STEPS_LIMIT and all(
+            isinstance(step,dict) and set(step)=={'id','call'} and isinstance(step['id'],str) and SKILL_STEP_ID.fullmatch(step['id'])
+            and plain_text(step['call'],128) for step in preview)):return False
     if 'diff' in output and not plain_text(output['diff'],2048):return False
+    if 'validation' in output and output['validation']!={'ok':True}:return False
     return bounded_output(output)
 # op -> (result channel, done message or builder). One table drives every Core answer.
 OPS={
