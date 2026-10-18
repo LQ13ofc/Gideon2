@@ -154,6 +154,7 @@ Control endpoints (tests only)
   POST /__control/set_token                {token} install token (1..256 chars); {token: null} revokes.
                                            Reply never echoes the token.
   POST /__control/set_instance             {name} (A-Z a-z 0-9 _ . -, max 39)
+  POST /__control/set_friendly_name        {entity_id, friendly_name} (1..255 printable chars; 404 unknown entity)
   GET  /__control/state                    instance, token_set (bool), requests, auth_failures,
                                            entities, calls. Never contains the token.
 

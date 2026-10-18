@@ -1832,6 +1832,13 @@ impl Core {
                 .connection_op(storage.as_deref(), |c, l, st| {
                     c.remove(st, l, &id, revision)
                 }),
+            Operation::ConnectionSetToken {
+                id,
+                token,
+                revision,
+            } => self.connection_op(storage.as_deref(), |c, _, _| {
+                c.set_token(&id, token.expose(), revision)
+            }),
             Operation::SkillImportConfirm { name, revision } => {
                 crate::skills::wire_op(self.skill_import_confirm(&name, revision))
             }

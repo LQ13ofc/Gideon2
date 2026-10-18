@@ -1694,3 +1694,360 @@ fn google_account_mismatch_marks_the_account_as_error() {
     });
     assert_eq!(core.item(&id)["status"], "error");
 }
+
+// ---- S5 E2.3 homeassistant (tests/fixtures/connections/homeassistant_server.py) --------------
+
+const HA_TOKEN: &str = "ha-test-token-0123456789abcdef";
+const HA_BAD_TOKEN: &str = "ha-wrong-token-0123456789abcdef";
+
+fn ha_stub() -> Stub {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/connections/homeassistant_server.py");
+    Stub::spawn(&script, &["--port", "0"])
+}
+
+fn ha_core(dir: &Path, stub: &Stub, allow_public: bool) -> Core {
+    let mut core = Core::new(dir);
+    core.start(
+        &[format!("homeassistant=http://127.0.0.1:{}", stub.port)],
+        allow_public,
+    );
+    core
+}
+
+/// Connect, consent to `consent`, then paste `token` (the fake must hold `server_token` for the probe).
+fn ha_login(core: &mut Core, id: &str, consent: &[&str], token: &str) -> Value {
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "ok"
+    );
+    wait_until("ha connecting", || core.item(id)["status"] == "connecting");
+    assert_eq!(
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": consent}))["code"],
+        "ok"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": token}))["code"],
+        "ok"
+    );
+    core.wait_status(id, "connected")
+}
+
+fn ha_card(core: &mut Core, id: &str, operation: &str, args: Value) -> String {
+    let code = core.op(id, operation, args)["code"].clone();
+    assert_eq!(code, "pending_approval", "{operation}");
+    let pid = core.last_call()["proposal_id"].as_str().unwrap().to_owned();
+    let card = core.proposal(&pid);
+    assert_eq!(card["kind"], "connection");
+    assert_eq!(card["tool"], format!("conn:homeassistant.{operation}"));
+    pid
+}
+
+#[test]
+fn ha_connect_waits_for_consent_and_token_without_touching_the_network() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    assert_eq!(core.item(&id)["fake"], json!(true));
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "ok"
+    );
+    let item = wait_until_value("ha connecting with every scope pending", || {
+        let item = core.item(&id);
+        (item["status"] == "connecting").then_some(item)
+    });
+    assert_eq!(
+        item["pending_scopes"],
+        json!(["states.read", "services.call", "services.dangerous"])
+    );
+    assert!(item.get("user_code").is_none(), "{item}");
+    assert_eq!(
+        stub.state()["requests"],
+        json!(0),
+        "no request before the token"
+    );
+}
+
+#[test]
+fn ha_token_is_validated_by_one_probe_and_connects_with_the_consented_scopes() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    let item = ha_login(&mut core, &id, &["states.read", "services.call"], HA_TOKEN);
+    assert_eq!(item["account_ref"], "demo-home");
+    assert_eq!(
+        item["granted_scopes"],
+        json!(["states.read", "services.call"])
+    );
+    assert_eq!(stub.state()["requests"], json!(1), "exactly one probe");
+    let text = core.snap().to_string();
+    assert!(!text.contains(HA_TOKEN), "token never in the snapshot");
+}
+
+#[test]
+fn ha_consent_comes_before_the_token_and_only_for_requested_scopes() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    core.call(json!({"op": "connection_connect", "id": id}));
+    wait_until("ha connecting", || core.item(&id)["status"] == "connecting");
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": HA_TOKEN}))["code"],
+        "consent_required"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": ["admin:all"]}))["code"],
+        "scope_not_requested"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": []}))["code"],
+        "invalid_args"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": "curto"}))["code"],
+        "consent_required",
+        "consent is checked before the token format"
+    );
+    core.call(json!({"op": "connection_consent", "id": id, "scopes": ["states.read"]}));
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": "curto"}))["code"],
+        "invalid_token"
+    );
+    assert_eq!(
+        stub.state()["requests"],
+        json!(0),
+        "nothing reached the fake"
+    );
+}
+
+#[test]
+fn ha_wrong_token_is_reauth_required_and_nothing_is_stored() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    core.call(json!({"op": "connection_connect", "id": id}));
+    wait_until("ha connecting", || core.item(&id)["status"] == "connecting");
+    core.call(json!({"op": "connection_consent", "id": id, "scopes": ["states.read"]}));
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": HA_BAD_TOKEN}))["code"],
+        "ok"
+    );
+    wait_until("reauth after the rejected token", || {
+        core.item(&id)["status"] == "reauth_required"
+    });
+    assert!(core.item(&id)["granted_scopes"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!core.snap().to_string().contains(HA_BAD_TOKEN));
+    assert_eq!(
+        core.op(&id, "states.list", json!({}))["code"],
+        "scope_not_granted",
+        "the reauth account granted nothing: no request, connect again"
+    );
+}
+
+#[test]
+fn ha_read_needs_the_scope_and_never_reaches_the_network_without_it() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    ha_login(&mut core, &id, &["services.call"], HA_TOKEN);
+    let before = stub.state()["requests"].as_u64().unwrap();
+    assert_eq!(
+        core.op(&id, "states.list", json!({}))["code"],
+        "scope_not_granted"
+    );
+    assert_eq!(
+        core.op(&id, "state.get", json!({"entity_id": "light.kitchen"}))["code"],
+        "scope_not_granted"
+    );
+    assert_eq!(stub.state()["requests"].as_u64().unwrap(), before);
+}
+
+#[test]
+fn ha_service_call_waits_for_approval_then_changes_the_state_on_the_fake() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    ha_login(&mut core, &id, &["states.read", "services.call"], HA_TOKEN);
+    let pid = ha_card(
+        &mut core,
+        &id,
+        "service.call",
+        json!({"domain": "light", "service": "turn_on", "entity_id": "light.kitchen", "brightness": 128}),
+    );
+    assert_eq!(core.proposal(&pid)["risk"], "write");
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}))
+            ["code"],
+        "ok"
+    );
+    let done = core.wait_proposal_done(&pid);
+    assert_eq!(done["state"], "executed", "{done}");
+    let entity = &stub.state()["entities"]["light.kitchen"];
+    assert_eq!(entity["state"], "on");
+    assert_eq!(entity["attributes"]["brightness"], json!(128));
+}
+
+#[test]
+fn ha_dangerous_service_needs_the_dangerous_scope_and_never_runs_without_the_switch() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let plain = core.add("homeassistant", "sem perigosos");
+    ha_login(
+        &mut core,
+        &plain,
+        &["states.read", "services.call"],
+        HA_TOKEN,
+    );
+    let before = stub.state()["requests"].as_u64().unwrap();
+    assert_eq!(
+        core.op(
+            &plain,
+            "service.call",
+            json!({"domain": "lock", "service": "unlock", "entity_id": "lock.front_door"})
+        )["code"],
+        "scope_not_granted"
+    );
+    assert_eq!(stub.state()["requests"].as_u64().unwrap(), before);
+
+    let strong = core.add("homeassistant", "com perigosos");
+    ha_login(
+        &mut core,
+        &strong,
+        &["states.read", "services.call", "services.dangerous"],
+        HA_TOKEN,
+    );
+    let pid = ha_card(
+        &mut core,
+        &strong,
+        "service.call",
+        json!({"domain": "lock", "service": "unlock", "entity_id": "lock.front_door"}),
+    );
+    assert_eq!(core.proposal(&pid)["risk"], "destructive");
+    let refused =
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}));
+    assert_eq!(refused["code"], "public_disabled", "{refused}");
+    assert_eq!(
+        stub.state()["entities"]["lock.front_door"]["state"],
+        "locked"
+    );
+    core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "deny"}));
+}
+
+#[test]
+fn ha_dangerous_service_runs_only_after_approval_with_the_switch() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, true);
+    let id = core.add("homeassistant", "casa perigosa");
+    ha_login(
+        &mut core,
+        &id,
+        &["states.read", "services.call", "services.dangerous"],
+        HA_TOKEN,
+    );
+    let pid = ha_card(
+        &mut core,
+        &id,
+        "service.call",
+        json!({"domain": "lock", "service": "unlock", "entity_id": "lock.front_door"}),
+    );
+    assert_eq!(core.proposal(&pid)["state"], "pending");
+    assert_eq!(
+        stub.state()["entities"]["lock.front_door"]["state"],
+        "locked"
+    );
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}))
+            ["code"],
+        "ok"
+    );
+    let done = core.wait_proposal_done(&pid);
+    assert_eq!(done["state"], "executed", "{done}");
+    assert_eq!(
+        stub.state()["entities"]["lock.front_door"]["state"],
+        "unlocked"
+    );
+    let text = core.snap().to_string();
+    assert!(!text.contains(HA_TOKEN));
+}
+
+#[test]
+fn ha_switch_turn_off_is_an_ordinary_write_not_a_dangerous_service() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "tomada");
+    ha_login(&mut core, &id, &["services.call"], HA_TOKEN);
+    let pid = ha_card(
+        &mut core,
+        &id,
+        "service.call",
+        json!({"domain": "switch", "service": "turn_off", "entity_id": "switch.coffee"}),
+    );
+    assert_eq!(core.proposal(&pid)["risk"], "write");
+    core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "deny"}));
+}
+
+#[test]
+fn ha_token_rejected_on_a_call_is_reauth_required_without_a_refresh() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    ha_login(&mut core, &id, &["states.read"], HA_TOKEN);
+    stub.control("set_token", json!({"token": null}));
+    assert_eq!(core.op(&id, "states.list", json!({}))["code"], "ok");
+    wait_until("reauth after the rejected token", || {
+        core.last_call()["code"] == "reauth_required"
+    });
+    assert_eq!(core.item(&id)["status"], "reauth_required");
+}
+
+#[test]
+fn ha_revoke_wipes_the_token_locally_and_calls_stop() {
+    let (_guard, dir) = fresh();
+    let stub = ha_stub();
+    stub.control("set_token", json!({"token": HA_TOKEN}));
+    let mut core = ha_core(&dir, &stub, false);
+    let id = core.add("homeassistant", "casa");
+    ha_login(&mut core, &id, &["states.read"], HA_TOKEN);
+    let before = stub.state()["requests"].as_u64().unwrap();
+    assert_eq!(
+        core.call(json!({"op": "connection_revoke", "id": id}))["code"],
+        "ok"
+    );
+    assert_eq!(core.item(&id)["status"], "disconnected");
+    assert_eq!(
+        stub.state()["requests"].as_u64().unwrap(),
+        before,
+        "no revoke request: HA has none"
+    );
+    assert_eq!(
+        core.op(&id, "states.list", json!({}))["code"],
+        "not_connected"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": HA_TOKEN}))["code"],
+        "invalid_state"
+    );
+}

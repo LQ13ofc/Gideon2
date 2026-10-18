@@ -244,6 +244,12 @@ pub enum Operation {
         args: serde_json::Value,
         revision: Option<u64>,
     },
+    /// S5 Home Assistant: the long-lived token, validated by one probe. Debug redacts it.
+    ConnectionSetToken {
+        id: String,
+        token: crate::secrets::SecretKey,
+        revision: Option<u64>,
+    },
     /// Transport-only: a skill manifest line over the frame bound is answered with `code`.
     Refused {
         code: &'static str,
@@ -679,6 +685,14 @@ enum WireRequest {
         id: String,
         operation: String,
         args: serde_json::Value,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    ConnectionSetToken {
+        version: u16,
+        request_id: String,
+        id: String,
+        token: crate::secrets::SecretKey,
         #[serde(default)]
         revision: Option<u64>,
     },
@@ -1261,6 +1275,21 @@ impl<'de> Deserialize<'de> for Request {
                     id,
                     operation,
                     args,
+                    revision,
+                },
+            ),
+            WireRequest::ConnectionSetToken {
+                version,
+                request_id,
+                id,
+                token,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionSetToken {
+                    id,
+                    token,
                     revision,
                 },
             ),

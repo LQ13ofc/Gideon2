@@ -115,6 +115,9 @@ CONN_MESSAGES={
     'device_expired':'Código de confirmação expirou; conecte a conta de novo',
     'consent_denied':'Consentimento recusado no servidor; nada foi concedido',
     'connections_storage_error':'Contas indisponíveis: o arquivo de contas não pôde ser lido ou gravado',
+    'consent_required':'Consinta os escopos antes de enviar o token; nada foi enviado ao servidor',
+    'invalid_token':'Token inválido: use o token de longa duração do Home Assistant (16 a 256 caracteres, sem espaços)',
+    'invalid_state':'Esta conta não está aguardando um token agora',
 }
 CONN_CODES=frozenset(CONN_MESSAGES)
 TOOL_REASONS=TOOL_REASONS|CONN_CODES
@@ -895,6 +898,9 @@ def valid_skill_draft(output):
     return bounded_output(output)
 # S5 connections: local rules for what the page sends and shows. Each rule mirrors docs/S5.md; the Core remains the authority.
 def conn_id_ok(value):return isinstance(value,str) and CONN_ID.fullmatch(value) is not None
+def conn_token_ok(value):
+    """Home Assistant long-lived token: 16..256 printable ASCII characters, no spaces (the Core checks the same rule)."""
+    return isinstance(value,str) and 16<=len(value)<=256 and value.isascii() and all(33<=ord(c)<=126 for c in value)
 def conn_text_ok(value,limit):return plain_text(value,limit) and bool(value.strip())
 def conn_label_problem(text):
     """Account name: trimmed, 1..64 UTF-8 bytes, no control characters. None means the name may be sent (the trimmed text is sent)."""
@@ -984,16 +990,18 @@ PENDING={'agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao C
     'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…',
     'skill_validate':'Validando manifest no Core…','skill_save_draft':'Salvando rascunho no Core…','skill_dry_run':'Simulando skill no Core…','skill_approve':'Aprovando skill no Core…','skill_enable':'Habilitando skill no Core…','skill_disable':'Desabilitando skill no Core…','skill_rollback':'Revertendo versão no Core…','skill_remove':'Removendo skill no Core…','skill_run':'Iniciando skill no Core…','skill_decide':'Enviando decisão do passo ao Core…','skill_cancel':'Cancelando skill no Core…','skill_export':'Exportando pacote pelo Core…','skill_import':'Lendo pacote pelo Core…','skill_import_confirm':'Importando como rascunho pelo Core…'}
 # S5 connection ops: the Core's ack code is the result; refusals of accounts and consent arrive as codes from CONN_MESSAGES.
-CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_remove','connection_call'})
+CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_remove','connection_call','connection_set_token'})
 OPS.update({
     'connection_add':('connections','Conta criada (desconectada)'),'connection_connect':('connections','Conexão iniciada: confirme o código no servidor e consinta os escopos'),
     'connection_consent':('connections','Escopos concedidos pelo usuário'),'connection_refresh':('connections','Atualização da conta solicitada'),
     'connection_disconnect':('connections','Conta desconectada; segredos apagados'),'connection_revoke':('connections','Acesso revogado no servidor'),
     'connection_remove':('connections','Conta removida'),'connection_call':('connections','Chamada enviada ao Core; resultado em Última chamada'),
+    'connection_set_token':('connections','Token enviado ao Core para validação; o campo foi limpo'),
 })
 PENDING.update({
     'connection_add':'Criando conta no Core…','connection_connect':'Iniciando conexão no Core…','connection_consent':'Enviando consentimento ao Core…','connection_refresh':'Atualizando conta no Core…',
     'connection_disconnect':'Desconectando conta no Core…','connection_revoke':'Revogando acesso no Core…','connection_remove':'Removendo conta no Core…','connection_call':'Chamando operação pelo Core…',
+    'connection_set_token':'Validando token no Core…',
 })
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
@@ -1957,6 +1965,14 @@ class Bridge(QObject):
         if item['status']!='connected':self._refuse('connections',CONN_MESSAGES['not_connected']);return
         if spec['scope'] not in item['granted_scopes']:self._refuse('connections',CONN_MESSAGES['scope_not_granted']);return
         self._conn_op('connection_call',id=ident,operation=operation,args=value)
+    @Slot(str,str)
+    def connectionSetToken(self,ident,token):
+        """Home Assistant (docs/S5.md E2.3): the long-lived token goes once to the Core, which validates it with one probe.
+        The bridge keeps no copy beyond the request; the page clears its field right after this call."""
+        if self._conn_unknown(ident):return
+        if not conn_token_ok(token):self._refuse('connections',CONN_MESSAGES['invalid_token']);return
+        if self._conn_item(ident)['provider']!='homeassistant':self._refuse('connections',CONN_MESSAGES['invalid_state']);return
+        self._conn_op('connection_set_token',id=ident,token=token,revision=self._conn_revision())
     @Slot(str,result=str)
     def connectionLabelProblem(self,label):return conn_label_problem(label) or ''
     @Property(bool,notify=changed)

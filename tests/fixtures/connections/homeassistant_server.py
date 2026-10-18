@@ -224,6 +224,17 @@ def _ctl_set_instance(store, base, body):
     return 200, {"instance": name}, {}
 
 
+def _ctl_set_friendly_name(store, base, body):
+    entity_id = body.get("entity_id")
+    name = body.get("friendly_name")
+    if not isinstance(entity_id, str) or entity_id not in store.entities:
+        raise Fail(404, "not_found")
+    if not isinstance(name, str) or not 1 <= len(name) <= 255 or not name.isprintable():
+        raise Fail(400, "invalid_request")
+    store.entities[entity_id]["attributes"]["friendly_name"] = name
+    return 200, {"ok": True}, {}
+
+
 def _ctl_state(store, base, body):
     return 200, {
         "instance": store.instance,
@@ -239,6 +250,7 @@ CONTROL_ROUTES = {
     "reset": ("POST", _ctl_reset),
     "set_token": ("POST", _ctl_set_token),
     "set_instance": ("POST", _ctl_set_instance),
+    "set_friendly_name": ("POST", _ctl_set_friendly_name),
     "state": ("GET", _ctl_state),
 }
 

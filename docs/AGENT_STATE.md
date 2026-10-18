@@ -36,3 +36,9 @@
 ## 2026-10-18 — E2.2 google (AUTO_VERIFIED against the fake, UNCOMMITTED)
 - Descriptor google (7 scopes, 7 ops), calendar_list_events / gmail_list_messages / calendar_create_event (fake flag only), scope loss at refresh -> reauth_required with reduced grant, reauth keeps granted scopes (github too). Gate scripts/verify_e22_google.py 111/0 (4 documented skips); evidence target/evidence/e22-google.json. Regression: verify_e1_connections 119/0; cargo test 323/0; snapshot contract 10/10; bridge protocol 156/0; fixtures 129 + 86 green. Wire differences: docs/S5.md "Resultado E2.2 google".
 - Next: E2.3 homeassistant (needs its own fake contract review first).
+
+## 2026-10-18 — E2.3 homeassistant (AUTO_VERIFIED against the fake, UNCOMMITTED)
+
+- Descriptor homeassistant (3 scopes, 3 operations), connection_set_token (one GET /api/states probe, token only in the vault), dangerous services (lock.unlock, lock.open, alarm_control_panel.*, cover.open_cover, cover.close_cover) destructive with services.dangerous, agent tools ha_get_state / ha_call_service with the fake flag. Gate scripts/verify_e23_ha.py 101/0 (4 documented skips); evidence target/evidence/e23-ha.json. Regression: verify_e1_connections 119/0, verify_e22_google 111/0, cargo test green (fmt, clippy -D warnings), snapshot contract 11/11, bridge protocol 156, fixtures 129 + 86.
+- Open point for the owner: garage_door.* is not in the dangerous list (five patterns requested). Details and wire differences: docs/S5.md "Resultado E2.3 homeassistant".
+- Next: E3 registry (src/registry.rs) or E2.4 mcp, per owner order.

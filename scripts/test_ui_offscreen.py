@@ -415,9 +415,31 @@ elif args.phase=='connections':
     account,scope=waiting
     box=visual_item('connScope_'+account['id']+'_'+scope);box.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);QTest.qWait(20)
     consent=visual_item('connConsent_'+account['id']);check('consent offered once the scope is ticked',consent.property('enabled'));consent.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
-    wait(lambda:not bridge.connectionsBusy and scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'],60)
-    check('the Core lists the consented scope as granted',scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'])
+    if account['provider']=='homeassistant':
+        # S5 E2.3: a token account keeps 'connecting' after consent (granted scopes arrive with the token probe).
+        wait(lambda:not bridge.connectionsBusy,60)
+        check('Home Assistant consent accepted: the account keeps waiting for its token',next(c for c in bridge.connectionsItems if c['id']==account['id'])['status']=='connecting')
+    else:
+        wait(lambda:not bridge.connectionsBusy and scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'],60)
+        check('the Core lists the consented scope as granted',scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'])
     Path(args.artifacts,'connections-consented').touch()
+    ha_token=os.environ.get('GIDEON_E23_HA_TOKEN')
+    if ha_token:
+        # S5 E2.3 set-token path: the token is typed into the hidden field, sent once, and the field is cleared.
+        ha=next((c for c in bridge.connectionsItems if c['provider']=='homeassistant' and c['status']=='connecting'),None)
+        check('a Home Assistant account waits for its token',ha is not None)
+        field=visual_item('connToken_'+ha['id'])
+        echo=QQmlExpression(QQmlEngine.contextForObject(field),field,'echoMode === TextInput.Password');masked=echo.evaluate();masked=masked[0] if isinstance(masked,tuple) else masked
+        check('the token field is a password field (echoMode Password)',masked is True and not echo.hasError())
+        field.forceActiveFocus()
+        for character in ha_token:QTest.keyClick(window,character)
+        send=visual_item('connSetToken_'+ha['id']);check('send enabled for a token of valid length',send.property('enabled'));send.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        # the field is cleared at the click; the delegate is rebuilt when the account connects, so read it before the wait
+        check('the token field is cleared right after sending',field.property('text')=='')
+        wait(lambda:not bridge.connectionsBusy and next(c for c in bridge.connectionsItems if c['id']==ha['id'])['status']=='connected',60)
+        check('the Core connects the Home Assistant account after the probe',next(c for c in bridge.connectionsItems if c['id']==ha['id'])['status']=='connected')
+        check('the bridge snapshot never holds the token',ha_token not in json.dumps(bridge.snapshot,ensure_ascii=False))
+        Path(args.artifacts,'connections-token').touch()
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':
     # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,

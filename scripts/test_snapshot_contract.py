@@ -28,6 +28,8 @@ PLUGIN_SRC = BASE / 'tests/fixtures/llm_engine.py'
 FAKE_SRC = BASE / 'tests/fixtures/fake_llm_server.py'
 GITHUB_SRC = BASE / 'tests/fixtures/connections/github_server.py'  # S5 E1 fake GitHub (loopback, stdlib)
 GOOGLE_SRC = BASE / 'tests/fixtures/connections/google_server.py'  # S5 E2.2 fake Google (loopback, stdlib)
+HA_SRC = BASE / 'tests/fixtures/connections/homeassistant_server.py'  # S5 E2.3 fake Home Assistant (loopback, stdlib)
+HA_TOKEN = 'ha-contract-token-0123456789'  # test-only long-lived token for the fake; never a real credential
 PYTHON = '/usr/bin/python3'
 PLUGIN = 'llm_engine'
 CAP = 'llm_engine.chat'
@@ -691,6 +693,75 @@ class SnapshotContract(unittest.TestCase):
         self.assertEqual(self.ok_op('connection_remove', id=cid)['code'], 'ok')
         c.snap('google removed')
         self.assertGreaterEqual(len(c.validated), 9, c.validated)
+        c.stop()
+
+    def test_homeassistant_snapshots_validate_against_real_core(self):
+        # S5 E2.3 (docs/S5.md, "E2.3 homeassistant"): every homeassistant state passes the bridge validator, the
+        # token never appears in any snapshot, and write and destructive service proposals validate.
+        base = self.start_loopback_fake(HA_SRC)
+        self.github_control(base, 'set_token', {'token': HA_TOKEN})
+        self.core.extra = ['--connections-fake', f'homeassistant={base}']
+        self.core.start()
+        c = self.core
+        c.snap('homeassistant: nothing added yet')
+        self.assertEqual(self.ok_op('connection_add', provider='homeassistant', label='contrato casa')['code'], 'ok')
+        cid = c.snap('homeassistant account added')['connections']['items'][0]['id']
+        self.assertEqual(self.ok_op('connection_connect', id=cid)['code'], 'ok')
+        pending = c.snap('homeassistant connecting: three pending scopes, no user_code')
+        item = next(i for i in pending['connections']['items'] if i['id'] == cid)
+        self.assertEqual(len(item['pending_scopes']), 3)
+        self.assertNotIn('user_code', item)
+        self.assertEqual(self.ok_op('connection_consent', id=cid, scopes=['states.read', 'services.call'])['code'],
+                         'ok')
+        self.assertEqual(self.ok_op('connection_set_token', id=cid, token=HA_TOKEN)['code'], 'ok')
+        c.wait(lambda s: next(i for i in s['connections']['items'] if i['id'] == cid)['status'] == 'connected',
+               20, 'homeassistant connected')
+        connected = c.snap('homeassistant connected with the consented scopes')
+        item = next(i for i in connected['connections']['items'] if i['id'] == cid)
+        self.assertEqual(item['account_ref'], 'demo-home')
+        self.assertEqual(set(item['granted_scopes']), {'states.read', 'services.call'})
+        self.assertNotIn(HA_TOKEN, json.dumps(connected))
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='states.list', args={})['code'], 'ok')
+        c.wait(lambda s: (s['connections'].get('last_call') or {}).get('outcome') == 'ok', 20, 'states listed')
+        c.snap('states list finished (entity, state and friendly name only)')
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='service.call', args={
+            'domain': 'light', 'service': 'turn_on', 'entity_id': 'light.kitchen', 'brightness': 100})['code'],
+            'pending_approval')
+        write_pid = c.snap('service write proposal pending')['connections']['last_call']['proposal_id']
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=write_pid, decision='authorize')['code'], 'ok')
+        c.wait(lambda s: any(p['proposal_id'] == write_pid and p['state'] == 'executed'
+                             for p in s['tool_proposals']), 20, 'service write executed')
+        done = c.snap('service write executed with the projected states')
+        proposal = next(p for p in done['tool_proposals'] if p['proposal_id'] == write_pid)
+        self.assertEqual(proposal['tool'], 'conn:homeassistant.service.call')
+        self.assertEqual(sorted(json.loads(proposal['result'])[0]), ['attributes', 'entity_id', 'state'])
+        self.assertNotIn(HA_TOKEN, json.dumps(done))
+
+        strong = self.ok_op('connection_add', provider='homeassistant', label='contrato perigoso')
+        self.assertEqual(strong['code'], 'ok')
+        sid = next(i['id'] for i in c.snap('second homeassistant account added')['connections']['items']
+                   if i['label'] == 'contrato perigoso')
+        self.assertEqual(self.ok_op('connection_connect', id=sid)['code'], 'ok')
+        self.assertEqual(self.ok_op('connection_consent', id=sid,
+                                    scopes=['states.read', 'services.call', 'services.dangerous'])['code'], 'ok')
+        self.assertEqual(self.ok_op('connection_set_token', id=sid, token=HA_TOKEN)['code'], 'ok')
+        c.wait(lambda s: next(i for i in s['connections']['items'] if i['id'] == sid)['status'] == 'connected',
+               20, 'second homeassistant connected')
+        self.assertEqual(self.ok_op('connection_call', id=sid, operation='service.call', args={
+            'domain': 'lock', 'service': 'unlock', 'entity_id': 'lock.front_door'})['code'], 'pending_approval')
+        lock_pid = c.snap('destructive unlock proposal pending')['connections']['last_call']['proposal_id']
+        lock = next(p for p in c.snap('unlock card')['tool_proposals'] if p['proposal_id'] == lock_pid)
+        self.assertEqual((lock['kind'], lock['risk']), ('connection', 'destructive'))
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=lock_pid, decision='deny')['code'], 'ok')
+
+        for account in (cid, sid):
+            self.assertEqual(self.ok_op('connection_disconnect', id=account)['code'], 'ok')
+            self.assertEqual(self.ok_op('connection_remove', id=account)['code'], 'ok')
+        self.assertNotIn(HA_TOKEN, json.dumps(c.snap('homeassistant removed')))
+        self.assertGreaterEqual(len(c.validated), 9, c.validated)
+        self.assertTrue(any('proposal' in label for label in c.validated), c.validated)
         c.stop()
 
 if __name__ == '__main__':

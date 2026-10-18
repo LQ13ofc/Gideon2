@@ -121,6 +121,9 @@ def retry_after(response):
 
 def account_of(response):
     raw = response.getheader("X-Account")
+    if raw is None:
+        # Home Assistant names its instance in X-Instance (docs/S5.md E2.3); same printable rule.
+        raw = response.getheader("X-Instance")
     if raw is None or len(raw) > ACCOUNT_MAX or not raw.isprintable() or not raw:
         return None
     return raw

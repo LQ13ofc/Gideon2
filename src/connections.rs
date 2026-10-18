@@ -141,6 +141,12 @@ pub enum Kind {
     Rfc3339,
     /// File name for a drive: 1..=128 bytes, no `/` or `\`, never `.` or `..`.
     FileName,
+    /// Home Assistant entity id: `domain.object`, lowercase `[a-z0-9_]` parts, at most 64 bytes each.
+    EntityId,
+    /// Home Assistant domain or service name: 1..=64 bytes of `[a-z_]`.
+    Slug,
+    /// Integer 0..=255 (light brightness).
+    Byte,
 }
 
 #[derive(Clone, Copy)]
@@ -482,6 +488,127 @@ const GOOGLE_OPERATIONS: [OpDef; 7] = [
     },
 ];
 
+const ENTITY_ID: Field = Field {
+    name: "entity_id",
+    kind: Kind::EntityId,
+    required: true,
+};
+const DOMAIN: Field = Field {
+    name: "domain",
+    kind: Kind::Slug,
+    required: true,
+};
+const SERVICE: Field = Field {
+    name: "service",
+    kind: Kind::Slug,
+    required: true,
+};
+const BRIGHTNESS: Field = Field {
+    name: "brightness",
+    kind: Kind::Byte,
+    required: false,
+};
+
+/// Home Assistant scopes (docs/S5.md E2.3). The token is one long-lived bearer, not OAuth: the user
+/// consents per scope, then pastes the token (`connection_set_token`). Dangerous services need the third scope.
+const HA_SCOPES: [ScopeDef; 3] = [
+    ScopeDef {
+        id: "states.read",
+        label: "Ler estados das entidades",
+        access: Access::Read,
+    },
+    ScopeDef {
+        id: "services.call",
+        label: "Chamar serviços (ligar, desligar, ajustar)",
+        access: Access::Write,
+    },
+    ScopeDef {
+        id: "services.dangerous",
+        label: "Serviços perigosos (fechaduras, alarme, portões)",
+        access: Access::Destructive,
+    },
+];
+
+/// States list only the entity id, the state and the friendly name: the other attributes never leave.
+const HA_FIELDS: &[&str] = &["entity_id", "state", "attributes.friendly_name"];
+
+const HA_OPERATIONS: [OpDef; 3] = [
+    OpDef {
+        name: "states.list",
+        scope: "states.read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/states",
+        params: &[],
+        body: &[],
+        idempotent: true,
+        project: HA_FIELDS,
+    },
+    OpDef {
+        name: "state.get",
+        scope: "states.read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/states/{entity_id}",
+        params: &[ENTITY_ID],
+        body: &[],
+        idempotent: true,
+        project: HA_FIELDS,
+    },
+    OpDef {
+        name: "service.call",
+        scope: "services.call",
+        // Write by default; `effective_risk` makes a dangerous service destructive (needs services.dangerous).
+        risk: Access::Write,
+        method: "POST",
+        path: "/api/services/{domain}/{service}",
+        params: &[DOMAIN, SERVICE],
+        body: &[ENTITY_ID, BRIGHTNESS],
+        // A service call has no natural key: a failed call is never retried (no Idempotency-Key).
+        idempotent: false,
+        project: HA_FIELDS,
+    },
+];
+
+/// Providers whose account takes one token pasted by the user (`connection_set_token`), not a device login.
+const TOKEN_PROVIDERS: &[&str] = &["homeassistant"];
+
+fn uses_token(provider: &str) -> bool {
+    TOKEN_PROVIDERS.contains(&provider)
+}
+
+/// Services that open, unlock or disarm something physical (docs/S5.md E2.3). Calling one is destructive.
+fn dangerous_service(domain: &str, service: &str) -> bool {
+    matches!(
+        (domain, service),
+        ("lock", "unlock" | "open") | ("cover", "open_cover" | "close_cover")
+    ) || domain == "alarm_control_panel"
+        || domain == "garage_door"
+}
+
+fn is_dangerous_call(op: &OpDef, shape: &Shape) -> bool {
+    op.name == "service.call"
+        && matches!(
+            (shape.input.get("domain"), shape.input.get("service")),
+            (Some(Value::String(domain)), Some(Value::String(service)))
+                if dangerous_service(domain, service)
+        )
+}
+
+/// Every scope one call needs: its operation scope, plus `services.dangerous` for a dangerous service.
+fn required_scopes(op: &OpDef, shape: &Shape) -> Vec<&'static str> {
+    let mut needed = vec![op.scope];
+    if is_dangerous_call(op, shape) {
+        needed.push("services.dangerous");
+    }
+    needed
+}
+
+/// Home Assistant long-lived token: printable ASCII without spaces, 16..=256 bytes.
+fn ha_token_ok(token: &str) -> bool {
+    (16..=256).contains(&token.len()) && token.bytes().all(|b| b.is_ascii_graphic())
+}
+
 const NO_SCOPES: [ScopeDef; 0] = [];
 const NO_OPERATIONS: [OpDef; 0] = [];
 
@@ -502,8 +629,8 @@ const PROVIDERS: [Provider; 4] = [
     Provider {
         id: "homeassistant",
         label: "Home Assistant",
-        scopes: &NO_SCOPES,
-        operations: &NO_OPERATIONS,
+        scopes: &HA_SCOPES,
+        operations: &HA_OPERATIONS,
     },
     Provider {
         id: "mcp",
@@ -532,7 +659,17 @@ pub struct AgentTool {
     pub operation: &'static str,
 }
 
-const AGENT_TOOLS: [AgentTool; 5] = [
+const AGENT_TOOLS: [AgentTool; 7] = [
+    AgentTool {
+        name: "ha_get_state",
+        provider: "homeassistant",
+        operation: "state.get",
+    },
+    AgentTool {
+        name: "ha_call_service",
+        provider: "homeassistant",
+        operation: "service.call",
+    },
     AgentTool {
         name: "github_list_repos",
         provider: "github",
@@ -582,6 +719,12 @@ pub fn agent_prompt() -> String {
             "gmail_list_messages" => text.push_str("\n- gmail_list_messages {}"),
             "calendar_create_event" => text.push_str(
                 "\n- calendar_create_event {\"title\": string up to 256 chars, \"start\": RFC 3339 date-time with seconds, \"end\": RFC 3339 date-time not before start}",
+            ),
+            "ha_get_state" => text.push_str(
+                "\n- ha_get_state {\"entity_id\": \"domain.object\"}",
+            ),
+            "ha_call_service" => text.push_str(
+                "\n- ha_call_service {\"domain\": string, \"service\": string, \"entity_id\": \"domain.object\", \"brightness\": integer 0..255, optional}",
             ),
             _ => {}
         }
@@ -665,7 +808,26 @@ fn kind_value(kind: Kind, value: &Value) -> Option<Value> {
         Kind::Email => value.as_str().filter(|s| email_ok(s)).map(Value::from),
         Kind::Rfc3339 => value.as_str().filter(|s| rfc3339_ok(s)).map(Value::from),
         Kind::FileName => value.as_str().filter(|s| file_name_ok(s)).map(Value::from),
+        Kind::EntityId => value.as_str().filter(|s| entity_ok(s)).map(Value::from),
+        Kind::Slug => value.as_str().filter(|s| slug_ok(s)).map(Value::from),
+        Kind::Byte => value.as_u64().filter(|n| *n <= 255).map(Value::from),
     }
+}
+
+/// `domain.object`: both parts 1..=64 bytes of lowercase letters, digits and `_` (the domain has no digits).
+fn entity_ok(text: &str) -> bool {
+    text.len() <= 129
+        && text.split_once('.').is_some_and(|(domain, object)| {
+            slug_ok(domain)
+                && (1..=64).contains(&object.len())
+                && object
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        })
+}
+
+fn slug_ok(text: &str) -> bool {
+    (1..=64).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
 }
 
 fn id_ok(text: &str) -> bool {
@@ -785,15 +947,15 @@ pub fn validate(op: &OpDef, args: &Value) -> Result<Shape, &'static str> {
         }
     }
     let repo = input.get("repo").and_then(Value::as_str).map(str::to_owned);
+    // Every path parameter is a validated value without braces or slashes (see the Kind rules above).
     let mut path = op.path.to_owned();
-    if let Some(repo) = repo.as_deref() {
-        path = path.replace("{repo}", repo);
-    }
-    if let Some(number) = input.get("number").and_then(Value::as_u64) {
-        path = path.replace("{number}", &number.to_string());
-    }
-    if let Some(id) = input.get("id").and_then(Value::as_str) {
-        path = path.replace("{id}", id);
+    for (key, value) in &input {
+        let text = match value {
+            Value::String(text) => text.clone(),
+            Value::Number(number) => number.to_string(),
+            _ => continue,
+        };
+        path = path.replace(&format!("{{{key}}}"), &text);
     }
     // Only GET and DELETE carry no body; every write sends a JSON object (possibly empty).
     let body = if matches!(op.method, "GET" | "DELETE") {
@@ -815,19 +977,40 @@ pub fn validate(op: &OpDef, args: &Value) -> Result<Shape, &'static str> {
     })
 }
 
-/// Projection keeps scalar fields listed by the descriptor; nested values never leave.
+/// Projection keeps scalar fields listed by the descriptor; nested values never leave. A listed
+/// `outer.inner` keeps one scalar inside an object (`attributes.friendly_name`) and nothing else of it.
 fn project_object(value: &Value, fields: &[&str]) -> Value {
     let mut out = Map::new();
     if let Some(object) = value.as_object() {
         for field in fields {
-            if let Some(scalar) = object.get(*field) {
-                if !scalar.is_object() && !scalar.is_array() {
-                    out.insert((*field).to_owned(), scalar.clone());
+            match field.split_once('.') {
+                None => {
+                    if let Some(scalar) = object.get(*field).filter(|v| is_scalar(v)) {
+                        out.insert((*field).to_owned(), scalar.clone());
+                    }
+                }
+                Some((outer, inner)) => {
+                    if let Some(scalar) = object
+                        .get(outer)
+                        .and_then(|v| v.get(inner))
+                        .filter(|v| is_scalar(v))
+                    {
+                        let entry = out
+                            .entry(outer.to_owned())
+                            .or_insert_with(|| Value::Object(Map::new()));
+                        if let Value::Object(nested) = entry {
+                            nested.insert(inner.to_owned(), scalar.clone());
+                        }
+                    }
                 }
             }
         }
     }
     Value::Object(out)
+}
+
+fn is_scalar(value: &Value) -> bool {
+    !value.is_object() && !value.is_array()
 }
 
 fn project(value: &Value, op: &OpDef) -> Result<Value, &'static str> {
@@ -1020,6 +1203,12 @@ pub enum Job {
         token: String,
     },
     Call(Box<Call>),
+    /// Home Assistant: one `GET /api/states` with the pasted token (never stored before it is validated).
+    Probe {
+        account: String,
+        base: String,
+        token: String,
+    },
 }
 
 impl std::fmt::Debug for Job {
@@ -1030,6 +1219,7 @@ impl std::fmt::Debug for Job {
             Job::Refresh { .. } => "Job::Refresh",
             Job::Revoke { .. } => "Job::Revoke",
             Job::Call(_) => "Job::Call",
+            Job::Probe { .. } => "Job::Probe",
         })
     }
 }
@@ -1071,6 +1261,12 @@ pub enum Reply {
     Call {
         call: Box<Call>,
         outcome: Result<(Value, Option<(String, bool)>), Failure>,
+    },
+    /// `account_ref` (the instance name) on success. The token comes back only to be stored or dropped.
+    Probe {
+        account: String,
+        token: String,
+        outcome: Result<String, Failure>,
     },
 }
 
@@ -1341,6 +1537,26 @@ async fn run_refresh(ex: &Exchange<'_>, base: &str, refresh: &str) -> Result<Ref
     })
 }
 
+/// One `GET /api/states` with the pasted token. The instance name comes back as `X-Instance`, which the
+/// broker reports as the account; a body that is not a JSON list is a provider error.
+async fn run_probe(ex: &Exchange<'_>, base: &str, token: &str) -> Result<String, Failure> {
+    let headers = [("Accept", "application/json".to_owned())];
+    let response = ex
+        .send(base, "GET", "/api/states", &headers, None, Some(token))
+        .await?;
+    if !matches!(
+        serde_json::from_slice::<Value>(&response.body),
+        Ok(Value::Array(_))
+    ) {
+        return Err(Failure::new("provider_error"));
+    }
+    response
+        .meta
+        .account
+        .filter(|name| !name.is_empty())
+        .ok_or(Failure::new("provider_error"))
+}
+
 async fn run_call(
     ex: &Exchange<'_>,
     call: &Call,
@@ -1469,6 +1685,18 @@ pub async fn execute(id: u64, job: Job, python: PathBuf, script: PathBuf) -> Don
             let outcome = run_call_with_retries(&ex, &call).await;
             Reply::Call { call, outcome }
         }
+        Job::Probe {
+            account,
+            base,
+            token,
+        } => {
+            let outcome = run_probe(&ex, &base, &token).await;
+            Reply::Probe {
+                account,
+                token,
+                outcome,
+            }
+        }
     };
     Done { id, reply }
 }
@@ -1595,6 +1823,8 @@ pub struct Manager {
     ledger: Ledger,
     storage_error: bool,
     devices: BTreeMap<String, Device>,
+    /// Token accounts (`uses_token`) in `connecting`: the scopes the user consented to, awaiting the token.
+    token_wait: BTreeMap<String, Vec<String>>,
     errors: BTreeMap<String, &'static str>,
     /// Account to repo (`owner/name`) to `private`, learned from `repo.get` results only.
     visibility: BTreeMap<String, BTreeMap<String, bool>>,
@@ -1640,6 +1870,7 @@ fn job_account(job: &Job) -> Option<&str> {
             Some(account)
         }
         Job::Call(call) => Some(&call.account),
+        Job::Probe { account, .. } => Some(account),
         Job::Revoke { .. } => None,
     }
 }
@@ -1665,10 +1896,14 @@ impl Manager {
             .accounts
             .iter()
             .map(|account| {
-                let device = self
-                    .devices
-                    .get(&account.id)
-                    .filter(|_| account.status == Status::Connecting);
+                let connecting = account.status == Status::Connecting;
+                let device = self.devices.get(&account.id).filter(|_| connecting);
+                // A token account waits for its consent and token: every scope of the provider is pending.
+                let token_pending = (connecting && uses_token(&account.provider)).then(|| {
+                    provider_by_id(&account.provider)
+                        .map(|p| p.scopes.iter().map(|s| s.id.to_owned()).collect())
+                        .unwrap_or_default()
+                });
                 ItemView {
                     id: account.id.clone(),
                     provider: account.provider.clone(),
@@ -1676,7 +1911,7 @@ impl Manager {
                     account_ref: account.account_ref.clone(),
                     status: account.status,
                     granted_scopes: account.granted_scopes.clone(),
-                    pending_scopes: device.map(|d| d.requested.clone()),
+                    pending_scopes: token_pending.or_else(|| device.map(|d| d.requested.clone())),
                     user_code: device.map(|d| d.user_code.clone()),
                     fake: fake_base(&account.provider).is_some(),
                 }
@@ -1949,6 +2184,11 @@ impl Manager {
         if let Err(code) = self.set_status(storage, id, Status::Connecting, None) {
             return code;
         }
+        if uses_token(provider.id) {
+            // No device to poll: the account waits for consent and then for the pasted token.
+            self.token_wait.remove(id);
+            return "ok";
+        }
         let scopes = provider.scopes.iter().map(|s| s.id.to_owned()).collect();
         self.push(Job::Device {
             account: id.to_owned(),
@@ -1970,6 +2210,9 @@ impl Manager {
         }
         if self.status_of(id) != Some(Status::Connecting) {
             return "invalid_state";
+        }
+        if uses_token(self.provider_of(id)) {
+            return self.consent_token(id, scopes);
         }
         let Some(device) = self.devices.get(id) else {
             return "invalid_state";
@@ -2002,6 +2245,60 @@ impl Manager {
             device.next_poll = None;
         }
         self.push(job);
+        "ok"
+    }
+
+    /// Token accounts: consent is stored in memory only (no network) until the token is validated.
+    fn consent_token(&mut self, id: &str, scopes: Vec<String>) -> &'static str {
+        let Some(provider) = provider_by_id(self.provider_of(id)) else {
+            return "invalid_state";
+        };
+        if scopes.is_empty() {
+            return "invalid_args";
+        }
+        let mut chosen: Vec<String> = Vec::new();
+        for scope in scopes {
+            if !provider.scopes.iter().any(|s| s.id == scope) {
+                return "scope_not_requested";
+            }
+            if !chosen.contains(&scope) {
+                chosen.push(scope);
+            }
+        }
+        self.token_wait.insert(id.to_owned(), chosen);
+        "ok"
+    }
+
+    /// Starts the one-probe validation of the token of a consented `connecting` token account. The token is
+    /// held in memory until the probe answers; it is never written before that.
+    pub fn set_token(&mut self, id: &str, token: &str, revision: Option<u64>) -> &'static str {
+        if let Err(code) = self.check_revision(revision) {
+            return code;
+        }
+        let Some(index) = self.index(id) else {
+            return "unknown_connection";
+        };
+        let account = &self.ledger.accounts[index];
+        if !uses_token(&account.provider) || account.status != Status::Connecting {
+            return "invalid_state";
+        }
+        if !self.token_wait.contains_key(id) {
+            return "consent_required";
+        }
+        if !ha_token_ok(token) {
+            return "invalid_token";
+        }
+        let Some(base) = fake_base(&account.provider) else {
+            return "real_backend_unsupported";
+        };
+        if self.busy() {
+            return "busy";
+        }
+        self.push(Job::Probe {
+            account: id.to_owned(),
+            base: base.to_owned(),
+            token: token.to_owned(),
+        });
         "ok"
     }
 
@@ -2053,7 +2350,8 @@ impl Manager {
         let access = vault.connection_token(id, "access");
         let refresh = vault.connection_token(id, "refresh");
         let base = fake_base(self.provider_of(id)).map(str::to_owned);
-        if revoke {
+        // A token account has no revoke endpoint: its token is only wiped locally (the user revokes it in the service).
+        if revoke && !uses_token(self.provider_of(id)) {
             if let (Some(base), Some(token)) = (base.clone(), access.clone().or(refresh)) {
                 self.push(Job::Revoke { base, token });
             }
@@ -2078,6 +2376,7 @@ impl Manager {
         }
         self.queue = kept;
         self.devices.remove(id);
+        self.token_wait.remove(id);
         vault.clear_connection(storage, id)?;
         Ok(())
     }
@@ -2189,16 +2488,19 @@ impl Manager {
         args: &Value,
     ) -> Result<Plan, &'static str> {
         let shape = validate(op, args)?;
+        let needed = required_scopes(op, &shape);
         let account = match account {
             Some(id) => {
                 let found = self.account(id).ok_or("unknown_connection")?;
                 if found.provider != provider.id {
                     return Err("unknown_connection");
                 }
-                account_gate(found, op.scope)?;
+                for scope in &needed {
+                    account_gate(found, scope)?;
+                }
                 id.to_owned()
             }
-            None => self.resolve(provider, op)?,
+            None => self.resolve(provider, &needed)?,
         };
         let risk = self.effective_risk(&account, op, &shape);
         Ok(Plan {
@@ -2211,7 +2513,16 @@ impl Manager {
     }
 
     /// Account for a tool that names no account: the first connected one granting the scope.
-    fn resolve(&self, provider: &'static Provider, op: &OpDef) -> Result<String, &'static str> {
+    fn resolve(
+        &self,
+        provider: &'static Provider,
+        needed: &[&str],
+    ) -> Result<String, &'static str> {
+        let grants_all = |a: &Account| {
+            needed
+                .iter()
+                .all(|scope| a.granted_scopes.iter().any(|s| s == scope))
+        };
         let candidates: Vec<&Account> = self
             .ledger
             .accounts
@@ -2227,10 +2538,10 @@ impl Manager {
             .collect();
         if connected.is_empty() {
             // Same answer as `plan` for an explicit account that lost its scope after a reauth.
-            if candidates.iter().all(|a| {
-                a.status == Status::ReauthRequired
-                    && !a.granted_scopes.iter().any(|s| s == op.scope)
-            }) {
+            if candidates
+                .iter()
+                .all(|a| a.status == Status::ReauthRequired && !grants_all(a))
+            {
                 return Err("scope_not_granted");
             }
             return Err(status_code(candidates[0].status)
@@ -2239,13 +2550,16 @@ impl Manager {
         }
         connected
             .iter()
-            .find(|a| a.granted_scopes.iter().any(|s| s == op.scope))
+            .find(|a| grants_all(a))
             .map(|a| a.id.clone())
             .ok_or("scope_not_granted")
     }
 
     /// Public when a write targets a repo not known to be private. Unknown visibility is public.
     fn effective_risk(&self, account: &str, op: &OpDef, shape: &Shape) -> Access {
+        if op.name == "service.call" && is_dangerous_call(op, shape) {
+            return Access::Destructive;
+        }
         if op.name == "issues.create" {
             let private = shape
                 .repo
@@ -2316,7 +2630,9 @@ impl Manager {
         }
         let base = fake_base(plan.provider.id).ok_or("real_backend_unsupported")?;
         let found = self.account(&plan.account).ok_or("unknown_connection")?;
-        account_gate(found, plan.op.scope)?;
+        for scope in required_scopes(plan.op, &plan.shape) {
+            account_gate(found, scope)?;
+        }
         let token = vault
             .connection_token(&plan.account, "access")
             .ok_or("reauth_required")?;
@@ -2489,6 +2805,85 @@ impl Manager {
                 None
             }
             Reply::Call { call, outcome } => self.settle_call(storage, vault, call, outcome),
+            Reply::Probe {
+                account,
+                token,
+                outcome,
+            } => {
+                self.settle_probe(storage, vault, &account, token, outcome);
+                None
+            }
+        }
+    }
+
+    /// Token account probe answered. Success stores the token in the vault and connects with the consented
+    /// scopes; the instance name becomes `account_ref`. A 401 is `reauth_required` and stores nothing. The
+    /// token never reaches the ledger, the snapshot, the audit or the log.
+    fn settle_probe(
+        &mut self,
+        storage: &Storage,
+        vault: &mut LlmState,
+        id: &str,
+        token: String,
+        outcome: Result<String, Failure>,
+    ) {
+        if self.status_of(id) != Some(Status::Connecting) {
+            return;
+        }
+        let granted = self.token_wait.remove(id).unwrap_or_default();
+        match outcome {
+            Ok(name) => {
+                if self
+                    .account(id)
+                    .and_then(|a| a.account_ref.as_deref())
+                    .is_some_and(|known| known != name)
+                {
+                    let _ = self.set_status(storage, id, Status::Error, Some("account_mismatch"));
+                    return;
+                }
+                if granted.is_empty() {
+                    let _ = self.set_status(storage, id, Status::Error, Some("scope_not_granted"));
+                    return;
+                }
+                if vault
+                    .set_connection_tokens(storage, id, Some(token), None)
+                    .is_err()
+                {
+                    let _ =
+                        self.set_status(storage, id, Status::Error, Some("secrets_storage_error"));
+                    return;
+                }
+                let Some(index) = self.index(id) else {
+                    return;
+                };
+                let mut next = self.ledger.clone();
+                {
+                    let account = &mut next.accounts[index];
+                    account.status = Status::Connected;
+                    account.account_ref = Some(name);
+                    account.granted_scopes = granted;
+                    account.last_ok = Some(unix_now());
+                }
+                if self.commit(storage, next).is_ok() {
+                    self.errors.remove(id);
+                    self.log("connection_consented", "none", "none", "ok");
+                    self.log("connection_connected", "none", "none", "ok");
+                }
+            }
+            Err(failure) => {
+                if failure.code == "unauthorized" {
+                    let _ = self.set_status(
+                        storage,
+                        id,
+                        Status::ReauthRequired,
+                        Some("reauth_required"),
+                    );
+                    self.log("connection_expired", "none", "none", "reauth_required");
+                } else {
+                    let status = failure_status(failure.code);
+                    let _ = self.set_status(storage, id, status, Some(failure.code));
+                }
+            }
         }
     }
 
@@ -2785,9 +3180,21 @@ mod tests {
     fn descriptors_are_fixed_and_empty_providers_are_valid() {
         let ids: Vec<&str> = PROVIDERS.iter().map(|p| p.id).collect();
         assert_eq!(ids, ["github", "google", "homeassistant", "mcp"]);
-        assert!(PROVIDERS[2..]
+        assert!(PROVIDERS[3..]
             .iter()
             .all(|p| p.scopes.is_empty() && p.operations.is_empty()));
+        let ha = provider_by_id("homeassistant").unwrap();
+        assert_eq!(ha.scopes.len(), 3);
+        assert_eq!(ha.operations.len(), 3);
+        assert!(ha
+            .operations
+            .iter()
+            .all(|o| ha.scopes.iter().any(|s| s.id == o.scope)));
+        assert_eq!(
+            operation(ha, "service.call").unwrap().risk,
+            Access::Write,
+            "the base risk; a dangerous service is destructive by `effective_risk`"
+        );
         let google = provider_by_id("google").unwrap();
         assert_eq!(google.scopes.len(), 7);
         assert_eq!(google.operations.len(), 7);
@@ -2962,5 +3369,135 @@ mod tests {
         for bad in ["a/b", "a\\b", ".", "..", ""] {
             assert!(validate(files, &json!({ "name": bad })).is_err(), "{bad}");
         }
+    }
+
+    fn homeassistant() -> &'static Provider {
+        provider_by_id("homeassistant").unwrap()
+    }
+
+    #[test]
+    fn ha_states_project_entity_state_and_friendly_name_only() {
+        let op = operation(homeassistant(), "states.list").unwrap();
+        let raw = json!([{"entity_id": "light.kitchen", "state": "on",
+                          "attributes": {"friendly_name": "Cozinha", "brightness": 128, "token": "x"},
+                          "context": {"id": "c"}}]);
+        assert_eq!(
+            project(&raw, op).unwrap(),
+            json!([{"entity_id": "light.kitchen", "state": "on", "attributes": {"friendly_name": "Cozinha"}}])
+        );
+        let bare = json!({"entity_id": "lock.front_door", "state": "locked", "attributes": {"brightness": 1}});
+        let one = operation(homeassistant(), "state.get").unwrap();
+        assert_eq!(
+            project(&bare, one).unwrap(),
+            json!({"entity_id": "lock.front_door", "state": "locked"})
+        );
+    }
+
+    #[test]
+    fn ha_paths_and_arguments_are_strict() {
+        let get = operation(homeassistant(), "state.get").unwrap();
+        let shape = validate(get, &json!({"entity_id": "light.kitchen"})).unwrap();
+        assert_eq!(shape.path, "/api/states/light.kitchen");
+        for bad in [
+            "Light.kitchen",
+            "light",
+            "light.",
+            "light.a/b",
+            "../x.y",
+            "light.x?y",
+        ] {
+            assert!(
+                validate(get, &json!({ "entity_id": bad })).is_err(),
+                "{bad}"
+            );
+        }
+        let call = operation(homeassistant(), "service.call").unwrap();
+        let shape = validate(
+            call,
+            &json!({"domain": "light", "service": "turn_on", "entity_id": "light.kitchen", "brightness": 255}),
+        )
+        .unwrap();
+        assert_eq!(shape.path, "/api/services/light/turn_on");
+        assert_eq!(
+            shape.body,
+            Some(json!({"entity_id": "light.kitchen", "brightness": 255}))
+        );
+        assert!(validate(
+            call,
+            &json!({"domain": "light", "service": "turn_on", "entity_id": "light.kitchen", "brightness": 256})
+        )
+        .is_err());
+        assert!(validate(
+            call,
+            &json!({"domain": "light/x", "service": "turn_on", "entity_id": "light.kitchen"})
+        )
+        .is_err());
+        assert!(validate(
+            call,
+            &json!({"domain": "light", "service": "turn_on", "code": "1"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn dangerous_services_are_destructive_and_need_their_scope() {
+        let call = operation(homeassistant(), "service.call").unwrap();
+        let risk = |domain: &str, service: &str| {
+            let shape = validate(
+                call,
+                &json!({"domain": domain, "service": service, "entity_id": "x.y"}),
+            )
+            .unwrap();
+            (
+                Manager::default().effective_risk("conta", call, &shape),
+                required_scopes(call, &shape),
+            )
+        };
+        for (domain, service) in [
+            ("lock", "unlock"),
+            ("lock", "open"),
+            ("cover", "open_cover"),
+            ("cover", "close_cover"),
+            ("alarm_control_panel", "alarm_disarm"),
+            ("garage_door", "open"),
+        ] {
+            let (access, scopes) = risk(domain, service);
+            assert_eq!(access, Access::Destructive, "{domain}.{service}");
+            assert_eq!(scopes, vec!["services.call", "services.dangerous"]);
+        }
+        for (domain, service) in [
+            ("light", "turn_on"),
+            ("switch", "turn_off"),
+            ("lock", "lock"),
+        ] {
+            let (access, scopes) = risk(domain, service);
+            assert_eq!(access, Access::Write, "{domain}.{service}");
+            assert_eq!(scopes, vec!["services.call"]);
+        }
+    }
+
+    #[test]
+    fn ha_tokens_are_16_to_256_printable_bytes_without_spaces() {
+        assert!(ha_token_ok(&"a".repeat(16)));
+        assert!(ha_token_ok(&"a".repeat(256)));
+        assert!(!ha_token_ok(&"a".repeat(15)));
+        assert!(!ha_token_ok(&"a".repeat(257)));
+        assert!(!ha_token_ok("token com espaco 0123456789"));
+        assert!(!ha_token_ok("token\ncom-controle-0123456"));
+        assert!(!ha_token_ok("token-ação-0123456789abc"));
+    }
+
+    #[test]
+    fn ha_agent_tools_are_fixed_and_listed_only_with_a_fake() {
+        assert!(agent_tool("ha_get_state").is_some() == fake_base("homeassistant").is_some());
+        assert!(agent_tool("ha_call_service").is_some() == fake_base("homeassistant").is_some());
+        assert_eq!(
+            parse_call("conn:homeassistant.service.call")
+                .unwrap()
+                .1
+                .risk,
+            Access::Write
+        );
+        assert!(parse_call("conn:homeassistant.nope").is_none());
     }
 }
