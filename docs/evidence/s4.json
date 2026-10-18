@@ -1,0 +1,94 @@
+{
+ "stage": "S4",
+ "code_commit": "2dc212d0cbbc1e607df2325dcb76a6b12ae4e309",
+ "gates": {
+  "s4-core": {
+   "passed": 175,
+   "failed": 0,
+   "skipped": [],
+   "divergences": [
+    {
+     "file": "cycle_b",
+     "reference": "skill_invalid:cycle",
+     "core": "ok",
+     "class": "catalog_scope"
+    },
+    {
+     "file": "duplicate_step_id",
+     "reference": "skill_invalid:duplicate_step_id",
+     "core": "skill_invalid:duplicate_step",
+     "class": "naming"
+    },
+    {
+     "file": "future_ref",
+     "reference": "skill_invalid:future_ref",
+     "core": "skill_invalid:forward_ref",
+     "class": "naming"
+    }
+   ]
+  },
+  "s4-share": {
+   "passed": 151,
+   "failed": 0,
+   "skipped": [],
+   "divergences": null
+  },
+  "s4-final": {
+   "passed": 72,
+   "failed": 0,
+   "skipped": [],
+   "divergences": []
+  }
+ },
+ "matrix_run1": [
+  "start all",
+  "a0 rc=0 secs=7",
+  "a1 rc=0 secs=20",
+  "a2 rc=0 secs=11",
+  "a3 rc=0 secs=35",
+  "a4 rc=0 secs=45",
+  "a5 rc=0 secs=115",
+  "soak rc=0 secs=45",
+  "shutdown rc=0 secs=12",
+  "b1 rc=0 secs=25",
+  "b2 rc=0 secs=12",
+  "safe rc=0 secs=16",
+  "pack rc=0 secs=41",
+  "feedback rc=0 secs=41",
+  "catalog rc=0 secs=32",
+  "permissions rc=0 secs=33",
+  "design rc=0 secs=33",
+  "import rc=0 secs=34",
+  "timeout rc=0 secs=121",
+  "capacity rc=0 secs=8",
+  "lifecycle rc=0 secs=34",
+  "c0plugins rc=0 secs=74",
+  "c1llm rc=0 secs=62",
+  "c2models rc=1 secs=49",
+  "c3agent rc=0 secs=70",
+  "c4 rc=0 secs=145",
+  "s4core rc=0 secs=17",
+  "s4share rc=0 secs=3",
+  "s4final rc=1 secs=0",
+  "b4package rc=0 secs=128",
+  "b4update rc=1 secs=261",
+  "s2final rc=1 secs=214",
+  "c0package rc=1 secs=164",
+  "DONE"
+ ],
+ "matrix_rerun_from_c2models": [
+  "start c2models",
+  "c2models rc=0 secs=50",
+  "c3agent rc=0 secs=69",
+  "c4 rc=0 secs=146",
+  "s4core rc=0 secs=17",
+  "s4share rc=0 secs=2",
+  "s4final rc=0 secs=54",
+  "b4package rc=0 secs=108",
+  "b4update rc=0 secs=262",
+  "s2final rc=0 secs=215",
+  "c0package rc=0 secs=165",
+  "DONE"
+ ],
+ "note": "run1: c2models flaky pid race in gate (fixed), s4final needs ui-venv python, later steps failed on dirty tree; rerun from c2models after commit all rc=0"
+}
