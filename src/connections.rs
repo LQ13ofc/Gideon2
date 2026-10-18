@@ -133,6 +133,14 @@ pub enum Kind {
     Text(usize),
     /// One of these exact strings.
     Choice(&'static [&'static str]),
+    /// Opaque provider id: `[A-Za-z0-9_-]`, 1..=64 bytes (no path separators).
+    Id,
+    /// One e-mail address, at most 254 bytes, no whitespace, `<`, `>` or a second `@`.
+    Email,
+    /// RFC 3339 date-time with seconds: `YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)`.
+    Rfc3339,
+    /// File name for a drive: 1..=128 bytes, no `/` or `\`, never `.` or `..`.
+    FileName,
 }
 
 #[derive(Clone, Copy)]
@@ -302,6 +310,178 @@ const GITHUB_OPERATIONS: [OpDef; 7] = [
     },
 ];
 
+const ID: Field = Field {
+    name: "id",
+    kind: Kind::Id,
+    required: true,
+};
+const EMAIL_TO: Field = Field {
+    name: "to",
+    kind: Kind::Email,
+    required: true,
+};
+const MAIL_SUBJECT: Field = Field {
+    name: "subject",
+    kind: Kind::Text(256),
+    required: true,
+};
+const MAIL_BODY: Field = Field {
+    name: "body",
+    kind: Kind::Text(4096),
+    required: true,
+};
+const EVENT_START: Field = Field {
+    name: "start",
+    kind: Kind::Rfc3339,
+    required: true,
+};
+const EVENT_END: Field = Field {
+    name: "end",
+    kind: Kind::Rfc3339,
+    required: true,
+};
+const FILE_NAME: Field = Field {
+    name: "name",
+    kind: Kind::FileName,
+    required: true,
+};
+const FILE_CONTENT: Field = Field {
+    name: "content",
+    kind: Kind::Text(8192),
+    required: false,
+};
+
+/// Google scopes (docs/S5.md E2.2). Read, send and delete are separate scopes; the device flow
+/// asks for all of them and the user grants each one.
+const GOOGLE_SCOPES: [ScopeDef; 7] = [
+    ScopeDef {
+        id: "gmail.read",
+        label: "Ler lista de e-mails (id, remetente, assunto)",
+        access: Access::Read,
+    },
+    ScopeDef {
+        id: "gmail.send",
+        label: "Enviar e-mail em seu nome",
+        access: Access::Public,
+    },
+    ScopeDef {
+        id: "gmail.delete",
+        label: "Apagar e-mail",
+        access: Access::Destructive,
+    },
+    ScopeDef {
+        id: "calendar.read",
+        label: "Ler eventos da agenda",
+        access: Access::Read,
+    },
+    ScopeDef {
+        id: "calendar.write",
+        label: "Criar eventos na agenda",
+        access: Access::Write,
+    },
+    ScopeDef {
+        id: "drive.read",
+        label: "Listar arquivos do Drive",
+        access: Access::Read,
+    },
+    ScopeDef {
+        id: "drive.write",
+        label: "Criar arquivos no Drive",
+        access: Access::Write,
+    },
+];
+
+/// Projections list ids and headers only: message bodies and file contents never leave the fake.
+const MAIL_FIELDS: &[&str] = &["id", "from", "subject"];
+const SENT_FIELDS: &[&str] = &["id", "to", "subject"];
+const DELETED_FIELDS: &[&str] = &["id", "deleted"];
+const EVENT_FIELDS: &[&str] = &["id", "title", "start", "end"];
+const FILE_FIELDS: &[&str] = &["id", "name"];
+
+const GOOGLE_OPERATIONS: [OpDef; 7] = [
+    OpDef {
+        name: "gmail.messages.list",
+        scope: "gmail.read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/gmail/messages",
+        params: &[],
+        body: &[],
+        idempotent: true,
+        project: MAIL_FIELDS,
+    },
+    OpDef {
+        name: "gmail.send",
+        scope: "gmail.send",
+        // Sending is always public: the user approves it explicitly, never by default.
+        risk: Access::Public,
+        method: "POST",
+        path: "/api/gmail/send",
+        params: &[],
+        body: &[EMAIL_TO, MAIL_SUBJECT, MAIL_BODY],
+        // No natural key: a failed send is never retried (no Idempotency-Key).
+        idempotent: false,
+        project: SENT_FIELDS,
+    },
+    OpDef {
+        name: "gmail.messages.delete",
+        scope: "gmail.delete",
+        risk: Access::Destructive,
+        method: "DELETE",
+        path: "/api/gmail/messages/{id}",
+        params: &[ID],
+        body: &[],
+        idempotent: false,
+        project: DELETED_FIELDS,
+    },
+    OpDef {
+        name: "calendar.events.list",
+        scope: "calendar.read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/calendar/events",
+        params: &[],
+        body: &[],
+        idempotent: true,
+        project: EVENT_FIELDS,
+    },
+    OpDef {
+        name: "calendar.events.create",
+        scope: "calendar.write",
+        risk: Access::Write,
+        method: "POST",
+        path: "/api/calendar/events",
+        params: &[],
+        body: &[TITLE, EVENT_START, EVENT_END],
+        // Idempotency-Key is sent: a retry after a 5xx or a timeout replays the same event.
+        idempotent: true,
+        project: EVENT_FIELDS,
+    },
+    OpDef {
+        name: "drive.files.list",
+        scope: "drive.read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/drive/files",
+        params: &[],
+        body: &[],
+        idempotent: true,
+        project: FILE_FIELDS,
+    },
+    OpDef {
+        name: "drive.files.create",
+        scope: "drive.write",
+        risk: Access::Write,
+        method: "POST",
+        path: "/api/drive/files",
+        params: &[],
+        body: &[FILE_NAME, FILE_CONTENT],
+        // The Drive route has no Idempotency-Key: a failed create is never retried.
+        idempotent: false,
+        project: FILE_FIELDS,
+    },
+];
+
 const NO_SCOPES: [ScopeDef; 0] = [];
 const NO_OPERATIONS: [OpDef; 0] = [];
 
@@ -316,8 +496,8 @@ const PROVIDERS: [Provider; 4] = [
     Provider {
         id: "google",
         label: "Google",
-        scopes: &NO_SCOPES,
-        operations: &NO_OPERATIONS,
+        scopes: &GOOGLE_SCOPES,
+        operations: &GOOGLE_OPERATIONS,
     },
     Provider {
         id: "homeassistant",
@@ -352,7 +532,7 @@ pub struct AgentTool {
     pub operation: &'static str,
 }
 
-const AGENT_TOOLS: [AgentTool; 2] = [
+const AGENT_TOOLS: [AgentTool; 5] = [
     AgentTool {
         name: "github_list_repos",
         provider: "github",
@@ -362,6 +542,21 @@ const AGENT_TOOLS: [AgentTool; 2] = [
         name: "github_create_issue",
         provider: "github",
         operation: "issues.create",
+    },
+    AgentTool {
+        name: "calendar_list_events",
+        provider: "google",
+        operation: "calendar.events.list",
+    },
+    AgentTool {
+        name: "gmail_list_messages",
+        provider: "google",
+        operation: "gmail.messages.list",
+    },
+    AgentTool {
+        name: "calendar_create_event",
+        provider: "google",
+        operation: "calendar.events.create",
     },
 ];
 
@@ -382,6 +577,11 @@ pub fn agent_prompt() -> String {
             "github_list_repos" => text.push_str("\n- github_list_repos {}"),
             "github_create_issue" => text.push_str(
                 "\n- github_create_issue {\"repo\": \"owner/name\", \"title\": string up to 256 chars, \"body\": string up to 4096 chars, optional}",
+            ),
+            "calendar_list_events" => text.push_str("\n- calendar_list_events {}"),
+            "gmail_list_messages" => text.push_str("\n- gmail_list_messages {}"),
+            "calendar_create_event" => text.push_str(
+                "\n- calendar_create_event {\"title\": string up to 256 chars, \"start\": RFC 3339 date-time with seconds, \"end\": RFC 3339 date-time not before start}",
             ),
             _ => {}
         }
@@ -461,7 +661,99 @@ fn kind_value(kind: Kind, value: &Value) -> Option<Value> {
             .as_str()
             .filter(|s| options.contains(s))
             .map(Value::from),
+        Kind::Id => value.as_str().filter(|s| id_ok(s)).map(Value::from),
+        Kind::Email => value.as_str().filter(|s| email_ok(s)).map(Value::from),
+        Kind::Rfc3339 => value.as_str().filter(|s| rfc3339_ok(s)).map(Value::from),
+        Kind::FileName => value.as_str().filter(|s| file_name_ok(s)).map(Value::from),
     }
+}
+
+fn id_ok(text: &str) -> bool {
+    (1..=64).contains(&text.len())
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+fn email_ok(text: &str) -> bool {
+    let Some((local, domain)) = text.split_once('@') else {
+        return false;
+    };
+    text.len() <= 254
+        && (1..=64).contains(&local.len())
+        && (1..=253).contains(&domain.len())
+        && !domain.contains('@')
+        && !text
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '<' || c == '>')
+}
+
+fn file_name_ok(text: &str) -> bool {
+    (1..=128).contains(&text.len())
+        && text != "."
+        && text != ".."
+        && !text.contains('/')
+        && !text.contains('\\')
+        && !text.chars().any(char::is_control)
+}
+
+/// Strict RFC 3339 subset: seconds are required, fraction 1..=9 digits, offset `Z` or `±HH:MM`.
+fn rfc3339_ok(text: &str) -> bool {
+    let Some((date, time)) = text.split_once('T') else {
+        return false;
+    };
+    let d = date.as_bytes();
+    let date_ok = d.len() == 10
+        && d[4] == b'-'
+        && d[7] == b'-'
+        && digits(&d[0..4])
+        && digits(&d[5..7])
+        && digits(&d[8..10])
+        && (1..=12).contains(&num(&d[5..7]))
+        && (1..=31).contains(&num(&d[8..10]));
+    let t = time.as_bytes();
+    if !date_ok
+        || t.len() < 8
+        || t[2] != b':'
+        || t[5] != b':'
+        || !digits(&t[0..2])
+        || !digits(&t[3..5])
+        || !digits(&t[6..8])
+    {
+        return false;
+    }
+    if num(&t[0..2]) > 23 || num(&t[3..5]) > 59 || num(&t[6..8]) > 60 {
+        return false;
+    }
+    let mut rest = &t[8..];
+    if let Some(after_dot) = rest.strip_prefix(b".") {
+        let frac = after_dot.iter().take_while(|b| b.is_ascii_digit()).count();
+        if !(1..=9).contains(&frac) {
+            return false;
+        }
+        rest = &after_dot[frac..];
+    }
+    match rest {
+        b"Z" => true,
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] => {
+            digits(&[*h1, *h2])
+                && digits(&[*m1, *m2])
+                && num(&[*h1, *h2]) <= 23
+                && num(&[*m1, *m2]) <= 59
+                && (*sign == b'+' || *sign == b'-')
+        }
+        _ => false,
+    }
+}
+
+fn digits(bytes: &[u8]) -> bool {
+    !bytes.is_empty() && bytes.iter().all(u8::is_ascii_digit)
+}
+
+fn num(bytes: &[u8]) -> u32 {
+    bytes
+        .iter()
+        .fold(0u32, |acc, b| acc * 10 + u32::from(b - b'0'))
 }
 
 /// Validated call: exact keys, typed values, then the path and body the broker will send.
@@ -500,7 +792,11 @@ pub fn validate(op: &OpDef, args: &Value) -> Result<Shape, &'static str> {
     if let Some(number) = input.get("number").and_then(Value::as_u64) {
         path = path.replace("{number}", &number.to_string());
     }
-    let body = if op.method == "GET" {
+    if let Some(id) = input.get("id").and_then(Value::as_str) {
+        path = path.replace("{id}", id);
+    }
+    // Only GET and DELETE carry no body; every write sends a JSON object (possibly empty).
+    let body = if matches!(op.method, "GET" | "DELETE") {
         None
     } else {
         let mut body = Map::new();
@@ -767,7 +1063,7 @@ pub enum Reply {
     Refresh {
         account: String,
         then: Option<Box<Call>>,
-        outcome: Result<(String, Option<String>, Option<String>), Failure>,
+        outcome: Result<Refreshed, Failure>,
     },
     Revoke {
         outcome: Result<bool, Failure>,
@@ -1004,11 +1300,16 @@ async fn run_poll(ex: &Exchange<'_>, base: &str, device_code: &str) -> Result<Po
     })
 }
 
-async fn run_refresh(
-    ex: &Exchange<'_>,
-    base: &str,
-    refresh: &str,
-) -> Result<(String, Option<String>, Option<String>), Failure> {
+/// A refresh answer: new access token, rotated refresh token, account name and the scopes the provider
+/// now grants (`None` when the answer has no `scope` field; an empty list means every scope went away).
+pub struct Refreshed {
+    access: String,
+    rotated: Option<String>,
+    account: Option<String>,
+    scope: Option<Vec<String>>,
+}
+
+async fn run_refresh(ex: &Exchange<'_>, base: &str, refresh: &str) -> Result<Refreshed, Failure> {
     let body = json!({ "refresh_token": refresh });
     let headers = [
         ("Content-Type", "application/json".to_owned()),
@@ -1028,8 +1329,16 @@ async fn run_refresh(
     let access =
         short_string(&object, "access_token", TOKEN_MAX).ok_or(Failure::new("provider_error"))?;
     let rotated = short_string(&object, "refresh_token", TOKEN_MAX);
-    let account = response.meta.account.clone();
-    Ok((access, rotated, account))
+    let scope = object
+        .get("scope")
+        .and_then(Value::as_str)
+        .map(|s| s.split_whitespace().map(str::to_owned).collect());
+    Ok(Refreshed {
+        access,
+        rotated,
+        account: response.meta.account.clone(),
+        scope,
+    })
 }
 
 async fn run_call(
@@ -1310,6 +1619,21 @@ fn status_code(status: Status) -> Result<(), &'static str> {
     }
 }
 
+/// Status and scope gate of one account for one operation, before any approval or network work. A
+/// `reauth_required` account that no longer grants the scope answers `scope_not_granted`, like any
+/// account without the scope; one that still grants it answers `reauth_required`.
+fn account_gate(found: &Account, scope: &str) -> Result<(), &'static str> {
+    let granted = found.granted_scopes.iter().any(|s| s == scope);
+    if found.status == Status::ReauthRequired && !granted {
+        return Err("scope_not_granted");
+    }
+    status_code(found.status)?;
+    if !granted {
+        return Err("scope_not_granted");
+    }
+    Ok(())
+}
+
 fn job_account(job: &Job) -> Option<&str> {
     match job {
         Job::Device { account, .. } | Job::Poll { account, .. } | Job::Refresh { account, .. } => {
@@ -1441,7 +1765,9 @@ impl Manager {
         };
         let mut next = self.ledger.clone();
         next.accounts[index].status = status;
-        if status != Status::Connected {
+        // `reauth_required` keeps the scopes the user granted (only the token must be renewed); every
+        // other state that is not connected forgets them.
+        if !matches!(status, Status::Connected | Status::ReauthRequired) {
             next.accounts[index].granted_scopes.clear();
         }
         self.commit(storage, next)?;
@@ -1869,10 +2195,7 @@ impl Manager {
                 if found.provider != provider.id {
                     return Err("unknown_connection");
                 }
-                status_code(found.status)?;
-                if !found.granted_scopes.iter().any(|s| s == op.scope) {
-                    return Err("scope_not_granted");
-                }
+                account_gate(found, op.scope)?;
                 id.to_owned()
             }
             None => self.resolve(provider, op)?,
@@ -1903,6 +2226,13 @@ impl Manager {
             .filter(|a| a.status == Status::Connected)
             .collect();
         if connected.is_empty() {
+            // Same answer as `plan` for an explicit account that lost its scope after a reauth.
+            if candidates.iter().all(|a| {
+                a.status == Status::ReauthRequired
+                    && !a.granted_scopes.iter().any(|s| s == op.scope)
+            }) {
+                return Err("scope_not_granted");
+            }
             return Err(status_code(candidates[0].status)
                 .err()
                 .unwrap_or("not_connected"));
@@ -1986,10 +2316,7 @@ impl Manager {
         }
         let base = fake_base(plan.provider.id).ok_or("real_backend_unsupported")?;
         let found = self.account(&plan.account).ok_or("unknown_connection")?;
-        status_code(found.status)?;
-        if !found.granted_scopes.iter().any(|s| s == plan.op.scope) {
-            return Err("scope_not_granted");
-        }
+        account_gate(found, plan.op.scope)?;
         let token = vault
             .connection_token(&plan.account, "access")
             .ok_or("reauth_required")?;
@@ -2231,10 +2558,15 @@ impl Manager {
         vault: &mut LlmState,
         id: &str,
         then: Option<Box<Call>>,
-        outcome: Result<(String, Option<String>, Option<String>), Failure>,
+        outcome: Result<Refreshed, Failure>,
     ) -> Option<Settled> {
         match outcome {
-            Ok((access, rotated, name)) => {
+            Ok(Refreshed {
+                access,
+                rotated,
+                account: name,
+                scope,
+            }) => {
                 let known = self.account(id).and_then(|a| a.account_ref.clone());
                 if name.is_some() && known.is_some() && name != known {
                     let _ = self.set_status(storage, id, Status::Error, Some("account_mismatch"));
@@ -2247,6 +2579,21 @@ impl Manager {
                     .is_err()
                 {
                     return then.and_then(|call| self.fail_proposal(call, "secrets_storage_error"));
+                }
+                let granted = self
+                    .account(id)
+                    .map(|a| a.granted_scopes.clone())
+                    .unwrap_or_default();
+                let still: Vec<String> = match &scope {
+                    Some(offered) => granted
+                        .iter()
+                        .filter(|s| offered.contains(s))
+                        .cloned()
+                        .collect(),
+                    None => granted.clone(),
+                };
+                if still.len() < granted.len() {
+                    return self.scope_lost(storage, id, still, then);
                 }
                 if self
                     .set_status(storage, id, Status::Connected, None)
@@ -2275,6 +2622,35 @@ impl Manager {
                 then.and_then(|call| self.fail_proposal(call, code))
             }
         }
+    }
+
+    /// The provider stopped granting a scope the account held: the account needs the user again and keeps
+    /// only the scopes still granted. The call that triggered the refresh fails with the code of its own
+    /// scope (`reauth_required` while its scope is still granted, `scope_not_granted` once it is gone).
+    fn scope_lost(
+        &mut self,
+        storage: &Storage,
+        id: &str,
+        still: Vec<String>,
+        then: Option<Box<Call>>,
+    ) -> Option<Settled> {
+        if let Some(index) = self.index(id) {
+            let mut next = self.ledger.clone();
+            next.accounts[index].status = Status::ReauthRequired;
+            next.accounts[index].granted_scopes = still.clone();
+            if self.commit(storage, next).is_ok() {
+                self.errors.insert(id.to_owned(), "reauth_required");
+            }
+        }
+        self.log("connection_expired", "none", "none", "reauth_required");
+        then.and_then(|call| {
+            let code = if still.iter().any(|s| s == call.op.scope) {
+                "reauth_required"
+            } else {
+                "scope_not_granted"
+            };
+            self.fail_proposal(call, code)
+        })
     }
 
     fn fail_proposal(&mut self, call: Box<Call>, code: &'static str) -> Option<Settled> {
@@ -2409,9 +2785,25 @@ mod tests {
     fn descriptors_are_fixed_and_empty_providers_are_valid() {
         let ids: Vec<&str> = PROVIDERS.iter().map(|p| p.id).collect();
         assert_eq!(ids, ["github", "google", "homeassistant", "mcp"]);
-        assert!(PROVIDERS[1..]
+        assert!(PROVIDERS[2..]
             .iter()
             .all(|p| p.scopes.is_empty() && p.operations.is_empty()));
+        let google = provider_by_id("google").unwrap();
+        assert_eq!(google.scopes.len(), 7);
+        assert_eq!(google.operations.len(), 7);
+        for op in google.operations {
+            assert!(
+                google.scopes.iter().any(|s| s.id == op.scope),
+                "{}",
+                op.name
+            );
+        }
+        let risks: Vec<(&str, Access)> =
+            google.operations.iter().map(|o| (o.name, o.risk)).collect();
+        assert!(risks.contains(&("gmail.send", Access::Public)));
+        assert!(risks.contains(&("gmail.messages.delete", Access::Destructive)));
+        assert!(risks.contains(&("calendar.events.create", Access::Write)));
+        assert!(risks.contains(&("gmail.messages.list", Access::Read)));
         let github = github();
         assert_eq!(github.scopes.len(), 3);
         // Every operation names a declared scope and a method the broker allows.
@@ -2484,6 +2876,24 @@ mod tests {
     }
 
     #[test]
+    fn google_lists_never_project_bodies_or_contents() {
+        let google = provider_by_id("google").unwrap();
+        let mail = operation(google, "gmail.messages.list").unwrap();
+        let raw = json!([{"id": "m1", "from": "a@example.test", "subject": "Oi",
+                          "body": "CORPO-SECRETO", "labels": ["x"]}]);
+        assert_eq!(
+            project(&raw, mail).unwrap(),
+            json!([{"id": "m1", "from": "a@example.test", "subject": "Oi"}])
+        );
+        let files = operation(google, "drive.files.list").unwrap();
+        let raw = json!([{"id": "f1", "name": "seed.txt", "content": "CONTEUDO-SECRETO"}]);
+        assert_eq!(
+            project(&raw, files).unwrap(),
+            json!([{"id": "f1", "name": "seed.txt"}])
+        );
+    }
+
+    #[test]
     fn fake_targets_must_be_loopback_ip_literals_without_a_path() {
         assert!(parse_fake("github=http://127.0.0.1:8080").is_ok());
         assert!(parse_fake("github=http://[::1]:8080").is_ok());
@@ -2504,5 +2914,53 @@ mod tests {
         assert!(!repo_ok("demo"));
         assert!(!repo_ok("demo/../x"));
         assert!(!repo_ok("demo/a b"));
+    }
+
+    #[test]
+    fn google_values_are_strict_and_bound_to_the_path() {
+        let del = operation(provider_by_id("google").unwrap(), "gmail.messages.delete").unwrap();
+        let shape = validate(del, &json!({"id": "m1"})).unwrap();
+        assert_eq!(shape.path, "/api/gmail/messages/m1");
+        assert_eq!(shape.body, None, "DELETE carries no body");
+        let long = "x".repeat(65);
+        for bad in ["../m1", "m1/x", "", "m 1", long.as_str()] {
+            assert!(validate(del, &json!({ "id": bad })).is_err(), "{bad}");
+        }
+        let create =
+            operation(provider_by_id("google").unwrap(), "calendar.events.create").unwrap();
+        let ok = json!({"title": "Reunião", "start": "2026-10-20T09:00:00Z", "end": "2026-10-20T10:30:00-03:00"});
+        assert!(validate(create, &ok).is_ok());
+        for bad in [
+            "2026-10-20 09:00:00",
+            "2026-10-20T09:00Z",
+            "2026-13-20T09:00:00Z",
+            "2026-10-20T25:00:00Z",
+            "2026-10-20T09:00:00",
+            "2026-10-20T09:00:00.Z",
+        ] {
+            let args = json!({"title": "t", "start": bad, "end": "2026-10-20T10:00:00Z"});
+            assert!(validate(create, &args).is_err(), "{bad}");
+        }
+        let send = operation(provider_by_id("google").unwrap(), "gmail.send").unwrap();
+        assert!(validate(
+            send,
+            &json!({"to": "a@b.test", "subject": "s", "body": "b"})
+        )
+        .is_ok());
+        for bad in [
+            "sem-arroba",
+            "a@b@c.test",
+            "a b@c.test",
+            "<a>@b.test",
+            "@b.test",
+        ] {
+            let args = json!({"to": bad, "subject": "s", "body": "b"});
+            assert!(validate(send, &args).is_err(), "{bad}");
+        }
+        let files = operation(provider_by_id("google").unwrap(), "drive.files.create").unwrap();
+        assert!(validate(files, &json!({"name": "a.txt"})).is_ok());
+        for bad in ["a/b", "a\\b", ".", "..", ""] {
+            assert!(validate(files, &json!({ "name": bad })).is_err(), "{bad}");
+        }
     }
 }

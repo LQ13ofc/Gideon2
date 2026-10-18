@@ -271,9 +271,14 @@ impl Stub {
     fn start(dir: &Path) -> Stub {
         let script = dir.join("stub.py");
         fs::write(&script, STUB).unwrap();
+        Stub::spawn(&script, &[])
+    }
+    /// Runs one loopback fake (the inline GitHub stub, or a fixture under tests/fixtures) and reads its PORT line.
+    fn spawn(script: &Path, args: &[&str]) -> Stub {
         let mut child = Command::new(PYTHON)
             .arg("-I")
-            .arg(&script)
+            .arg(script)
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -1250,4 +1255,442 @@ fn unknown_operations_and_bad_arguments_never_reach_the_network() {
     );
     thread::sleep(Duration::from_millis(100));
     assert_eq!(api_requests(&stub), before);
+}
+
+// ---- S5 E2.2 google (fixture tests/fixtures/connections/google_server.py) ----
+
+/// Loopback Google fake (Gmail, Calendar, Drive). Its request counter ignores control calls.
+fn google_stub() -> Stub {
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/connections/google_server.py");
+    Stub::spawn(&script, &["--port", "0"])
+}
+
+fn google_core(dir: &Path, stub: &Stub, allow_public: bool) -> Core {
+    let mut core = Core::new(dir);
+    core.start(
+        &[format!("google=http://127.0.0.1:{}", stub.port)],
+        allow_public,
+    );
+    core
+}
+
+fn google_requests(stub: &Stub) -> u64 {
+    stub.state()["requests"].as_u64().unwrap()
+}
+
+/// Device login against the Google fake: approval by user code, then consent to `consent`.
+fn google_login(core: &mut Core, stub: &Stub, id: &str, consent: &[&str]) -> Value {
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "ok"
+    );
+    let pending = wait_until_value("google device code", || {
+        let item = core.item(id);
+        (item["user_code"].is_string()).then_some(item)
+    });
+    assert_eq!(pending["pending_scopes"].as_array().unwrap().len(), 7);
+    stub.control(
+        "approve",
+        json!({"user_code": pending["user_code"], "scopes": pending["pending_scopes"]}),
+    );
+    wait_until("consent accepted", || {
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": consent}))["code"] == "ok"
+    });
+    core.wait_status(id, "connected")
+}
+
+/// A write or public call waits for its approval card; returns the proposal id of that card.
+fn google_card(core: &mut Core, id: &str, operation: &str, args: Value) -> String {
+    let code = core.op(id, operation, args)["code"].clone();
+    assert_eq!(code, "pending_approval", "{operation}");
+    let pid = core.last_call()["proposal_id"].as_str().unwrap().to_owned();
+    let card = core.proposal(&pid);
+    assert_eq!(card["kind"], "connection");
+    assert_eq!(card["tool"], format!("conn:google.{operation}"));
+    pid
+}
+
+#[test]
+fn google_descriptor_is_fixed_in_the_snapshot_and_marked_fake() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "descricao");
+    assert_eq!(core.item(&id)["fake"], json!(true));
+    let snap = core.snap();
+    let provider = snap["connections"]["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "google")
+        .unwrap()
+        .clone();
+    let scopes: Vec<&str> = provider["scopes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        scopes,
+        [
+            "gmail.read",
+            "gmail.send",
+            "gmail.delete",
+            "calendar.read",
+            "calendar.write",
+            "drive.read",
+            "drive.write"
+        ]
+    );
+    let risk = |name: &str| -> String {
+        provider["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["name"] == name)
+            .unwrap()["risk"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(risk("gmail.messages.list"), "read");
+    assert_eq!(risk("gmail.send"), "public");
+    assert_eq!(risk("gmail.messages.delete"), "destructive");
+    assert_eq!(risk("calendar.events.create"), "write");
+    assert_eq!(risk("drive.files.create"), "write");
+    assert_eq!(provider["operations"].as_array().unwrap().len(), 7);
+}
+
+#[test]
+fn google_partial_consent_keeps_only_the_ticked_scopes_and_refuses_unrequested_ones() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "parcial");
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "ok"
+    );
+    let pending = wait_until_value("google device code", || {
+        let item = core.item(&id);
+        (item["user_code"].is_string()).then_some(item)
+    });
+    stub.control(
+        "approve",
+        json!({"user_code": pending["user_code"], "scopes": pending["pending_scopes"]}),
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": ["admin:everything"]}))
+            ["code"],
+        "scope_not_requested"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": []}))["code"],
+        "invalid_args"
+    );
+    let consent = ["gmail.read", "calendar.read"];
+    wait_until("consent accepted", || {
+        core.call(json!({"op": "connection_consent", "id": id, "scopes": consent}))["code"] == "ok"
+    });
+    let connected = core.wait_status(&id, "connected");
+    let mut granted: Vec<String> = connected["granted_scopes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_owned())
+        .collect();
+    granted.sort();
+    assert_eq!(granted, ["calendar.read", "gmail.read"]);
+    assert_eq!(connected["account_ref"], "demo-user");
+}
+
+#[test]
+fn google_read_write_and_delete_scopes_are_separate_and_refused_before_the_network() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "so leitura");
+    google_login(&mut core, &stub, &id, &["gmail.read", "calendar.read"]);
+    let before = google_requests(&stub);
+    assert_eq!(
+        core.op(
+            &id,
+            "gmail.send",
+            json!({"to": "bob@example.test", "subject": "s", "body": "b"})
+        )["code"],
+        "scope_not_granted"
+    );
+    assert_eq!(
+        core.op(&id, "gmail.messages.delete", json!({"id": "m1"}))["code"],
+        "scope_not_granted"
+    );
+    assert_eq!(
+        core.op(&id, "drive.files.create", json!({"name": "a.txt"}))["code"],
+        "scope_not_granted"
+    );
+    assert_eq!(
+        core.op(
+            &id,
+            "calendar.events.create",
+            json!({"title": "t", "start": "2026-10-20T09:00:00Z", "end": "2026-10-20T10:00:00Z"})
+        )["code"],
+        "scope_not_granted"
+    );
+    assert_eq!(
+        google_requests(&stub),
+        before,
+        "refused calls reach no server"
+    );
+    assert_eq!(stub.state()["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(core.op(&id, "gmail.messages.list", json!({}))["code"], "ok");
+    wait_until("list finished", || core.last_call()["outcome"] == "ok");
+    assert_eq!(google_requests(&stub), before + 1);
+}
+
+#[test]
+fn google_send_waits_for_approval_and_is_refused_without_the_public_switch() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "envio");
+    google_login(&mut core, &stub, &id, &["gmail.send"]);
+    let pid = google_card(
+        &mut core,
+        &id,
+        "gmail.send",
+        json!({"to": "bob@example.test", "subject": "oi", "body": "corpo"}),
+    );
+    assert_eq!(core.proposal(&pid)["risk"], "public");
+    let refused =
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}));
+    assert_eq!(refused["code"], "public_disabled", "{refused}");
+    assert_eq!(core.proposal(&pid)["state"], "pending");
+    assert!(stub.state()["sent"].as_array().unwrap().is_empty());
+    let denied = core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "deny"}));
+    assert_eq!(denied["code"], "ok");
+    assert!(stub.state()["sent"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn google_delete_is_destructive_and_never_runs_without_the_public_switch() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "apagar");
+    google_login(&mut core, &stub, &id, &["gmail.read", "gmail.delete"]);
+    let pid = google_card(&mut core, &id, "gmail.messages.delete", json!({"id": "m1"}));
+    assert_eq!(core.proposal(&pid)["risk"], "destructive");
+    let refused =
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}));
+    assert_eq!(refused["code"], "public_disabled", "{refused}");
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        stub.state()["messages"].as_array().unwrap().len(),
+        2,
+        "m1 still there"
+    );
+    core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "deny"}));
+}
+
+#[test]
+fn google_destructive_and_send_run_only_after_approval_with_the_switch() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, true);
+    let id = core.add("google", "apagar liberado");
+    google_login(
+        &mut core,
+        &stub,
+        &id,
+        &["gmail.read", "gmail.delete", "gmail.send"],
+    );
+    let pid = google_card(&mut core, &id, "gmail.messages.delete", json!({"id": "m1"}));
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}))
+            ["code"],
+        "ok"
+    );
+    let done = core.wait_proposal_done(&pid);
+    assert_eq!(done["state"], "executed", "{done}");
+    assert_eq!(
+        serde_json::from_str::<Value>(done["result"].as_str().unwrap()).unwrap(),
+        json!({"id": "m1", "deleted": true})
+    );
+    let messages = stub.state()["messages"].clone();
+    assert_eq!(
+        messages.as_array().unwrap().len(),
+        1,
+        "m1 removed on the fake"
+    );
+    let sid = google_card(
+        &mut core,
+        &id,
+        "gmail.send",
+        json!({"to": "bob@example.test", "subject": "oi", "body": "corpo"}),
+    );
+    assert!(
+        stub.state()["sent"].as_array().unwrap().is_empty(),
+        "nothing sent before approval"
+    );
+    core.call(json!({"op": "tool_decide", "proposal_id": sid, "decision": "authorize"}));
+    let sent = core.wait_proposal_done(&sid);
+    assert_eq!(sent["state"], "executed", "{sent}");
+    let result: Value = serde_json::from_str(sent["result"].as_str().unwrap()).unwrap();
+    let mut keys: Vec<&str> = result
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["id", "subject", "to"],
+        "no body in the sent projection"
+    );
+    assert_eq!(stub.state()["sent"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn google_calendar_create_retries_with_the_same_key_and_creates_one_event() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "agenda");
+    google_login(&mut core, &stub, &id, &["calendar.read", "calendar.write"]);
+    stub.control("fail_after_create", json!({"n": 1}));
+    let pid = google_card(
+        &mut core,
+        &id,
+        "calendar.events.create",
+        json!({"title": "Reunião de teste", "start": "2026-10-20T09:00:00Z", "end": "2026-10-20T10:00:00Z"}),
+    );
+    assert_eq!(
+        core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}))
+            ["code"],
+        "ok"
+    );
+    let done = core.wait_proposal_done(&pid);
+    assert_eq!(done["state"], "executed", "{done}");
+    let state = stub.state();
+    let copies = state["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["title"] == "Reunião de teste")
+        .count();
+    assert_eq!(copies, 1, "one event after a 500 and a retry");
+    let keys = state["last_idempotency_keys"].as_array().unwrap();
+    assert_eq!(keys.len(), 2, "create then the replayed retry");
+    assert_eq!(keys[0], keys[1], "the retry reuses the key");
+}
+
+#[test]
+fn google_quota_is_rate_limited_with_retry_after_and_keeps_the_account() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "cota");
+    google_login(&mut core, &stub, &id, &["calendar.read"]);
+    stub.control("quota", json!({"n": 1, "retry_after": 9}));
+    assert_eq!(
+        core.op(&id, "calendar.events.list", json!({}))["code"],
+        "ok"
+    );
+    wait_until("quota reported", || {
+        core.last_call()["code"] == "rate_limited"
+    });
+    assert_eq!(core.last_call()["retry_after"], 9);
+    assert_eq!(core.item(&id)["status"], "connected");
+}
+
+#[test]
+fn google_expired_token_is_refreshed_once_and_the_call_succeeds() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "expira");
+    google_login(&mut core, &stub, &id, &["gmail.read"]);
+    let issued = stub.state()["tokens"]["issued"].as_u64().unwrap();
+    stub.control("expire_token", json!({}));
+    assert_eq!(core.op(&id, "gmail.messages.list", json!({}))["code"], "ok");
+    wait_until("refreshed call", || core.last_call()["outcome"] == "ok");
+    assert_eq!(
+        stub.state()["tokens"]["issued"].as_u64().unwrap(),
+        issued + 1
+    );
+    assert_eq!(core.item(&id)["status"], "connected");
+}
+
+#[test]
+fn google_scope_loss_at_refresh_moves_the_account_to_reauth_required() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "escopo perdido");
+    google_login(&mut core, &stub, &id, &["gmail.read", "calendar.read"]);
+    stub.control("change_scopes", json!({"scopes": ["gmail.read"]}));
+    stub.control("expire_token", json!({}));
+    assert_eq!(core.op(&id, "gmail.messages.list", json!({}))["code"], "ok");
+    wait_until("reauth after scope loss", || {
+        core.item(&id)["status"] == "reauth_required"
+    });
+    let item = core.item(&id);
+    assert_eq!(
+        item["granted_scopes"],
+        json!(["gmail.read"]),
+        "reduced, not cleared"
+    );
+    wait_until("triggering call reports reauth", || {
+        core.last_call()["code"] == "reauth_required"
+    });
+    assert_eq!(
+        core.op(&id, "calendar.events.list", json!({}))["code"],
+        "scope_not_granted",
+        "the lost scope is refused before the network"
+    );
+    assert_eq!(
+        core.op(&id, "gmail.messages.list", json!({}))["code"],
+        "reauth_required",
+        "a scope still granted waits for the user"
+    );
+}
+
+#[test]
+fn google_revoke_stops_calls_and_the_server_sees_it() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "revogar");
+    google_login(&mut core, &stub, &id, &["gmail.read"]);
+    let revoked = stub.state()["tokens"]["revoked"].as_u64().unwrap();
+    assert_eq!(
+        core.call(json!({"op": "connection_revoke", "id": id}))["code"],
+        "ok"
+    );
+    wait_until("revoke reached the fake", || {
+        stub.state()["tokens"]["revoked"].as_u64().unwrap() > revoked
+    });
+    assert_eq!(core.item(&id)["status"], "disconnected");
+    assert_eq!(
+        core.op(&id, "gmail.messages.list", json!({}))["code"],
+        "not_connected"
+    );
+}
+
+#[test]
+fn google_account_mismatch_marks_the_account_as_error() {
+    let (_guard, dir) = fresh();
+    let stub = google_stub();
+    let mut core = google_core(&dir, &stub, false);
+    let id = core.add("google", "conta trocada");
+    google_login(&mut core, &stub, &id, &["gmail.read"]);
+    stub.control("set_account", json!({"name": "outra-conta"}));
+    assert_eq!(core.op(&id, "gmail.messages.list", json!({}))["code"], "ok");
+    wait_until("account mismatch", || {
+        core.last_call()["code"] == "account_mismatch"
+    });
+    assert_eq!(core.item(&id)["status"], "error");
 }

@@ -82,6 +82,7 @@ class Store:
         self.next_file = 2
         self.idem = {}
         self.idem_history = []
+        self.fail_after_create = 0  # next n event creates are stored, then answer 500 (retry replays)
         self.requests = 0
         self.tokens_issued = 0
         self.tokens_revoked = 0
@@ -326,6 +327,9 @@ def _create_event(store, base, body, args, headers):
     store.events[event_id] = {"title": title, "start": start_text, "end": end_text}
     if key is not None:
         store.idem[key] = (event_id, fingerprint)
+    if store.fail_after_create > 0:
+        store.fail_after_create -= 1
+        raise Fail(500, "server_error")
     return 201, _event_view(store, event_id), {}
 
 
@@ -396,6 +400,14 @@ def _ctl_expire_token(store, base, body):
     for rec in store.access.values():
         rec["expires_at"] = now - 1
     return 200, {"expired": len(store.access)}, {}
+
+
+def _ctl_fail_after_create(store, base, body):
+    n = body.get("n")
+    if not _is_int(n, 0, 10000):
+        raise Fail(400, "invalid_request")
+    store.fail_after_create = n
+    return 200, {"remaining": n}, {}
 
 
 def _ctl_rate_limit(store, base, body):
@@ -515,6 +527,7 @@ CONTROL_ROUTES = {
     "reset": ("POST", _ctl_reset),
     "expire_token": ("POST", _ctl_expire_token),
     "rate_limit": ("POST", _ctl_rate_limit),
+    "fail_after_create": ("POST", _ctl_fail_after_create),
     "quota": ("POST", _ctl_quota),
     "set_account": ("POST", _ctl_set_account),
     "deny_scope": ("POST", _ctl_deny_scope),

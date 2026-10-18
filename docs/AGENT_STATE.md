@@ -32,3 +32,7 @@
 
 ## 2026-10-18 — S4 CLOSED (AUTO_VERIFIED)
 - Evidence docs/evidence/s4.json; matrix script target/run-matrix-s4b.sh. Next: S5 Connections (read Notion S5 page, write docs/S5.md), then final integrated package and owner human validation round.
+
+## 2026-10-18 — E2.2 google (AUTO_VERIFIED against the fake, UNCOMMITTED)
+- Descriptor google (7 scopes, 7 ops), calendar_list_events / gmail_list_messages / calendar_create_event (fake flag only), scope loss at refresh -> reauth_required with reduced grant, reauth keeps granted scopes (github too). Gate scripts/verify_e22_google.py 111/0 (4 documented skips); evidence target/evidence/e22-google.json. Regression: verify_e1_connections 119/0; cargo test 323/0; snapshot contract 10/10; bridge protocol 156/0; fixtures 129 + 86 green. Wire differences: docs/S5.md "Resultado E2.2 google".
+- Next: E2.3 homeassistant (needs its own fake contract review first).

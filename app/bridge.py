@@ -109,6 +109,12 @@ CONN_MESSAGES={
     'connection_consent_required':'Escolha ao menos um escopo pedido para consentir',
     'connection_args_invalid':'Argumentos devem ser um objeto JSON de até 4 KiB',
     'connection_unavailable':'Conexões indisponíveis agora',
+    'not_found':'Recurso não encontrado no servidor; nada foi alterado',
+    'public_disabled':'Ação pública ou destrutiva desativada nesta build; nada foi executado',
+    'scope_not_requested':'Escopo não pedido pelo dispositivo; nada foi concedido',
+    'device_expired':'Código de confirmação expirou; conecte a conta de novo',
+    'consent_denied':'Consentimento recusado no servidor; nada foi concedido',
+    'connections_storage_error':'Contas indisponíveis: o arquivo de contas não pôde ser lido ou gravado',
 }
 CONN_CODES=frozenset(CONN_MESSAGES)
 TOOL_REASONS=TOOL_REASONS|CONN_CODES

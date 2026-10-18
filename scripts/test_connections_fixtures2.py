@@ -614,6 +614,20 @@ class GoogleCalendarTests(GoogleCase):
                 self.assertEqual(reply.json, {"error": "validation_failed"})
         self.assertEqual(len(self.state()["events"]), 1)
 
+    def test_fail_after_create_stores_then_500_and_retry_replays(self):
+        tok = self.token()
+        self.assertEqual(self.control("fail_after_create", {"n": 1}).status, 200)
+        headers = {"Idempotency-Key": "cal-500-1"}
+        failed = self.api("POST", self.PATH, tok["access_token"], self.event(), headers)
+        self.assertEqual(failed.status, 500)
+        self.assertEqual(failed.json, {"error": "server_error"})
+        self.assertEqual(len(self.state()["events"]), 2, "the failed create is stored")
+        replay = self.api("POST", self.PATH, tok["access_token"], self.event(), headers)
+        self.assertEqual(replay.status, 201)
+        self.assertEqual(replay.headers.get("X-Idempotent-Replay"), "true")
+        self.assertEqual(len(self.state()["events"]), 2, "the retry creates no second event")
+        self.assertEqual(self.control("fail_after_create", {"n": -1}).status, 400)
+
     def test_idempotency_key_replays_same_event(self):
         tok = self.token()
         headers = {"Idempotency-Key": "cal-replay-1"}

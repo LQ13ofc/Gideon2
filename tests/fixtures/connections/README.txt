@@ -109,6 +109,8 @@ Control endpoints (tests only)
                                            scopes must be known scope names; denied scopes dropped.
                                            404 unknown_user_code | unknown_device_code; 409 expired/used
   POST /__control/expire_token             {} all access tokens; {access_token} or {device_code}; 404 if unknown
+  POST /__control/fail_after_create        {n} the next n calendar event creates are stored, then answer 500
+                                           server_error (a retry with the same Idempotency-Key replays the event)
   POST /__control/quota                    {n, retry_after?=1} next n /api requests get 429 quota_exceeded
   POST /__control/rate_limit               {n, retry_after?=1} next n /api requests get 429 rate_limited
   POST /__control/set_account              {name}

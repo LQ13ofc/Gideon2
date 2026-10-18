@@ -59,6 +59,8 @@ ApplicationWindow {
     readonly property var connProviderChoices: [{id: "github", text: "GitHub"}, {id: "google", text: "Google"}, {id: "homeassistant", text: "Home Assistant"}, {id: "mcp", text: "MCP"}]
     function connProviderName(id) { for (var i = 0; i < connProviderChoices.length; i++) if (connProviderChoices[i].id === id) return connProviderChoices[i].text; return id; }
     function connStatusText(s) { switch (s) { case "disconnected": return "desconectada"; case "connecting": return "conectando (aguardando confirmação)"; case "connected": return "conectada"; case "expired": return "expirada"; case "offline": return "offline"; case "error": return "erro"; case "reauth_required": return "reautenticação necessária"; default: return s; } }
+    // S5 E2.2: short Portuguese label of an operation name (the name itself stays visible for the tests and the wire).
+    function connOpLabel(name) { switch (name) { case "repos.list": return "listar repositórios"; case "repo.get": return "ver repositório"; case "issues.create": return "criar issue"; case "issues.update": return "editar issue"; case "pulls.get": return "ver pull request"; case "pulls.comment": return "comentar pull request"; case "actions.list": return "listar actions"; case "gmail.messages.list": return "listar e-mails"; case "gmail.send": return "enviar e-mail"; case "gmail.messages.delete": return "apagar e-mail"; case "calendar.events.list": return "listar eventos"; case "calendar.events.create": return "criar evento"; case "drive.files.list": return "listar arquivos"; case "drive.files.create": return "criar arquivo"; default: return name; } }
     function connRiskText(r) { switch (r) { case "read": return "leitura"; case "write": return "escrita (pede aprovação)"; case "destructive": return "destrutiva (aprovação forte)"; case "public": return "pública (aprovação explícita)"; default: return r; } }
     function connProvider(id) { var list = core.connectionsProviders; for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
     function connScopeLabel(providerId, scope) { var p = connProvider(providerId); if (p) for (var i = 0; i < p.scopes.length; i++) if (p.scopes[i].id === scope) return p.scopes[i].label; return scope; }
@@ -86,7 +88,7 @@ ApplicationWindow {
         var items = core.connectionsItems; var item = null
         for (var i = 0; i < items.length; i++) if (items[i].id === p.connection_id) item = items[i]
         var account = item ? (item.account_ref ? item.label + " (" + item.account_ref + ")" : item.label) : "conta desconhecida"
-        return "Conexão: " + (item ? connProviderName(item.provider) : "provedor desconhecido") + " · conta " + account + " · operação " + p.operation + " · risco " + connRiskText(p.risk)
+        return "Conexão: " + (item ? connProviderName(item.provider) : "provedor desconhecido") + " · conta " + account + " · operação " + p.operation + " (" + connOpLabel(p.operation) + ") · risco " + connRiskText(p.risk)
     }
     // The skill whose permissions are shown; a copy of the snapshot row, so it reads as shown when it was picked.
     property var skillSelected: null
@@ -1124,7 +1126,7 @@ ApplicationWindow {
                                         delegate: RowLayout {
                                             required property var modelData
                                             Layout.fillWidth: true; spacing: 8
-                                            Label { objectName: "connOp_" + connCard.modelData.id + "_" + modelData.name; text: modelData.name + " · " + window.connRiskText(modelData.risk) + (window.connGranted(connCard.modelData, modelData.scope) ? "" : " · escopo não concedido"); textFormat: Text.PlainText; color: "#dce7ff"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                            Label { objectName: "connOp_" + connCard.modelData.id + "_" + modelData.name; text: modelData.name + " (" + window.connOpLabel(modelData.name) + ") · " + window.connRiskText(modelData.risk) + (window.connGranted(connCard.modelData, modelData.scope) ? "" : " · escopo não concedido"); textFormat: Text.PlainText; color: "#dce7ff"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                             GlowButton { objectName: "connTest_" + connCard.modelData.id + "_" + modelData.name; visible: modelData.risk === "read"; text: "Testar leitura"; Accessible.name: "Testar leitura " + modelData.name + " de " + connCard.modelData.label; enabled: window.connCanTest(connCard.modelData, modelData); onClicked: core.connectionCall(connCard.modelData.id, modelData.name, "{}") }
                                         }
                                     }

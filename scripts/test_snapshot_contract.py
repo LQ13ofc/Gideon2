@@ -27,6 +27,7 @@ C4_CATALOG = BASE / 'tests/fixtures/hub-c4.json'
 PLUGIN_SRC = BASE / 'tests/fixtures/llm_engine.py'
 FAKE_SRC = BASE / 'tests/fixtures/fake_llm_server.py'
 GITHUB_SRC = BASE / 'tests/fixtures/connections/github_server.py'  # S5 E1 fake GitHub (loopback, stdlib)
+GOOGLE_SRC = BASE / 'tests/fixtures/connections/google_server.py'  # S5 E2.2 fake Google (loopback, stdlib)
 PYTHON = '/usr/bin/python3'
 PLUGIN = 'llm_engine'
 CAP = 'llm_engine.chat'
@@ -179,7 +180,13 @@ class SnapshotContract(unittest.TestCase):
         self._td.cleanup()
 
     def start_github(self):
-        self.github = subprocess.Popen([PYTHON, '-I', str(GITHUB_SRC), '--port', '0'], stdin=subprocess.DEVNULL,
+        return self.start_loopback_fake(GITHUB_SRC)
+
+    def start_google(self):
+        return self.start_loopback_fake(GOOGLE_SRC)
+
+    def start_loopback_fake(self, source):
+        self.github = subprocess.Popen([PYTHON, '-I', str(source), '--port', '0'], stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=CLEAN_ENV, cwd='/')
         line = self.github.stdout.readline().decode('ascii').strip()
         self.assertTrue(line.startswith('PORT='), line)
@@ -617,6 +624,73 @@ class SnapshotContract(unittest.TestCase):
         c.snap('removed')
         self.assertGreaterEqual(len(c.validated), 9, c.validated)  # nine connection states, every one validated
         self.assertTrue(any('proposal' in label for label in c.validated), c.validated)
+        c.stop()
+
+    def test_google_connections_snapshots_validate_against_real_core(self):
+        # S5 E2.2 (docs/S5.md, "E2.2 google"): every google connections state passes the bridge validator, the
+        # public, destructive and write proposals included, against the real Core and the Google fake.
+        base = self.start_google()
+        self.core.extra = ['--connections-fake', f'google={base}']
+        self.core.start()
+        c = self.core
+        c.snap('google: nothing added yet')
+        self.assertEqual(self.ok_op('connection_add', provider='google', label='contrato google')['code'], 'ok')
+        cid = c.snap('google account added')['connections']['items'][0]['id']
+        self.assertEqual(self.ok_op('connection_connect', id=cid)['code'], 'ok')
+        c.wait(lambda s: any(i['id'] == cid and i.get('user_code') for i in s['connections']['items']), 15,
+               'google device code shown')
+        pending = c.snap('google connecting: user_code and seven pending scopes')
+        item = next(i for i in pending['connections']['items'] if i['id'] == cid)
+        self.assertEqual(len(item['pending_scopes']), 7)
+        self.github_control(base, 'approve', {'user_code': item['user_code'], 'scopes': item['pending_scopes']})
+        consent = ['gmail.read', 'gmail.send', 'gmail.delete', 'calendar.write']
+        until = time.monotonic() + 20
+        while self.ok_op('connection_consent', id=cid, scopes=consent)['code'] != 'ok':
+            self.assertLess(time.monotonic(), until, 'google consent accepted after the device approval')
+            time.sleep(0.2)
+        c.wait(lambda s: next(i for i in s['connections']['items'] if i['id'] == cid)['status'] == 'connected',
+               20, 'google connected')
+        connected = c.snap('google connected with four consented scopes')
+        granted = next(i for i in connected['connections']['items'] if i['id'] == cid)['granted_scopes']
+        self.assertEqual(set(granted), set(consent))
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='gmail.messages.list', args={})['code'], 'ok')
+        c.wait(lambda s: (s['connections'].get('last_call') or {}).get('outcome') == 'ok', 20, 'list finished')
+        c.snap('google list finished (last_call ok, no body in any state)')
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='gmail.send',
+                                    args={'to': 'bob@example.test', 'subject': 'contrato', 'body': 'corpo'})['code'],
+                         'pending_approval')
+        send_pid = c.snap('google public send proposal pending')['connections']['last_call']['proposal_id']
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=send_pid, decision='authorize')['code'],
+                         'public_disabled')
+        refused = c.snap('public send refused without the switch (still pending)')
+        self.assertEqual(next(p for p in refused['tool_proposals'] if p['proposal_id'] == send_pid)['state'],
+                         'pending')
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=send_pid, decision='deny')['code'], 'ok')
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='gmail.messages.delete',
+                                    args={'id': 'm1'})['code'], 'pending_approval')
+        del_pid = c.snap('google destructive delete proposal pending')['connections']['last_call']['proposal_id']
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=del_pid, decision='deny')['code'], 'ok')
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='calendar.events.create', args={
+            'title': 'contrato', 'start': '2026-10-20T09:00:00Z', 'end': '2026-10-20T10:00:00Z'})['code'],
+            'pending_approval')
+        write_pid = c.snap('google write proposal pending')['connections']['last_call']['proposal_id']
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=write_pid, decision='authorize')['code'], 'ok')
+        c.wait(lambda s: any(p['proposal_id'] == write_pid and p['state'] == 'executed'
+                             for p in s['tool_proposals']), 20, 'google write executed')
+        done = c.snap('google write proposal executed with projected result')
+        proposal = next(p for p in done['tool_proposals'] if p['proposal_id'] == write_pid)
+        self.assertEqual(proposal['tool'], 'conn:google.calendar.events.create')
+        self.assertEqual(sorted(json.loads(proposal['result'])), ['end', 'id', 'start', 'title'])
+
+        self.assertEqual(self.ok_op('connection_disconnect', id=cid)['code'], 'ok')
+        c.snap('google disconnected')
+        self.assertEqual(self.ok_op('connection_remove', id=cid)['code'], 'ok')
+        c.snap('google removed')
+        self.assertGreaterEqual(len(c.validated), 9, c.validated)
         c.stop()
 
 if __name__ == '__main__':

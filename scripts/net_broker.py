@@ -11,7 +11,8 @@ stdout: JSON lines only: {"chunk": str<=16384 chars}, then exactly one terminal 
 {"error": code[, "status": N][, "retry_after": int][, "provider_error": snake_str]}.
 Bodies of failed responses are never printed; the only body fact kept is a snake_case
 "error" token of a small JSON object (provider_error). Redirects are refused, never followed.
-Connections (C-S5) use GET/POST/PATCH with an Idempotency-Key header; C1 uses POST only.
+Connections (C-S5) use GET/POST/PATCH, and DELETE for Gmail message removal (E2.2), with an Idempotency-Key header
+on idempotent writes; C1 uses POST only.
 """
 import codecs
 import http.client
@@ -30,7 +31,7 @@ MAX_CHUNK = 16384
 MAX_TOTAL = 4 * 1024 * 1024
 MAX_ERROR_BODY = 4096
 ALLOWED_HEADERS = {"content-type", "accept", "idempotency-key"}
-ALLOWED_METHODS = ("GET", "POST", "PATCH")
+ALLOWED_METHODS = ("GET", "POST", "PATCH", "DELETE")
 ACCOUNT_MAX = 128
 
 

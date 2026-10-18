@@ -1980,6 +1980,21 @@ class ConnectionsContract(unittest.TestCase):
         for block in ({**conns_block(),'extra':1},{k:v for k,v in conns_block().items() if k!='providers'},{k:v for k,v in conns_block().items() if k!='revision'},[],'x'):
             with self.subTest(block=str(block)[:30]):
                 with self.assertRaises(ValueError):validate_snapshot({**BASE,'connections':block},'r',0)
+    def test_google_catalog_and_public_destructive_proposals_validate(self):
+        # S5 E2.2: the fixed google catalog (seven scopes, seven operations, every access class) and its proposals.
+        scopes=[{'id':'gmail.read','label':'Ler','access':'read'},{'id':'gmail.send','label':'Enviar','access':'public'},{'id':'gmail.delete','label':'Apagar','access':'destructive'},{'id':'calendar.read','label':'Ler agenda','access':'read'},{'id':'calendar.write','label':'Criar evento','access':'write'},{'id':'drive.read','label':'Listar','access':'read'},{'id':'drive.write','label':'Criar arquivo','access':'write'}]
+        ops=[{'name':'gmail.messages.list','scope':'gmail.read','risk':'read'},{'name':'gmail.send','scope':'gmail.send','risk':'public'},{'name':'gmail.messages.delete','scope':'gmail.delete','risk':'destructive'},{'name':'calendar.events.list','scope':'calendar.read','risk':'read'},{'name':'calendar.events.create','scope':'calendar.write','risk':'write'},{'name':'drive.files.list','scope':'drive.read','risk':'read'},{'name':'drive.files.create','scope':'drive.write','risk':'write'}]
+        google={'id':'google','scopes':scopes,'operations':ops}
+        item=conn_item('g_1','google','Pessoal',granted=('gmail.read','gmail.send','gmail.delete'),pending=(),fake=True)
+        proposals=[conn_proposal('p_send','g_1','gmail.send','public'),conn_proposal('p_del','g_1','gmail.messages.delete','destructive')]
+        for item_status in ('connected','reauth_required'):
+            with self.subTest(status=item_status):validate_snapshot(conn_snap_with(proposals,conns_block(items=[{**item,'status':item_status}],providers=[google],last_call={'operation':'gmail.send','outcome':'failed','code':'public_disabled'})),'r',0)
+        validate_snapshot(conn_snap_with([],conns_block(items=[item],providers=[google],last_call={'operation':'gmail.messages.delete','outcome':'failed','code':'not_found'})),'r',0)
+        for code in ('not_found','public_disabled','scope_not_requested','device_expired','consent_denied','connections_storage_error'):
+            self.assertIn(code,CODE_MESSAGES)
+        self.assertTrue(CODE_MESSAGES['public_disabled'].startswith('Ação pú'))
+        with self.assertRaises(ValueError):validate_snapshot(conn_snap_with([conn_proposal('p_bad','g_1','gmail.send','unknown')],conns_block(items=[item],providers=[google])),'r',0)
+
     def test_every_status_and_scope_access_is_accepted(self):
         for status in CONN_STATUSES:
             with self.subTest(status=status):validate_snapshot(conns_snap(conns_block(items=[conn_item(status=status)])),'r',0)
@@ -2172,12 +2187,12 @@ def qml_connections_child():
             check('Desconectar enabled while connecting',find('connDisconnect_ha_1').property('enabled') is True)
             check('Remover disabled while connecting',find('connRemove_ha_1').property('enabled') is False)
             check('read test enabled for a granted read operation',find('connTest_gh_1_repos.list').property('enabled') is True)
-            check('write operation names its risk and missing scope',find('connOp_gh_1_issues.create').property('text')=='issues.create · '+'escrita (pede aprovação) · escopo não concedido')
+            check('write operation names its risk and missing scope',find('connOp_gh_1_issues.create').property('text')=='issues.create (criar issue) · '+'escrita (pede aprovação) · escopo não concedido')
             check('write operation has no test button',find('connTest_gh_1_issues.create').property('visible') is False)
             check('last call names the operation and code text',find('connLastCall').property('text').startswith('Última chamada: repos.list · Limite de chamadas'))
             check('last call is PlainText',plain(find('connLastCall')))
             summary=QQmlExpression(QQmlEngine.contextForObject(window),window,"connProposalText({connection_id:'gh_1',operation:'issues.create',risk:'write'})");text=summary.evaluate();text=text[0] if isinstance(text,tuple) else text
-            check('connection proposal names provider, account, operation and risk',text=='Conexão: GitHub · conta Trabalho (octo-user) · operação issues.create · risco escrita (pede aprovação)' and not summary.hasError())
+            check('connection proposal names provider, account, operation and risk',text=='Conexão: GitHub · conta Trabalho (octo-user) · operação issues.create (criar issue) · risco escrita (pede aprovação)' and not summary.hasError())
             check('account name field refuses a blank name',find('connectionAdd').property('enabled') is False)
             find('connectionLabel').setProperty('text','Casa');QTest.qWait(20)
             check('account add enabled with a valid name',find('connectionAdd').property('enabled') is True)
