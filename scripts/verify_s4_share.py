@@ -335,11 +335,15 @@ def d3_refusals(state):
     res = capability(root, 'llm_engine.skill_draft', {'description': 'Texto livre com comandos'})
     g.check(f'D3 injection as plain text refused model_output_invalid (error={res.get("error")})',
             res.get('ok') is False and res.get('error') == 'model_output_invalid', res)
-    # S4.md D1: triggers, prerequisites and attestations are required keys (only readme is optional).
+    # S4.md D1 (amended): the list/map keys default to empty; identity keys and steps stay required.
     missing = draft_manifest('skill_draft_nokeys', '1.0.0')
     del missing['triggers']
     code = g.sk_validate(root, missing)
-    g.check(f'D1 manifest without the required key triggers is refused ({code})', code != 'ok', code)
+    g.check(f'D1 manifest without the optional key triggers is accepted ({code})', code == 'ok', code)
+    missing_id = draft_manifest('skill_draft_noid', '1.0.0')
+    del missing_id['license']
+    code = g.sk_validate(root, missing_id)
+    g.check(f'D1 manifest without the required key license is refused ({code})', code != 'ok', code)
     g.check('D3 refusals create no items', g.item_of(root, 'skill_draft_bad') is None
             and g.item_of(root, 'skill_draft_grant') is None)
 
