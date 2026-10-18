@@ -86,7 +86,7 @@ TOOL_REASONS=TOOL_REASONS|AGENT_CODES|{'run_ended','denied','destructive_disable
 CONN_PROVIDERS=('github','google','homeassistant','mcp');CONN_STATUSES=('disconnected','connecting','connected','expired','offline','error','reauth_required');CONN_ACCESS=('read','write','destructive','public')
 CONN_ITEMS_LIMIT=8;CONN_SCOPES_LIMIT=8;CONN_OPERATIONS_LIMIT=16;CONN_ARGS_LIMIT=4096;CONN_LABEL_LIMIT=64;CONN_ACCOUNT_LIMIT=128;CONN_USER_CODE_LIMIT=32
 CONN_ID=re.compile(r'[A-Za-z0-9_-]{1,64}');CONN_NAME=re.compile(r'[a-z][a-z0-9_.:]{0,63}')
-CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake'})
+CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call','storage_error'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake'})
 CONN_PROPOSAL_KEYS=frozenset({'kind','connection_id','operation','risk'})
 # Core codes for connection ops and for connection proposals (kind 'connection'). Each one has a Portuguese text in CONN_MESSAGES.
 CONN_MESSAGES={
@@ -309,7 +309,7 @@ def valid_conn_proposal(item):
     """S5 (docs/S5.md E1): kind 'connection' carries connection_id, operation and risk, never an agent run; any other proposal carries none of them."""
     if 'kind' in item and item['kind'] not in ('tool','connection'):return False
     if item.get('kind')!='connection':return not set(item)&(CONN_PROPOSAL_KEYS-{'kind'})
-    return {'connection_id','operation','risk'}<=set(item) and 'run_id' not in item and conn_id_ok(item['connection_id']) and isinstance(item['operation'],str) and CONN_NAME.fullmatch(item['operation']) is not None and item['risk'] in CONN_ACCESS
+    return {'connection_id','operation','risk'}<=set(item) and conn_id_ok(item['connection_id']) and isinstance(item['operation'],str) and CONN_NAME.fullmatch(item['operation']) is not None and item['risk'] in CONN_ACCESS
 def agent_goal_problem(goal):
     """Rule for agentStart (docs/C3.md): trimmed, 1..=1024 UTF-8 bytes, no control characters. None means the goal may be sent (the trimmed text)."""
     try:
@@ -929,13 +929,18 @@ def valid_conn_item(item,catalog):
     if 'user_code' in item and not conn_text_ok(item['user_code'],CONN_USER_CODE_LIMIT):return False
     return 'fake' not in item or type(item['fake']) is bool
 def valid_conn_last_call(call):
-    if not (isinstance(call,dict) and {'operation','outcome'}<=set(call)<={'operation','outcome','code'}):return False
+    """Operation, outcome and code (docs/S5.md), plus the two fields a write or a rate limit needs: the proposal id of a
+    card the user must decide (also listed in tool_proposals) and retry_after in seconds (Core clamps it to 1..60)."""
+    if not (isinstance(call,dict) and {'operation','outcome'}<=set(call)<={'operation','outcome','code','retry_after','proposal_id'}):return False
     if not (isinstance(call['operation'],str) and CONN_NAME.fullmatch(call['operation']) and isinstance(call['outcome'],str) and SNAKE_CODE.fullmatch(call['outcome'])):return False
-    return 'code' not in call or (isinstance(call['code'],str) and SNAKE_CODE.fullmatch(call['code']) is not None)
+    if 'code' in call and not (isinstance(call['code'],str) and SNAKE_CODE.fullmatch(call['code']) is not None):return False
+    if 'retry_after' in call and not is_int(call['retry_after'],0,3600):return False
+    return 'proposal_id' not in call or (isinstance(call['proposal_id'],str) and PROPOSAL_ID.fullmatch(call['proposal_id']) is not None)
 def valid_connections(block):
     """Snapshot block connections: null, or revision, providers (the fixed catalog), items (at most 8, unique ids) and an optional last_call."""
     if block is None:return True
     if not (isinstance(block,dict) and {'revision','items','providers'}<=set(block)<=CONN_BLOCK_KEYS and is_int(block['revision'])):return False
+    if 'storage_error' in block and type(block['storage_error']) is not bool:return False
     providers=block['providers']
     if not (isinstance(providers,list) and len(providers)<=len(CONN_PROVIDERS)):return False
     catalog={}

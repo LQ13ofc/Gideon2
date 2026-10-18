@@ -2033,7 +2033,7 @@ class ConnectionsContract(unittest.TestCase):
             'kind unknown':lambda:conn_proposal(kind='other'),
             'risk missing':lambda:{k:v for k,v in conn_proposal().items() if k!='risk'},
             'risk unknown':lambda:conn_proposal(risk='admin'),
-            'agent run on a connection proposal':lambda:conn_proposal(run_id='run_1',step=1),
+            'run_id without step on a connection proposal':lambda:{**conn_proposal(),'run_id':'run_1'},
             'connection id malformed':lambda:conn_proposal(connection='gh 1'),
             'operation malformed':lambda:conn_proposal(op='Issues Create'),
             'tool kind with connection fields':lambda:{**tool_item('tool_9'),'kind':'tool','operation':'repos.list'},
@@ -2042,6 +2042,8 @@ class ConnectionsContract(unittest.TestCase):
         for name,make in cases.items():
             with self.subTest(name):
                 with self.assertRaises(ValueError):validate_snapshot(conn_snap_with([make()]),'r',0)
+        # An agent run may call a connection tool: the card then carries the run and its step, like any run proposal.
+        validate_snapshot(conn_snap_with([conn_proposal(run_id='run_1',step=1)]),'r',0)
     def test_codes_and_labels_have_portuguese_text(self):
         for code in ('scope_not_granted','rate_limited','unauthorized','forbidden_scope','account_mismatch','provider_unreachable','real_backend_unsupported','reauth_required','public_pending'):
             with self.subTest(code=code):
@@ -2155,7 +2157,7 @@ def qml_connections_child():
             check('connections panel visible on its page',find('connectionsPanel').property('visible'))
             check('account title names label and provider',find('connTitle_gh_1').property('text')=='Trabalho · GitHub')
             check('fake label shown for a fake account',find('connFake_gh_1').property('visible'))
-            check('fake label shown when fake is absent',find('connFake_ha_1').property('visible'))
+            check('fake label hidden when fake is absent (a real account never shows SERVIDOR FALSO)',find('connFake_ha_1').property('visible') is False)
             check('fake label hidden when fake is false',find('connFake_gh_2').property('visible') is False)
             check('status badge text is Portuguese',find('connStatus_ha_1').property('text')=='Estado: conectando (aguardando confirmação)')
             check('user code shown while connecting',find('connUserCode_ha_1').property('visible') and find('connUserCode_ha_1').property('text').endswith('WDJB-MJHT'))

@@ -599,7 +599,7 @@ fn real_backend_is_refused_without_a_fake_and_fakes_need_the_broker_python() {
     let response = core.call(json!({"op": "connection_connect", "id": id}));
     assert_eq!(response["code"], "real_backend_unsupported");
     assert_eq!(core.item(&id)["status"], "disconnected");
-    assert_eq!(core.snap()["connections"]["fake_backends"], json!([]));
+    assert_eq!(core.item(&id)["fake"], json!(false));
     let refused = Command::new(env!("CARGO_BIN_EXE_gideon-base"))
         .arg("--root")
         .arg(dir.join("other"))
@@ -634,7 +634,7 @@ fn connect_flow_consents_per_scope_and_keeps_only_granted_scopes() {
         core.call(json!({"op": "connection_consent", "id": id, "scopes": ["repo:read"]}));
     assert_eq!(response["code"], "invalid_state");
     let snap = core.snap();
-    assert_eq!(snap["connections"]["fake_backends"], json!(["github"]));
+    assert_eq!(core.item(&id)["fake"], json!(true));
     let provider = snap["connections"]["providers"]
         .as_array()
         .unwrap()

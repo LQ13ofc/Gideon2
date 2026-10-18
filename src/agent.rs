@@ -1275,13 +1275,17 @@ impl Core {
             None => return String::new(),
         };
         // Connection calls store the validated plan, never the raw model arguments. An invalid plan
-        // becomes a null-argument proposal that authorize refuses.
+        // becomes a null-argument proposal that authorize refuses; it is not shown as a connection card.
         let connection = crate::connections::agent_tool(&call.name).is_some();
-        let args = if connection {
-            self.connections_plan(&call.name, &call.args)
-                .map_or(Value::Null, |plan| plan.wrap())
+        let plan = if connection {
+            self.connections_plan(&call.name, &call.args).ok()
         } else {
-            call.args.clone()
+            None
+        };
+        let args = match &plan {
+            Some(plan) => plan.wrap(),
+            None if connection => Value::Null,
+            None => call.args.clone(),
         };
         let proposal_id = self.tools.propose(
             &plugin_id,
@@ -1290,8 +1294,9 @@ impl Core {
             args,
             Instant::now(),
         );
-        if connection {
-            self.tools.set_kind(&proposal_id, "connection");
+        if let Some(plan) = &plan {
+            self.tools
+                .set_connection(&proposal_id, &plan.account, plan.op.name, plan.risk.name());
         }
         self.tools.tag(&proposal_id, &run_id, step);
         self.emit(String::new(), None, "tool_proposed");

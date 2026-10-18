@@ -1000,7 +1000,8 @@ impl Core {
         let proposal = self
             .tools
             .propose(CONNECTION_OWNER, String::new(), name, plan.wrap(), now);
-        self.tools.set_kind(&proposal, "connection");
+        self.tools
+            .set_connection(&proposal, id, op.name, plan.risk.name());
         self.connections.pending_approval(op.name, proposal.clone());
         self.emit(request_id, None, "tool_proposed");
         "pending_approval"

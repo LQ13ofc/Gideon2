@@ -2456,7 +2456,8 @@ impl Core {
             plan.wrap(),
             Instant::now(),
         );
-        self.tools.set_kind(&proposal, "connection");
+        self.tools
+            .set_connection(&proposal, &plan.account, op.name, plan.risk.name());
         match self
             .connections
             .start(&self.llm, plan, Some(proposal.clone()), Instant::now())

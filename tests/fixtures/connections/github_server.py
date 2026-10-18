@@ -55,6 +55,9 @@ class Store:
     def reset(self):
         self.account = DEFAULT_ACCOUNT
         self.denied = set()
+        self.delay_left = 0
+        self.delay_seconds = 0
+        self.fail_after_create = 0
         self.rate_left = 0
         self.retry_after = 1
         self.device = {}
@@ -305,6 +308,10 @@ def _create_issue(store, base, body, args, headers):
     store.issues[repo][number] = {"title": title, "body": issue_body, "state": "open"}
     if key is not None:
         store.idem[(repo, key)] = number
+    if store.fail_after_create > 0:
+        # The issue exists but the reply is a 500: a client retry with the same key must replay it.
+        store.fail_after_create -= 1
+        raise Fail(500, "server_error")
     return 201, _issue_view(store, base, repo, number), {}
 
 
@@ -443,10 +450,23 @@ def _ctl_deny_scope(store, base, body):
 
 
 def _ctl_approve(store, base, body):
+    """User approval of a pending device login. Addressed by `user_code` (what the user reads on the
+    consent screen, and what the Core shows) or by `device_code`; exactly one of the two."""
     device_code = body.get("device_code")
+    user_code = body.get("user_code")
     scopes = body.get("scopes")
-    if (not _nonempty_str(device_code) or not isinstance(scopes, list)
-            or not all(_nonempty_str(s) for s in scopes)):
+    if (device_code is None) == (user_code is None):
+        raise Fail(400, "invalid_request")
+    if not isinstance(scopes, list) or not all(_nonempty_str(s) for s in scopes):
+        raise Fail(400, "invalid_request")
+    if user_code is not None:
+        if not _nonempty_str(user_code):
+            raise Fail(400, "invalid_request")
+        device_code = next((code for code, d in store.device.items()
+                            if d["user_code"] == user_code), None)
+        if device_code is None:
+            raise Fail(404, "unknown_user_code")
+    elif not _nonempty_str(device_code):
         raise Fail(400, "invalid_request")
     dev = store.device.get(device_code)
     if dev is None:
@@ -462,6 +482,33 @@ def _ctl_approve(store, base, body):
     dev["approved"] = True
     dev["scopes"] = granted
     return 200, {"ok": True, "granted_scopes": granted}, {}
+
+
+def _ctl_delay(store, base, body):
+    n = body.get("n")
+    seconds = body.get("seconds")
+    if not _is_int(n, 0, 10000) or not _is_int(seconds, 0, 60):
+        raise Fail(400, "invalid_request")
+    store.delay_left = n
+    store.delay_seconds = seconds
+    return 200, {"delayed": n, "seconds": seconds}, {}
+
+
+def _ctl_fail_after_create(store, base, body):
+    n = body.get("n")
+    if not _is_int(n, 0, 100):
+        raise Fail(400, "invalid_request")
+    store.fail_after_create = n
+    return 200, {"fail_after_create": n}, {}
+
+
+def _ctl_invalidate_refresh(store, base, body):
+    count = 0
+    for rec in store.refresh.values():
+        if not rec["revoked"]:
+            rec["revoked"] = True
+            count += 1
+    return 200, {"invalidated": count}, {}
 
 
 def _ctl_state(store, base, body):
@@ -497,6 +544,9 @@ CONTROL_ROUTES = {
     "set_account": ("POST", _ctl_set_account),
     "deny_scope": ("POST", _ctl_deny_scope),
     "approve": ("POST", _ctl_approve),
+    "delay": ("POST", _ctl_delay),
+    "fail_after_create": ("POST", _ctl_fail_after_create),
+    "invalidate_refresh": ("POST", _ctl_invalidate_refresh),
     "state": ("GET", _ctl_state),
 }
 
@@ -531,6 +581,15 @@ class Handler(BaseHTTPRequestHandler):
         control = path.startswith("/__control/")
         try:
             raw = self._read_body()
+            pause = 0
+            if not control:
+                with self.server.store.lock:
+                    if self.server.store.delay_left > 0:
+                        self.server.store.delay_left -= 1
+                        pause = self.server.store.delay_seconds
+            if pause:
+                # Slow reply (timeout tests): sleeps outside the lock so other requests proceed.
+                time.sleep(pause)
             with self.server.store.lock:
                 if not control:
                     self.server.store.requests += 1

@@ -293,6 +293,13 @@ pub struct View {
     /// `connection` for S5 operation proposals; their owner is the Core, not a plugin.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<&'static str>,
+    /// Connection proposals only (docs/S5.md E1): the account, the operation and its access class.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk: Option<&'static str>,
 }
 
 struct Entry {
@@ -401,6 +408,9 @@ impl Ledger {
                 run_id: None,
                 step: None,
                 kind: None,
+                connection_id: None,
+                operation: None,
+                risk: None,
             },
             created: now,
             seq: self.sequence,
@@ -415,14 +425,24 @@ impl Ledger {
         }
         proposal_id
     }
-    /// Marks a proposal as a Connection Manager operation (S5). Unknown ids are ignored.
-    pub fn set_kind(&mut self, proposal_id: &str, kind: &'static str) {
+    /// Marks a proposal as a Connection Manager operation (S5) with its account, operation and access
+    /// class (the card names them). Unknown ids are ignored.
+    pub fn set_connection(
+        &mut self,
+        proposal_id: &str,
+        connection_id: &str,
+        operation: &'static str,
+        risk: &'static str,
+    ) {
         if let Some(entry) = self
             .entries
             .iter_mut()
             .find(|e| e.view.proposal_id == proposal_id)
         {
-            entry.view.kind = Some(kind);
+            entry.view.kind = Some("connection");
+            entry.view.connection_id = Some(connection_id.to_owned());
+            entry.view.operation = Some(operation);
+            entry.view.risk = Some(risk);
         }
     }
     /// Marks a proposal as owned by an agent run and step (C3). Unknown ids are ignored.

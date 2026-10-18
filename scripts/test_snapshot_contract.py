@@ -12,6 +12,7 @@ Run with the UI venv (stdlib unittest; bridge imports PySide6 only for QObject):
   QT_QPA_PLATFORM=offscreen target/ui-venv/bin/python scripts/test_snapshot_contract.py
 """
 import hashlib, json, os, shutil, signal, socket, subprocess, sys, tempfile, time, unittest
+import urllib.request
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ CATALOG = BASE / 'tests/fixtures/hub-c1.json'
 C4_CATALOG = BASE / 'tests/fixtures/hub-c4.json'
 PLUGIN_SRC = BASE / 'tests/fixtures/llm_engine.py'
 FAKE_SRC = BASE / 'tests/fixtures/fake_llm_server.py'
+GITHUB_SRC = BASE / 'tests/fixtures/connections/github_server.py'  # S5 E1 fake GitHub (loopback, stdlib)
 PYTHON = '/usr/bin/python3'
 PLUGIN = 'llm_engine'
 CAP = 'llm_engine.chat'
@@ -158,6 +160,7 @@ class SnapshotContract(unittest.TestCase):
         self.root = self.td / 'core'
         self.core = Core(self.root, self.td)
         self.fake = None
+        self.github = None
 
     def tearDown(self):
         if self.core is not None:
@@ -169,7 +172,34 @@ class SnapshotContract(unittest.TestCase):
             self.fake.wait(timeout=5)
             self.fake.stdin.close()
             self.fake.stdout.close()
+        if self.github is not None:
+            self.github.kill()
+            self.github.wait(timeout=5)
+            self.github.stdout.close()
         self._td.cleanup()
+
+    def start_github(self):
+        self.github = subprocess.Popen([PYTHON, '-I', str(GITHUB_SRC), '--port', '0'], stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=CLEAN_ENV, cwd='/')
+        line = self.github.stdout.readline().decode('ascii').strip()
+        self.assertTrue(line.startswith('PORT='), line)
+        return f'http://127.0.0.1:{int(line[len("PORT="):])}'
+
+    def github_control(self, base, name, body):
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        request = urllib.request.Request(base + '/__control/' + name, data=json.dumps(body).encode(),
+                                         headers={'Content-Type': 'application/json'}, method='POST')
+        with opener.open(request, timeout=10) as reply:
+            return json.loads(reply.read())
+
+    def ok_op(self, op, **fields):
+        """Core op with the single-slot `busy` retried for up to 20 s (what the bridge does per click)."""
+        until = time.monotonic() + 20
+        while True:
+            reply = self.core.req(op, **fields)
+            if reply.get('code') != 'busy' or time.monotonic() > until:
+                return reply
+            time.sleep(0.2)
 
     def start_fake(self):
         self.fake = subprocess.Popen([PYTHON, '-I', str(FAKE_SRC), '--port', '0'], stdin=subprocess.PIPE,
@@ -531,6 +561,63 @@ class SnapshotContract(unittest.TestCase):
                          {'skill_invalid:duplicate_id', 'skill_invalid:hash_mismatch'})
         self.assertTrue(finding['duplicate'])
         self.core.stop()
+
+    def test_connections_snapshots_validate_against_real_core(self):
+        # S5 E1 (docs/S5.md, "Snapshot connections"): every connections state the Core emits must pass the bridge
+        # validator, the connection proposals included, against the real Core and the S5 fake GitHub.
+        base = self.start_github()
+        self.core.extra = ['--connections-fake', f'github={base}']
+        self.core.start()
+        c = self.core
+        c.snap('connections: nothing added yet')
+        self.assertEqual(self.ok_op('connection_add', provider='github', label='contrato')['code'], 'ok')
+        cid = c.snap('connection added (disconnected)')['connections']['items'][0]['id']
+        self.assertEqual(self.ok_op('connection_connect', id=cid)['code'], 'ok')
+        c.wait(lambda s: any(i['id'] == cid and i.get('user_code') for i in s['connections']['items']), 15,
+               'device code shown')
+        pending = c.snap('connecting: user_code and pending scopes')
+        item = next(i for i in pending['connections']['items'] if i['id'] == cid)
+        self.assertEqual(set(item['pending_scopes']), {'repo:read', 'issues:write', 'pulls:write'})
+        self.github_control(base, 'approve', {'user_code': item['user_code'], 'scopes': item['pending_scopes']})
+        until = time.monotonic() + 20
+        while self.ok_op('connection_consent', id=cid, scopes=['repo:read', 'issues:write'])['code'] != 'ok':
+            self.assertLess(time.monotonic(), until, 'consent accepted after the device approval')
+            time.sleep(0.2)
+        c.wait(lambda s: next(i for i in s['connections']['items'] if i['id'] == cid)['status'] == 'connected',
+               20, 'connected')
+        connected = c.snap('connected with the consented scopes')
+        granted = next(i for i in connected['connections']['items'] if i['id'] == cid)['granted_scopes']
+        self.assertEqual(set(granted), {'repo:read', 'issues:write'})
+        self.assertFalse(connected['connections']['storage_error'])
+
+        self.assertEqual(self.ok_op('connection_call', id=cid, operation='repo.get',
+                                    args={'repo': 'demo/private-repo'})['code'], 'ok')
+        c.wait(lambda s: (s['connections'].get('last_call') or {}).get('outcome') == 'ok', 20, 'read finished')
+        c.snap('read call finished (last_call ok)')
+
+        code = self.ok_op('connection_call', id=cid, operation='issues.create',
+                          args={'repo': 'demo/private-repo', 'title': 'contrato'})['code']
+        self.assertEqual(code, 'pending_approval')
+        write_pid = c.snap('write proposal pending')['connections']['last_call']['proposal_id']
+        code = self.ok_op('connection_call', id=cid, operation='pulls.comment',
+                          args={'repo': 'demo/private-repo', 'number': 1, 'body': 'contrato'})['code']
+        self.assertEqual(code, 'scope_not_granted')  # pulls:write was not consented: no proposal, no request
+        self.assertEqual(self.ok_op('tool_decide', proposal_id=write_pid, decision='authorize')['code'], 'ok')
+        c.wait(lambda s: any(p['proposal_id'] == write_pid and p['state'] == 'executed'
+                             for p in s['tool_proposals']), 20, 'write executed')
+        done = c.snap('write proposal executed with projected result')
+        proposal = next(p for p in done['tool_proposals'] if p['proposal_id'] == write_pid)
+        self.assertEqual(proposal['kind'], 'connection')
+        self.assertEqual(proposal['tool'], 'conn:github.issues.create')
+        self.assertEqual(sorted(json.loads(proposal['result'])), ['number', 'public', 'state', 'title', 'url'])
+
+        self.assertEqual(self.ok_op('connection_disconnect', id=cid)['code'], 'ok')
+        c.snap('disconnected')
+        self.assertEqual(self.ok_op('connection_remove', id=cid)['code'], 'ok')
+        c.snap('removed')
+        self.assertGreaterEqual(len(c.validated), 9, c.validated)  # nine connection states, every one validated
+        self.assertTrue(any('proposal' in label for label in c.validated), c.validated)
+        c.stop()
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

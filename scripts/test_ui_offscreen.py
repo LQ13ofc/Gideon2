@@ -397,7 +397,8 @@ elif args.phase=='connections':
     nav=visual_item('nav11');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:window.property('page')==11,3)
     check('connections panel visible on its page',visual_item('connectionsPanel').property('visible'))
-    fake_accounts=[c for c in bridge.connectionsItems if c.get('fake') is not False]
+    fake_accounts=[c for c in bridge.connectionsItems if c.get('fake') is True]
+    check('the fake-served account is present in the phase (not vacuous)',len(fake_accounts)>=1)
     check('every account served by the fake carries the SERVIDOR FALSO label',bool(fake_accounts) and all(visual_item('connFake_'+c['id']).property('visible') and visual_item('connFake_'+c['id']).property('text')=='SERVIDOR FALSO — sem credenciais reais' for c in fake_accounts))
     Path(args.artifacts,'connections-ready').touch()
     providers={p['id']:p for p in bridge.connectionsProviders}
@@ -409,7 +410,7 @@ elif args.phase=='connections':
     last=visual_item('connLastCall');expression=QQmlExpression(QQmlEngine.contextForObject(last),last,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
     check('read test outcome shown as PlainText from the Core snapshot',plain is True and not expression.hasError() and last.property('text').startswith('Última chamada: '+operation['name']))
     Path(args.artifacts,'connections-read').touch()
-    waiting=next(((c,s) for c in bridge.connectionsItems for s in c['pending_scopes']),None)
+    waiting=next(((c,s) for c in bridge.connectionsItems for s in (c.get('pending_scopes') or [])),None)
     check('an account waits for consent',waiting is not None)
     account,scope=waiting
     box=visual_item('connScope_'+account['id']+'_'+scope);box.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);QTest.qWait(20)

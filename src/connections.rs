@@ -98,7 +98,8 @@ pub enum Access {
 }
 
 impl Access {
-    fn name(self) -> &'static str {
+    /// The access class as the snapshot and the proposal card spell it (`read`, `write`, ...).
+    pub fn name(self) -> &'static str {
         match self {
             Access::Read => "read",
             Access::Write => "write",
@@ -897,7 +898,6 @@ fn short_string(object: &Map<String, Value>, key: &str, max: usize) -> Option<St
 pub struct DeviceGrant {
     device_code: String,
     user_code: String,
-    verification_uri: String,
     interval: u64,
     expires_in: u64,
 }
@@ -927,8 +927,8 @@ async fn run_device(
     let device_code =
         short_string(&object, "device_code", 512).ok_or(Failure::new("provider_error"))?;
     let user_code = short_string(&object, "user_code", 64).ok_or(Failure::new("provider_error"))?;
-    let verification_uri =
-        short_string(&object, "verification_uri", 512).ok_or(Failure::new("provider_error"))?;
+    // Required by the device flow (the user visits it); not kept, so it never reaches the snapshot.
+    short_string(&object, "verification_uri", 512).ok_or(Failure::new("provider_error"))?;
     let interval = object
         .get("interval")
         .and_then(Value::as_u64)
@@ -941,7 +941,6 @@ async fn run_device(
     Ok(DeviceGrant {
         device_code,
         user_code,
-        verification_uri,
         interval,
         expires_in,
     })
@@ -1169,7 +1168,6 @@ pub async fn execute(id: u64, job: Job, python: PathBuf, script: PathBuf) -> Don
 struct Device {
     device_code: String,
     user_code: String,
-    verification_uri: String,
     interval: u64,
     expires_at: Instant,
     next_poll: Option<Instant>,
@@ -1249,11 +1247,12 @@ pub struct OperationView {
 #[derive(Debug, Serialize)]
 pub struct ProviderView {
     pub id: &'static str,
-    pub label: &'static str,
     pub scopes: Vec<ScopeView>,
     pub operations: Vec<OperationView>,
 }
 
+/// One account, exactly the S5 snapshot fields (docs/S5.md E1) plus `fake`: true when the provider is served
+/// by a loopback test fake (the UI shows SERVIDOR FALSO for it). Never a token, device code or last error.
 #[derive(Debug, Serialize)]
 pub struct ItemView {
     pub id: String,
@@ -1267,12 +1266,7 @@ pub struct ItemView {
     pub pending_scopes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verification_uri: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_ok: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<&'static str>,
+    pub fake: bool,
 }
 
 /// Snapshot block `connections`. No tokens, device codes, arguments or response content.
@@ -1280,8 +1274,6 @@ pub struct ItemView {
 pub struct View {
     pub revision: u64,
     pub storage_error: bool,
-    /// Providers that have a loopback test fake (SERVIDOR FALSO). Empty in production.
-    pub fake_backends: Vec<&'static str>,
     pub items: Vec<ItemView>,
     pub providers: Vec<ProviderView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1362,26 +1354,18 @@ impl Manager {
                     granted_scopes: account.granted_scopes.clone(),
                     pending_scopes: device.map(|d| d.requested.clone()),
                     user_code: device.map(|d| d.user_code.clone()),
-                    verification_uri: device.map(|d| d.verification_uri.clone()),
-                    last_ok: account.last_ok,
-                    last_error: self.errors.get(&account.id).copied(),
+                    fake: fake_base(&account.provider).is_some(),
                 }
             })
             .collect();
         View {
             revision: self.ledger.revision,
             storage_error: self.storage_error,
-            fake_backends: PROVIDERS
-                .iter()
-                .filter(|p| fake_base(p.id).is_some())
-                .map(|p| p.id)
-                .collect(),
             items,
             providers: PROVIDERS
                 .iter()
                 .map(|p| ProviderView {
                     id: p.id,
-                    label: p.label,
                     scopes: p
                         .scopes
                         .iter()
@@ -2118,7 +2102,6 @@ impl Manager {
                             Device {
                                 device_code: grant.device_code,
                                 user_code: grant.user_code,
-                                verification_uri: grant.verification_uri,
                                 interval: grant.interval.clamp(1, POLL_INTERVAL_MAX),
                                 expires_at: now + Duration::from_secs(grant.expires_in),
                                 next_poll: None,

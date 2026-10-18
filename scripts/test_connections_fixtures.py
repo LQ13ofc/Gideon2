@@ -791,5 +791,99 @@ class SecurityTests(ServerCase):
         self.assertNotIn("Authorization", text)
 
 
+class UserCodeApprovalTests(ServerCase):
+    def start_login(self):
+        reply = call(self.base, "POST", "/login/device/code", {})
+        self.assertEqual(reply.status, 200)
+        return reply.json["device_code"], reply.json["user_code"]
+
+    def test_approve_by_user_code_grants_requested_scopes(self):
+        device_code, user_code = self.start_login()
+        reply = call(self.base, "POST", "/__control/approve",
+                     {"user_code": user_code, "scopes": ["repo:read"]})
+        self.assertEqual(reply.status, 200)
+        self.assertEqual(reply.json["granted_scopes"], ["repo:read"])
+        token = self.exchange(device_code)
+        self.assertEqual(token.status, 200)
+        self.assertEqual(token.json["scope"], "repo:read")
+
+    def test_approve_by_user_code_strips_denied_scopes(self):
+        call(self.base, "POST", "/__control/deny_scope", {"scope": "pulls:write"})
+        device_code, user_code = self.start_login()
+        reply = call(self.base, "POST", "/__control/approve",
+                     {"user_code": user_code, "scopes": ALL_SCOPES})
+        self.assertEqual(reply.json["granted_scopes"], ["repo:read", "issues:write"])
+        self.assertEqual(self.exchange(device_code).status, 200)
+
+    def test_approve_by_unknown_user_code_is_404(self):
+        reply = call(self.base, "POST", "/__control/approve",
+                     {"user_code": "ZZZZ-ZZZZ", "scopes": ["repo:read"]})
+        self.assertEqual(reply.status, 404)
+        self.assertEqual(reply.json, {"error": "unknown_user_code"})
+
+    def test_approve_needs_exactly_one_of_device_or_user_code(self):
+        device_code, user_code = self.start_login()
+        both = call(self.base, "POST", "/__control/approve",
+                    {"device_code": device_code, "user_code": user_code, "scopes": ["repo:read"]})
+        neither = call(self.base, "POST", "/__control/approve", {"scopes": ["repo:read"]})
+        self.assertEqual(both.status, 400)
+        self.assertEqual(neither.status, 400)
+        self.assertEqual(self.exchange(device_code).json, {"error": "authorization_pending"})
+
+    def test_user_code_approval_then_exchange_is_single_use(self):
+        device_code, user_code = self.start_login()
+        call(self.base, "POST", "/__control/approve", {"user_code": user_code, "scopes": ["repo:read"]})
+        self.assertEqual(self.exchange(device_code).status, 200)
+        self.assertEqual(self.exchange(device_code).json, {"error": "invalid_grant"})
+
+
+class FaultControlTests(ServerCase):
+    def test_delay_slows_the_next_api_requests_only(self):
+        tok = self.token()
+        self.assertEqual(call(self.base, "POST", "/__control/delay", {"n": 1, "seconds": 1}).status, 200)
+        started = time.monotonic()
+        self.assertEqual(self.api("GET", "/api/repos", tok["access_token"]).status, 200)
+        self.assertGreaterEqual(time.monotonic() - started, 0.9)
+        started = time.monotonic()
+        self.assertEqual(self.api("GET", "/api/repos", tok["access_token"]).status, 200)
+        self.assertLess(time.monotonic() - started, 0.9)
+
+    def test_delay_rejects_out_of_range_values(self):
+        reply = call(self.base, "POST", "/__control/delay", {"n": 1, "seconds": 61})
+        self.assertEqual(reply.status, 400)
+
+    def test_fail_after_create_keeps_the_issue_and_replays_the_key(self):
+        tok = self.token(["repo:read", "issues:write"])
+        call(self.base, "POST", "/__control/fail_after_create", {"n": 1})
+        key = {"Idempotency-Key": "retry-key-1"}
+        body = {"title": "uma vez"}
+        first = self.api("POST", "/api/repos/%s/issues" % PRIVATE, tok["access_token"], body, key)
+        self.assertEqual(first.status, 500)
+        second = self.api("POST", "/api/repos/%s/issues" % PRIVATE, tok["access_token"], body, key)
+        self.assertEqual(second.status, 201)
+        self.assertEqual(second.headers.get("X-Idempotent-Replay"), "true")
+        titles = [i["title"] for i in self.state()["issues"][PRIVATE] if i["title"] == "uma vez"]
+        self.assertEqual(len(titles), 1)
+
+    def test_invalidate_refresh_spends_every_refresh_token(self):
+        tok = self.token()
+        reply = call(self.base, "POST", "/__control/invalidate_refresh", {})
+        self.assertEqual(reply.status, 200)
+        self.assertGreaterEqual(reply.json["invalidated"], 1)
+        refused = call(self.base, "POST", "/login/oauth/refresh", {"refresh_token": tok["refresh_token"]})
+        self.assertEqual(refused.json, {"error": "invalid_grant"})
+
+    def test_reset_clears_delay_and_fail_controls(self):
+        call(self.base, "POST", "/__control/fail_after_create", {"n": 5})
+        call(self.base, "POST", "/__control/delay", {"n": 5, "seconds": 2})
+        call(self.base, "POST", "/__control/reset", {})
+        tok = self.token(["repo:read", "issues:write"])
+        started = time.monotonic()
+        reply = self.api("POST", "/api/repos/%s/issues" % PRIVATE, tok["access_token"], {"title": "ok"},
+                         {"Idempotency-Key": "after-reset"})
+        self.assertEqual(reply.status, 201)
+        self.assertLess(time.monotonic() - started, 1.5)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
