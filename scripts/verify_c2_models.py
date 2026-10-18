@@ -262,7 +262,7 @@ def alive(pid):
 
 def sandbox_pids(core_pid, mark):
     table = proc_table()
-    return [p for p in descendants(core_pid) if mark in table[p][2]]
+    return [p for p in descendants(core_pid) if p in table and mark in table[p][2]]
 
 
 def wait_no(core_pid, mark, secs):
