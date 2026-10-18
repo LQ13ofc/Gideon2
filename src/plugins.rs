@@ -779,6 +779,11 @@ impl PluginView {
     pub(crate) fn last(&self) -> Option<&CapabilityResult> {
         self.last.as_ref()
     }
+    /// Drops the published result once an internal consumer (a skill run) has taken it, so step
+    /// output never reaches the client snapshot.
+    pub(crate) fn clear_last(&mut self) {
+        self.last = None;
+    }
     /// Live text of the running invocation, present only while it has produced partials.
     pub(crate) fn partial(&self) -> Option<String> {
         self.active

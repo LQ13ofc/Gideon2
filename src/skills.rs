@@ -573,11 +573,17 @@ fn json_depth(value: &Value) -> usize {
     }
 }
 
+/// A key names a grant when it is listed or merely mentions `grant`/`permission`.
+fn grant_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    GRANT_KEYS.contains(&lower.as_str()) || lower.contains("grant") || lower.contains("permission")
+}
+
 fn grant_key_inside(value: &Value) -> bool {
     match value {
         Value::Object(map) => map
             .iter()
-            .any(|(key, inner)| GRANT_KEYS.contains(&key.as_str()) || grant_key_inside(inner)),
+            .any(|(key, inner)| grant_key(key) || grant_key_inside(inner)),
         Value::Array(items) => items.iter().any(grant_key_inside),
         _ => false,
     }
@@ -2513,6 +2519,7 @@ impl Core {
         if last.plugin_id != plugin_id || last.capability != capability {
             return;
         }
+        self.plugins.clear_last();
         let outcome = if last.ok {
             last.output.ok_or("invalid_output")
         } else {

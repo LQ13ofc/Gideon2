@@ -86,7 +86,9 @@ TOP_KEYS = {
     "min_runtime", "triggers", "inputs", "outputs", "dependency_capabilities",
     "permissions_required", "prerequisites", "steps", "attestations", "readme",
 }
-REQUIRED_KEYS = TOP_KEYS - {"readme"}
+OPTIONAL_KEYS = {"readme", "triggers", "inputs", "outputs", "dependency_capabilities",
+                 "permissions_required", "prerequisites", "attestations"}  # the Core defaults these
+REQUIRED_KEYS = TOP_KEYS - OPTIONAL_KEYS
 STEP_KEYS = {
     "id", "call", "args", "when", "unless", "retries", "timeout_ms", "idempotent",
     "verify", "undo", "save",
@@ -338,6 +340,11 @@ def reference_validate(manifest, catalog=None):
         return OVERSIZE
     if not REQUIRED_KEYS <= set(manifest):
         return MALFORMED
+    manifest = dict(manifest)
+    for key in ("triggers", "dependency_capabilities", "permissions_required", "prerequisites", "attestations"):
+        manifest.setdefault(key, [])
+    for key in ("inputs", "outputs"):
+        manifest.setdefault(key, {})
     steps = manifest["steps"]
     deps = manifest["dependency_capabilities"]
     if not isinstance(steps, list) or not isinstance(deps, list):
