@@ -31,6 +31,13 @@ const WINDOWS_MAX: usize = 8;
 const ELEMENTS_MAX: usize = 64;
 const ROUTES_MAX: usize = 8;
 const APPS_MAX: usize = 16;
+const ISSUES_MAX: usize = 16;
+/// Elements of the fake issues site, added to the a11y tree only when the site is opened (`open_site`).
+const SITE_ELEMENTS: [(&str, &str, &str, u32, u32); 3] = [
+    ("issue_title", "textbox", "Titulo da issue", 40, 160),
+    ("issue_body", "textbox", "Corpo da issue", 40, 220),
+    ("issue_submit", "button", "Criar issue", 40, 280),
+];
 pub const EQ_PRESETS: [&str; 4] = ["flat", "voice", "music", "bass"];
 pub const MIC_FILTERS: [&str; 3] = ["off", "low_cut", "voice"];
 pub const GESTURES: [&str; 2] = ["wave", "thumbs_up"];
@@ -172,6 +179,32 @@ pub struct Base {
     pub speaker_state: String,
 }
 
+/// One issue on the fake site.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Issue {
+    pub n: u64,
+    pub title: String,
+    pub body: String,
+}
+
+/// The form fields typed so far on the fake site.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Form {
+    pub title: String,
+    pub body: String,
+}
+
+/// Fake issues site (S5 E3 visual route). Absent until `open_site`, so worlds written before it still load
+/// and keep their exact bytes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Site {
+    pub issues: Vec<Issue>,
+    pub form: Form,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct World {
@@ -182,6 +215,8 @@ pub struct World {
     pub mic: Mic,
     pub camera: Camera,
     pub base: Base,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<Site>,
 }
 
 impl Default for World {
@@ -249,6 +284,7 @@ impl Default for World {
                 mic_state: "base-idle".into(),
                 speaker_state: "base-idle".into(),
             },
+            site: None,
         }
     }
 }
@@ -362,7 +398,19 @@ pub fn validate(world: &World) -> Result<(), &'static str> {
             .as_ref()
             .is_none_or(|gesture| GESTURES.contains(&gesture.as_str())),
     )?;
-    ensure(plain(&world.base.mic_state, 32) && plain(&world.base.speaker_state, 32))
+    ensure(plain(&world.base.mic_state, 32) && plain(&world.base.speaker_state, 32))?;
+    if let Some(site) = &world.site {
+        ensure(site.issues.len() <= ISSUES_MAX)?;
+        let mut last = 0;
+        for issue in &site.issues {
+            ensure(
+                issue.n > last && text_ok(&issue.title, TEXT_MAX) && plain(&issue.body, TEXT_MAX),
+            )?;
+            last = issue.n;
+        }
+        ensure(plain(&site.form.title, TEXT_MAX) && plain(&site.form.body, TEXT_MAX))?;
+    }
+    Ok(())
 }
 
 /// Writes `bytes` to `dir/name` through a 0600 temporary file and a rename.
@@ -446,6 +494,80 @@ pub fn mutate<T>(
         return Err("verify_failed");
     }
     Ok(value)
+}
+
+/// Opens the fake issues site: its three elements join the a11y tree and the site state starts empty.
+/// This is the "browser is already on the page" step of the visual route (a Core action, not a tool); it
+/// bumps the screen epoch once and does nothing when the site is already open.
+pub fn open_site(dir: &Path) -> Result<(), &'static str> {
+    if read(dir, |w| Ok(w.site.is_some()))? {
+        return Ok(());
+    }
+    mutate(dir, |w| {
+        let screen = &mut w.screen;
+        ensure(screen.elements.len() + SITE_ELEMENTS.len() <= ELEMENTS_MAX)?;
+        ensure(screen.windows.len() < WINDOWS_MAX)?;
+        for (id, role, name, x, y) in SITE_ELEMENTS {
+            ensure(!screen.elements.iter().any(|e| e.id == id))?;
+            screen.elements.push(Element {
+                id: id.into(),
+                role: role.into(),
+                name: name.into(),
+                x,
+                y,
+            });
+        }
+        screen.windows.push(Window {
+            id: "site".into(),
+            title: "Site falso de issues".into(),
+            focused: false,
+        });
+        w.site = Some(Site::default());
+        bump(w);
+        Ok(())
+    })
+}
+
+/// Number of an issue on the fake site with exactly this title and body, if any (the post-verify read).
+pub fn site_issue(dir: &Path, title: &str, body: &str) -> Result<Option<u64>, &'static str> {
+    read(dir, |w| {
+        Ok(w.site.as_ref().and_then(|site| {
+            site.issues
+                .iter()
+                .rev()
+                .find(|issue| issue.title == title && issue.body == body)
+                .map(|issue| issue.n)
+        }))
+    })
+}
+
+/// Click effects on the fake site: textboxes take focus, the submit button publishes the form.
+fn site_click(world: &mut World, element: &str) -> Result<Option<u64>, &'static str> {
+    let Some(site) = world.site.as_mut() else {
+        return Ok(None);
+    };
+    match element {
+        "issue_title" | "issue_body" => {
+            world.screen.focus = Some(element.to_owned());
+            Ok(None)
+        }
+        "issue_submit" => {
+            if site.form.title.is_empty() {
+                return Err("form_incomplete");
+            }
+            ensure(site.issues.len() < ISSUES_MAX)?;
+            let n = site.issues.last().map_or(1, |issue| issue.n + 1);
+            let form = std::mem::take(&mut site.form);
+            site.issues.push(Issue {
+                n,
+                title: form.title,
+                body: form.body,
+            });
+            world.screen.focus = None;
+            Ok(Some(n))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Typed service request. Built only by `parse`, so every field is already validated.
@@ -700,9 +822,14 @@ fn run(dir: &Path, op: &Op) -> Result<Value, &'static str> {
         Op::Click { epoch, element } => write(dir, |w| {
             fresh(w, *epoch)?;
             find_element(w, element)?;
+            let issue = site_click(w, element)?;
             w.screen.last_click = Some(element.clone());
             bump(w);
-            Ok(json!({"element": element, "epoch": w.screen.epoch}))
+            let mut reply = json!({"element": element, "epoch": w.screen.epoch});
+            if let Some(n) = issue {
+                reply["issue"] = json!(n);
+            }
+            Ok(reply)
         }),
         Op::Focus { epoch, element } => write(dir, |w| {
             fresh(w, *epoch)?;
@@ -721,7 +848,11 @@ fn run(dir: &Path, op: &Op) -> Result<Value, &'static str> {
             if focused.is_none_or(|e| e.role != "textbox") {
                 return Err("no_focus");
             }
-            w.screen.text = text.clone();
+            match (w.site.as_mut(), w.screen.focus.as_deref()) {
+                (Some(site), Some("issue_title")) => site.form.title = text.clone(),
+                (Some(site), Some("issue_body")) => site.form.body = text.clone(),
+                _ => w.screen.text = text.clone(),
+            }
             bump(w);
             Ok(json!({"text": text, "epoch": w.screen.epoch}))
         }),
@@ -900,6 +1031,62 @@ mod tests {
         }
         assert_eq!(super::permission("screen.capture"), Some("screen_observe"));
         assert_eq!(super::permission("base.write"), None);
+    }
+
+    #[test]
+    fn world_without_a_site_keeps_its_bytes_and_still_loads() {
+        let world = World::default();
+        let text = serde_json::to_string(&world).unwrap();
+        assert!(!text.contains("site"));
+        let back: World = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.site, None);
+    }
+
+    #[test]
+    fn site_form_publishes_an_issue_through_clicks_and_typing() {
+        let dir = tempfile::tempdir().unwrap();
+        open_site(dir.path()).unwrap();
+        open_site(dir.path()).unwrap();
+        let epoch = |dir: &Path| read(dir, |w| Ok(w.screen.epoch)).unwrap();
+        assert_eq!(epoch(dir.path()), 2);
+        let tree = serve(dir.path(), "input.a11y_tree", &json!({})).unwrap();
+        assert_eq!(tree["elements"].as_array().unwrap().len(), 6);
+        // Typing needs a focused textbox; clicking a site textbox focuses it.
+        let blind = serve(dir.path(), "input.type", &json!({"epoch": 2, "text": "x"}));
+        assert_eq!(blind, Err("no_focus"));
+        let click = |element: &str, at: u64| {
+            serve(
+                dir.path(),
+                "input.click",
+                &json!({"epoch": at, "element": element}),
+            )
+        };
+        let reply = click("issue_title", 2).unwrap();
+        let reply = serve(
+            dir.path(),
+            "input.type",
+            &json!({"epoch": reply["epoch"], "text": "Titulo"}),
+        )
+        .unwrap();
+        assert_eq!(click("issue_submit", 1), Err("stale_screen"));
+        let reply = click("issue_body", reply["epoch"].as_u64().unwrap()).unwrap();
+        let reply = serve(
+            dir.path(),
+            "input.type",
+            &json!({"epoch": reply["epoch"], "text": "Corpo"}),
+        )
+        .unwrap();
+        let reply = click("issue_submit", reply["epoch"].as_u64().unwrap()).unwrap();
+        assert_eq!(reply["issue"], 1);
+        assert_eq!(site_issue(dir.path(), "Titulo", "Corpo"), Ok(Some(1)));
+        assert_eq!(site_issue(dir.path(), "Titulo", "outro"), Ok(None));
+        // The plain app text field is untouched and an empty form is refused.
+        let w = read(dir.path(), |w| Ok(w.clone())).unwrap();
+        assert_eq!(w.screen.text, "");
+        assert_eq!(w.site.unwrap().form, Form::default());
+        let at = epoch(dir.path());
+        assert_eq!(click("issue_submit", at), Err("form_incomplete"));
+        assert_eq!(epoch(dir.path()), at);
     }
 
     #[test]

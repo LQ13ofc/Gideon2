@@ -43,6 +43,13 @@ Phase protocol (each phase writes one empty marker file per checkpoint into --ar
     connections-read       Testar leitura of a connected account went through the Core; Última chamada is shown as PlainText
     connections-consented  the ticked pending scope was sent with Consentir escopos marcados; the Core lists it as granted
     The page ends with ui.png
+  registry phase (S5 E3 UI, needs a real Core started with the github fake and one connected github account, with the visual fallback off; scripts/verify_e3_registry.py).
+    The card 'Rotas' is on the Conexões page. The phase clicks Planejar and the visual switch (on, then off again: the user's own revocable choice);
+    it never connects an account and never starts an agent run.
+    registry-ready    Rotas offered; every purpose shows its chosen route (or none) and its candidates with reasons as PlainText; the fallback is off with a warning
+    registry-plan     Planejar went through the Core (nothing executed) and its answer is shown; the bridge refuses an unknown purpose and a purpose with no visual route without a request
+    registry-allowed  the switch turned the fallback on in the Core (visual_allowed lists create_issue); the card says ligado por você
+    registry-revoked  the same switch turned it off again; the card says desligado; the page ends with ui.png
 """
 import argparse,json,os,sys,time
 from pathlib import Path
@@ -51,7 +58,7 @@ from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
 from main import create
-parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--llm',choices=['yes','no'],default='no',help='skills phase: yes = llm_engine runs (Gerar com LLM is used), no = plugin absent (the button must say so)');parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills','connections'],required=True);args=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--llm',choices=['yes','no'],default='no',help='skills phase: yes = llm_engine runs (Gerar com LLM is used), no = plugin absent (the button must say so)');parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills','connections','registry'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}
 bridge.changed.connect(lambda:deltas.append((bridge.state,bridge.subtitle,bridge.result)))
 def check(name,value):
@@ -463,6 +470,47 @@ elif args.phase=='connections':
         check('the Core connects the Home Assistant account after the probe',next(c for c in bridge.connectionsItems if c['id']==ha['id'])['status']=='connected')
         check('the bridge snapshot never holds the token',ha_token not in json.dumps(bridge.snapshot,ensure_ascii=False))
         Path(args.artifacts,'connections-token').touch()
+    QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
+elif args.phase=='registry':
+    # Gate protocol (S5 E3 UI): see the module docstring.
+    from PySide6.QtQml import QQmlEngine,QQmlExpression
+    def plain_of(item):
+        expression=QQmlExpression(QQmlEngine.contextForObject(item),item,'textFormat === Text.PlainText');value=expression.evaluate();value=value[0] if isinstance(value,tuple) else value
+        return value is True and not expression.hasError()
+    wait(lambda:bridge.registryAvailable,50)
+    nav=visual_item('nav11');nav.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:window.property('page')==11,3)
+    check('routes panel visible on the connections page',visual_item('routesPanel').property('visible'))
+    purposes={p['id']:p for p in bridge.registryPurposes}
+    check('the three fixed purposes are listed',list(purposes)==['create_issue','list_events','read_state'])
+    for ident,purpose in purposes.items():
+        label=visual_item('routePurpose_'+ident)
+        check('purpose '+ident+' shows its label and the chosen route as PlainText',plain_of(label) and purpose['label'] in label.property('text'))
+        for candidate in purpose['candidates']:
+            row=visual_item('routeCandidate_'+ident+'_'+candidate['route'])
+            check('candidate '+ident+'/'+candidate['route']+' shows route, status and the Core reason as PlainText',plain_of(row) and candidate['reason'] in row.property('text') and row.property('text').startswith('Escolhida' if purpose.get('route_chosen')==candidate['route'] else 'Descartada'))
+    create=purposes['create_issue']
+    check('the visual fallback is off by default and says so',bridge.registryVisualAllowed==[] and 'desligado' in visual_item('routeVisualState_create_issue').property('text'))
+    warning=visual_item('routeVisualWarning_create_issue');check('a warning about the visual fallback is on screen as PlainText',warning.property('visible') and plain_of(warning) and warning.property('text').startswith('Atenção'))
+    check('only create_issue offers the visual switch',visual_item('routeVisual_create_issue').property('visible') and not visual_item('routeVisual_list_events').property('visible') and not visual_item('routeVisual_read_state').property('visible'))
+    Path(args.artifacts,'registry-ready').touch()
+    revision=bridge.registryRevision
+    plan=visual_item('routePlan_create_issue');plan.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:not bridge.registryBusy and bridge.registryResult!='',30)
+    check('Planejar answered from the Core and changed nothing',bridge.registryRevision==revision and bridge.registryVisualAllowed==[] and ('Rota planejada' in bridge.registryResult or 'Nenhuma rota' in bridge.registryResult))
+    result=visual_item('routesResult');check('the plan answer is shown as PlainText',result.property('visible') and plain_of(result))
+    bridge.registryPlan('nope');check('an unknown purpose is refused by the bridge',bridge.registryResult=='Finalidade desconhecida')
+    bridge.registryAllowVisual('read_state',True);check('a purpose with no visual route is refused by the bridge',bridge.registryResult=='Esta finalidade não tem rota visual' and bridge.registryVisualAllowed==[])
+    Path(args.artifacts,'registry-plan').touch()
+    toggle=visual_item('routeVisual_create_issue');check('the switch offers to turn the fallback on',toggle.property('enabled') and toggle.property('text')=='Ligar fallback visual')
+    toggle.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:not bridge.registryBusy and bridge.registryVisualAllowed==['create_issue'],30);QTest.qWait(50)
+    check('the Core lists create_issue as allowed and the card says ligado por você','ligado por você' in visual_item('routeVisualState_create_issue').property('text') and visual_item('routeVisual_create_issue').property('text').startswith('Desligar'))
+    Path(args.artifacts,'registry-allowed').touch()
+    toggle=visual_item('routeVisual_create_issue');toggle.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:not bridge.registryBusy and bridge.registryVisualAllowed==[],30);QTest.qWait(50)
+    check('the same switch revoked it: desligado and the Core agrees','desligado' in visual_item('routeVisualState_create_issue').property('text') and visual_item('routeVisual_create_issue').property('text')=='Ligar fallback visual')
+    Path(args.artifacts,'registry-revoked').touch()
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':
     # Gate protocol (C0 UI): the gate starts Core with --plugin-python, approves, installs and stages dummy_echo,

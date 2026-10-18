@@ -4,6 +4,7 @@
 //! test app; effects go through the C1 tool ledger and the existing sandbox executor.
 use crate::{
     core::Core,
+    registry::{self, Route},
     tools::{self, Risk, State as ToolState, View as ProposalView},
     world,
 };
@@ -101,6 +102,13 @@ struct Call {
     shape_ok: bool,
     /// Set for calls rejected before validation (beyond the per-step limit).
     reject: Option<&'static str>,
+}
+
+/// Why an approved visual publication did not run or did not finish.
+enum RouteFail {
+    /// The registry no longer allows the visual route (closed reason code).
+    Unavailable(&'static str),
+    Code(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,6 +272,12 @@ fn system_prompt(synthetic: bool) -> String {
          - open_app {\"desktop_id\": string}\n- set_volume {\"level\": 0..100}\n- mute {}",
     );
     text.push_str(&crate::connections::agent_prompt());
+    if registry::tool_enabled() {
+        text.push_str(
+            "\n- route_create_issue {\"title\": string up to 256 chars, \"body\": string up to 4096 chars, optional} \
+             (the Core picks the route and asks the user; you cannot choose or change it)",
+        );
+    }
     if synthetic {
         text.push_str(
             "\n- synth_screen_read {} (returns epoch and text)\n\
@@ -297,7 +311,8 @@ fn known_name(name: &str, synthetic: bool) -> Option<&'static str> {
         .iter()
         .find(|(known, _)| *known == name)
         .map(|(known, _)| *known)
-        .or_else(|| crate::connections::agent_tool(name).map(|tool| tool.name));
+        .or_else(|| crate::connections::agent_tool(name).map(|tool| tool.name))
+        .or_else(|| (registry::tool_enabled() && name == registry::TOOL).then_some(registry::TOOL));
     if base.is_some() || !synthetic {
         return base;
     }
@@ -706,7 +721,8 @@ impl Core {
     ) -> &'static str {
         let risk = tools::risk(&view.tool)
             .or_else(|| tools::synthetic_risk(&view.tool))
-            .or_else(|| tools::bridge(&view.tool).map(|entry| entry.risk));
+            .or_else(|| tools::bridge(&view.tool).map(|entry| entry.risk))
+            .or_else(|| (view.tool == registry::TOOL).then_some(Risk::Destructive));
         if risk == Some(Risk::Destructive) && !self.agent.options.allow_destructive {
             return "destructive_disabled";
         }
@@ -734,6 +750,9 @@ impl Core {
             }
         } else if tools::bridge(&view.tool).is_some() {
             self.agent_exec_bridge(proposal_id, view);
+            "ok"
+        } else if view.tool == registry::TOOL {
+            self.agent_exec_route(proposal_id, view);
             "ok"
         } else {
             self.agent_exec_synth(proposal_id, view);
@@ -791,6 +810,96 @@ impl Core {
         };
         self.tools.set(proposal_id, state, reason, result);
         self.agent_settle(proposal_id, Some(observation));
+    }
+
+    /// Approved visual publication. The route is planned again here: a permission revoked, a connection
+    /// made, or a credential problem since the card was shown blocks it, and nothing is touched.
+    fn agent_exec_route(&mut self, proposal_id: &str, view: &ProposalView) {
+        let result = self.route_visual_publish(view);
+        let (state, reason, result, observation) = match result {
+            Ok(data) => (
+                ToolState::Executed,
+                None,
+                Some(data.to_string()),
+                json!({"ok": true, "verified": true, "result": data}),
+            ),
+            Err(RouteFail::Unavailable(reason)) => (
+                ToolState::Failed,
+                Some("route_unavailable"),
+                None,
+                json!({"ok": false, "error": "route_unavailable", "reason": reason}),
+            ),
+            Err(RouteFail::Code("stale_screen")) => (
+                ToolState::Cancelled,
+                Some("stale_screen"),
+                None,
+                json!({"ok": false, "error": "stale_screen"}),
+            ),
+            Err(RouteFail::Code(code)) => (
+                ToolState::Failed,
+                Some(code),
+                None,
+                json!({"ok": false, "error": code}),
+            ),
+        };
+        self.tools.set(proposal_id, state, reason, result);
+        self.agent_settle(proposal_id, Some(observation));
+    }
+
+    fn route_visual_publish(&mut self, view: &ProposalView) -> Result<Value, RouteFail> {
+        let arg = |key: &str| view.args.get(key).and_then(Value::as_str);
+        let (Some("visual"), Some(title), Some(body)) = (arg("route"), arg("title"), arg("body"))
+        else {
+            return Err(RouteFail::Code("invalid_args"));
+        };
+        let (title, body) = (title.to_owned(), body.to_owned());
+        let found =
+            registry::purpose(registry::CREATE_ISSUE).ok_or(RouteFail::Code("unknown_tool"))?;
+        // Policy first (permission, connection standing); the owners come next so their codes stay specific.
+        let standing = self.connections.standing(found.provider, found.scope());
+        let policy = self.registry.plan(
+            found,
+            &registry::Facts {
+                standing,
+                synthetic: self.agent.options.synthetic,
+                owners: &|| true,
+            },
+        );
+        if policy.chosen != Some(Route::Visual) {
+            let allowed = self.registry.visual_allowed(found.id);
+            let reason = match (policy.chosen, allowed) {
+                (Some(_), _) => "connection_available",
+                (None, false) => "visual_not_allowed",
+                (None, true) if policy.denial != "not_connected" && policy.denial != "no_api" => {
+                    policy.denial
+                }
+                (None, true) => "disabled",
+            };
+            return Err(RouteFail::Unavailable(reason));
+        }
+        for name in ["ui_tree", "ui_click", "ui_type"] {
+            if let Some(bridge) = tools::bridge(name) {
+                self.bridge_owner(bridge).map_err(RouteFail::Code)?;
+            }
+        }
+        self.emit(String::new(), None, "registry_visual_run");
+        let mut audits: Vec<&'static str> = Vec::new();
+        let outcome =
+            registry::visual_create_issue(&app_dir(), &title, &body, &mut |service, args| {
+                audits.push(world::audit_kind(service));
+                world::serve(&app_dir(), service, &args)
+            });
+        for kind in audits {
+            self.emit(String::new(), None, kind);
+        }
+        self.registry
+            .record(registry::CREATE_ISSUE, Route::Visual, outcome.is_ok());
+        outcome.map_err(|code| {
+            RouteFail::Code(match code {
+                "stale_screen" | "verify_failed" | "invalid_args" => code,
+                _ => "executor_failed",
+            })
+        })
     }
 
     /// Owner of a bridge capability must be running with its permission approved. A missing or
@@ -1108,6 +1217,8 @@ impl Core {
             self.agent_base_call(&call, invocation)
         } else if crate::connections::agent_tool(&call.name).is_some() {
             self.agent_connection_call(&call, invocation)
+        } else if call.name == registry::TOOL && registry::tool_enabled() {
+            self.agent_route_call(&call, invocation)
         } else if synthetic && tools::synthetic_risk(&call.name).is_some() {
             self.agent_synth_call(&call, invocation)
         } else if let Some(bridge) = tools::bridge(&call.name).filter(|_| synthetic) {
@@ -1252,6 +1363,11 @@ impl Core {
     /// `--agent-allow-destructive` end the run in `awaiting_approval` and never execute.
     fn agent_wait_approval(&mut self, call: &Call, invocation: u64, risk: Risk) -> Flow {
         let proposal_id = self.agent_propose(call);
+        self.agent_await(proposal_id, invocation, risk)
+    }
+
+    /// Waits for the user's decision on an already created proposal.
+    fn agent_await(&mut self, proposal_id: String, invocation: u64, risk: Risk) -> Flow {
         if risk == Risk::Destructive && !self.agent.options.allow_destructive {
             if let Some(run) = self.agent.run.as_mut() {
                 set_step(run, invocation, "awaiting_approval", None);
@@ -1269,11 +1385,71 @@ impl Core {
         Flow::Wait
     }
 
-    fn agent_propose(&mut self, call: &Call) -> String {
-        let (plugin_id, run_id, step) = match self.agent.run.as_ref() {
-            Some(run) => (run.plugin_id.clone(), run.id.clone(), run.step),
-            None => return String::new(),
+    /// `route_create_issue` (S5 E3): the registry, never the model, picks the route. The connection route
+    /// proposes the same `github.issues.create` card as `github_create_issue`; the visual route proposes
+    /// the publication of a form on the fake site. With no route, nothing runs and nothing falls back.
+    fn agent_route_call(&mut self, call: &Call, invocation: u64) -> Flow {
+        let (title, body) = match registry::parse_args(&call.args) {
+            Ok(parsed) => parsed,
+            Err(code) => return self.reject_call(&call.name, invocation, code, "denied"),
         };
+        if self.voice_active() {
+            return self.reject_call(&call.name, invocation, "busy", "denied");
+        }
+        let Some(found) = registry::purpose(registry::CREATE_ISSUE) else {
+            return self.reject_call(&call.name, invocation, "unknown_tool", "denied");
+        };
+        let plan = self.registry_plan_for(found);
+        let Some(route) = plan.chosen else {
+            return self.route_unavailable(&call.name, invocation, plan.denial);
+        };
+        match route {
+            Route::Connection => {
+                let mut args = json!({"repo": registry::TARGET_REPO, "title": title});
+                if let Some(body) = &body {
+                    args["body"] = json!(body);
+                }
+                let planned = crate::connections::provider_by_id(found.provider)
+                    .and_then(|provider| {
+                        crate::connections::operation(provider, found.operation)
+                            .map(|op| (provider, op))
+                    })
+                    .ok_or("unknown_tool")
+                    .and_then(|(provider, op)| self.connections.plan(provider, op, None, &args));
+                let planned = match planned {
+                    Ok(planned) => planned,
+                    Err(code) => return self.route_unavailable(&call.name, invocation, code),
+                };
+                let risk = planned.tool_risk();
+                self.set_risk(invocation, risk);
+                let proposal_id = self.agent_propose_args(call, planned.wrap(), Some(&planned));
+                self.registry.expect(&proposal_id, registry::CREATE_ISSUE);
+                self.agent_await(proposal_id, invocation, risk)
+            }
+            Route::Visual => {
+                let body = body.unwrap_or_default();
+                if !registry::visual_text_ok(&title, &body) {
+                    return self.reject_call(&call.name, invocation, "invalid_args", "denied");
+                }
+                self.set_risk(invocation, Risk::Destructive);
+                let args = json!({"route": "visual", "title": title, "body": body});
+                let proposal_id = self.agent_propose_args(call, args, None);
+                self.agent_await(proposal_id, invocation, Risk::Destructive)
+            }
+        }
+    }
+
+    /// No route can serve the call: the model learns the reason and nothing else happens.
+    fn route_unavailable(&mut self, name: &str, invocation: u64, reason: &'static str) -> Flow {
+        self.set_step_state(invocation, "denied", Some("route_unavailable"));
+        self.observe(
+            name,
+            json!({"ok": false, "error": "route_unavailable", "reason": reason}),
+        );
+        Flow::Continue
+    }
+
+    fn agent_propose(&mut self, call: &Call) -> String {
         // Connection calls store the validated plan, never the raw model arguments. An invalid plan
         // becomes a null-argument proposal that authorize refuses; it is not shown as a connection card.
         let connection = crate::connections::agent_tool(&call.name).is_some();
@@ -1287,6 +1463,20 @@ impl Core {
             None if connection => Value::Null,
             None => call.args.clone(),
         };
+        self.agent_propose_args(call, args, plan.as_ref())
+    }
+
+    /// Creates the proposal with the arguments the Core validated. A connection plan marks it as a card.
+    fn agent_propose_args(
+        &mut self,
+        call: &Call,
+        args: Value,
+        plan: Option<&crate::connections::Plan>,
+    ) -> String {
+        let (plugin_id, run_id, step) = match self.agent.run.as_ref() {
+            Some(run) => (run.plugin_id.clone(), run.id.clone(), run.step),
+            None => return String::new(),
+        };
         let proposal_id = self.tools.propose(
             &plugin_id,
             call.call_id.clone(),
@@ -1294,7 +1484,7 @@ impl Core {
             args,
             Instant::now(),
         );
-        if let Some(plan) = &plan {
+        if let Some(plan) = plan {
             self.tools
                 .set_connection(&proposal_id, &plan.account, plan.op.name, plan.risk.name());
         }
@@ -1354,6 +1544,7 @@ impl Core {
             || tools::synthetic_risk(name).is_some()
             || tools::bridge(name).is_some()
             || crate::connections::agent_tool(name).is_some()
+            || (name == registry::TOOL && registry::tool_enabled())
         {
             name
         } else {

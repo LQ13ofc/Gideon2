@@ -147,6 +147,7 @@ impl Default for Generations {
 /// Size caps of the private ledgers. `secrets.json` also holds S5 connection tokens (<= 8 accounts).
 const SECRETS_LIMIT: u64 = 16384;
 const CONNECTIONS_LIMIT: u64 = 131_072;
+const REGISTRY_LIMIT: u64 = 4096;
 /// Private C1 ledgers: bounded, strict and 0600, read through the same guards as plugin state.
 fn read_private_bounded(root: &Path, name: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
     let path = root.join(name);
@@ -593,6 +594,21 @@ impl Storage {
             return Err(io::Error::other("connections ledger too large"));
         }
         self.replace_json("connections.json", &bytes)?;
+        File::open(&self.root)?.sync_all()
+    }
+    /// `registry.json` (S5 E3): the purposes for which the user allowed the visual fallback. Missing means default off.
+    pub(crate) fn registry_ledger(&self) -> io::Result<crate::registry::Ledger> {
+        match read_private_bounded(&self.root, "registry.json", REGISTRY_LIMIT)? {
+            Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            None => Ok(Default::default()),
+        }
+    }
+    pub(crate) fn save_registry_ledger(&self, ledger: &crate::registry::Ledger) -> io::Result<()> {
+        let bytes = serde_json::to_vec(ledger)?;
+        if bytes.len() as u64 > REGISTRY_LIMIT {
+            return Err(io::Error::other("registry ledger too large"));
+        }
+        self.replace_json("registry.json", &bytes)?;
         File::open(&self.root)?.sync_all()
     }
     pub(crate) fn llm_secrets(&self) -> io::Result<crate::secrets::Secrets> {

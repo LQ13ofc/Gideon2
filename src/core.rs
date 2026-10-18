@@ -67,6 +67,8 @@ pub struct Core {
     pub(crate) skills: crate::skills::Engine,
     /// S5 Connection Manager: accounts, device logins and the single network slot.
     pub(crate) connections: crate::connections::Manager,
+    /// S5 E3 CapabilityRegistry: the user's visual permission and the last result of each route.
+    pub(crate) registry: crate::registry::Registry,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -110,6 +112,7 @@ impl Core {
             agent: crate::agent::Agent::new(crate::agent::options()),
             skills: Default::default(),
             connections: Default::default(),
+            registry: Default::default(),
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -827,6 +830,7 @@ impl Core {
             agent: self.agent.view(),
             skills: self.skills_view(),
             connections: self.connections.view(),
+            registry: self.registry_view(),
         }
     }
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
@@ -898,6 +902,10 @@ impl Core {
     pub fn configure_connections(&mut self, storage: &crate::storage::Storage) {
         self.connections.configure(storage);
     }
+    /// Loads `registry.json`; a damaged file keeps the visual fallback off.
+    pub fn configure_registry(&mut self, storage: &crate::storage::Storage) {
+        self.registry.configure(storage);
+    }
     /// Next network job for the single slot; transport runs it and returns the reply.
     pub fn take_connection_job(&mut self) -> Option<(u64, crate::connections::Job)> {
         self.connections.take_job()
@@ -938,6 +946,10 @@ impl Core {
             } else {
                 "tool_failed"
             };
+            self.registry.settled(
+                &outcome.proposal,
+                outcome.state == crate::tools::State::Executed,
+            );
             self.tools.set(
                 &outcome.proposal,
                 outcome.state,
@@ -1865,6 +1877,18 @@ impl Core {
             Operation::SkillImportConfirm { name, revision } => {
                 crate::skills::wire_op(self.skill_import_confirm(&name, revision))
             }
+            Operation::RegistryPlan { purpose } => self.registry_plan_op(&purpose),
+            Operation::RegistryAllowVisual {
+                purpose,
+                enabled,
+                revision,
+            } => self.registry_allow_op(
+                req.request_id.clone(),
+                storage.as_deref(),
+                &purpose,
+                enabled,
+                revision,
+            ),
             Operation::Snapshot => unreachable!(),
         };
         self.sweep_tools();

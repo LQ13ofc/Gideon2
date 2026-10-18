@@ -2447,3 +2447,214 @@ extern "C" {
     #[link_name = "kill"]
     fn libc_kill(pid: i32, sig: i32) -> i32;
 }
+
+// ---------------------------------------------------------------------------------------------
+// S5 E3 CapabilityRegistry
+// ---------------------------------------------------------------------------------------------
+
+fn purpose<'a>(snap: &'a Value, id: &str) -> &'a Value {
+    snap["registry"]["purposes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == id)
+        .unwrap()
+}
+
+fn candidate<'a>(snap: &'a Value, id: &str, route: &str) -> &'a Value {
+    purpose(snap, id)["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["route"] == route)
+        .unwrap()
+}
+
+#[test]
+fn registry_plan_follows_the_connection_standing_and_sends_no_request() {
+    let (_guard, dir) = fresh();
+    let stub = Stub::start(&dir);
+    let mut core = start_core(&dir, &stub, false);
+    let snap = core.snap();
+    assert_eq!(snap["registry"]["revision"], 0);
+    assert_eq!(snap["registry"]["visual_allowed"], json!([]));
+    let names: Vec<&str> = snap["registry"]["purposes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["create_issue", "list_events", "read_state"]);
+    // No account: the connection is not connected, the visual route is off by default.
+    assert_eq!(
+        candidate(&snap, "create_issue", "connection")["status"],
+        "not_connected"
+    );
+    assert_eq!(
+        candidate(&snap, "create_issue", "visual")["status"],
+        "visual_not_allowed"
+    );
+    assert!(purpose(&snap, "create_issue")["route_chosen"].is_null());
+    // The google and homeassistant providers have no fake in this run.
+    assert_eq!(
+        candidate(&snap, "list_events", "connection")["status"],
+        "no_api"
+    );
+    for id in ["create_issue", "list_events", "read_state"] {
+        for c in purpose(&snap, id)["candidates"].as_array().unwrap() {
+            assert!(!c["reason"].as_str().unwrap().is_empty(), "{id}");
+        }
+    }
+    let before = api_requests(&stub);
+    let reply = core.call(json!({"op": "registry_plan", "purpose": "create_issue"}));
+    assert_eq!(reply["code"], "route_unavailable");
+    assert_eq!(
+        core.call(json!({"op": "registry_plan", "purpose": "nope"}))["code"],
+        "unknown_purpose"
+    );
+    let id = core.add("github", "conta registro");
+    let snap = core.snap();
+    assert_eq!(
+        candidate(&snap, "create_issue", "connection")["status"],
+        "not_connected"
+    );
+    core.login(&stub, &id, &["repo:read", "issues:write"]);
+    let reply = core.call(json!({"op": "registry_plan", "purpose": "create_issue"}));
+    assert_eq!(reply["code"], "ok");
+    let snap = core.snap();
+    assert_eq!(purpose(&snap, "create_issue")["route_chosen"], "connection");
+    assert_eq!(
+        candidate(&snap, "create_issue", "connection")["status"],
+        "available"
+    );
+    assert_eq!(
+        candidate(&snap, "create_issue", "visual")["status"],
+        "visual_not_allowed"
+    );
+    let after_login = api_requests(&stub);
+    for _ in 0..3 {
+        core.call(json!({"op": "registry_plan", "purpose": "create_issue"}));
+    }
+    assert_eq!(api_requests(&stub), after_login, "plan sends nothing");
+    assert!(after_login >= before);
+    // Consent to fewer scopes elsewhere: a connected account without the scope is scope_not_granted.
+    let other = core.add("github", "sem escopo");
+    core.login(&stub, &other, &["repo:read"]);
+    core.call(json!({"op": "connection_disconnect", "id": id}));
+    let snap = core.snap();
+    assert_eq!(
+        candidate(&snap, "create_issue", "connection")["status"],
+        "scope_not_granted"
+    );
+    core.call(json!({"op": "connection_remove", "id": other}));
+    let snap = core.snap();
+    assert_eq!(
+        candidate(&snap, "create_issue", "connection")["status"],
+        "not_connected"
+    );
+    let plan = core.call(json!({"op": "registry_plan", "purpose": "create_issue"}));
+    assert_eq!(plan["code"], "route_unavailable");
+}
+
+#[test]
+fn registry_visual_permission_is_user_only_cas_persisted_and_revocable() {
+    let (_guard, dir) = fresh();
+    let stub = Stub::start(&dir);
+    {
+        let mut core = start_core(&dir, &stub, false);
+        let call = |core: &mut Core, op: Value| core.call(op)["code"].as_str().unwrap().to_owned();
+        assert_eq!(
+            call(
+                &mut core,
+                json!({"op": "registry_allow_visual", "purpose": "nope", "enabled": true})
+            ),
+            "unknown_purpose"
+        );
+        assert_eq!(
+            call(
+                &mut core,
+                json!({"op": "registry_allow_visual", "purpose": "read_state", "enabled": true})
+            ),
+            "no_visual_route"
+        );
+        assert_eq!(
+            call(
+                &mut core,
+                json!({"op": "registry_allow_visual", "purpose": "create_issue", "enabled": true, "revision": 9})
+            ),
+            "stale_registry_revision"
+        );
+        assert_eq!(core.snap()["registry"]["visual_allowed"], json!([]));
+        assert_eq!(
+            call(
+                &mut core,
+                json!({"op": "registry_allow_visual", "purpose": "create_issue", "enabled": true, "revision": 0})
+            ),
+            "ok"
+        );
+        let snap = core.snap();
+        assert_eq!(snap["registry"]["revision"], 1);
+        assert_eq!(snap["registry"]["visual_allowed"], json!(["create_issue"]));
+        // Allowed but the synthetic world is off in this run: the route stays disabled, never chosen.
+        let visual = candidate(&snap, "create_issue", "visual");
+        assert_eq!(visual["status"], "disabled");
+        assert!(purpose(&snap, "create_issue")["route_chosen"].is_null());
+        let mode = fs::metadata(core.root.join("registry.json"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        // A bad request shape is refused by the wire.
+        let junk = core.call(json!({"op": "registry_allow_visual", "purpose": "create_issue"}));
+        assert_ne!(junk["code"], "ok");
+        let junk = core.call(
+            json!({"op": "registry_allow_visual", "purpose": "create_issue", "enabled": true, "route": "visual"}),
+        );
+        assert_ne!(junk["code"], "ok");
+    }
+    let mut core = start_core(&dir, &stub, false);
+    assert_eq!(
+        core.snap()["registry"]["visual_allowed"],
+        json!(["create_issue"]),
+        "the permission survives a restart"
+    );
+    assert_eq!(
+        core.call(json!({"op": "registry_allow_visual", "purpose": "create_issue", "enabled": false, "revision": 1}))
+            ["code"],
+        "ok"
+    );
+    let snap = core.snap();
+    assert_eq!(snap["registry"]["visual_allowed"], json!([]));
+    assert_eq!(snap["registry"]["revision"], 2);
+    let text = fs::read_to_string(core.root.join("registry.json")).unwrap();
+    assert!(text.contains("\"visual_allowed\":[]"), "{text}");
+}
+
+#[test]
+fn a_damaged_registry_file_keeps_the_fallback_off_and_refuses_changes() {
+    let (_guard, dir) = fresh();
+    let stub = Stub::start(&dir);
+    {
+        let mut core = start_core(&dir, &stub, false);
+        core.call(
+            json!({"op": "registry_allow_visual", "purpose": "create_issue", "enabled": true}),
+        );
+    }
+    let path = dir.join("core").join("registry.json");
+    fs::write(
+        &path,
+        br#"{"version":1,"revision":4,"visual_allowed":["create_issue"],"x":1}"#,
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut core = start_core(&dir, &stub, false);
+    let snap = core.snap();
+    assert_eq!(snap["registry"]["visual_allowed"], json!([]));
+    assert_eq!(
+        core.call(
+            json!({"op": "registry_allow_visual", "purpose": "create_issue", "enabled": true})
+        )["code"],
+        "registry_storage_error"
+    );
+    assert_eq!(core.snap()["code"], "ok", "the Core keeps running");
+}

@@ -10,6 +10,7 @@ from bridge import AGENT_CODES,AGENT_STATE_LABELS,AGENT_STATES,OPS,PENDING,SNAPS
 from bridge import CAPABILITY_ERRORS,PERCEPTION_CAPABILITIES,PERCEPTION_DEADLINE_MS,PERCEPTION_INPUT_LIMIT,PERCEPTION_MESSAGES,PERCEPTION_OUTPUTS,PERCEPTION_PLUGINS,perception_code_message,perception_input_problem,perception_text
 from bridge import PENDING_SKILL_DRAFT,SKILL_CODES,SKILL_DRAFT_CAPABILITY,SKILL_DRAFT_DEADLINE_MS,SKILL_HISTORY_LIMIT,SKILL_ITEMS_LIMIT,SKILL_JSON_LIMIT,SKILL_OP_CODES,SKILL_OP_MESSAGES,SKILL_REASON_MESSAGES,SKILL_REASONS,SKILL_SOURCES,SKILL_STATES,SKILL_STEPS_LIMIT,code_message,skill_code_ok,skill_json,valid_skill_draft,valid_skills
 from bridge import CONN_ACCESS,CONN_ARGS_LIMIT,CONN_CODES,CONN_MESSAGES,CONN_STATUSES,conn_label_problem
+from bridge import REG_MESSAGES,REG_PURPOSES,REG_STATUSES,REG_VISUAL_WARNING,valid_agent_step
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
@@ -2194,6 +2195,97 @@ class McpContract(unittest.TestCase):
         bridge.connectionCall('mcp_1','mcp.sh','{}');wait_idle();self.assertFalse(peer.canReadLine())
         self.assertEqual(bridge.connectionsResult,CONN_MESSAGES['unknown_operation'])
         bridge.connectionCall('mcp_1','mcp.call','[]');wait_idle();self.assertFalse(peer.canReadLine())
+# S5 E3 CapabilityRegistry: the block 'registry', the two slots and their refusals (docs/S5.md E3).
+def reg_candidate(route='connection',status='available',reason='Conta GitHub conectada com o escopo concedido'):return {'route':route,'status':status,'reason':reason}
+def reg_purpose(ident='create_issue',label='Criar issue',chosen='connection',**change):
+    item={'id':ident,'label':label,'candidates':[reg_candidate(),reg_candidate('visual','visual_not_allowed','Fallback visual desligado para esta finalidade (padrão); só você pode ligar')]}
+    if chosen:item['route_chosen']=chosen
+    return {**item,**change}
+def reg_block(purposes=None,revision=3,allowed=()):return {'revision':revision,'purposes':[reg_purpose()] if purposes is None else purposes,'visual_allowed':list(allowed)}
+def reg_snap(block=None):return {**BASE,'registry':reg_block() if block is None else block}
+class RegistryContract(unittest.TestCase):
+    def test_block_is_optional_and_exact(self):
+        validate_snapshot(copy.deepcopy(BASE),'r',0);validate_snapshot({**BASE,'registry':None},'r',0);validate_snapshot(reg_snap(),'r',0)
+        validate_snapshot(reg_snap(reg_block([reg_purpose(chosen=None,candidates=[reg_candidate(status='not_connected',reason='Nenhuma conta GitHub conectada'),reg_candidate('visual','available','Permitido por você; sem conexão')])],allowed=['create_issue'])),'r',0)
+        validate_snapshot(reg_snap(reg_block([reg_purpose(),reg_purpose('list_events','Listar eventos da agenda',None),reg_purpose('read_state','Ler estado da casa',None)])),'r',0)
+        self.assertEqual(SECTION_SIGNALS['registry'],'registryChanged');self.assertIn('registry',SNAPSHOT_SECTION_KEYS)
+    def test_every_contract_break_is_refused(self):
+        good=reg_block()
+        def edit(f):
+            block=copy.deepcopy(good);f(block);return reg_snap(block)
+        cases={
+            'extra key':edit(lambda b:b.update(extra=1)),'missing visual_allowed':edit(lambda b:b.pop('visual_allowed')),'missing revision':edit(lambda b:b.pop('revision')),
+            'negative revision':edit(lambda b:b.update(revision=-1)),'revision not int':edit(lambda b:b.update(revision='3')),
+            'unknown purpose':edit(lambda b:b['purposes'][0].update(id='delete_all')),'duplicate purpose':edit(lambda b:b['purposes'].append(reg_purpose())),
+            'too many purposes':edit(lambda b:b['purposes'].extend(reg_purpose(i,'x',None) for i in ('list_events','read_state','create_issue'))),
+            'empty label':edit(lambda b:b['purposes'][0].update(label='  ')),'label with newline':edit(lambda b:b['purposes'][0].update(label='a\nb')),
+            'candidate secret key':edit(lambda b:b['purposes'][0]['candidates'][0].update(token='x')),'candidate missing reason':edit(lambda b:b['purposes'][0]['candidates'][0].pop('reason')),
+            'unknown route':edit(lambda b:b['purposes'][0]['candidates'][0].update(route='telepathy')),'unknown status':edit(lambda b:b['purposes'][0]['candidates'][0].update(status='maybe')),
+            'reason over 256':edit(lambda b:b['purposes'][0]['candidates'][0].update(reason='x'*257)),'reason with control':edit(lambda b:b['purposes'][0]['candidates'][0].update(reason='a\tb')),
+            'duplicate route':edit(lambda b:b['purposes'][0]['candidates'].append(reg_candidate())),'no candidates':edit(lambda b:b['purposes'][0].update(candidates=[])),
+            'chosen not a candidate':edit(lambda b:b['purposes'][0].update(route_chosen='telepathy')),
+            'chosen route not available':edit(lambda b:b['purposes'][0].update(route_chosen='visual')),
+            'visual allowed unknown':edit(lambda b:b.update(visual_allowed=['delete_all'])),'visual allowed without a visual route':edit(lambda b:b.update(visual_allowed=['list_events'])),
+            'visual allowed duplicate':edit(lambda b:b.update(visual_allowed=['create_issue','create_issue'])),'visual allowed not a list':edit(lambda b:b.update(visual_allowed='create_issue')),
+        }
+        for name,snap in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ValueError):validate_snapshot(snap,'r',0)
+        for block in ([],'x',3):
+            with self.subTest(block=block):
+                with self.assertRaises(ValueError):validate_snapshot({**BASE,'registry':block},'r',0)
+    def test_texts_codes_and_tables(self):
+        self.assertEqual(REG_PURPOSES,('create_issue','list_events','read_state'))
+        self.assertEqual(set(REG_STATUSES),{'available','not_connected','expired','scope_not_granted','no_api','visual_not_allowed','disabled'})
+        for code in ('route_unavailable','unknown_purpose','no_visual_route','stale_registry_revision','registry_storage_error','registry_unavailable'):
+            with self.subTest(code=code):
+                self.assertIn(code,REG_MESSAGES);self.assertFalse(code_message(code).startswith('Core recusou'));self.assertIn(code,CODE_MESSAGES)
+        for op in ('registry_plan','registry_allow_visual'):self.assertIn(op,OPS);self.assertIn(op,PENDING)
+        self.assertIn('route_unavailable',AGENT_CODES);self.assertTrue(REG_VISUAL_WARNING.startswith('Atenção'))
+    def test_connection_failure_codes_are_valid_agent_step_codes(self):
+        # A failed connection tool step carries the connection code (the bridge refused those before this fix: the page went offline).
+        step={'n':1,'invocation_id':3,'kind':'tool','state':'failed','tool':'route_create_issue','risk':'destructive'}
+        for code in ('forbidden_scope','rate_limited','provider_error','public_disabled','route_unavailable','permission_revoked'):
+            with self.subTest(code=code):self.assertTrue(valid_agent_step({**step,'code':code}))
+        self.assertFalse(valid_agent_step({**step,'code':'not_a_code'}))
+    def test_slots_send_one_exact_request_and_refusals_never_reach_the_core(self):
+        snap=reg_snap();bridge,peer=connect_bridge(self,snap)
+        self.assertTrue(bridge.registryAvailable);self.assertEqual(bridge.registryRevision,'3');self.assertEqual([p['id'] for p in bridge.registryPurposes],['create_issue'])
+        self.assertEqual(bridge.registryVisualAllowed,[])
+        request=skill_round(bridge,peer,lambda:bridge.registryPlan('create_issue'),snap)
+        self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':'registry_plan','purpose':'create_issue'})
+        self.assertEqual(bridge.registryResult,OPS['registry_plan'][1])
+        request=skill_round(bridge,peer,lambda:bridge.registryAllowVisual('create_issue',True),snap)
+        self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':'registry_allow_visual','purpose':'create_issue','enabled':True,'revision':3})
+        self.assertEqual(bridge.registryResult,OPS['registry_allow_visual'][1])
+        request=skill_round(bridge,peer,lambda:bridge.registryAllowVisual('create_issue',False),snap)
+        self.assertIs(request['enabled'],False)
+        for call,message in ((lambda:bridge.registryPlan('nope'),REG_MESSAGES['unknown_purpose']),(lambda:bridge.registryPlan('../x'),REG_MESSAGES['unknown_purpose']),
+                             (lambda:bridge.registryAllowVisual('nope',True),REG_MESSAGES['unknown_purpose']),(lambda:bridge.registryAllowVisual('read_state',True),REG_MESSAGES['no_visual_route']),
+                             (lambda:bridge.registryAllowVisual('list_events',True),REG_MESSAGES['no_visual_route'])):
+            with self.subTest(message=message):
+                call();wait_idle();self.assertFalse(peer.canReadLine());self.assertEqual(bridge.registryResult,message)
+    def test_core_refusals_show_portuguese_text(self):
+        snap=reg_snap();bridge,peer=connect_bridge(self,snap)
+        for code in ('route_unavailable','stale_registry_revision','registry_storage_error'):
+            with self.subTest(code=code):
+                call=lambda:bridge.registryPlan('create_issue')
+                call();request=next_request(peer);answer(peer,request,snap,code);settle(bridge)
+                self.assertEqual(bridge.registryResult,CODE_MESSAGES[code])
+    def test_unavailable_registry_refuses_every_op(self):
+        bridge,peer=connect_bridge(self,{**BASE,'registry':None})
+        self.assertFalse(bridge.registryAvailable)
+        bridge.registryPlan('create_issue');wait_idle();self.assertFalse(peer.canReadLine())
+        self.assertEqual(bridge.registryResult,REG_MESSAGES['registry_unavailable'])
+        bridge.registryAllowVisual('create_issue',True);wait_idle();self.assertFalse(peer.canReadLine())
+    def test_section_signal_fires_only_when_the_block_changes(self):
+        bridge=Bridge('/nonexistent-gideon-root');counts=Counter()
+        for signal in SECTION_SIGNALS.values():getattr(bridge,signal).connect(lambda n=signal:counts.update([n]))
+        old=reg_snap();new=reg_snap(reg_block(allowed=['create_issue'],revision=4))
+        bridge._publish(old,new);self.assertEqual(dict(counts),{'registryChanged':1})
+        counts.clear();bridge._publish(new,dict(new));self.assertEqual(dict(counts),{})
+        bridge._apply(validate_snapshot(copy.deepcopy(new),'r',0));self.assertEqual(bridge.registryVisualAllowed,['create_issue']);self.assertEqual(bridge.registryRevision,'4')
+        self.assertFalse(any(k in str(bridge.registryPurposes) for k in ('token','secret','refresh')))
 class ConnectionsQml(unittest.TestCase):
     def test_connections_page_follows_qml_rules(self):
         env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}

@@ -26,7 +26,7 @@ STAGED_ERRORS=('staged_payload_invalid',)
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections','registry'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
@@ -79,7 +79,7 @@ HTTP_STATUS_KEY='http_status'
 AGENT_STATES=('thinking','waiting_tool','awaiting_approval','done','failed','aborted','blocked');AGENT_TERMINAL=('done','failed','aborted','blocked');AGENT_ERROR_STATES=('failed','aborted','blocked')
 AGENT_STEP_KINDS=('chat','tool');AGENT_RISKS=('read','state_changing','destructive');AGENT_STEP_STATES=('running','done','awaiting_approval','denied','failed','stale','blocked','cancelled','expired')
 AGENT_CODES=frozenset({'agent_busy','llm_unavailable','unknown_run','invalid_input','invalid_args','unknown_tool','too_many_calls','executor_unavailable','executor_failed','busy','denied','destructive_disabled','app_unavailable','app_write_failed','verify_failed','stale_screen','loop_blocked','max_steps','token_budget','run_deadline','capability_unavailable','unknown_capability','plugin_error','invalid_output','empty_answer','aborted','revoked','cancelled','permission_denied','cloud_not_authorized','key_missing','provider_not_configured','http_error','timeout','response_too_large','network_unavailable','model_unsupported_feature','settings_unavailable',
- 'permission_revoked','awaiting_approval'})  # the last two are named by docs/C3.md (the Core emits them when that path exists)
+ 'permission_revoked','awaiting_approval','route_unavailable'})  # the last two are named by docs/C3.md (the Core emits them when that path exists)
 # C3: a proposal cancelled or refused by an agent run carries the run's code (or run_ended), and synthetic tools refuse with their own codes.
 TOOL_REASONS=TOOL_REASONS|AGENT_CODES|{'run_ended','denied','destructive_disabled','app_unavailable','app_write_failed','verify_failed','stale_screen','aborted','revoked'}
 # S5 connections (docs/S5.md E1). Providers, statuses and limits mirror the Core; the snapshot block 'connections' is refused when it breaks them. No secret, token or endpoint is ever part of it.
@@ -132,6 +132,22 @@ CONN_MESSAGES={
     'mcp_restart_limit':'Limite de reinícios do servidor MCP atingido; reinicie o Core para tentar de novo',
 }
 CONN_CODES=frozenset(CONN_MESSAGES)
+# A failed connection tool of an agent run (github_create_issue, route_create_issue, ...) ends its step, and the run, with the connection code (rate_limited, forbidden_scope, provider_error, ...).
+AGENT_CODES=AGENT_CODES|CONN_CODES
+# S5 E3 CapabilityRegistry (docs/S5.md E3). Purposes, routes and statuses mirror the Core's fixed table; the snapshot block 'registry' is refused when it breaks them.
+REG_PURPOSES=('create_issue','list_events','read_state');REG_VISUAL_PURPOSES=('create_issue',);REG_ROUTES=('connection','visual')
+REG_STATUSES=('available','not_connected','expired','scope_not_granted','no_api','visual_not_allowed','disabled')
+REG_BLOCK_KEYS=frozenset({'revision','purposes','visual_allowed'});REG_CANDIDATE_KEYS=frozenset({'route','status','reason'});REG_LABEL_LIMIT=64;REG_REASON_LIMIT=256
+REG_VISUAL_WARNING='Atenção: o fallback visual dirige uma tela por cliques e digitação, é menos seguro que a API e só vale quando não há conta conectada. Nunca contorna token expirado, reautenticação ou escopo negado. A publicação ainda pede sua aprovação.'
+REG_MESSAGES={
+    'route_unavailable':'Nenhuma rota disponível para esta finalidade; veja os motivos. Nada foi executado',
+    'unknown_purpose':'Finalidade desconhecida',
+    'no_visual_route':'Esta finalidade não tem rota visual',
+    'stale_registry_revision':'As rotas mudaram no Core; atualize e tente de novo',
+    'registry_storage_error':'Rotas indisponíveis: o arquivo de permissões não pôde ser lido ou gravado',
+    'registry_unavailable':'Rotas indisponíveis agora',
+    'registry_revision_exhausted':'Revisão das rotas esgotada',
+}
 TOOL_REASONS=TOOL_REASONS|CONN_CODES
 AGENT_STATE_LABELS={'thinking':'Pensando','waiting_tool':'Executando ferramenta','awaiting_approval':'Aguardando sua aprovação','done':'Concluído','failed':'Falhou','aborted':'Abortado','blocked':'Bloqueado'}
 AGENT_MAX_STEPS=6;AGENT_CHAT_STEPS=12;AGENT_TOOL_STEPS=25;AGENT_TOTAL_TOKENS=4096;AGENT_GOAL_LIMIT=1024;AGENT_ANSWER_LIMIT=4096
@@ -593,6 +609,8 @@ def validate_snapshot(data,request_id,min_sequence):
     if 'skills' in data:require(valid_skills(data['skills']))
     # S5: the connections block is optional (absent or null while the connection manager is not published); when present it is the exact view of docs/S5.md E1.
     if 'connections' in data:require(valid_connections(data['connections']))
+    # S5 E3: the registry block is optional (absent or null while the registry is not published); when present it is the exact view of docs/S5.md E3.
+    if 'registry' in data:require(valid_registry(data['registry']))
     partial=data.get('partial')
     require(partial is None or (isinstance(partial,str) and utf8_len(partial)<=PARTIAL_LIMIT))
     pack=data.get('base_pack')
@@ -796,6 +814,7 @@ CODE_MESSAGES.update({f'skill_invalid:{reason}':text for reason,text in SKILL_RE
 CODE_MESSAGES.update({code:text for code,text in SKILL_OP_MESSAGES.items() if code not in CODE_MESSAGES})
 CODE_MESSAGES.update({'skill_invalid':'Skill recusada pela validação do Core; nada foi gravado','model_output_invalid':'O modelo não devolveu um manifest JSON válido'}) 
 CODE_MESSAGES.update(CONN_MESSAGES)
+CODE_MESSAGES.update(REG_MESSAGES)
 SKILL_ID=re.compile(r'[a-z][a-z0-9_]{2,40}');SKILL_STEP_ID=re.compile(r'[a-z][a-z0-9_]{0,23}');SKILL_IMPORT_NAME=re.compile(r'[A-Za-z0-9._-]{1,64}')
 SKILL_SEMVER=re.compile(r'(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})')
 # Limits mirror docs/S4.md: manifest and inputs at most 16 KiB; 16 skills x 3 versions in the ledger; 16 steps; 32 history entries; outputs at most 1 KiB.
@@ -991,6 +1010,27 @@ def valid_connections(block):
         ids.append(item['id'])
     if len(set(ids))!=len(ids):return False
     return 'last_call' not in block or valid_conn_last_call(block['last_call'])
+def valid_registry(block):
+    """Snapshot block registry: null, or revision, purposes (the fixed table: each with its candidates, and a chosen route that is an available candidate) and the purposes with the visual fallback allowed."""
+    if block is None:return True
+    if not (isinstance(block,dict) and set(block)==REG_BLOCK_KEYS and is_int(block['revision'])):return False
+    purposes=block['purposes']
+    if not (isinstance(purposes,list) and len(purposes)<=len(REG_PURPOSES)):return False
+    ids=[]
+    for item in purposes:
+        if not (isinstance(item,dict) and {'id','label','candidates'}<=set(item)<={'id','label','candidates','route_chosen'} and item['id'] in REG_PURPOSES and conn_text_ok(item['label'],REG_LABEL_LIMIT)):return False
+        candidates=item['candidates']
+        if not (isinstance(candidates,list) and 0<len(candidates)<=len(REG_ROUTES)):return False
+        routes=[]
+        for candidate in candidates:
+            if not (isinstance(candidate,dict) and set(candidate)==REG_CANDIDATE_KEYS and candidate['route'] in REG_ROUTES and candidate['status'] in REG_STATUSES and conn_text_ok(candidate['reason'],REG_REASON_LIMIT)):return False
+            routes.append(candidate['route'])
+        if len(set(routes))!=len(routes):return False
+        if 'route_chosen' in item and not (item['route_chosen'] in routes and next(c for c in candidates if c['route']==item['route_chosen'])['status']=='available'):return False
+        ids.append(item['id'])
+    if len(set(ids))!=len(ids):return False
+    allowed=block['visual_allowed']
+    return isinstance(allowed,list) and len(allowed)<=len(REG_VISUAL_PURPOSES) and all(a in REG_VISUAL_PURPOSES for a in allowed) and len(set(allowed))==len(allowed)
 # op -> (result channel, done message or builder). One table drives every Core answer.
 OPS={
     'preferences':('prefs',PREFS_DONE),'rollback_preferences':('prefs',PREFS_DONE),'select_wake':('prefs',PREFS_DONE),'feedback_preferences':('prefs',PREFS_DONE),
@@ -1022,25 +1062,27 @@ OPS.update({
     'connection_remove':('connections','Conta removida'),'connection_call':('connections','Chamada enviada ao Core; resultado em Última chamada'),
     'connection_set_token':('connections','Token enviado ao Core para validação; o campo foi limpo'),
     'connection_trust_tools':('connections','Ferramentas confiadas pelo usuário; cada chamada ainda pede aprovação'),
+    'registry_plan':('registry','Rota planejada; nada foi executado'),'registry_allow_visual':('registry','Fallback visual atualizado pelo Core'),
 })
 PENDING.update({
     'connection_add':'Criando conta no Core…','connection_connect':'Iniciando conexão no Core…','connection_consent':'Enviando consentimento ao Core…','connection_refresh':'Atualizando conta no Core…',
     'connection_disconnect':'Desconectando conta no Core…','connection_revoke':'Revogando acesso no Core…','connection_remove':'Removendo conta no Core…','connection_call':'Chamando operação pelo Core…',
     'connection_set_token':'Validando token no Core…','connection_trust_tools':'Confiando nas ferramentas no Core…',
+    'registry_plan':'Planejando rota no Core…','registry_allow_visual':'Atualizando fallback visual no Core…',
 })
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
     preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
-    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal()
+    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
@@ -1089,7 +1131,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -2025,3 +2067,35 @@ class Bridge(QObject):
     def connectionsProviders(self):return [dict(p) for p in self._conn_block().get('providers',[])]
     @Property('QVariantMap',notify=connectionsChanged)
     def connectionLastCall(self):return dict(self._conn_block().get('last_call') or {})
+    # ---- S5 E3 CapabilityRegistry (docs/S5.md E3, UI). The Core picks routes and owns the visual permission; this page only asks for a plan or flips the user's switch for one purpose. Nothing here executes a route.
+    def _reg_block(self):return self.snapshot.get('registry') or {}
+    def _reg_ready(self):return self.online and isinstance(self.snapshot.get('registry'),dict)
+    def _reg_op(self,op,**kw):
+        """One Core request on the registry channel: refused while unavailable or while another request is in flight; never queued."""
+        if not self._reg_ready():self._refuse('registry',REG_MESSAGES['registry_unavailable']);return
+        if self.pending:self._refuse('registry',CODE_MESSAGES['busy']);return
+        self._send('registry',op,**kw)
+    @Slot(str)
+    def registryPlan(self,purpose):
+        if purpose not in REG_PURPOSES:self._refuse('registry',REG_MESSAGES['unknown_purpose']);return
+        self._reg_op('registry_plan',purpose=purpose)
+    @Slot(str,bool)
+    def registryAllowVisual(self,purpose,enabled):
+        """The user's switch (default off). Refused here for an unknown purpose or one with no visual route; the Core checks the revision."""
+        if purpose not in REG_PURPOSES:self._refuse('registry',REG_MESSAGES['unknown_purpose']);return
+        if purpose not in REG_VISUAL_PURPOSES:self._refuse('registry',REG_MESSAGES['no_visual_route']);return
+        self._reg_op('registry_allow_visual',purpose=purpose,enabled=bool(enabled),revision=int(self._reg_block().get('revision',0)))
+    @Property(bool,notify=changed)
+    def registryAvailable(self):return self._reg_ready()
+    @Property(bool,notify=changed)
+    def registryBusy(self):return self.pending_op in ('registry_plan','registry_allow_visual')
+    @Property(str,notify=changed)
+    def registryResult(self):return self.results['registry']
+    @Property(str,constant=True)
+    def registryVisualWarning(self):return REG_VISUAL_WARNING
+    @Property(str,notify=registryChanged)
+    def registryRevision(self):return str(self._reg_block().get('revision',0))
+    @Property('QVariantList',notify=registryChanged)
+    def registryPurposes(self):return [dict(p) for p in self._reg_block().get('purposes',[])]
+    @Property('QVariantList',notify=registryChanged)
+    def registryVisualAllowed(self):return list(self._reg_block().get('visual_allowed',[]))

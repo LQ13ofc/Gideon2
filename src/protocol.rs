@@ -256,6 +256,16 @@ pub enum Operation {
         token: crate::secrets::SecretKey,
         revision: Option<u64>,
     },
+    /// S5 E3: plans a purpose (which route would run); executes nothing.
+    RegistryPlan {
+        purpose: String,
+    },
+    /// S5 E3: the user's switch for the visual fallback of one purpose. `revision` is an optional CAS.
+    RegistryAllowVisual {
+        purpose: String,
+        enabled: bool,
+        revision: Option<u64>,
+    },
     /// Transport-only: a skill manifest line over the frame bound is answered with `code`.
     Refused {
         code: &'static str,
@@ -315,6 +325,7 @@ pub struct Response {
     pub agent: Option<crate::agent::View>,
     pub skills: Option<crate::skills::View>,
     pub connections: crate::connections::View,
+    pub registry: crate::registry::View,
     pub text_input_available: bool,
     pub speech_samples: usize,
     pub speech_status: &'static str,
@@ -707,6 +718,19 @@ enum WireRequest {
         request_id: String,
         id: String,
         token: crate::secrets::SecretKey,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
+    RegistryPlan {
+        version: u16,
+        request_id: String,
+        purpose: String,
+    },
+    RegistryAllowVisual {
+        version: u16,
+        request_id: String,
+        purpose: String,
+        enabled: bool,
         #[serde(default)]
         revision: Option<u64>,
     },
@@ -1319,6 +1343,26 @@ impl<'de> Deserialize<'de> for Request {
                 Operation::ConnectionSetToken {
                     id,
                     token,
+                    revision,
+                },
+            ),
+            WireRequest::RegistryPlan {
+                version,
+                request_id,
+                purpose,
+            } => (version, request_id, Operation::RegistryPlan { purpose }),
+            WireRequest::RegistryAllowVisual {
+                version,
+                request_id,
+                purpose,
+                enabled,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::RegistryAllowVisual {
+                    purpose,
+                    enabled,
                     revision,
                 },
             ),

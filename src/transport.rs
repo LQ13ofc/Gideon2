@@ -467,6 +467,7 @@ pub async fn serve(
     core.configure_storage(&storage);
     core.configure_llm(&storage, net_allow_loopback);
     core.configure_connections(&storage);
+    core.configure_registry(&storage);
     core.configure_skills(&storage);
     if let Some((path, digest)) = hub_catalog {
         core.configure_hub(

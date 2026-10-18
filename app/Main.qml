@@ -92,6 +92,12 @@ ApplicationWindow {
         var account = item ? (item.account_ref ? item.label + " (" + item.account_ref + ")" : item.label) : "conta desconhecida"
         return "Conexão: " + (item ? connProviderName(item.provider) : "provedor desconhecido") + " · conta " + account + " · operação " + p.operation + " (" + connOpLabel(p.operation) + ") · risco " + connRiskText(p.risk)
     }
+    // S5 E3 CapabilityRegistry: words for routes and statuses. Choices come from the Core snapshot 'registry'; this page only asks for a plan or flips the user's visual switch.
+    readonly property var regVisualPurposes: ["create_issue"]
+    function regRouteText(r) { return r === "connection" ? "API autorizada (conexão)" : r === "visual" ? "Visual (cliques e digitação)" : r; }
+    function regStatusText(s) { switch (s) { case "available": return "disponível"; case "not_connected": return "não conectada"; case "expired": return "expirada ou reautenticação necessária"; case "scope_not_granted": return "escopo não concedido"; case "no_api": return "sem API neste ambiente"; case "visual_not_allowed": return "fallback visual desligado"; case "disabled": return "indisponível"; default: return s; } }
+    function regVisualOn(id) { return core.registryVisualAllowed.indexOf(id) >= 0; }
+    function regChosenText(p) { return p.route_chosen ? "rota escolhida: " + regRouteText(p.route_chosen) : "nenhuma rota disponível (route_unavailable)"; }
     // The skill whose permissions are shown; a copy of the snapshot row, so it reads as shown when it was picked.
     property var skillSelected: null
     // C4 test buttons: reads only. Each entry is one allowlisted capability (bridge PERCEPTION_CAPABILITIES) sent with the empty object.
@@ -1166,6 +1172,52 @@ ApplicationWindow {
                             }
                         }
                         Label { objectName: "connLastCall"; visible: core.connectionLastCall.operation !== undefined; text: "Última chamada: " + (core.connectionLastCall.operation || "") + " · " + window.connOutcomeText(core.connectionLastCall); textFormat: Text.PlainText; color: "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Última chamada de conexão: " + text }
+                    }
+                }
+                // S5 E3 CapabilityRegistry: the chosen route per purpose, the discarded ones with their reasons, and the user's visual-fallback switch (off by default). PlainText only; planning executes nothing.
+                GlassCard {
+                objectName: "routesPanel"
+                theme: window.themeIndex
+                    visible: window.page === 11 && core.registryAvailable; Layout.fillWidth: true; implicitHeight: routesColumn.implicitHeight + 44
+                    ColumnLayout {
+                        id: routesColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        Label { text: "Rotas"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        Label { text: "Para cada finalidade o Core escolhe o melhor caminho por: autorização, segurança, suporte oficial, confiabilidade, privacidade e menos efeitos colaterais. Planejar não executa nada."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "routesResult"; visible: text.length > 0; text: core.registryResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado das rotas: " + text }
+                        Repeater {
+                            model: core.registryPurposes
+                            delegate: Rectangle {
+                                id: routeCard
+                                required property var modelData
+                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
+                                implicitHeight: routeColumn.implicitHeight + 20
+                                ColumnLayout {
+                                    id: routeColumn; anchors.fill: parent; anchors.margins: 10; spacing: 5
+                                    Label { objectName: "routePurpose_" + routeCard.modelData.id; text: routeCard.modelData.label + " · " + window.regChosenText(routeCard.modelData); textFormat: Text.PlainText; color: routeCard.modelData.route_chosen ? "#78debc" : "#ffc674"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Finalidade: " + text }
+                                    Repeater {
+                                        model: routeCard.modelData.candidates
+                                        delegate: Label {
+                                            required property var modelData
+                                            objectName: "routeCandidate_" + routeCard.modelData.id + "_" + modelData.route
+                                            text: (routeCard.modelData.route_chosen === modelData.route ? "Escolhida · " : "Descartada · ") + window.regRouteText(modelData.route) + " · " + window.regStatusText(modelData.status) + " · " + modelData.reason
+                                            textFormat: Text.PlainText; color: "#dce7ff"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: text
+                                        }
+                                    }
+                                    Flow {
+                                        Layout.fillWidth: true; spacing: 10
+                                        GlowButton { objectName: "routePlan_" + routeCard.modelData.id; text: "Planejar"; Accessible.name: "Planejar rota de " + routeCard.modelData.label; enabled: !core.registryBusy; onClicked: core.registryPlan(routeCard.modelData.id) }
+                                        GlowButton {
+                                            objectName: "routeVisual_" + routeCard.modelData.id; visible: window.regVisualPurposes.indexOf(routeCard.modelData.id) >= 0
+                                            text: window.regVisualOn(routeCard.modelData.id) ? "Desligar fallback visual (revogar)" : "Ligar fallback visual"
+                                            Accessible.name: text + " de " + routeCard.modelData.label; enabled: !core.registryBusy
+                                            onClicked: core.registryAllowVisual(routeCard.modelData.id, !window.regVisualOn(routeCard.modelData.id))
+                                        }
+                                    }
+                                    Label { objectName: "routeVisualState_" + routeCard.modelData.id; visible: window.regVisualPurposes.indexOf(routeCard.modelData.id) >= 0; text: "Fallback visual: " + (window.regVisualOn(routeCard.modelData.id) ? "ligado por você" : "desligado (padrão)"); textFormat: Text.PlainText; color: window.regVisualOn(routeCard.modelData.id) ? "#ffc674" : "#a6b9df"; Layout.fillWidth: true }
+                                    Label { objectName: "routeVisualWarning_" + routeCard.modelData.id; visible: window.regVisualPurposes.indexOf(routeCard.modelData.id) >= 0; text: core.registryVisualWarning; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                }
+                            }
+                        }
                     }
                 }
                 // C3 agent: same visibility rule as the chat, only while the LLM plugin runs. Everything shown comes from the Core snapshot 'agent' block.

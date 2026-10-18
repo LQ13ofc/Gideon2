@@ -75,7 +75,7 @@ pub fn mcp_profile() -> Option<&'static str> {
 }
 
 /// Whether the provider has a test backend: an HTTP fake, or the fixed fake MCP server.
-fn has_fake(provider: &str) -> bool {
+pub fn has_fake(provider: &str) -> bool {
     if provider == "mcp" {
         mcp_profile().is_some()
     } else {
@@ -2091,6 +2091,46 @@ fn account_gate(found: &Account, scope: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// How usable a provider is for one scope, as seen by the CapabilityRegistry (S5 E3). It reads the ledger only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    /// No backend in this build or run (no fake configured): the API does not exist here.
+    NoBackend,
+    /// No account of the provider at all.
+    NoAccount,
+    /// Accounts exist and every one is disconnected (the user disconnected or revoked).
+    Disconnected,
+    /// A connected account grants the scope.
+    Usable,
+    /// A credential problem: an expired token.
+    Expired,
+    /// A credential problem: the account must authenticate again and still holds the scope.
+    Reauth,
+    /// The account exists but the scope is not granted.
+    ScopeNotGranted,
+    /// Connecting, offline or in error: not usable now, not a reason to leave the API.
+    Unavailable,
+}
+
+impl Standing {
+    /// Only a missing connection lets the visual route stand in. A credential problem never does.
+    pub fn fallback_eligible(self) -> bool {
+        matches!(self, Self::NoBackend | Self::NoAccount | Self::Disconnected)
+    }
+    /// Closed code of the standing, the reason of `route_unavailable`.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NoBackend => "no_api",
+            Self::NoAccount | Self::Disconnected => "not_connected",
+            Self::Usable => "available",
+            Self::Expired => "expired",
+            Self::Reauth => "reauth_required",
+            Self::ScopeNotGranted => "scope_not_granted",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
 fn job_account(job: &Job) -> Option<&str> {
     match job {
         Job::Device { account, .. } | Job::Poll { account, .. } | Job::Refresh { account, .. } => {
@@ -2862,6 +2902,51 @@ impl Manager {
         self.mcp_starts.remove(id);
         self.log("connection_removed", "none", "none", "ok");
         "ok"
+    }
+
+    /// Standing of a provider for a scope (S5 E3). A credential problem on any account outranks a plain
+    /// disconnected one, so the registry never reads "the user has no connection" when a token went bad.
+    pub fn standing(&self, provider: &str, scope: &str) -> Standing {
+        if !has_fake(provider) {
+            return Standing::NoBackend;
+        }
+        let accounts: Vec<&Account> = self
+            .ledger
+            .accounts
+            .iter()
+            .filter(|a| a.provider == provider)
+            .collect();
+        if accounts.is_empty() {
+            return Standing::NoAccount;
+        }
+        let grants = |a: &&Account| a.granted_scopes.iter().any(|s| s == scope);
+        if accounts
+            .iter()
+            .any(|a| a.status == Status::Connected && grants(a))
+        {
+            return Standing::Usable;
+        }
+        if accounts.iter().any(|a| a.status == Status::Connected) {
+            return Standing::ScopeNotGranted;
+        }
+        if accounts.iter().any(|a| a.status == Status::Expired) {
+            return Standing::Expired;
+        }
+        if accounts.iter().any(|a| a.status == Status::ReauthRequired) {
+            return if accounts
+                .iter()
+                .any(|a| a.status == Status::ReauthRequired && grants(a))
+            {
+                Standing::Reauth
+            } else {
+                Standing::ScopeNotGranted
+            };
+        }
+        if accounts.iter().all(|a| a.status == Status::Disconnected) {
+            Standing::Disconnected
+        } else {
+            Standing::Unavailable
+        }
     }
 
     /// Operation of an account's provider, by name. Unknown accounts and names are refused.

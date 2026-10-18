@@ -764,6 +764,79 @@ class SnapshotContract(unittest.TestCase):
         self.assertTrue(any('proposal' in label for label in c.validated), c.validated)
         c.stop()
 
+    def test_registry_snapshots_validate_against_real_core(self):
+        # S5 E3 (docs/S5.md, "E3 CapabilityRegistry"): every registry state the Core emits passes the bridge validator, and the
+        # validator refuses a block that breaks the contract (unknown status, chosen route not available, extra key, bad purpose).
+        base = self.start_github()
+        self.core.extra = ['--connections-fake', f'github={base}']
+        self.core.start()
+        c = self.core
+        first = c.snap('registry: fresh Core, no account, fallback off')['registry']
+        self.assertEqual([p['id'] for p in first['purposes']], ['create_issue', 'list_events', 'read_state'])
+        self.assertEqual((first['revision'], first['visual_allowed']), (0, []))
+        create = first['purposes'][0]
+        self.assertNotIn('route_chosen', create)
+        self.assertEqual({(x['route'], x['status']) for x in create['candidates']},
+                         {('connection', 'not_connected'), ('visual', 'visual_not_allowed')})
+        self.assertEqual(self.ok_op('registry_plan', purpose='create_issue')['code'], 'route_unavailable')
+        self.assertEqual(self.ok_op('registry_plan', purpose='nope')['code'], 'unknown_purpose')
+        c.snap('registry: after a plan with no route')
+        self.assertEqual(self.ok_op('connection_add', provider='github', label='contrato rotas')['code'], 'ok')
+        cid = c.snap('registry: account added')['connections']['items'][0]['id']
+        self.assertEqual(self.ok_op('connection_connect', id=cid)['code'], 'ok')
+        c.wait(lambda s: any(i['id'] == cid and i.get('user_code') for i in s['connections']['items']), 15, 'device code')
+        item = next(i for i in c.snap('registry: connecting')['connections']['items'] if i['id'] == cid)
+        self.github_control(base, 'approve', {'user_code': item['user_code'], 'scopes': item['pending_scopes']})
+        until = time.monotonic() + 20
+        while self.ok_op('connection_consent', id=cid, scopes=['repo:read', 'issues:write'])['code'] != 'ok':
+            self.assertLess(time.monotonic(), until, 'consent accepted after the device approval')
+            time.sleep(0.2)
+        c.wait(lambda s: next(i for i in s['connections']['items'] if i['id'] == cid)['status'] == 'connected', 20,
+               'connected')
+        chosen = c.snap('registry: connected, the connection route is chosen')['registry']['purposes'][0]
+        self.assertEqual(chosen['route_chosen'], 'connection')
+        self.assertTrue(all(x['reason'] for x in chosen['candidates']))
+        self.assertEqual(self.ok_op('registry_plan', purpose='create_issue')['code'], 'ok')
+        self.assertEqual(self.ok_op('registry_allow_visual', purpose='create_issue', enabled=True, revision=0)['code'], 'ok')
+        allowed = c.snap('registry: visual fallback allowed')['registry']
+        self.assertEqual((allowed['revision'], allowed['visual_allowed']), (1, ['create_issue']))
+        # allowed, yet the connection is usable: the visual route stays out
+        self.assertEqual(allowed['purposes'][0]['route_chosen'], 'connection')
+        self.assertEqual(self.ok_op('registry_allow_visual', purpose='create_issue', enabled=True, revision=0)['code'],
+                         'stale_registry_revision')
+        self.assertEqual(self.ok_op('registry_allow_visual', purpose='list_events', enabled=True)['code'], 'no_visual_route')
+        self.assertEqual(self.ok_op('registry_allow_visual', purpose='create_issue', enabled=False, revision=1)['code'], 'ok')
+        self.assertEqual(c.snap('registry: fallback revoked')['registry']['visual_allowed'], [])
+        self.assertEqual(self.ok_op('connection_disconnect', id=cid)['code'], 'ok')
+        after = c.snap('registry: disconnected, no route again')['registry']['purposes'][0]
+        self.assertNotIn('route_chosen', after)
+        self.assertEqual(self.ok_op('connection_remove', id=cid)['code'], 'ok')
+        good = c.snap('registry: account removed')
+        self.assertGreaterEqual(len(c.validated), 9, c.validated)
+        # the validator refuses a block that breaks the contract
+        import copy
+        def refused(mutate):
+            bad = copy.deepcopy(good)
+            mutate(bad['registry'])
+            try:
+                validate_snapshot(bad, bad['request_id'], 0)
+            except Exception:
+                return True
+            return False
+        self.assertTrue(refused(lambda r: r.update(extra=1)))
+        self.assertTrue(refused(lambda r: r['purposes'][0]['candidates'][0].update(status='maybe')))
+        self.assertTrue(refused(lambda r: r['purposes'][0]['candidates'][0].update(secret='x')))
+        self.assertTrue(refused(lambda r: r['purposes'][0].update(route_chosen='connection')))  # not available
+        self.assertTrue(refused(lambda r: r['purposes'][0].update(route_chosen='visual')))
+        self.assertTrue(refused(lambda r: r['purposes'][0].update(id='delete_all')))
+        self.assertTrue(refused(lambda r: r['purposes'][0]['candidates'][0].update(route='telepathy')))
+        self.assertTrue(refused(lambda r: r['purposes'][0]['candidates'][0].update(reason='x' * 257)))
+        self.assertTrue(refused(lambda r: r.update(visual_allowed=['list_events'])))
+        self.assertTrue(refused(lambda r: r.update(visual_allowed=['create_issue', 'create_issue'])))
+        self.assertTrue(refused(lambda r: r.update(revision=-1)))
+        self.assertTrue(refused(lambda r: r.pop('visual_allowed')))
+        c.stop()
+
     def test_mcp_snapshots_validate_against_real_core(self):
         # S5 E2.4 (docs/S5.md, "E2.4 mcp"): the Core starts the fake stdio MCP server in the plugin sandbox from the fixed
         # registration. Every mcp state (connecting, tools with their trust states, call proposals, the untrusted

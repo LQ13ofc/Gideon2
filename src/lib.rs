@@ -11,6 +11,7 @@ pub mod mcp;
 pub mod pack;
 pub mod plugins;
 pub mod protocol;
+pub mod registry;
 pub mod secrets;
 pub mod skills;
 pub mod storage;
