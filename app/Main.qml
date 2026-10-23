@@ -38,6 +38,7 @@ ApplicationWindow {
     readonly property bool packAvailable: core.wakeChoices.length > 0
     readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM", "Percepção e ação", "Skills", "Conexões"]
     readonly property bool shellRail: width < 980
+    readonly property bool sessionCancellable: core.connected && core.sessionId.length > 0 && (core.state === "capturing" || core.state === "transcribing" || core.state === "executing" || core.state === "speaking")
     // One short Portuguese line per page, shown under the page title in the header (index = page).
     readonly property var pageSubtitles: ["Visão geral da Base e da conversa.", "Configure como o Gideon escuta e responde.", "Sua voz e os ajustes de áudio.", "Defina o estilo visual do Gideon.", "Cada capacidade precisa de autorização.", "Acompanhe o estado real da Base.", "Capacidades opcionais, em um só lugar.", "Converse com o motor LLM opcional.", "Escolha, teste e configure o modelo do motor LLM.", "Teste sensores e ações simulados; nada age no seu computador.", "Procedimentos sobre capacidades instaladas; não concedem permissões.", "Contas de serviços; você concede cada escopo."]
     // S4 skills: state words live here; codes go through core.codeMessage. Nothing on this page grants a permission.
@@ -229,7 +230,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Label { text: modelData.plugin_id + " " + modelData.semver + " · " + (modelData.state === "quarantined" ? "Em quarentena" : window.pluginEnabledFor(modelData.plugin_id) ? "Instalado · ativo" : "Instalado · desativado (sem execução)"); textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         GlowButton { objectName: "rollback_" + modelData.plugin_id; text: "Reverter versão"; Accessible.name: "Reverter versão de " + modelData.plugin_id; enabled: core.hubLifecycleAvailable && !!modelData.previous && modelData.state === "installed"; onClicked: core.rollbackHub(modelData.plugin_id) }
-                        GlowButton { objectName: "remove_" + modelData.plugin_id; text: "Remover plugin"; Accessible.name: "Remover " + modelData.plugin_id; enabled: core.hubLifecycleAvailable; onClicked: { removeConfirm.plugin = modelData; removeConfirm.revision = core.hubInstallRevision; removeConfirm.open() } }
+                        DangerButton { objectName: "remove_" + modelData.plugin_id; text: "Remover plugin"; Accessible.name: "Remover " + modelData.plugin_id; enabled: core.hubLifecycleAvailable; onClicked: { removeConfirm.plugin = modelData; removeConfirm.revision = core.hubInstallRevision; removeConfirm.open() } }
                     }
                 }
                 Label { objectName: "hubLifecycleResult"; text: core.hubApprovalResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -248,7 +249,7 @@ ApplicationWindow {
                         Label { objectName: "reapprovalHint_" + pluginEntry.modelData.plugin_id; visible: window.pluginInstalled(pluginEntry.modelData.plugin_id) && !window.pluginApproved(pluginEntry.modelData.plugin_id); text: "Aprove novamente as permissões para ativar"; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         GlowButton { objectName: "enable_" + pluginEntry.modelData.plugin_id; text: "Ativar"; Accessible.name: "Ativar " + pluginEntry.modelData.plugin_id; enabled: core.pluginsAvailable && window.pluginCanEnable(pluginEntry.modelData); onClicked: core.enablePlugin(pluginEntry.modelData.plugin_id) }
                         GlowButton { objectName: "disable_" + pluginEntry.modelData.plugin_id; text: "Desativar"; Accessible.name: "Desativar " + pluginEntry.modelData.plugin_id; enabled: core.pluginsAvailable && pluginEntry.modelData.enabled === true; onClicked: core.disablePlugin(pluginEntry.modelData.plugin_id) }
-                        GlowButton { objectName: "revoke_" + pluginEntry.modelData.plugin_id; text: "Revogar permissões"; Accessible.name: "Revogar permissões de " + pluginEntry.modelData.plugin_id; enabled: core.pluginsAvailable && pluginEntry.modelData.state !== "quarantined"; onClicked: { revokeConfirm.plugin = pluginEntry.modelData; revokeConfirm.revision = core.pluginsRevision; revokeConfirm.open() } }
+                        DangerButton { objectName: "revoke_" + pluginEntry.modelData.plugin_id; text: "Revogar permissões"; Accessible.name: "Revogar permissões de " + pluginEntry.modelData.plugin_id; enabled: core.pluginsAvailable && pluginEntry.modelData.state !== "quarantined"; onClicked: { revokeConfirm.plugin = pluginEntry.modelData; revokeConfirm.revision = core.pluginsRevision; revokeConfirm.open() } }
                         TextField {
                             id: capabilityInput; objectName: "capabilityInput_" + pluginEntry.modelData.plugin_id
                             placeholderText: "Texto para a capability"; Accessible.name: "Texto para a capability de " + pluginEntry.modelData.plugin_id
@@ -325,7 +326,7 @@ ApplicationWindow {
                         // The field is cleared at once: the key leaves QML with this call and is never shown again.
                         onClicked: { core.setApiKey(providerBox.currentValue, keyField.text); keyField.text = "" }
                     }
-                    GlowButton { objectName: "clearKeyButton"; text: "Remover chave"; Accessible.name: "Remover chave do provedor"; enabled: core.llmConfigAvailable && core.llmSecretsConfigured[providerBox.currentValue] === true; onClicked: core.clearApiKey(providerBox.currentValue) }
+                    DangerButton { objectName: "clearKeyButton"; text: "Remover chave"; Accessible.name: "Remover chave do provedor"; enabled: core.llmConfigAvailable && core.llmSecretsConfigured[providerBox.currentValue] === true; onClicked: core.clearApiKey(providerBox.currentValue) }
                 }
                 CheckBox { id: consentBox; objectName: "llmConsent"; checked: false; text: "Permitir envio de conversas ao provedor na nuvem"; enabled: core.llmConfigAvailable; Accessible.name: "Consentimento para envio à nuvem"; Accessible.description: "Mensagens serão enviadas ao provedor escolhido na nuvem" }
                 Label { objectName: "llmConsentWarning"; text: "Mensagens serão enviadas ao provedor escolhido na nuvem"; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -356,7 +357,7 @@ ApplicationWindow {
             Label { text: window.reviewPlugin ? "Permissões: " + (window.reviewPlugin.permissions.join(", ") || "nenhuma") : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Label { text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             CheckBox { id: reviewAck; objectName: "publisherAcknowledgement"; text: "Entendo que o publisher não foi autenticado"; enabled: core.hubApprovalAvailable }
-            GlowButton { objectName: "approveHubButton"; text: "Aprovar estas permissões"; Accessible.name: window.reviewPlugin ? "Aprovar permissões de " + window.reviewPlugin.plugin_id : "Aprovar permissões"; enabled: core.hubApprovalAvailable && reviewAck.checked && window.reviewPlugin !== null && !window.approvalDone(); onClicked: core.approveHub(window.reviewPlugin.plugin_id, window.reviewPlugin.manifest_sha256, window.reviewPlugin.permissions, reviewAck.checked, window.reviewRevision) }
+            PrimaryButton { objectName: "approveHubButton"; text: "Aprovar estas permissões"; Accessible.name: window.reviewPlugin ? "Aprovar permissões de " + window.reviewPlugin.plugin_id : "Aprovar permissões"; enabled: core.hubApprovalAvailable && reviewAck.checked && window.reviewPlugin !== null && !window.approvalDone(); onClicked: core.approveHub(window.reviewPlugin.plugin_id, window.reviewPlugin.manifest_sha256, window.reviewPlugin.permissions, reviewAck.checked, window.reviewRevision) }
             Label { objectName: "hubApprovalResult"; text: core.hubApprovalResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         }
         }
@@ -375,7 +376,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             width: removeConfirm.availableWidth
             Label { text: removeConfirm.plugin ? "Remover " + removeConfirm.plugin.plugin_id + " " + removeConfirm.plugin.semver + " do Core? Nada é executado e o catálogo não muda." : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            GlowButton { objectName: "confirmRemoveButton"; text: "Remover"; Accessible.name: removeConfirm.plugin ? "Remover " + removeConfirm.plugin.plugin_id : "Remover"; Layout.alignment: Qt.AlignRight; onClicked: removeConfirm.accept() }
+            DangerButton { objectName: "confirmRemoveButton"; text: "Remover"; Accessible.name: removeConfirm.plugin ? "Remover " + removeConfirm.plugin.plugin_id : "Remover"; Layout.alignment: Qt.AlignRight; onClicked: removeConfirm.accept() }
         }
     }
     Dialog {
@@ -391,7 +392,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             width: revokeConfirm.availableWidth
             Label { text: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id + "? O plugin será desativado e o processo encerrado. Reativar exige nova aprovação." : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            GlowButton { objectName: "confirmRevokeButton"; text: "Revogar"; Accessible.name: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id : "Revogar"; Layout.alignment: Qt.AlignRight; onClicked: revokeConfirm.accept() }
+            DangerButton { objectName: "confirmRevokeButton"; text: "Revogar"; Accessible.name: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id : "Revogar"; Layout.alignment: Qt.AlignRight; onClicked: revokeConfirm.accept() }
         }
     }
     // Destructive confirmations for the model manager: Cancel is the focused default; the explicit action button is the only way to accept.
@@ -407,7 +408,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             width: removeCustomConfirm.availableWidth
             Label { text: removeCustomConfirm.entry ? "Remover " + removeCustomConfirm.entry.label + " da lista de modelos personalizados? O modelo no provedor não é apagado." : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            GlowButton { objectName: "confirmRemoveCustomButton"; text: "Remover"; Accessible.name: removeCustomConfirm.entry ? "Remover modelo " + removeCustomConfirm.entry.id : "Remover"; Layout.alignment: Qt.AlignRight; onClicked: removeCustomConfirm.accept() }
+            DangerButton { objectName: "confirmRemoveCustomButton"; text: "Remover"; Accessible.name: removeCustomConfirm.entry ? "Remover modelo " + removeCustomConfirm.entry.id : "Remover"; Layout.alignment: Qt.AlignRight; onClicked: removeCustomConfirm.accept() }
         }
     }
     Dialog {
@@ -421,7 +422,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             width: clearPluginConfirm.availableWidth
             Label { text: "Apagar as configurações guardadas pelo plugin LLM, inclusive modelos personalizados? O plugin e a configuração do Core (provedor, modelo e chaves) não são alterados."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            GlowButton { objectName: "confirmClearPluginButton"; text: "Apagar dados"; Accessible.name: "Apagar dados do plugin LLM"; Layout.alignment: Qt.AlignRight; onClicked: clearPluginConfirm.accept() }
+            DangerButton { objectName: "confirmClearPluginButton"; text: "Apagar dados"; Accessible.name: "Apagar dados do plugin LLM"; Layout.alignment: Qt.AlignRight; onClicked: clearPluginConfirm.accept() }
         }
     }
     // Destructive confirmation for a skill: Cancel is the focused default; the explicit action button is the only way to accept.
@@ -437,7 +438,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             width: removeSkillConfirm.availableWidth
             Label { text: removeSkillConfirm.skill ? "Remover " + removeSkillConfirm.skill.id + " v" + removeSkillConfirm.skill.version + " do Core? Nada é executado." : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            GlowButton { objectName: "confirmRemoveSkillButton"; text: "Remover"; Accessible.name: removeSkillConfirm.skill ? "Remover skill " + removeSkillConfirm.skill.id : "Remover skill"; Layout.alignment: Qt.AlignRight; onClicked: removeSkillConfirm.accept() }
+            DangerButton { objectName: "confirmRemoveSkillButton"; text: "Remover"; Accessible.name: removeSkillConfirm.skill ? "Remover skill " + removeSkillConfirm.skill.id : "Remover skill"; Layout.alignment: Qt.AlignRight; onClicked: removeSkillConfirm.accept() }
         }
     }
     // Sidebar navigation: sections of rows. Each row is one page (nav<index>, same index as before) or a dialog opener.
@@ -487,6 +488,52 @@ ApplicationWindow {
         Layout.topMargin: 8; Layout.bottomMargin: 4
         color: "#2b3d6a"
     }
+    // Shared page system. PageCard: one card with a title (16-20px padding, 12px rhythm). PrimaryButton: the one action of a card (top-right).
+    // DangerButton: destructive actions, always behind a confirmation dialog. EmptyState: icon + one sentence + the next action.
+    component PageCard: GlassCard {
+        id: pageCard
+        property string title: ""
+        default property alias content: cardBody.data
+        theme: window.themeIndex
+        Layout.fillWidth: true
+        implicitHeight: cardBody.implicitHeight + 40
+        ColumnLayout {
+            id: cardBody
+            anchors.fill: parent; anchors.margins: 20; spacing: 12
+            Label { visible: pageCard.title.length > 0; text: pageCard.title; textFormat: Text.PlainText; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true; Layout.fillWidth: true }
+        }
+    }
+    component PrimaryButton: GlowButton {
+        id: primaryBtn
+        background: Rectangle {
+            radius: 12
+            color: !primaryBtn.enabled ? "#2b3f6b" : primaryBtn.down ? "#3650ad" : primaryBtn.hovered ? "#4f6fdc" : "#3e5fcc"
+            border.width: 1; border.color: primaryBtn.activeFocus ? "#ffffff" : "#5d7ae6"
+            opacity: primaryBtn.enabled ? 1 : 0.5
+        }
+        contentItem: Text { text: primaryBtn.text; color: "#ffffff"; font: primaryBtn.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; textFormat: Text.PlainText }
+    }
+    component DangerButton: GlowButton {
+        id: dangerBtn
+        background: Rectangle {
+            radius: 12
+            color: dangerBtn.down || dangerBtn.hovered ? "#4a1f2c" : "#331a26"
+            border.width: 1; border.color: "#c2566a"
+            opacity: dangerBtn.enabled ? 1 : 0.45
+        }
+        contentItem: Text { text: dangerBtn.text; color: dangerBtn.enabled ? "#ffd3da" : "#8898b8"; font: dangerBtn.font; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; textFormat: Text.PlainText }
+    }
+    component EmptyState: RowLayout {
+        id: emptyState
+        property string iconName: "hub"
+        property string message: ""
+        property string actionText: ""
+        signal actionRequested()
+        Layout.fillWidth: true; spacing: 12
+        Image { source: "icons/" + emptyState.iconName + ".svg"; sourceSize.width: 28; sourceSize.height: 28; Layout.preferredWidth: 28; Layout.preferredHeight: 28; layer.enabled: true; layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#8fa5d0" } }
+        Label { text: emptyState.message; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        PrimaryButton { visible: emptyState.actionText.length > 0; text: emptyState.actionText; onClicked: emptyState.actionRequested() }
+    }
     Rectangle {
         id: sidebar; objectName: "sidebar"
         width: window.shellRail ? 56 : 232
@@ -511,6 +558,12 @@ ApplicationWindow {
             Flickable {
                 id: navFlick; objectName: "navFlick"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 contentWidth: width; contentHeight: navColumn.implicitHeight; boundsBehavior: Flickable.StopAtBounds
+                // Thin scrollbar: visible only when the nav list is taller than the sidebar.
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded; width: 6; minimumSize: 0.1
+                    contentItem: Rectangle { implicitWidth: 6; radius: 3; color: parent.pressed ? "#7693ff" : "#3a5088" }
+                    background: Rectangle { implicitWidth: 6; radius: 3; color: "transparent" }
+                }
                 ColumnLayout {
                     id: navColumn; width: navFlick.width; spacing: 4
                     ColumnLayout {
@@ -587,34 +640,38 @@ ApplicationWindow {
                     Label { objectName: "aura"; text: window.stateLabels[core.state] || "Erro"; textFormat: Text.PlainText; color: "#e6edf4"; font.pixelSize: 13; Accessible.role: Accessible.StaticText; Accessible.name: "Estado do Gideon"; Accessible.description: text }
                 }
             }
-            // Cancel appears only while a session can be cancelled (same condition as its enabled state).
-            GlowButton { objectName: "cancelButton"; text: "Cancelar"; visible: core.connected && core.sessionId.length > 0; enabled: core.connected && core.sessionId.length > 0; implicitHeight: 34; onClicked: core.cancel(); Accessible.name: "Cancelar sessão" }
+            // Cancelar is shown only while the Core session is cancellable (a live capture, transcription, execution or speech). Idle: hidden.
+            GlowButton { objectName: "cancelButton"; text: "Cancelar"; visible: window.sessionCancellable; enabled: window.sessionCancellable; implicitHeight: 34; onClicked: core.cancel(); Accessible.name: "Cancelar sessão" }
         }
-        RowLayout {
-            visible: window.page === 0 && window.spacious
-            Layout.fillWidth: true; Layout.preferredHeight: 350; spacing: 14
+        // Início: hero and system status (hidden on compact heights), then the three summary cards. Conversation keeps the rest.
+        GridLayout {
+            id: heroGrid; objectName: "heroRow"
+            visible: window.page === 0 && window.height >= 640
+            columns: window.width >= 760 ? 2 : 1
+            Layout.fillWidth: true; rowSpacing: 12; columnSpacing: 14
             GlassCard {
                 theme: window.themeIndex
-                Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                Layout.fillWidth: true; Layout.preferredHeight: 220; clip: true
                 RoundedImage { anchors.fill: parent; source: Qt.resolvedUrl("assets/hero-background.png"); opacity: window.themeIndex === 2 ? 0 : 0.55 }
-                Image { id: heroOrb; source: "assets/gideon-orb.png"; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; width: Math.min(parent.width * 0.47, parent.height - 24); height: width; fillMode: Image.PreserveAspectFit; visible: core.visualFeedback }
+                Image { id: heroOrb; source: "assets/gideon-orb.png"; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; width: Math.min(parent.width * 0.4, parent.height - 40); height: width; fillMode: Image.PreserveAspectFit; visible: core.visualFeedback }
                 ColumnLayout {
-                    anchors.left: parent.left; anchors.leftMargin: 30; anchors.verticalCenter: parent.verticalCenter; width: parent.width * 0.56; spacing: 14
-                    Row { spacing: 12
-                        Label { text: "Olá,"; color: "#f4f6ff"; font.pixelSize: 60; font.bold: true }
-                        Label { text: "Gideon"; color: window.accentColor; font.pixelSize: 60; font.bold: true }
+                    anchors.left: parent.left; anchors.leftMargin: 26; anchors.verticalCenter: parent.verticalCenter; width: parent.width * 0.6; spacing: 8
+                    Row { spacing: 10
+                        Label { text: "Olá,"; color: "#f4f6ff"; font.pixelSize: 44; font.bold: true }
+                        Label { text: "Gideon"; color: window.accentColor; font.pixelSize: 44; font.bold: true }
                     }
-                    Label { text: core.connected ? "Seu Gideon, em um só lugar." : "Vamos reconectar ao Gideon."; color: "#c3d2f7"; font.pixelSize: 22; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                    Label { text: "Acompanhe a conversa, ajuste sua voz e conheça as capacidades disponíveis."; color: "#a8bbe2"; font.pixelSize: 16; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.maximumWidth: 340 }
+                    Label { text: core.connected ? "Seu Gideon, em um só lugar." : "Vamos reconectar ao Gideon."; color: "#c3d2f7"; font.pixelSize: 18; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    Label { text: "Acompanhe a conversa, ajuste sua voz e conheça as capacidades disponíveis."; color: "#a8bbe2"; font.pixelSize: 14; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     Label { text: "Base · áudio virtual · validação física pendente"; color: "#a6b9e2"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 }
             }
             GlassCard {
                 theme: window.themeIndex
-                Layout.preferredWidth: 245; Layout.fillHeight: true
+                visible: window.width >= 760
+                Layout.preferredWidth: 245; Layout.preferredHeight: 220
                 ColumnLayout {
-                    anchors.fill: parent; anchors.margins: 20; spacing: 16
-                    Label { text: "Estado do sistema"; color: "#edf2ff"; font.pixelSize: 18; font.bold: true }
+                    anchors.fill: parent; anchors.margins: 18; spacing: 8
+                    Label { text: "Estado do sistema"; color: "#edf2ff"; font.pixelSize: 16; font.bold: true }
                     Label { text: core.connected ? "Conectado ao Core" : "Core offline"; color: core.connected ? "#78debc" : "#f6c77e"; font.pixelSize: 13 }
                     Repeater {
                         model: ["Wake", "STT", "TTS"]
@@ -622,33 +679,36 @@ ApplicationWindow {
                             required property int index
                             required property string modelData
                             Layout.fillWidth: true
-                            Label { text: modelData; color: "#d8e3ff"; font.pixelSize: 15; Layout.fillWidth: true }
+                            Label { text: modelData; color: "#d8e3ff"; font.pixelSize: 13; Layout.fillWidth: true }
                             Label { text: window.statusText(index === 0 ? core.wakeStatus : index === 1 ? core.sttStatus : core.speechStatus); textFormat: Text.PlainText; color: (index === 0 ? core.wakeStatus : index === 1 ? core.sttStatus : core.speechStatus) === "unavailable" ? "#b8aaca" : "#78debc"; font.pixelSize: 12 }
                         }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: "#33466c" }
-                    Label { text: "Privacidade"; color: "#edf2ff"; font.bold: true; font.pixelSize: 16 }
-                    Label { text: "Sem histórico de conversas.\nÁudio e legendas em memória."; color: "#aabde4"; font.pixelSize: 13; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    Label { text: "Privacidade"; color: "#edf2ff"; font.bold: true; font.pixelSize: 13 }
+                    Label { text: "Sem histórico de conversas. Áudio e legendas em memória."; color: "#aabde4"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     Item { Layout.fillHeight: true }
                 }
             }
         }
-        RowLayout {
-            visible: window.page === 0 && window.spacious
-            Layout.fillWidth: true; Layout.preferredHeight: 104; spacing: 14
+        // The three summary cards: icon (mic, speaker, cpu) + title + value + one action. Three across when there is room, stacked when narrow.
+        GridLayout {
+            objectName: "summaryRow"
+            visible: window.page === 0
+            Layout.fillWidth: true
+            columns: window.width >= 760 ? 3 : 1; columnSpacing: 14; rowSpacing: 8
             Repeater {
-                model: [{title:"Frase de despertar",value:window.wakeText(),icon:"voice",page:1}, {title:"Entrada de áudio",value:window.packAvailable ? "PCM virtual" : "Indisponível",icon:"audio",page:2}, {title:"Modo",value:"Base · sem LLM",icon:"hub",page:6}]
+                model: [{title:"Frase de despertar",value:window.wakeText(),icon:"mic",page:1}, {title:"Entrada de áudio",value:window.packAvailable ? "PCM virtual" : "Indisponível",icon:"speaker",page:2}, {title:"Modo",value:"Base · sem LLM",icon:"cpu",page:6}]
                 delegate: GlassCard {
-                theme: window.themeIndex
+                    theme: window.themeIndex
                     required property var modelData
-                    Layout.fillWidth: true; Layout.fillHeight: true
+                    Layout.fillWidth: true; Layout.preferredHeight: window.width >= 760 && window.height >= 640 ? 84 : 64
                     RowLayout {
-                        anchors.fill: parent; anchors.margins: 18
-                        Image { source: "assets/" + modelData.icon + ".png"; Layout.preferredWidth: 30; Layout.preferredHeight: 30 }
+                        anchors.fill: parent; anchors.margins: 12; spacing: 12
+                        Image { source: "icons/" + modelData.icon + ".svg"; sourceSize.width: 26; sourceSize.height: 26; Layout.preferredWidth: 26; Layout.preferredHeight: 26; layer.enabled: true; layer.effect: MultiEffect { colorization: 1.0; colorizationColor: window.accentColor } }
                         ColumnLayout {
-                            Layout.fillWidth: true
-                            Label { text: modelData.title; color: "#aebfe7"; font.pixelSize: 13 }
-                            Label { text: modelData.value; textFormat: Text.PlainText; color: "#f2f5ff"; font.bold: true; font.pixelSize: 17; elide: Text.ElideRight; Layout.fillWidth: true }
+                            Layout.fillWidth: true; spacing: 2
+                            Label { text: modelData.title; color: "#aebfe7"; font.pixelSize: 12 }
+                            Label { text: modelData.value; textFormat: Text.PlainText; color: "#f2f5ff"; font.bold: true; font.pixelSize: 15; elide: Text.ElideRight; Layout.fillWidth: true }
                         }
                         GlowButton { text: "Abrir"; Accessible.name: "Abrir " + modelData.title; onClicked: window.page = modelData.page }
                     }
@@ -660,13 +720,14 @@ ApplicationWindow {
             visible: window.page !== 0
             Layout.fillWidth: true; Layout.fillHeight: true; clip: true
             ColumnLayout {
-                width: pageViewport.availableWidth; spacing: 16
+                // Content is capped at 1100 px and centred on wide windows; the scroll area is the page area under the header.
+                width: Math.min(pageViewport.availableWidth, 1100); x: Math.max(0, (pageViewport.availableWidth - width) / 2); spacing: 16
                 GlassCard {
                 theme: window.themeIndex
-                    visible: window.page === 1; Layout.fillWidth: true; implicitHeight: voiceColumn.implicitHeight + 44
+                    visible: window.page === 1; Layout.fillWidth: true; implicitHeight: voiceColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: voiceColumn; anchors.fill: parent; anchors.margins: 22; spacing: 14
-                        Label { text: "Frase de despertar"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        id: voiceColumn; anchors.fill: parent; anchors.margins: 20; spacing: 14
+                        Label { text: "Frase de despertar"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
                         Label { text: "Escolha uma frase qualificada do pack. A alteração requer reinício do Core."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Flow {
                             Layout.fillWidth: true; spacing: 12; Layout.preferredHeight: childrenRect.height
@@ -688,29 +749,29 @@ ApplicationWindow {
                 }
                 GlassCard {
                 theme: window.themeIndex
-                    visible: window.page === 1 || window.page === 2; Layout.fillWidth: true; implicitHeight: captureColumn.implicitHeight + 44
+                    visible: window.page === 1 || window.page === 2; Layout.fillWidth: true; implicitHeight: captureColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: captureColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        id: captureColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
                         Label { text: window.page === 1 ? "Captura" : "Resposta por voz"; color: "#f1f5ff"; font.bold: true; font.pixelSize: 21 }
                         Label { text: window.page === 1 ? "Entrada PCM virtual · pré-roll de 1 segundo · CPU. Microfone físico, AEC e redução de ruído ainda indisponíveis." : "Pocket TTS · Alba · inglês · saída virtual. Outras vozes e dispositivos físicos ainda indisponíveis."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { visible: window.page === 2; text: "Ganho atual: " + core.outputVolume + "%"; textFormat: Text.PlainText; color: "#b0c3e9" }
                         RowLayout {
                             visible: window.page === 2; Layout.fillWidth: true
                             Slider { id: gainSlider; objectName: "gainSlider"; from: 0; to: 100; stepSize: 5; value: core.outputVolume; enabled: core.preferencesAvailable && core.voiceAvailable; Layout.fillWidth: true; Accessible.name: "Ganho da resposta por voz" }
-                            GlowButton { objectName: "applyGainButton"; text: "Aplicar"; Accessible.name: "Aplicar ganho da resposta por voz"; enabled: core.preferencesAvailable && core.voiceAvailable; onClicked: core.saveFeedback(core.visualFeedback, Math.round(gainSlider.value)) }
+                            PrimaryButton { objectName: "applyGainButton"; text: "Aplicar"; Accessible.name: "Aplicar ganho da resposta por voz"; enabled: core.preferencesAvailable && core.voiceAvailable; onClicked: core.saveFeedback(core.visualFeedback, Math.round(gainSlider.value)) }
                         }
                         GlowButton { text: "Abrir ajustes da Base"; Accessible.name: "Abrir ajustes da Base"; enabled: core.connected; onClicked: preferences.open() }
                     }
                 }
                 GlassCard {
                 theme: window.themeIndex
-                    visible: window.page === 3; Layout.fillWidth: true; implicitHeight: appearanceColumn.implicitHeight + 44
+                    visible: window.page === 3; Layout.fillWidth: true; implicitHeight: appearanceColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: appearanceColumn; anchors.fill: parent; anchors.margins: 22; spacing: 16
+                        id: appearanceColumn; anchors.fill: parent; anchors.margins: 20; spacing: 16
                         GridLayout {
                             Layout.fillWidth: true; columns: window.width > 1000 ? 2 : 1; columnSpacing: 24; rowSpacing: 20
                             ColumnLayout { Layout.fillWidth: true; Layout.alignment: Qt.AlignTop; spacing: 16
-                        Label { text: "Tema"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        Label { text: "Tema"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
                         Flow {
                             id: themeFlow; Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height; spacing: 12
                             Repeater { model: ["Gideon", "Clássico", "Minimalista"]
@@ -746,38 +807,77 @@ ApplicationWindow {
                         Label { text: "Tema e cor se aplicam a esta janela. O indicador é salvo pelo Core."; color: "#a4b8dc"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
-                GlassCard {
-                theme: window.themeIndex
-                    visible: window.page === 4; Layout.fillWidth: true; implicitHeight: permissionsColumn.implicitHeight + 44
-                    ColumnLayout { id: permissionsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Comandos da Base"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
-                        Label { text: "O Hub declara permissões e registra aprovação por manifesto. Plugins instalados e aprovados podem ser ativados em sandbox sem rede. Comandos da Base não dependem de plugins."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                    }
+                PageCard {
+                    visible: window.page === 4; title: "Comandos da Base"
+                    Label { text: "O Hub declara permissões e registra aprovação por manifesto. Plugins instalados e aprovados podem ser ativados em sandbox sem rede. Comandos da Base não dependem de plugins."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 }
-                GlassCard {
-                theme: window.themeIndex
-                    visible: window.page === 5; Layout.fillWidth: true; implicitHeight: diagnosticsColumn.implicitHeight + 44
-                    ColumnLayout { id: diagnosticsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Motores e conexão"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                // Diagnóstico: engines and the live system status in two cards (the Início card is the compact copy).
+                ColumnLayout {
+                    objectName: "diagnosticsPanel"
+                    visible: window.page === 5; Layout.fillWidth: true; spacing: 16
+                    PageCard {
+                        title: "Motores e conexão"
                         Label { text: core.diagnostic; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { text: core.packDescription || "Pack de voz não configurado"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
+                    PageCard {
+                        title: "Estado do sistema"
+                        Label { text: core.connected ? "Conectado ao Core" : "Core offline"; color: core.connected ? "#78debc" : "#f6c77e"; font.pixelSize: 13 }
+                        Repeater {
+                            model: ["Wake", "STT", "TTS"]
+                            delegate: RowLayout {
+                                required property int index
+                                required property string modelData
+                                Layout.fillWidth: true
+                                Label { text: modelData; color: "#d8e3ff"; font.pixelSize: 14; Layout.fillWidth: true }
+                                Label { text: window.statusText(index === 0 ? core.wakeStatus : index === 1 ? core.sttStatus : core.speechStatus); textFormat: Text.PlainText; color: (index === 0 ? core.wakeStatus : index === 1 ? core.sttStatus : core.speechStatus) === "unavailable" ? "#b8aaca" : "#78debc"; font.pixelSize: 13 }
+                            }
+                        }
+                    }
                 }
-                GlassCard {
-                theme: window.themeIndex
-                    visible: window.page === 6; Layout.fillWidth: true; implicitHeight: hubPageColumn.implicitHeight + 44
-                    ColumnLayout { id: hubPageColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: core.hubDescription; color: "#b0c3e9"; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        GlowButton { text: "Explorar catálogo"; enabled: core.connected; onClicked: hubDialog.open() }
+                // Gideon Hub: one compact info banner, then the catalog card (primary action top-right) or an empty state when no catalog is loaded.
+                ColumnLayout {
+                    objectName: "hubPanel"
+                    visible: window.page === 6; Layout.fillWidth: true; spacing: 16
+                    Rectangle {
+                        objectName: "hubBanner"
+                        Layout.fillWidth: true; radius: 12; color: "#132341"; border.color: "#2f4a7d"
+                        implicitHeight: hubBannerRow.implicitHeight + 24
+                        RowLayout {
+                            id: hubBannerRow; anchors.fill: parent; anchors.margins: 12; spacing: 12
+                            Image { source: "icons/hub.svg"; sourceSize.width: 22; sourceSize.height: 22; Layout.preferredWidth: 22; Layout.preferredHeight: 22; layer.enabled: true; layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#8fb4ff" } }
+                            Label { text: core.hubDescription; color: "#c3d2f7"; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        }
+                    }
+                    PageCard {
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 12
+                            Label { text: "Catálogo local"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true; Layout.fillWidth: true }
+                            PrimaryButton { objectName: "hubCatalogButton"; text: "Explorar catálogo"; enabled: core.connected; onClicked: hubDialog.open() }
+                        }
+                        Label { text: "Instalar copia o pacote verificado para o Core; nada é executado. O catálogo não concede acesso ao computador."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Repeater {
+                            model: core.hubEntries
+                            delegate: Label {
+                                required property var modelData
+                                objectName: "hubEntry_" + modelData.plugin_id
+                                text: modelData.plugin_id + " " + modelData.semver + " · " + (modelData.status === "installed" ? "instalado" : modelData.status === "update_available" ? "atualização disponível" : modelData.status === "not_installed" ? "não instalado" : "incompatível: " + modelData.reason) + " · " + (modelData.permissions_approved ? "permissões aprovadas" : "permissões não aprovadas")
+                                textFormat: Text.PlainText; color: modelData.status === "installed" ? "#78debc" : "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true
+                            }
+                        }
+                        EmptyState {
+                            visible: core.hubEntries.length === 0
+                            iconName: "hub"; message: "Nenhum plugin no catálogo ainda. Conecte o Core para carregar o catálogo local."
+                        }
                     }
                 }
                 // Percepção e ação (C4): shown only while a C4 plugin runs. Controls send reads only, through core.perceptionInvoke; the Core and the plugins decide everything else.
                 GlassCard {
                 objectName: "perceptionPanel"
                 theme: window.themeIndex
-                    visible: window.page === 9 && core.perceptionAvailable; Layout.fillWidth: true; implicitHeight: perceptionColumn.implicitHeight + 44
+                    visible: window.page === 9 && core.perceptionAvailable; Layout.fillWidth: true; implicitHeight: perceptionColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: perceptionColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        id: perceptionColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
                         Label { text: "Backends simulados: nenhum hardware pessoal é acessado nesta build."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         // Privacy indicators are always on this page: they show the last state read ("não lido" until a read).
                         Label { objectName: "micIndicator"; text: "Microfone · indicador: " + core.perceptionMicIndicator; textFormat: Text.PlainText; color: core.perceptionMicIndicator === "ligado" ? "#ffc674" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Indicador do microfone: " + core.perceptionMicIndicator }
@@ -817,16 +917,17 @@ ApplicationWindow {
                     }
                 }
                 // Skills (S4): list, manifest editor, LLM draft, dry run, run with per-step decisions, import preview and history. Every value is the Core snapshot 'skills' block; PlainText only.
-                GlassCard {
-                objectName: "skillsPanel"
-                theme: window.themeIndex
-                    visible: window.page === 10 && core.skillsAvailable; Layout.fillWidth: true; implicitHeight: skillsColumn.implicitHeight + 44
-                    ColumnLayout {
-                        id: skillsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Skills"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                ColumnLayout {
+                    objectName: "skillsPanel"
+                    visible: window.page === 10 && core.skillsAvailable; Layout.fillWidth: true; spacing: 16
+                    PageCard {
+                        title: "Como funciona"
                         Label { text: "Validar não grava. Simular não chama capacidades. Executar pede sua aprovação em cada passo que muda estado. Skills não concedem permissões."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { objectName: "skillsResult"; visible: text.length > 0; text: core.skillsResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado das skills: " + text }
                         ProgressBar { objectName: "skillsProgress"; visible: core.skillsBusy; indeterminate: true; Layout.fillWidth: true; Accessible.name: "Operação de skill em andamento" }
+                    }
+                    PageCard {
+                        title: "Entradas e skills instaladas"
                         Label { text: "Entradas (JSON de objeto, até 16 KiB) para Simular e Executar"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         TextArea {
                             id: skillInputs; objectName: "skillInputs"; Layout.fillWidth: true; text: "{}"
@@ -834,7 +935,6 @@ ApplicationWindow {
                             placeholderText: "{ \"campo\": \"valor\" }"; Accessible.name: "Entradas da skill em JSON"
                             background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
                         }
-                        Label { text: "Skills instaladas"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
                         Label { objectName: "skillsEmpty"; visible: core.skillsItems.length === 0; text: "Nenhuma skill no Core ainda. Crie uma abaixo."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Repeater {
                             model: core.skillsItems
@@ -858,7 +958,7 @@ ApplicationWindow {
                                         GlowButton { objectName: "skillRollback_" + skillRow.modelData.id; text: "Reverter versão"; Accessible.name: "Reverter versão de " + skillRow.modelData.id; enabled: window.skillCan("rollback", skillRow.modelData.state); onClicked: core.skillRollback(skillRow.modelData.id) }
                                         GlowButton { objectName: "skillPermissions_" + skillRow.modelData.id; text: "Permissões"; Accessible.name: "Ver permissões de " + skillRow.modelData.id; onClicked: window.skillSelected = skillRow.modelData }
                                         GlowButton { objectName: "skillExport_" + skillRow.modelData.id; text: "Exportar"; Accessible.name: "Exportar " + skillRow.modelData.id + " v" + skillRow.modelData.version; enabled: window.skillCan("export", skillRow.modelData.state); onClicked: core.skillExport(skillRow.modelData.id, skillRow.modelData.version) }
-                                        GlowButton { objectName: "skillRemove_" + skillRow.modelData.id; text: "Remover"; Accessible.name: "Remover " + skillRow.modelData.id; enabled: window.skillCan("remove", skillRow.modelData.state); onClicked: { removeSkillConfirm.skill = skillRow.modelData; removeSkillConfirm.open() } }
+                                        DangerButton { objectName: "skillRemove_" + skillRow.modelData.id; text: "Remover"; Accessible.name: "Remover " + skillRow.modelData.id; enabled: window.skillCan("remove", skillRow.modelData.state); onClicked: { removeSkillConfirm.skill = skillRow.modelData; removeSkillConfirm.open() } }
                                     }
                                 }
                             }
@@ -870,8 +970,10 @@ ApplicationWindow {
                             Label { text: window.skillSelected ? "Aprovadas no Core: " + (window.skillSelected.permissions_ok ? "sim" : "não") + "\nFaltando: " + (window.skillSelected.missing.length ? window.skillSelected.missing.join(", ") : "nada") : ""; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Label { text: "Aprovar permissões não concede nada à skill: ela só usa capacidades já instaladas e aprovadas."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         }
+                    }
+                    PageCard {
+                        title: "Criar skill"
                         // Criar: manifest JSON by hand, or a draft from the LLM plugin when it runs. A draft is never enabled here.
-                        Label { text: "Criar skill (manifesto JSON, até 16 KiB)"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
                         TextArea {
                             id: skillManifest; objectName: "skillManifest"; Layout.fillWidth: true
                             textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#dce7ff"; placeholderTextColor: "#a3b6db"
@@ -880,7 +982,7 @@ ApplicationWindow {
                         }
                         RowLayout {
                             Layout.fillWidth: true
-                            GlowButton { objectName: "skillValidate"; text: "Validar"; Accessible.name: "Validar manifest da skill"; enabled: !core.skillsBusy && skillManifest.text.trim().length > 0; onClicked: core.skillValidate(skillManifest.text) }
+                            PrimaryButton { objectName: "skillValidate"; text: "Validar"; Accessible.name: "Validar manifest da skill"; enabled: !core.skillsBusy && skillManifest.text.trim().length > 0; onClicked: core.skillValidate(skillManifest.text) }
                             GlowButton { objectName: "skillSaveDraft"; text: "Salvar rascunho"; Accessible.name: "Salvar rascunho da skill"; enabled: !core.skillsBusy && skillManifest.text.trim().length > 0; onClicked: core.skillSaveDraft(skillManifest.text) }
                         }
                         Label { text: "Gerar com LLM: descreva o que a skill deve fazer (até 1024 bytes)"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -903,8 +1005,10 @@ ApplicationWindow {
                             Label { text: "Passos previstos:\n" + ((core.skillDraftOutput.preview || []).map(function (p) { return p.id + " → " + p.call }).join("\n") || "nenhum"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             Label { visible: !!core.skillDraftOutput.diff; text: "Diferença:\n" + (core.skillDraftOutput.diff || ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
                         }
+                    }
+                    PageCard {
+                        title: "Importar e exportar"
                         // Importar: the Core reads only <home>/skill-imports/<name>.gskill and previews it; nothing is installed until the confirmation.
-                        Label { text: "Importar e exportar"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
                         RowLayout {
                             Layout.fillWidth: true
                             TextField {
@@ -936,6 +1040,9 @@ ApplicationWindow {
                             Label { text: "Importar instala como rascunho e nunca concede permissões. Valide, simule e aprove antes de usar."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             GlowButton { objectName: "skillImportConfirm"; text: "Instalar como rascunho"; Accessible.name: "Instalar como rascunho o pacote " + core.skillImportPreview.name; enabled: !core.skillsBusy && (core.skillImportPreview.findings || []).length === 0; onClicked: core.skillImportConfirm(core.skillImportPreview.name) }
                         }
+                    }
+                    PageCard {
+                        title: "Execução e histórico"
                         // Execução: progress from the Core run; each step that changes state waits for the user's decision here.
                         ColumnLayout {
                             objectName: "skillRunView"; visible: !!core.skillCurrentRun.run_id; Layout.fillWidth: true; spacing: 6
@@ -976,19 +1083,20 @@ ApplicationWindow {
                         }
                     }
                 }
-                // Modelos LLM: shown only while llm_engine runs with llm_engine.models; the Base has no models page.
-                GlassCard {
-                objectName: "modelsPanel"
-                theme: window.themeIndex
-                    visible: window.page === 8 && core.modelsAvailable; Layout.fillWidth: true; implicitHeight: modelsColumn.implicitHeight + 44
-                    ColumnLayout {
-                        id: modelsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Modelos LLM"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                // Modelos LLM: shown only while llm_engine runs with llm_engine.models; the Base has no models page. Five cards: current model, catalog, custom model, fallback, hardware.
+                ColumnLayout {
+                    objectName: "modelsPanel"
+                    visible: window.page === 8 && core.modelsAvailable; Layout.fillWidth: true; spacing: 16
+                    PageCard {
+                        title: "Modelo atual"
                         Label { objectName: "modelsStatus"; text: "Estado do modelo atual: " + core.modelsStatus; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Estado do modelo atual: " + core.modelsStatus }
                         Label { objectName: "modelsSelectedLabel"; text: core.modelsSelected.provider ? "Configurado: " + core.providerLabel(core.modelsSelected.provider) + " · " + core.modelsSelected.model : "Nenhum modelo configurado"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         ProgressBar { objectName: "modelsProgress"; visible: core.modelsBusy; indeterminate: true; Layout.fillWidth: true; Accessible.name: "Operação de modelo em andamento" }
                         Label { objectName: "modelsResult"; visible: text.length > 0; text: core.modelsResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado do modelo: " + text }
                         GlowButton { objectName: "modelsRefresh"; text: "Atualizar lista"; Accessible.name: "Atualizar lista de modelos"; enabled: core.modelsAvailable && !core.modelsBusy; onClicked: core.listModels(modelsTabs.currentIndex === 0 ? "recommended" : "custom") }
+                    }
+                    PageCard {
+                        title: "Catálogo"
                         TabBar {
                             id: modelsTabs; objectName: "modelsTabs"; Layout.fillWidth: true
                             onCurrentIndexChanged: core.listModels(currentIndex === 0 ? "recommended" : "custom")
@@ -1021,7 +1129,7 @@ ApplicationWindow {
                         GlowButton { objectName: "modelsLoadMore"; text: "Carregar mais"; Layout.fillWidth: true; visible: modelsTabs.currentIndex === 0 ? core.modelsRecommended.length < core.modelsRecommendedTotal : core.modelsCustom.length < core.modelsCustomTotal; enabled: core.modelsAvailable && !core.modelsBusy; Accessible.name: "Carregar mais modelos"; onClicked: core.loadMoreModels(modelsTabs.currentIndex === 0 ? "recommended" : "custom") }
                         GlassCard {
                             objectName: "modelDetails"; theme: window.themeIndex
-                            visible: window.selectedModel !== null; Layout.fillWidth: true; implicitHeight: detailColumn.implicitHeight + 44
+                            visible: window.selectedModel !== null; Layout.fillWidth: true; implicitHeight: detailColumn.implicitHeight + 40
                             ColumnLayout {
                                 id: detailColumn; anchors.fill: parent; anchors.margins: 18; spacing: 6
                                 Label { objectName: "modelDetailTitle"; text: window.selectedModel ? window.selectedModel.label : ""; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; font.pixelSize: 18; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
@@ -1042,14 +1150,14 @@ ApplicationWindow {
                                 Label { text: window.selectedModel ? (window.selectedModel.offline ? "Funciona offline" : "Requer rede") : ""; textFormat: Text.PlainText; color: "#b0c3e9"; Layout.fillWidth: true }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    GlowButton { objectName: "useModelButton"; text: "Usar este modelo"; Accessible.name: window.selectedModel ? "Usar este modelo: " + window.selectedModel.label : "Usar este modelo"; enabled: core.modelsAvailable && !core.modelsBusy && window.selectedModel !== null; onClicked: core.useModel(window.selectedModel.id, window.modelsRevisionCaptured) }
-                                    GlowButton { objectName: "removeCustomButton"; text: "Remover"; visible: modelsTabs.currentIndex === 1 && window.selectedModel !== null; Accessible.name: window.selectedModel ? "Remover modelo personalizado " + window.selectedModel.id : "Remover"; enabled: core.modelsAvailable && !core.modelsBusy; onClicked: { removeCustomConfirm.entry = window.selectedModel; removeCustomConfirm.open() } }
+                                    PrimaryButton { objectName: "useModelButton"; text: "Usar este modelo"; Accessible.name: window.selectedModel ? "Usar este modelo: " + window.selectedModel.label : "Usar este modelo"; enabled: core.modelsAvailable && !core.modelsBusy && window.selectedModel !== null; onClicked: core.useModel(window.selectedModel.id, window.modelsRevisionCaptured) }
+                                    DangerButton { objectName: "removeCustomButton"; text: "Remover"; visible: modelsTabs.currentIndex === 1 && window.selectedModel !== null; Accessible.name: window.selectedModel ? "Remover modelo personalizado " + window.selectedModel.id : "Remover"; enabled: core.modelsAvailable && !core.modelsBusy; onClicked: { removeCustomConfirm.entry = window.selectedModel; removeCustomConfirm.open() } }
                                 }
                             }
                         }
-                        ColumnLayout {
-                            objectName: "customForm"; visible: modelsTabs.currentIndex === 1; Layout.fillWidth: true; spacing: 8
-                            Label { text: "Adicionar modelo personalizado"; color: "#f1f5ff"; font.bold: true }
+                    }
+                    PageCard {
+                        objectName: "customForm"; title: "Adicionar modelo personalizado"; visible: modelsTabs.currentIndex === 1
                             ComboBox { id: customProvider; objectName: "customProvider"; Layout.fillWidth: true; textRole: "text"; valueRole: "id"; Accessible.name: "Provedor do modelo personalizado"; model: [{id: "local", text: "Local (llama.cpp)"}, {id: "ollama", text: "Ollama (local)"}, {id: "custom", text: "Personalizado (https)"}, {id: "openrouter", text: "OpenRouter (nuvem)"}, {id: "opencode", text: "OpenCode (nuvem)"}, {id: "google", text: "Google AI Studio (nuvem)"}] }
                             TextField { id: customModelId; objectName: "customModelId"; Layout.fillWidth: true; maximumLength: 128; placeholderText: "Identificador do modelo"; Accessible.name: "Identificador do modelo personalizado"; validator: RegularExpressionValidator { regularExpression: /[A-Za-z0-9._:\/-]{1,128}/ } }
                             SpinBox { id: customPort; objectName: "customPort"; from: 1024; to: 65535; value: 8080; editable: true; enabled: customProvider.currentValue === "local" || customProvider.currentValue === "ollama"; Accessible.name: "Porta do servidor local, de 1024 a 65535" }
@@ -1063,11 +1171,10 @@ ApplicationWindow {
                                 ComboBox { id: customCancel; objectName: "customCancel"; Layout.fillWidth: true; model: window.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Cancelamento declarado" }
                             }
                             Label { objectName: "customFormProblem"; visible: text.length > 0; text: core.customFormProblem(window.customForm()); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            GlowButton { objectName: "saveCustomButton"; text: "Salvar modelo personalizado"; Accessible.name: "Salvar modelo personalizado"; enabled: core.modelsAvailable && !core.modelsBusy && core.customFormProblem(window.customForm()) === ""; onClicked: core.saveCustomModel(window.customForm()) }
+                            PrimaryButton { objectName: "saveCustomButton"; text: "Salvar modelo personalizado"; Accessible.name: "Salvar modelo personalizado"; enabled: core.modelsAvailable && !core.modelsBusy && core.customFormProblem(window.customForm()) === ""; onClicked: core.saveCustomModel(window.customForm()) }
                         }
-                        ColumnLayout {
-                            Layout.fillWidth: true; spacing: 8
-                            Label { text: "Fallback (opcional)"; color: "#f1f5ff"; font.bold: true }
+                        PageCard {
+                            title: "Fallback (opcional)"
                             Label { objectName: "fallbackCurrent"; text: core.modelsFallback.provider ? "Atual: " + core.modelsFallback.provider + " · " + core.modelsFallback.model : "Nenhum fallback configurado"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                             ComboBox { id: fallbackPick; objectName: "fallbackModel"; Layout.fillWidth: true; model: window.allModels(); textRole: "label"; valueRole: "id"; Accessible.name: "Modelo para fallback" }
                             Label { objectName: "fallbackCloudWarning"; visible: window.fallbackIsCloud(); text: "Mensagens poderão ir para a nuvem se o modelo principal falhar"; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Aviso: envio à nuvem no fallback" }
@@ -1075,32 +1182,30 @@ ApplicationWindow {
                             RowLayout {
                                 Layout.fillWidth: true
                                 GlowButton { objectName: "setFallbackButton"; text: "Usar como fallback"; Accessible.name: "Usar o modelo escolhido como fallback"; enabled: core.modelsAvailable && !core.modelsBusy && fallbackPick.currentIndex >= 0 && window.fallbackAllowed(); onClicked: core.setFallback(fallbackPick.currentValue, window.modelsRevisionCaptured) }
-                                GlowButton { objectName: "clearFallbackButton"; text: "Remover fallback"; Accessible.name: "Remover fallback"; enabled: core.modelsAvailable && !core.modelsBusy && !!core.modelsFallback.provider; onClicked: core.clearFallback(window.modelsRevisionCaptured) }
+                                DangerButton { objectName: "clearFallbackButton"; text: "Remover fallback"; Accessible.name: "Remover fallback"; enabled: core.modelsAvailable && !core.modelsBusy && !!core.modelsFallback.provider; onClicked: core.clearFallback(window.modelsRevisionCaptured) }
                             }
                         }
-                        ColumnLayout {
-                            Layout.fillWidth: true; spacing: 6
-                            Label { text: "Hardware"; color: "#f1f5ff"; font.bold: true }
+                        PageCard {
+                            title: "Hardware e plugin"
                             Label { objectName: "modelsHardware"; text: core.modelsHardware.cpu_cores ? "CPU: " + core.modelsHardware.cpu_cores + " núcleos · RAM: " + (core.modelsHardware.ram_gb === null ? "desconhecida" : core.modelsHardware.ram_gb + " GB") + " · GPU: " + (core.modelsHardware.gpu === "unknown" ? "desconhecido" : core.modelsHardware.gpu) : "Hardware: aguardando catálogo"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                            GlowButton { objectName: "clearPluginSettingsButton"; text: "Apagar dados do plugin"; Accessible.name: "Apagar dados do plugin LLM"; enabled: core.connected && !core.modelsBusy; onClicked: clearPluginConfirm.open() }
+                            DangerButton { objectName: "clearPluginSettingsButton"; text: "Apagar dados do plugin"; Accessible.name: "Apagar dados do plugin LLM"; enabled: core.connected && !core.modelsBusy; onClicked: clearPluginConfirm.open() }
                         }
-                    }
                 }
                 GlassCard {
                 theme: window.themeIndex
-                    visible: window.page === 7 && !core.chatAvailable; Layout.fillWidth: true; implicitHeight: chatOffColumn.implicitHeight + 44
+                    visible: window.page === 7 && !core.chatAvailable; Layout.fillWidth: true; implicitHeight: chatOffColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: chatOffColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
+                        id: chatOffColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
                         Label { objectName: "chatUnavailable"; text: "Motor LLM não está ativo. O plugin llm_engine é opcional: instale e ative pelo Gideon Hub. Voz, wake e comandos da Base funcionam sem ele."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
                 GlassCard {
                 objectName: "chatPanel"
                 theme: window.themeIndex
-                    visible: window.page === 7 && core.chatAvailable; Layout.fillWidth: true; implicitHeight: chatColumn.implicitHeight + 44
+                    visible: window.page === 7 && core.chatAvailable; Layout.fillWidth: true; implicitHeight: chatColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: chatColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Conversa"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        id: chatColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
+                        Label { text: "Conversa"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
                         Label { objectName: "chatState"; text: "Estado: " + core.chatStateLabel; textFormat: Text.PlainText; color: "#b0c3e9"; Accessible.name: "Estado da conversa: " + core.chatStateLabel }
                         Label { objectName: "chatConsentHint"; visible: core.llmConfig.cloud_consent !== true; text: "Consentimento de nuvem desativado: envios são recusados até você marcá-lo em Motor LLM."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { objectName: "chatEmpty"; visible: core.chatMessages.length === 0 && core.chatState === "idle"; text: "Nenhuma mensagem ainda. O motor LLM é opcional: voz, wake e comandos da Base funcionam sem ele."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -1165,36 +1270,39 @@ ApplicationWindow {
                                 onTextEdited: window.setDraft("#chat", "text", text)
                                 onAccepted: window.sendChatDraft()
                             }
-                            GlowButton { objectName: "chatSend"; text: "Enviar"; Accessible.name: "Enviar mensagem ao motor LLM"; enabled: core.chatAvailable && chatInput.enabled && core.chatTextProblem(chatInput.text) === ""; onClicked: window.sendChatDraft() }
+                            PrimaryButton { objectName: "chatSend"; text: "Enviar"; Accessible.name: "Enviar mensagem ao motor LLM"; enabled: core.chatAvailable && chatInput.enabled && core.chatTextProblem(chatInput.text) === ""; onClicked: window.sendChatDraft() }
                             GlowButton { objectName: "chatCancel"; text: "Cancelar"; Accessible.name: "Cancelar resposta do motor LLM"; enabled: core.chatState === "waiting" || core.chatState === "streaming"; onClicked: core.cancelChat() }
                         }
                         Label { objectName: "chatInputProblem"; visible: chatInput.text.length > 0 && core.chatTextProblem(chatInput.text).length > 0; text: core.chatTextProblem(chatInput.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
                 // S5 connections: accounts, consent per scope, operations with risk labels, read-only tests and the last call. Everything shown comes from the Core snapshot 'connections' block; PlainText only.
-                GlassCard {
-                objectName: "connectionsPanel"
-                theme: window.themeIndex
-                    visible: window.page === 11 && core.connectionsAvailable; Layout.fillWidth: true; implicitHeight: connectionsColumn.implicitHeight + 44
-                    ColumnLayout {
-                        id: connectionsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Conexões"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                ColumnLayout {
+                    id: connectionsWrap; objectName: "connectionsPanel"
+                    visible: window.page === 11 && core.connectionsAvailable; Layout.fillWidth: true; spacing: 16
+                    PageCard {
+                        title: "Como funciona"
                         Label { text: "Gideon usa a API autorizada de cada serviço. Você concede cada escopo; escrita e ações públicas pedem aprovação. Neste ambiente, todas as contas são servidores falsos."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { objectName: "connectionsResult"; visible: text.length > 0; text: core.connectionsResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado das conexões: " + text }
                         ProgressBar { objectName: "connectionsProgress"; visible: core.connectionsBusy; indeterminate: true; Layout.fillWidth: true; Accessible.name: "Operação de conexão em andamento" }
-                        Label { text: "Nova conta"; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                    }
+                    PageCard {
+                        title: "Nova conta"
                         Flow {
                             Layout.fillWidth: true; spacing: 10
                             ComboBox { id: connProviderPick; objectName: "connectionProvider"; model: window.connProviderChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Provedor da nova conta" }
                             TextField {
-                                id: connLabel; objectName: "connectionLabel"; width: Math.max(160, Math.min(320, connectionsColumn.width - 300))
+                                id: connLabel; objectName: "connectionLabel"; width: Math.max(160, Math.min(320, connectionsWrap.width - 300))
                                 maximumLength: 64; placeholderText: "Nome da conta (ex.: Casa)"; Accessible.name: "Nome da nova conta"
                                 color: "#dce7ff"; placeholderTextColor: "#a3b6db"
                                 background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
                             }
-                            GlowButton { objectName: "connectionAdd"; text: "Adicionar conta"; Accessible.name: "Adicionar conta"; enabled: !core.connectionsBusy && core.connectionLabelProblem(connLabel.text) === "" && core.connectionsItems.length < 8; onClicked: core.connectionAdd(connProviderPick.currentValue, connLabel.text) }
+                            PrimaryButton { objectName: "connectionAdd"; text: "Adicionar conta"; Accessible.name: "Adicionar conta"; enabled: !core.connectionsBusy && core.connectionLabelProblem(connLabel.text) === "" && core.connectionsItems.length < 8; onClicked: core.connectionAdd(connProviderPick.currentValue, connLabel.text) }
                         }
                         Label { objectName: "connectionLabelProblem"; visible: connLabel.text.length > 0 && core.connectionLabelProblem(connLabel.text).length > 0; text: core.connectionLabelProblem(connLabel.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    }
+                    PageCard {
+                        title: "Contas"
                         Label { objectName: "connectionsEmpty"; visible: core.connectionsItems.length === 0; text: "Nenhuma conta ainda. Adicione uma acima."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Repeater {
                             model: core.connectionsItems
@@ -1233,10 +1341,10 @@ ApplicationWindow {
                                             id: connTokenField; objectName: "connToken_" + connCard.modelData.id; echoMode: TextInput.Password
                                             inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText; maximumLength: 256
                                             placeholderText: "Token de longa duração do Home Assistant"; Accessible.name: "Token do Home Assistant de " + connCard.modelData.label
-                                            color: "#dce7ff"; placeholderTextColor: "#a3b6db"; width: Math.max(200, Math.min(420, connectionsColumn.width - 160))
+                                            color: "#dce7ff"; placeholderTextColor: "#a3b6db"; width: Math.max(200, Math.min(420, connectionsWrap.width - 160))
                                             background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
                                         }
-                                        GlowButton { objectName: "connSetToken_" + connCard.modelData.id; text: "Enviar token"; Accessible.name: "Enviar token de " + connCard.modelData.label; enabled: !core.connectionsBusy && connTokenField.text.length >= 16 && connTokenField.text.length <= 256; onClicked: { core.connectionSetToken(connCard.modelData.id, connTokenField.text); connTokenField.clear() } }
+                                        PrimaryButton { objectName: "connSetToken_" + connCard.modelData.id; text: "Enviar token"; Accessible.name: "Enviar token de " + connCard.modelData.label; enabled: !core.connectionsBusy && connTokenField.text.length >= 16 && connTokenField.text.length <= 256; onClicked: { core.connectionSetToken(connCard.modelData.id, connTokenField.text); connTokenField.clear() } }
                                     }
                                     Flow {
                                         Layout.fillWidth: true; spacing: 8
@@ -1244,8 +1352,8 @@ ApplicationWindow {
                                         GlowButton { objectName: "connConnect_" + connCard.modelData.id; text: "Conectar"; Accessible.name: "Conectar " + connCard.modelData.label; enabled: window.connCan("connect", connCard.modelData); onClicked: core.connectionConnect(connCard.modelData.id) }
                                         GlowButton { objectName: "connRefresh_" + connCard.modelData.id; text: "Atualizar"; Accessible.name: "Atualizar " + connCard.modelData.label; enabled: window.connCan("refresh", connCard.modelData); onClicked: core.connectionRefresh(connCard.modelData.id) }
                                         GlowButton { objectName: "connDisconnect_" + connCard.modelData.id; text: "Desconectar"; Accessible.name: "Desconectar " + connCard.modelData.label; enabled: window.connCan("disconnect", connCard.modelData); onClicked: core.connectionDisconnect(connCard.modelData.id) }
-                                        GlowButton { objectName: "connRevoke_" + connCard.modelData.id; text: "Revogar"; Accessible.name: "Revogar acesso de " + connCard.modelData.label; enabled: window.connCan("revoke", connCard.modelData); onClicked: core.connectionRevoke(connCard.modelData.id) }
-                                        GlowButton { objectName: "connRemove_" + connCard.modelData.id; text: "Remover"; Accessible.name: "Remover " + connCard.modelData.label; enabled: window.connCan("remove", connCard.modelData); onClicked: core.connectionRemove(connCard.modelData.id) }
+                                        DangerButton { objectName: "connRevoke_" + connCard.modelData.id; text: "Revogar"; Accessible.name: "Revogar acesso de " + connCard.modelData.label; enabled: window.connCan("revoke", connCard.modelData); onClicked: core.connectionRevoke(connCard.modelData.id) }
+                                        DangerButton { objectName: "connRemove_" + connCard.modelData.id; text: "Remover"; Accessible.name: "Remover " + connCard.modelData.label; enabled: window.connCan("remove", connCard.modelData); onClicked: core.connectionRemove(connCard.modelData.id) }
                                     }
                                     // S5 E2.4: tools the MCP server listed. Names, risk and trust come from the Core; the description is server text, shown as PlainText and never sent to the model.
                                     Label { objectName: "connToolsTitle_" + connCard.modelData.id; visible: (connCard.modelData.tools || []).length > 0; text: "Ferramentas descobertas (a descrição vem do servidor e é só texto)"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -1283,10 +1391,10 @@ ApplicationWindow {
                 GlassCard {
                 objectName: "routesPanel"
                 theme: window.themeIndex
-                    visible: window.page === 11 && core.registryAvailable; Layout.fillWidth: true; implicitHeight: routesColumn.implicitHeight + 44
+                    visible: window.page === 11 && core.registryAvailable; Layout.fillWidth: true; implicitHeight: routesColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: routesColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Rotas"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        id: routesColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
+                        Label { text: "Rotas"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
                         Label { text: "Para cada finalidade o Core escolhe o melhor caminho por: autorização, segurança, suporte oficial, confiabilidade, privacidade e menos efeitos colaterais. Planejar não executa nada."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { objectName: "routesResult"; visible: text.length > 0; text: core.registryResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado das rotas: " + text }
                         Repeater {
@@ -1329,10 +1437,10 @@ ApplicationWindow {
                 GlassCard {
                 objectName: "agentPanel"
                 theme: window.themeIndex
-                    visible: window.page === 7 && core.chatAvailable; Layout.fillWidth: true; implicitHeight: agentColumn.implicitHeight + 44
+                    visible: window.page === 7 && core.chatAvailable; Layout.fillWidth: true; implicitHeight: agentColumn.implicitHeight + 40
                     ColumnLayout {
-                        id: agentColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
-                        Label { text: "Agente"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
+                        id: agentColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
+                        Label { text: "Agente"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
                         // Banner: the run state in words, with the Core code when the run ended on one. Hidden without a run.
                         Label { objectName: "agentBanner"; visible: core.agentState.length > 0; text: core.agentStateLabel; textFormat: Text.PlainText; color: core.agentState === "failed" || core.agentState === "blocked" ? "#ff9a9a" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Estado do agente: " + text }
                         Label { objectName: "agentBudget"; visible: core.agentState.length > 0; text: "Tokens: " + (core.agentBudget.tokens_used || 0) + " de " + (core.agentBudget.tokens_max || 0); textFormat: Text.PlainText; color: "#a6b9df"; font.pixelSize: 12; Layout.fillWidth: true }
@@ -1348,7 +1456,7 @@ ApplicationWindow {
                         Label { objectName: "agentGoalProblem"; visible: agentGoal.text.length > 0 && core.agentGoalProblem(agentGoal.text).length > 0; text: core.agentGoalProblem(agentGoal.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         RowLayout {
                             Layout.fillWidth: true
-                            GlowButton { objectName: "agentStart"; text: "Iniciar"; Accessible.name: "Iniciar agente"; enabled: core.chatAvailable && !core.agentActive && core.agentGoalProblem(agentGoal.text) === ""; onClicked: core.agentStart(agentGoal.text) }
+                            PrimaryButton { objectName: "agentStart"; text: "Iniciar"; Accessible.name: "Iniciar agente"; enabled: core.chatAvailable && !core.agentActive && core.agentGoalProblem(agentGoal.text) === ""; onClicked: core.agentStart(agentGoal.text) }
                             GlowButton { objectName: "agentAbort"; text: "Abortar"; Accessible.name: "Abortar agente"; enabled: core.agentActive; onClicked: core.agentAbort() }
                         }
                         Repeater {
@@ -1380,7 +1488,7 @@ ApplicationWindow {
             visible: window.page === 0 || core.sessionId.length > 0
             Layout.fillWidth: true
             TextField { id: input; objectName: "textInput"; color: "#dce7ff"; placeholderTextColor: "#a3b6db"; background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" } Layout.fillWidth: true; enabled: core.textAvailable; placeholderText: "Comando de texto no perfil de teste"; maximumLength: 512; Accessible.name: "Comando de texto"; onAccepted: { if (core.textAvailable && text.trim().length > 0) core.submitText(text) } }
-            GlowButton { objectName: "sendButton"; text: "Enviar"; Accessible.name: "Enviar comando de texto"; enabled: core.textAvailable && input.text.trim().length > 0; onClicked: core.submitText(input.text) }
+            PrimaryButton { objectName: "sendButton"; text: "Enviar"; Accessible.name: "Enviar comando de texto"; enabled: core.textAvailable && input.text.trim().length > 0; onClicked: core.submitText(input.text) }
         }
         Label { objectName: "textResult"; visible: text.length > 0 && (window.page === 0 || core.sessionId.length > 0); text: core.textResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
     }

@@ -636,9 +636,16 @@ elif args.phase=='design':
     for index,name in ((4,'permissions'),(5,'diagnostics'),(6,'hub_page')):navigate(index);capture(name)
     for index in (0,1,3,6):
         navigate(index);window.setProperty('width',480);window.setProperty('height',520);QTest.qWait(120)
-        check('persistent cancel fits small window '+str(index),button.isVisible() and button.mapToItem(window.contentItem(),QPointF(0,0)).y()+button.height()<=window.height()+.5)
+        # Owner rule: Cancelar shows only while the Core session is cancellable. Idle means hidden, so nothing is clipped here.
+        check('cancel hidden at idle on small window '+str(index),not button.isVisible())
         capture('small_'+str(index))
         window.setProperty('width',1380);window.setProperty('height',904)
+    bridge.submitText('open brave');wait(lambda:bridge.state=='speaking' and bridge.snapshot['speech_samples']>0,25)
+    window.setProperty('width',480);window.setProperty('height',520);QTest.qWait(120)
+    check('cancel visible and fits small window while speech is cancellable',button.isVisible() and button.mapToItem(window.contentItem(),QPointF(0,0)).y()+button.height()<=window.height()+.5)
+    wait(lambda:bridge.snapshot.get('speech_status')=='completed',35)
+    check('cancel hidden again after speech completes',not button.isVisible())
+    window.setProperty('width',1380);window.setProperty('height',904)
     navigate(0)
     changes=len(deltas)
     def ticks():
@@ -747,7 +754,7 @@ elif args.phase=='feedback':
     check('Qt feedback save acknowledged by actual Core',bridge.preferencesResult=='Preferências salvas pelo Core')
     dialog.close();QTest.qWait(50)
     check('decorative activity indicator hidden',not window.findChild(QObject,'activityIndicator').property('visible'))
-    check('essential state and cancel remain present',window.findChild(QObject,'aura').property('visible') and button.property('visible'))
+    check('essential state stays visible and cancel hidden at idle',window.findChild(QObject,'aura').property('visible') and not button.property('visible'))
     bridge.submitText('open brave');wait(lambda:bridge.snapshot.get('speech_status')=='completed',35)
     check('Qt observes real attenuated native speech',bridge.resultVerified and bridge.snapshot['speech']['output_volume_percent']==50 and bridge.snapshot['speech']['samples']>0)
     dialog.open();QTest.qWait(100);image=window.grabWindow();image.save(str(Path(args.artifacts)/'ui.png'))
