@@ -111,23 +111,19 @@ Segmentado: **Privacidade · Plugins · Último resultado**.
 
 ## 3. Permissões  (ocasional; é a central de grants)
 
-Sub-abas: **Visão geral · Plugins · Skills · Conexões · Auditoria**
-(a aba mostra um contador de pendências)
+Sub-abas: **Visão geral · Concessões · Auditoria**
+(a aba mostra um contador de pendências). Plugins, Skills e Conexões **não** são sub-abas aqui (já existem em Extensões):
+são **filtros** dentro de Concessões, para não repetir a navegação.
 
 ### 3.1 Visão geral
-Resumo: N aprovadas · N pendentes · N revogadas. **Fila de pendências** (o que precisa da sua decisão agora, com Revisar). Lista curta "Concedido recentemente". Texto "Como funciona" recolhível.
+Resumo: N aprovadas · N pendentes · N revogadas. **Fila de pendências** (o que precisa da sua decisão agora, com Revisar). Lista curta "Concedido recentemente". "Como funciona" recolhível.
 Vazio: "Nada pendente".
 
-### 3.2 Plugins
-Tabela: plugin · permissão (rótulo em português; ID cru só em Avançado) · estado (Aprovada/Pendente/Revogada) · ação (Revisar · Revogar). Agrupável por plugin.
+### 3.2 Concessões
+Uma tabela única com filtro segmentado **Todas · Plugins · Skills · Conexões** e coluna "Origem" (badge). Linhas:
+plugin → permissão (rótulo em português) · estado · Revisar/Revogar; skill → necessárias × aprovadas × faltando · Revisar; conexão → escopo · acesso (leitura/escrita/público/destrutivo) · concedido · Consentir/Revogar. Agrupar por Origem ou por Item.
 
-### 3.3 Skills
-Tabela: skill · permissões necessárias × aprovadas × faltando · estado (`permissions_ok`) · ação.
-
-### 3.4 Conexões
-Tabela: conta · escopo · acesso (leitura/escrita/público/destrutivo) · concedido? · ação (Consentir/Revogar). Destaque para escopos de risco alto.
-
-### 3.5 Auditoria
+### 3.3 Auditoria
 Eventos recentes do Core (anel de 64): hora, tipo, resultado — sem conteúdo. Filtros por origem (Plugin · Skill · Conexão · Comando). Avançado: caminho do log.
 
 ---
@@ -164,17 +160,15 @@ Idioma (fixo hoje, com motivo), iniciar no login (indisponível, com motivo), **
 
 ## 5. Diagnóstico  (avançado)
 
-Sub-abas: **Estado · Motores · Eventos · Recuperação · Desenvolvedor** (a última só quando o modo está ligado; o interruptor fica em Estado)
+Sub-abas: **Estado · Motores · Recuperação · Desenvolvedor** (a última só quando o modo está ligado; o interruptor fica em Estado)
 
 ### 5.1 Estado
-Core (conectado/offline), perfil, idioma da Base, versão do pacote, privacidade, interruptor **Modo desenvolvedor**.
+Core (conectado/offline), perfil, idioma da Base, versão do pacote, privacidade, bloco **Últimos erros** (máx. 5), interruptor **Modo desenvolvedor**. (Não há feed de eventos aqui: ele existe só em Assistente › Atividade e Permissões › Auditoria.)
 ### 5.2 Motores
 Wake · STT · TTS: cartão com badge de estado, motor, detalhe; pacote de voz (preflight, entrada/saída).
-### 5.3 Eventos
-Igual a Auditoria mas técnico: sequência, tipo, resultado, com filtro e exportar (avançado).
-### 5.4 Recuperação
+### 5.3 Recuperação
 Reiniciar Core (quando exigido: wake/feedback/plugins), reparar instalação (hoje só CLI → comando em linha desativada), modo seguro, última configuração boa do LLM.
-### 5.5 Desenvolvedor  (condicional)
+### 5.4 Desenvolvedor  (condicional)
 Comando de texto de teste, invocar capability, replay, rótulos SINTÉTICO/SERVIDOR FALSO por extenso, versões, hashes.
 
 ---
