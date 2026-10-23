@@ -2362,6 +2362,44 @@ def qml_connections_child():
             del engine;del bridge
     print(f'qml connections checks ok: {len(checks)}',flush=True)
     return 0
+class DisplayMapping(unittest.TestCase):
+    """Round 2 display table (app/bridge.py): raw Core values and English labels become the text the user reads.
+    The Core wire values are never changed by these functions."""
+    def test_receipt_prefix_is_translated_and_the_name_kept(self):
+        from bridge import display_receipt
+        self.assertEqual(display_receipt('Sandbox app process verified: com.brave.Browser.desktop'),
+                         'Processo do app verificado no sandbox: com.brave.Browser.desktop')
+    def test_other_receipts_and_non_text_pass_through(self):
+        from bridge import display_receipt
+        self.assertEqual(display_receipt('Outro resultado: ok'),'Outro resultado: ok')
+        self.assertIsNone(display_receipt(None))
+    def test_wake_choices_get_a_translated_qualification_and_keep_the_wire_value(self):
+        from bridge import display_wake_choice
+        dev=display_wake_choice({'id':'hey','text':'Hey Gideon','qualification':'dev_qualified'})
+        poc=display_wake_choice({'id':'okay','text':'Okay Gideon','qualification':'poc_required'})
+        other=display_wake_choice({'id':'x','text':'X','qualification':'mystery'})
+        self.assertEqual((dev['qualification_label'],poc['qualification_label'],other['qualification_label']),
+                         ('em desenvolvimento','requer prova de conceito',''))
+        self.assertEqual((dev['qualification'],poc['qualification']),('dev_qualified','poc_required'))
+        self.assertEqual(dev['text'],'Hey Gideon')
+    def test_no_raw_codes_in_the_user_labels(self):
+        from bridge import WAKE_QUALIFICATION_LABELS,LANGUAGE_LABELS,LLM_PROVIDER_LABELS
+        for text in list(WAKE_QUALIFICATION_LABELS.values())+list(LANGUAGE_LABELS.values()):
+            self.assertIsNone(re.search(r'[A-Z]{2,}|_',text),text)
+        self.assertEqual(LLM_PROVIDER_LABELS['custom'],'personalizado')
+    def test_permission_ids_are_translated_and_unknown_ids_are_kept(self):
+        from bridge import display_permission,PERMISSION_LABELS
+        self.assertEqual(display_permission('input_control'),'controle de entrada')
+        self.assertEqual(display_permission('camera_capture'),'captura da câmera')
+        self.assertEqual(display_permission('permissao_nova'),'permissao_nova')
+        self.assertEqual(display_permission(None),'')
+        for text in PERMISSION_LABELS.values():
+            self.assertNotIn('_',text)  # LLM is an accepted acronym; raw ids use underscores
+    def test_provider_labels_fall_back_to_the_wire_value_and_empty_for_none(self):
+        from bridge import display_provider
+        self.assertEqual(display_provider('custom'),'personalizado')
+        self.assertEqual(display_provider('novo_provedor'),'novo_provedor')
+        self.assertEqual(display_provider(None),'')
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_CONNECTIONS_CHILD:sys.exit(qml_connections_child())

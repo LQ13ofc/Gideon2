@@ -754,6 +754,28 @@ CODE_MESSAGES={
     'capability_timeout':'Plugin de percepção não respondeu no prazo',
 }
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
+# Display mapping (round 2). The Core wire values never change; these tables only choose the text the user reads.
+# Each table has checks in scripts/test_bridge_protocol.py (class DisplayMapping).
+WAKE_QUALIFICATION_LABELS={'dev_qualified':'em desenvolvimento','poc_required':'requer prova de conceito'}
+LLM_PROVIDER_LABELS={'openrouter':'OpenRouter','opencode':'OpenCode','google':'Google','custom':'personalizado'}
+LANGUAGE_LABELS={'EN':'inglês'}
+RECEIPT_PREFIXES=(('Sandbox app process verified: ','Processo do app verificado no sandbox: '),)
+def display_receipt(text):
+    """Command receipt text as the user reads it: known Core prefixes are translated, anything else is shown as sent."""
+    if isinstance(text,str):
+        for raw,shown in RECEIPT_PREFIXES:
+            if text.startswith(raw):return shown+text[len(raw):]
+    return text
+def display_wake_choice(choice):
+    """A wake phrase row for QML: the Core fields plus the qualification label (empty for an unknown value)."""
+    return {**choice,'qualification_label':WAKE_QUALIFICATION_LABELS.get(choice.get('qualification'),'')}
+def display_provider(provider):return LLM_PROVIDER_LABELS.get(provider,provider or '')
+PERMISSION_LABELS={'network_llm':'rede do motor LLM','storage_settings':'armazenamento de configurações','skills_author':'autoria de skills',
+                   'screen_observe':'observação de tela','input_control':'controle de entrada','audio_route':'rota de áudio',
+                   'mic_config':'configuração do microfone','camera_capture':'captura da câmera','display_manipulate':'ajuste de tela'}
+def display_permission(permission):
+    """Permission id as the user reads it. Unknown ids are shown as the Core sent them (they are never translated by guess)."""
+    return PERMISSION_LABELS.get(permission,permission or '')
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
 def code_message(code):return CODE_MESSAGES.get(code,f'Core recusou a ação: {code}')
 # S4 skills (docs/S4.md D1-D4). The Core owns manifests, the ledger, dependencies and every transition; this layer checks the shape and size of what it shows and sends.
@@ -1253,6 +1275,10 @@ class Bridge(QObject):
     def chatTextProblem(self,text):return chat_problem(text) or ''
     @Slot(str,result=str)
     def codeMessage(self,code):return code_message(code) if isinstance(code,str) and SNAKE_CODE.fullmatch(code) else ''
+    @Slot(str,result=str)
+    def providerLabel(self,provider):return display_provider(provider)
+    @Slot(str,result=str)
+    def permissionLabel(self,permission):return display_permission(permission)
     @Property(str,notify=chatChanged)
     def chatState(self):
         if self.chat_inflight is not None:return 'streaming' if self.snapshot.get('partial') else 'waiting'
@@ -1610,7 +1636,7 @@ class Bridge(QObject):
         config=(self.snapshot.get('llm') or {}).get('config')
         return dict(config.get('fallback') or {}) if config else {}
     @Property('QVariantList',notify=packChanged)
-    def wakeChoices(self):return self.snapshot.get('base_pack',{}).get('wake_phrases',[]) if self.snapshot.get('base_pack') else []
+    def wakeChoices(self):return [display_wake_choice(p) for p in (self.snapshot.get('base_pack',{}).get('wake_phrases',[]) if self.snapshot.get('base_pack') else [])]
     @Property(str,notify=changed)
     def packDescription(self):
         pack=self.snapshot.get('base_pack')
@@ -1618,7 +1644,7 @@ class Bridge(QObject):
         active=next((p['text'] for p in pack['wake_phrases'] if p['id']==pack['active_phrase']),'inativo')
         configured=self.snapshot.get('preferences',{}).get('wake_phrase') or pack['default_phrase']
         saved=next((p['text'] for p in pack['wake_phrases'] if p['id']==configured),'incompatível')
-        return f"{pack['id']} · DEV virtual\nPerfil no processo: {active}\nConfiguração salva: {saved}\nVoz: {pack['voice']} · EN · candidata"
+        return f"{pack['id']} · em desenvolvimento · virtual\nPerfil no processo: {active}\nConfiguração salva: {saved}\nVoz: {pack['voice']} · {LANGUAGE_LABELS['EN']} · candidata"
     @Slot(str)
     def selectWake(self,ident):
         if self.preferencesAvailable:self._preferences('select_wake',revision=int(self.preferencesRevision),phrase_id=ident)
@@ -1779,7 +1805,7 @@ class Bridge(QObject):
     @Property(str,notify=sessionChanged)
     def result(self):
         c=self.snapshot.get('command') or {};r=c.get('receipt')
-        return r['result'] if r else c.get('code','')
+        return display_receipt(r['result']) if r else c.get('code','')
     @Property(bool,notify=sessionChanged)
     def resultVerified(self):return bool((self.snapshot.get('command') or {}).get('receipt',{})) and bool(self.snapshot['command']['receipt']['verified'])
     @Property(str,notify=changed)

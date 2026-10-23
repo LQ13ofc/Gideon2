@@ -97,7 +97,7 @@ ApplicationWindow {
     function regRouteText(r) { return r === "connection" ? "API autorizada (conexão)" : r === "visual" ? "Visual (cliques e digitação)" : r; }
     function regStatusText(s) { switch (s) { case "available": return "disponível"; case "not_connected": return "não conectada"; case "expired": return "expirada ou reautenticação necessária"; case "scope_not_granted": return "escopo não concedido"; case "no_api": return "sem API neste ambiente"; case "visual_not_allowed": return "fallback visual desligado"; case "disabled": return "indisponível"; default: return s; } }
     function regVisualOn(id) { return core.registryVisualAllowed.indexOf(id) >= 0; }
-    function regChosenText(p) { return p.route_chosen ? "rota escolhida: " + regRouteText(p.route_chosen) : "nenhuma rota disponível (route_unavailable)"; }
+    function regChosenText(p) { return p.route_chosen ? "rota escolhida: " + regRouteText(p.route_chosen) : "nenhuma rota disponível"; }
     // The skill whose permissions are shown; a copy of the snapshot row, so it reads as shown when it was picked.
     property var skillSelected: null
     // C4 test buttons: reads only. Each entry is one allowlisted capability (bridge PERCEPTION_CAPABILITIES) sent with the empty object.
@@ -172,7 +172,7 @@ ApplicationWindow {
                 ComboBox { id: wakeChoice; objectName: "wakeChoice"; Layout.fillWidth: true; model: core.wakeChoices; textRole: "text"; valueRole: "id"; enabled: core.preferencesAvailable; Accessible.name: "Frase de wake do pack" }
                 Button { objectName: "selectWakeButton"; text: "Selecionar"; enabled: core.preferencesAvailable && wakeChoice.currentIndex >= 0 && core.wakeChoices[wakeChoice.currentIndex].qualification === "dev_qualified"; onClicked: core.selectWake(wakeChoice.currentValue); Accessible.name: "Selecionar frase de wake"}
             }
-            Label { objectName: "wakeQualification"; visible: core.wakeChoices.length > 0; text: wakeChoice.currentIndex >= 0 ? (core.wakeChoices[wakeChoice.currentIndex].qualification === "dev_qualified" ? "Qualificada em DEV; validação física pendente" : "POC_REQUIRED: frase sem qualidade aprovada") : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { objectName: "wakeQualification"; visible: core.wakeChoices.length > 0; text: wakeChoice.currentIndex >= 0 ? (core.wakeChoices[wakeChoice.currentIndex].qualification === "dev_qualified" ? "Qualificada em desenvolvimento; validação física pendente" : "Requer prova de conceito: frase sem qualidade aprovada") : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             CheckBox { id: audible; objectName: "audiblePreference"; text: core.voiceAvailable ? "Resposta por voz (saída virtual)" : "Resposta por voz indisponível"; enabled: core.preferencesAvailable && core.voiceAvailable }
             CheckBox { id: visual; objectName: "visualPreference"; text: "Indicador visual de atividade"; enabled: core.preferencesAvailable }
             Label { text: "Ganho da saída virtual: " + core.outputVolume + "% (0% = mudo)"; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -200,7 +200,7 @@ ApplicationWindow {
         onOpened: window.localizeClose(hubDialog)
         background: GlassCard { theme: window.themeIndex }
         contentItem: ScrollView {
-            implicitHeight: Math.min(hubColumn.implicitHeight, window.height - 120); clip: true
+            implicitHeight: Math.min(hubColumn.implicitHeight, window.height - 200); clip: true
             ColumnLayout {
                 id: hubColumn; width: hubDialog.availableWidth
                 Label { objectName: "hubDescription"; text: core.hubDescription; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -213,9 +213,9 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Label { text: modelData.plugin_id + " " + modelData.semver + " · " + modelData.publisher; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         Label { objectName: "status_" + modelData.plugin_id; text: (modelData.status === "installed" ? (window.pluginEnabledFor(modelData.plugin_id) ? "Instalado · ativo (sandbox, sem rede)" : "Instalado · desativado (sem execução)") : modelData.status === "update_available" ? "Atualização disponível" : modelData.status === "not_installed" ? (modelData.payload_staged ? "Pacote verificado em staging; não instalado" : "Não instalado") : "Incompatível: " + modelData.reason) + " · " + modelData.license; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { text: (modelData.permissions_approved ? "Permissões aprovadas para este manifest: " : "Permissões declaradas (não aprovadas): ") + (modelData.permissions.join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: (modelData.permissions_approved ? "Permissões aprovadas para este manifesto: " : "Permissões declaradas (não aprovadas): ") + (modelData.permissions.map(function (p) { return core.permissionLabel(p) }).join(", ") || "nenhuma") + "\n" + modelData.support_policy; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         GlowButton { objectName: "review_" + modelData.plugin_id; text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"; Accessible.name: (modelData.permissions_approved ? "Permissões aprovadas de " : "Revisar permissões de ") + modelData.plugin_id; enabled: core.hubApprovalAvailable && (modelData.status === "not_installed" || modelData.status === "update_available" || modelData.status === "installed") && !modelData.permissions_approved; onClicked: { window.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() } }
-                        GlowButton { objectName: "install_" + modelData.plugin_id; text: "Instalar pacote verificado"; Accessible.name: "Instalar pacote verificado de " + modelData.plugin_id; enabled: core.hubLifecycleAvailable && modelData.payload_staged === true && modelData.permissions_approved === true && (modelData.status === "not_installed" || modelData.status === "update_available"); onClicked: core.installHub(modelData.plugin_id, modelData.manifest_sha256) }
+                        GlowButton { objectName: "install_" + modelData.plugin_id; text: "Instalar pacote verificado"; Accessible.name: "Instalar pacote verificado de " + modelData.plugin_id; visible: modelData.status === "not_installed" || modelData.status === "update_available"; enabled: core.hubLifecycleAvailable && modelData.payload_staged === true && modelData.permissions_approved === true && (modelData.status === "not_installed" || modelData.status === "update_available"); onClicked: core.installHub(modelData.plugin_id, modelData.manifest_sha256) }
                     }
                 }
                 Label { text: "Instalados no Core"; visible: core.hubInstalled.length > 0; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -351,7 +351,7 @@ ApplicationWindow {
             id: reviewColumn; width: reviewDialog.availableWidth
             Label { text: window.reviewPlugin ? window.reviewPlugin.plugin_id + " " + window.reviewPlugin.semver + " · " + window.reviewPlugin.publisher : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Label { text: window.reviewPlugin ? "Permissões: " + (window.reviewPlugin.permissions.join(", ") || "nenhuma") : ""; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            Label { text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifest."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Label { text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             CheckBox { id: reviewAck; objectName: "publisherAcknowledgement"; text: "Entendo que o publisher não foi autenticado"; enabled: core.hubApprovalAvailable }
             GlowButton { objectName: "approveHubButton"; text: "Aprovar estas permissões"; Accessible.name: window.reviewPlugin ? "Aprovar permissões de " + window.reviewPlugin.plugin_id : "Aprovar permissões"; enabled: core.hubApprovalAvailable && reviewAck.checked && window.reviewPlugin !== null && !window.approvalDone(); onClicked: core.approveHub(window.reviewPlugin.plugin_id, window.reviewPlugin.manifest_sha256, window.reviewPlugin.permissions, reviewAck.checked, window.reviewRevision) }
             Label { objectName: "hubApprovalResult"; text: core.hubApprovalResult; textFormat: Text.PlainText; wrapMode: Text.WordWrap; Layout.fillWidth: true }
@@ -454,13 +454,20 @@ ApplicationWindow {
                     Label { text: "Assistente pessoal"; color: "#aabbe1"; font.pixelSize: 12 }
                 }
             }
+            // The nav list scrolls inside the space left by the header and footer, so the footer and the last pages
+            // stay reachable at any window height (round 2: Conexões and the footer were outside the window at 904 px and 500 px).
+            Flickable {
+                id: navFlick; objectName: "navFlick"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                contentWidth: width; contentHeight: navColumn.implicitHeight; boundsBehavior: Flickable.StopAtBounds
+                ColumnLayout {
+                id: navColumn; width: navFlick.width; spacing: window.height < 760 ? 4 : 8
             Repeater {
                 model: window.navigation
                 GlowButton {
                     required property int index
                     required property string modelData
                     objectName: "nav" + index
-                    Layout.fillWidth: true; implicitHeight: window.height < 760 ? 40 : 52
+                    Layout.fillWidth: true; implicitHeight: window.height < 760 ? 40 : window.height < 980 ? 48 : 52
                     padding: sidebar.width < 100 ? 8 : 12
                     text: sidebar.width > 100 ? modelData : ""
                     Accessible.name: modelData
@@ -470,8 +477,9 @@ ApplicationWindow {
                     ToolTip.visible: hovered && sidebar.width < 100; ToolTip.text: modelData
                 }
             }
-            Item { Layout.fillHeight: true }
-            Label { visible: sidebar.width > 100; text: "Base local\nEN · perfil virtual"; color: "#8fa5d0"; font.pixelSize: 12; Layout.bottomMargin: 18 }
+                }
+            }
+            Label { visible: sidebar.width > 100; text: "Base local\ninglês · perfil virtual"; color: "#8fa5d0"; font.pixelSize: 12; Layout.bottomMargin: 18 }
         }
     }
     ColumnLayout {
@@ -580,7 +588,7 @@ ApplicationWindow {
                                 GlowButton {
                                     required property var modelData
                                     objectName: "wakeCard_" + modelData.id
-                                    text: modelData.text + (modelData.qualification === "dev_qualified" ? " · DEV" : " · POC_REQUIRED")
+                                    text: modelData.text + " · " + modelData.qualification_label
                                     Accessible.name: "Frase de wake " + modelData.text
                                     checked: window.packAvailable && core.snapshotPack.active_phrase === modelData.id
                                     enabled: core.preferencesAvailable && modelData.qualification === "dev_qualified"
@@ -656,7 +664,7 @@ ApplicationWindow {
                     visible: window.page === 4; Layout.fillWidth: true; implicitHeight: permissionsColumn.implicitHeight + 44
                     ColumnLayout { id: permissionsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
                         Label { text: "Comandos da Base"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
-                        Label { text: "O Hub declara permissões e registra aprovação por manifest. Plugins instalados e aprovados podem ser ativados em sandbox sem rede. Comandos da Base não dependem de plugins."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { text: "O Hub declara permissões e registra aprovação por manifesto. Plugins instalados e aprovados podem ser ativados em sandbox sem rede. Comandos da Base não dependem de plugins."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
                 GlassCard {
@@ -699,7 +707,7 @@ ApplicationWindow {
                                     Label { objectName: "perceptionTitle_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id + " " + perceptionCard.modelData.semver; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
                                     Label { objectName: "perceptionState_" + perceptionCard.modelData.plugin_id; text: "Estado: " + window.perceptionStateText(perceptionCard.modelData.state) + (perceptionCard.modelData.last_error ? " · " + perceptionCard.modelData.last_error : ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                     Label { objectName: "perceptionBadge_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id === "display_manipulate" ? "UNSUPPORTED" : "SINTÉTICO — sem hardware real"; textFormat: Text.PlainText; font.bold: true; color: perceptionCard.modelData.plugin_id === "display_manipulate" ? "#ffc674" : "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    Label { text: "Permissão exigida: " + (perceptionCard.modelData.permissions.join(", ") || "nenhuma") + (perceptionCard.modelData.approved ? " · concedida" : " · não concedida"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { text: "Permissão exigida: " + (perceptionCard.modelData.permissions.map(function (p) { return core.permissionLabel(p) }).join(", ") || "nenhuma") + (perceptionCard.modelData.approved ? " · concedida" : " · não concedida"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                     Label { text: "Backend real: não suportado / pendente de validação humana"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                                     Flow {
                                         Layout.fillWidth: true; spacing: 8
@@ -776,11 +784,11 @@ ApplicationWindow {
                             Label { text: "Aprovar permissões não concede nada à skill: ela só usa capacidades já instaladas e aprovadas."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         }
                         // Criar: manifest JSON by hand, or a draft from the LLM plugin when it runs. A draft is never enabled here.
-                        Label { text: "Criar skill (manifest JSON, até 16 KiB)"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
+                        Label { text: "Criar skill (manifesto JSON, até 16 KiB)"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; Layout.fillWidth: true }
                         TextArea {
                             id: skillManifest; objectName: "skillManifest"; Layout.fillWidth: true
                             textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#dce7ff"; placeholderTextColor: "#a3b6db"
-                            placeholderText: "schema_version 1, id, name, version, publisher, steps..."; Accessible.name: "Manifest da skill em JSON"
+                            placeholderText: "Cole aqui o manifesto JSON da skill"; Accessible.name: "Manifesto da skill em JSON"
                             background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
                         }
                         RowLayout {
@@ -890,15 +898,21 @@ ApplicationWindow {
                         id: modelsColumn; anchors.fill: parent; anchors.margins: 22; spacing: 12
                         Label { text: "Modelos LLM"; color: "#f1f5ff"; font.pixelSize: 21; font.bold: true }
                         Label { objectName: "modelsStatus"; text: "Estado do modelo atual: " + core.modelsStatus; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Estado do modelo atual: " + core.modelsStatus }
-                        Label { objectName: "modelsSelectedLabel"; text: core.modelsSelected.provider ? "Configurado: " + core.modelsSelected.provider + " · " + core.modelsSelected.model : "Nenhum modelo configurado"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Label { objectName: "modelsSelectedLabel"; text: core.modelsSelected.provider ? "Configurado: " + core.providerLabel(core.modelsSelected.provider) + " · " + core.modelsSelected.model : "Nenhum modelo configurado"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         ProgressBar { objectName: "modelsProgress"; visible: core.modelsBusy; indeterminate: true; Layout.fillWidth: true; Accessible.name: "Operação de modelo em andamento" }
                         Label { objectName: "modelsResult"; visible: text.length > 0; text: core.modelsResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado do modelo: " + text }
                         GlowButton { objectName: "modelsRefresh"; text: "Atualizar lista"; Accessible.name: "Atualizar lista de modelos"; enabled: core.modelsAvailable && !core.modelsBusy; onClicked: core.listModels(modelsTabs.currentIndex === 0 ? "recommended" : "custom") }
                         TabBar {
                             id: modelsTabs; objectName: "modelsTabs"; Layout.fillWidth: true
                             onCurrentIndexChanged: core.listModels(currentIndex === 0 ? "recommended" : "custom")
-                            TabButton { objectName: "modelsTabRecommended"; text: "Recomendados"; Accessible.name: "Aba Recomendados" }
-                            TabButton { objectName: "modelsTabCustom"; text: "Personalizados"; Accessible.name: "Aba Personalizados" }
+                            background: Rectangle { color: "transparent" }
+                            // Basic style paints a checked tab with the default light palette (unreadable on this theme): explicit colours.
+                            TabButton { objectName: "modelsTabRecommended"; text: "Recomendados"; Accessible.name: "Aba Recomendados"
+                                background: Rectangle { color: parent.checked ? "#2c4a86" : "#132341"; radius: 10; border.color: "#304572" }
+                                contentItem: Label { text: parent.text; color: "#f1f5ff"; font.bold: parent.checked; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter } }
+                            TabButton { objectName: "modelsTabCustom"; text: "Personalizados"; Accessible.name: "Aba Personalizados"
+                                background: Rectangle { color: parent.checked ? "#2c4a86" : "#132341"; radius: 10; border.color: "#304572" }
+                                contentItem: Label { text: parent.text; color: "#f1f5ff"; font.bold: parent.checked; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter } }
                         }
                         RowLayout {
                             Layout.fillWidth: true

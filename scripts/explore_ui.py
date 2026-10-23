@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Explore the packaged QML client on the real desktop (Wayland) like a user would.
 
-Run: target/ui-venv/bin/python -I -B scripts/explore_ui.py [--root ABS_CORE_ROOT] [--out DIR]
+Run: target/ui-venv/bin/python -I -B scripts/explore_ui.py --root ABS_CORE_ROOT [--out DIR] [--pages "Conversa,Plugins"]
+Round 2: start the populated private Core first with scripts/explore_setup.py (it prints ROOT=...). The root must be
+that private Core (a path containing GideonTeste is refused). --pages takes page labels (accent-insensitive) and
+the token "Plugins" (Gideon Hub dialog) or "Preferências"; without it every page is visited plus dialogs, Tab focus
+and the resize pass.
 
 The app is loaded in-process exactly like app/main.py (same create(), same QT_QUICK_CONTROLS_STYLE=Basic).
 Every interaction is an event delivered to our own QQuickWindow (QMouseEvent / QKeyEvent sent with
@@ -9,22 +13,24 @@ QCoreApplication.sendEvent, the same events QTest.mouseClick / keyClick build). 
 with the Qt render thread here (RoundedImage.paint needs the GIL), so they are not used. Nothing is injected
 system-wide and nothing is clicked outside the window.
 
-Safety: only navigation, tab switches, dialog openers, read-only probes and Escape are clicked.
-Destructive, consenting, connecting, installing, sending, saving and key buttons are recorded as skipped.
-The only typed text is an invalid model id into the Motor LLM field (validator check); nothing is saved.
+Safety: only navigation, tab switches, dialog openers, read-only probes (Simular/Validar dry runs, Testar leitura,
+Planejar, Capturar, Árvore, Estado, Atualizar) and Escape are clicked. Destructive, consenting, connecting, installing,
+approving, exporting, saving, starting-agent and key buttons are recorded as skipped (whitelist, not blacklist).
+Typed text: an invalid model id into the Motor LLM field (validator check, nothing saved) and ONE chat message
+on the Conversa page to the scripted fake LLM (the page's own send button). Nothing is saved or sent elsewhere.
 """
-import argparse, json, os, sys, time, traceback
+import argparse, json, os, re, sys, time, traceback
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / 'app'))
 
-DEFAULT_ROOT = '/home/lucas/GideonTeste/profiles/dono/core'
-DEFAULT_OUT = '/tmp/claude-1000/ui-shots'
+DEFAULT_OUT = '/tmp/claude-1000/ui-shots2'
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--root', default=DEFAULT_ROOT)
+parser.add_argument('--root', required=True, help='absolute root of the private test Core (scripts/explore_setup.py)')
 parser.add_argument('--out', default=DEFAULT_OUT)
+parser.add_argument('--pages', default='', help='comma list of page labels or "Plugins" / "Preferências"; default all')
 args = parser.parse_args()
 
 if 'offscreen' in os.environ.get('QT_QPA_PLATFORM', ''):
@@ -32,6 +38,11 @@ if 'offscreen' in os.environ.get('QT_QPA_PLATFORM', ''):
 root = Path(args.root)
 if not root.is_absolute():
     sys.exit('absolute root required')
+if 'GideonTeste' in str(root):
+    sys.exit('refusing: the owner profile GideonTeste is not an exploration target')
+if not (root / 'core.sock').exists():
+    sys.exit(f'no Core socket at {root / "core.sock"}: start scripts/explore_setup.py first')
+WANT = None if not args.pages.strip() else {t.strip() for t in args.pages.split(',') if t.strip()}
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=True)
 
@@ -129,9 +140,18 @@ EXC = REPORT['exceptions']
 DIALOGS = ['preferencesDialog', 'hubDialog', 'llmDialog', 'hubReviewDialog', 'removeConfirm', 'revokeConfirm',
            'removeCustomConfirm', 'clearPluginConfirm', 'removeSkillConfirm']
 # Buttons whose click only reads, navigates or opens a dialog. Anything else is skipped (see module docstring).
-SAFE_TEXT = {'Abrir', 'Abrir ajustes da Base', 'Explorar catálogo', 'Motor LLM', 'Planejar', 'Estado', 'Árvore',
-             'Revisar permissões', 'Fechar', 'Close'}
+# 'Abrir' (round 1) launched an app through the command sandbox on Início: no longer clicked.
+SAFE_TEXT = {'Abrir ajustes da Base', 'Explorar catálogo', 'Motor LLM', 'Planejar', 'Estado', 'Árvore', 'Capturar',
+             'Revisar permissões', 'Fechar', 'Close', 'Recomendados', 'Personalizados', 'Carregar mais',
+             'Atualizar lista', 'Simular', 'Validar', 'Atualizar', 'Testar leitura'}
 SAFE_OBJECTS = {'hubButton', 'settingsButton'}
+# Per-row read-only buttons: skill detail selection, model/connection list refresh and tabs, route planning, dry runs.
+SAFE_PREFIXES = ('skillPermissions_', 'skillDryRun_', 'skillValidate', 'modelsTab', 'modelsLoadMore', 'modelsRefresh',
+                 'connRefresh_', 'connTest_', 'routePlan_')
+# Raw or English strings that must not reach the user, plus the labels the spec requires (SINTÉTICO/UNSUPPORTED).
+FLAG_RE = re.compile(r'\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\b[a-z]+_[a-z_]+\b|\bDEV\b|\bPOC\b|\bUNSUPPORTED\b|\b(?:Ready|Error|Failed|'
+                     r'Loading|Pending|Connected|Disconnected|Revoked|Unavailable|Enable|Disable|Save|Cancel|Remove|Install|'
+                     r'Sandbox|Replay)\b')
 
 
 def msg_count():
@@ -285,7 +305,7 @@ def safe_candidates(page_index):
         if name.startswith('nav') or name in DIALOGS:
             continue
         text = str(item.property('text') or '')
-        if not (is_tab(item) or text in SAFE_TEXT or name in SAFE_OBJECTS):
+        if not (is_tab(item) or text in SAFE_TEXT or name in SAFE_OBJECTS or name.startswith(SAFE_PREFIXES)):
             continue
         if not in_window(scene_point(item)):
             continue
@@ -300,7 +320,7 @@ def skipped_buttons():
         if not is_button(item) or not eff_visible(item) or item.objectName().startswith('nav'):
             continue
         text = str(item.property('text') or '')
-        if text in SAFE_TEXT or item.objectName() in SAFE_OBJECTS:
+        if text in SAFE_TEXT or item.objectName() in SAFE_OBJECTS or item.objectName().startswith(SAFE_PREFIXES):
             continue
         label = text or item.objectName() or item.property('objectName')
         if label and label not in out:
@@ -308,10 +328,25 @@ def skipped_buttons():
     return out[:80]
 
 
+def reveal(item):
+    """Scroll the sidebar list (navFlick) so the item's centre is inside its viewport before a mouse click."""
+    flick = find('navFlick')
+    if flick is None or item is None:
+        return
+    top = flick.mapToScene(QPointF(0, 0)).y()
+    rel = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).y() - top
+    if 0 <= rel <= flick.height():
+        return
+    target = flick.property('contentY') + rel - flick.height() / 2
+    flick.setProperty('contentY', max(0.0, min(float(target), float(flick.property('contentHeight')) - flick.height())))
+    settle(150)
+
+
 def go(index):
     nav = find(f'nav{index}')
     if nav is None or not eff_visible(nav):
         return False
+    reveal(nav)
     click(nav)
     settle(700)
     return window.property('page') == index
@@ -320,6 +355,32 @@ def go(index):
 def slug(text):
     table = str.maketrans('áàâãéêíóôõúç ', 'aaaaeeiooouc-')
     return ''.join(ch for ch in text.lower().translate(table) if ch.isalnum() or ch == '-')
+
+
+def want(label):
+    return WANT is None or slug(label) in {slug(t) for t in WANT}
+
+
+def flagged(texts):
+    return [t for t in texts if FLAG_RE.search(t)][:40]
+
+
+def chat_once():
+    """One message to the scripted fake LLM through the page's own input and send button (round 2 allowance)."""
+    field, send = find('chatInput'), find('chatSend')
+    if field is None or send is None or not eff_visible(field):
+        return {'sent': False, 'why': 'chat input or send button not available'}
+    field.forceActiveFocus()
+    Input.keyClicks(window, 'Oi, teste de exploracao da interface.')
+    settle(300)
+    if send.property('enabled') is False:  # the send button is enabled only with text (and a usable chat target)
+        return {'sent': False, 'why': 'send button disabled after typing', 'input_text': str(field.property('text'))}
+    before = msg_count()
+    how = click(send)
+    settle(2500)
+    collect_messages()
+    return {'sent': True, 'via': how, 'messages': MESSAGES[before:][:10],
+            'state': str(window.property('page')), 'chat_state_text': [t for t in visible_texts() if 'Estado' in t or 'Resposta' in t or 'Pensando' in t][:6]}
 
 
 def shot(name):
@@ -347,6 +408,8 @@ settle(300)
 
 # ---- 2. page sweep -----------------------------------------------------------------------------------------------
 for index, label in enumerate(NAVIGATION):
+    if not want(label):
+        continue
     page = {'index': index, 'name': label, 'visible_in_nav': False, 'reached': False, 'exceptions': [], 'clicks': [], 'skipped': [],
             'disabled': [], 'texts': [], 'geometry': [], 'messages_from': msg_count()}
     REPORT['pages'].append(page)
@@ -388,9 +451,13 @@ for index, label in enumerate(NAVIGATION):
                 settle(500)
         if page['clicks']:
             page['screenshot_after_clicks'] = shot(f'{name}-after-clicks')
+        if index == 7 and window.property('page') == index:
+            page['chat'] = chat_once()
+            page['screenshot_after_chat'] = shot(f'{name}-after-chat')
         page['geometry_after_clicks'] = geometry_issues()
         page['texts_after_clicks'] = visible_texts()
         page['disabled_after_clicks'] = disabled_buttons()
+        page['flagged_texts'] = flagged(page['texts'] + page['texts_after_clicks'])
     except Exception as exc:
         tb = traceback.format_exc()
         page['exceptions'].append(tb)
@@ -401,8 +468,11 @@ for index, label in enumerate(NAVIGATION):
 # ---- 3. dialogs: open, look, close (Escape only; Motor LLM gets one invalid-character probe, nothing saved) ----
 go(0)
 settle(500)
+DIALOG_OPENERS = [('preferences', 'settingsButton', 'Preferências'), ('hub', 'hubButton', 'Plugins')]
 try:
-    for label, opener in [('preferences', 'settingsButton'), ('hub', 'hubButton')]:
+    for label, opener, token in DIALOG_OPENERS:
+        if WANT is not None and not want(token):
+            continue
         btn = find(opener)
         click(btn)
         dialog = window.findChild(QObject, 'preferencesDialog' if label == 'preferences' else 'hubDialog')
@@ -439,7 +509,7 @@ try:
     go(0)
     settle(500)
     window.requestActivate()
-    for i in range(8):
+    for i in range(8 if WANT is None else 0):
         Input.keyClick(window, Qt.Key.Key_Tab)
         Input.qWait(200)
         focus = window.activeFocusItem()
@@ -452,7 +522,7 @@ except Exception as exc:
     EXC.append({'where': 'tab', 'trace': traceback.format_exc()})
 
 # ---- 5. resize: 1000x700 and 600x500 on every visible page -----------------------------------------------------
-for size in [(1000, 700), (600, 500)]:
+for size in ([(1000, 700), (600, 500)] if WANT is None else []):
     for index, label in enumerate(NAVIGATION):
         nav = find(f'nav{index}')
         if nav is None or not eff_visible(nav):
