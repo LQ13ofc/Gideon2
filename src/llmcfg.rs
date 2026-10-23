@@ -622,6 +622,13 @@ impl LlmState {
         if self.quarantined {
             return Err("secrets_storage_error");
         }
+        // Tokens exist only for an account of the ledger: a removed account never gets orphan secrets back.
+        let ledger = storage
+            .connections_ledger()
+            .map_err(|_| "connections_storage_error")?;
+        if !ledger.accounts.iter().any(|a| a.id == account) {
+            return Err("unknown_connection");
+        }
         let mut next = self.secrets.clone();
         next.set_connection_token(account, "access", access);
         next.set_connection_token(account, "refresh", refresh);

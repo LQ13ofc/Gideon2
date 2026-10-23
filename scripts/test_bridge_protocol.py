@@ -2172,7 +2172,7 @@ class McpContract(unittest.TestCase):
             with self.subTest(name):
                 with self.assertRaises(ValueError):validate_snapshot(snap,'r',0)
     def test_new_codes_have_portuguese_text(self):
-        for code in ('tool_not_trusted','tool_rejected','mcp_not_running','mcp_crashed','mcp_protocol','mcp_too_large','mcp_start_failed','mcp_tool_error','mcp_rpc_error','mcp_too_many_tools','mcp_restart_limit'):
+        for code in ('tool_not_trusted','tool_not_verified','tool_rejected','mcp_not_running','mcp_crashed','mcp_protocol','mcp_too_large','mcp_start_failed','mcp_tool_error','mcp_rpc_error','mcp_too_many_tools','mcp_restart_limit'):
             with self.subTest(code=code):
                 self.assertIn(code,CONN_MESSAGES);self.assertFalse(code_message(code).startswith('Core recusou'));self.assertIn(code,CODE_MESSAGES)
         self.assertIn('connection_trust_tools',OPS);self.assertIn('connection_trust_tools',PENDING)

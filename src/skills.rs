@@ -886,7 +886,16 @@ fn steps(m: &Manifest, env: &Env) -> Result<(), &'static str> {
             if retries > RETRY_MAX {
                 return Err(E_FIELD);
             }
-            if retries > 0 && step.idempotent != Some(true) {
+            // A connection write (any class but read) is retried only when its descriptor is idempotent.
+            let unsafe_write = match &target {
+                Target::Connection(call) => {
+                    crate::connections::parse_call(call).is_some_and(|(_, op)| {
+                        !op.idempotent && op.risk != crate::connections::Access::Read
+                    })
+                }
+                _ => false,
+            };
+            if retries > 0 && (step.idempotent != Some(true) || unsafe_write) {
                 return Err(E_RETRIES);
             }
         }
@@ -1593,6 +1602,21 @@ impl Core {
         }
     }
 
+    /// Risk of one step with its resolved arguments. A connection operation is classed from the validated
+    /// plan (a `service.call` to `lock.unlock`, an MCP tool that deletes, a public issue), the same way the
+    /// agent path classes it at authorize time. Other targets use their static class.
+    fn step_risk(&self, call: &str, args: &Value) -> Result<Risk, &'static str> {
+        match parse_target(call)? {
+            Target::Connection(call) => {
+                let (provider, op) = crate::connections::parse_call(&call).ok_or("invalid_call")?;
+                self.connections
+                    .plan(provider, op, None, args)
+                    .map(|plan| plan.tool_risk())
+            }
+            _ => self.call_risk(call),
+        }
+    }
+
     fn destructive_blocked(&self, manifest: &Manifest) -> bool {
         !crate::agent::options().allow_destructive
             && manifest
@@ -2173,7 +2197,7 @@ impl Core {
                 }
                 continue;
             }
-            let risk = match self.call_risk(&step.call) {
+            let risk = match self.step_risk(&step.call, &args) {
                 Ok(risk) => risk,
                 Err(code) => {
                     let view = self.view_for(root, &step.id, "failed");
@@ -2446,14 +2470,12 @@ impl Core {
             return Dispatch::Done(Err("invalid_call"));
         };
         let plan = match self.connections.plan(provider, op, None, &args) {
-            Ok(plan) => plan,
+            Ok(plan) => plan.from_skill(),
             Err(code) => return Dispatch::Done(Err(code)),
         };
-        // An MCP tool that deletes or removes never runs from a skill step unless destructive runs are enabled.
-        if provider.id == "mcp"
-            && plan.tool_risk() == Risk::Destructive
-            && !crate::agent::options().allow_destructive
-        {
+        // Destructive and public operations never run from a skill step unless destructive runs are enabled
+        // (the agent path answers the same way). `start` adds the public switch on top.
+        if plan.tool_risk() == Risk::Destructive && !crate::agent::options().allow_destructive {
             return Dispatch::Done(Err("destructive_disabled"));
         }
         let proposal = self.tools.propose(

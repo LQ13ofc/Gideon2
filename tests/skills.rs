@@ -1302,3 +1302,39 @@ fn grant_fields_in_steps_are_reported_before_unknown_keys() {
     );
     assert_eq!(core.validate(unknown_only), "skill_invalid:unknown_key");
 }
+
+/// A connection write is retried only when its descriptor is idempotent (the GitHub issue create is not:
+/// the real API ignores the key). Reads may keep retries. Validated without any network call.
+#[test]
+fn connection_writes_are_never_retried_unless_the_descriptor_is_idempotent() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("conn_retry");
+    let mut core = Core::boot(&dir, &specs());
+    let args = json!({"repo": "demo/private-repo", "title": "x"});
+    let with = |id: &str, call: &str, retries: u64, idempotent: bool| {
+        manifest(
+            id,
+            &[call],
+            json!([{"id": "open", "call": call, "args": args, "retries": retries, "idempotent": idempotent}]),
+        )
+    };
+    let issue = "conn:github.issues.create";
+    assert_eq!(
+        core.validate(with("skill_conn_a", issue, 1, true)),
+        "skill_invalid:retries_need_idempotent"
+    );
+    assert_eq!(
+        core.validate(with("skill_conn_b", issue, 1, false)),
+        "skill_invalid:retries_need_idempotent"
+    );
+    assert_eq!(
+        core.validate(with("skill_conn_c", issue, 0, true)),
+        "ok",
+        "no retries is always fine"
+    );
+    assert_eq!(
+        core.validate(with("skill_conn_d", "conn:github.repo.get", 1, true)),
+        "ok",
+        "an idempotent read may retry"
+    );
+}

@@ -15,7 +15,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::{Path, PathBuf},
     sync::OnceLock,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -294,7 +294,9 @@ const GITHUB_OPERATIONS: [OpDef; 7] = [
         path: "/api/repos/{repo}/issues",
         params: &[REPO],
         body: &[TITLE, BODY],
-        idempotent: true,
+        // The real GitHub API ignores Idempotency-Key: a failed create is never retried (no retry on 5xx).
+        // scripts/verify_e1_connections.py still expects the retry; the coordinator updates that gate.
+        idempotent: false,
         project: ISSUE_FIELDS,
     },
     OpDef {
@@ -1340,7 +1342,11 @@ pub enum Job {
     Refresh {
         account: String,
         base: String,
-        refresh: String,
+        /// Read from the vault when the job starts (`take_job`); `None` when no refresh token is stored.
+        refresh: Option<String>,
+        /// Access token stored when the job was queued. Another one stored at start means the tokens
+        /// already rotated: the job skips the network and its call retries with the new access token.
+        seen_access: Option<String>,
         then: Option<Box<Call>>,
     },
     Revoke {
@@ -1361,7 +1367,10 @@ pub enum Job {
 /// What an MCP job does. Debug never prints arguments.
 pub enum McpWork {
     Start,
-    Discover,
+    Discover {
+        /// Queued by a skill step: a first catalog is not trusted automatically (every tool needs approval).
+        from_skill: bool,
+    },
     Call {
         tool: String,
         args: Map<String, Value>,
@@ -1384,6 +1393,51 @@ pub enum McpDone {
     Started(String),
     Listed(Value),
     Output(String),
+}
+
+/// The job that holds the network slot: its account and proposal (for audit and for settling it when
+/// the job is abandoned), and whether the account was disconnected, revoked or removed while it ran.
+struct Holder {
+    account: Option<String>,
+    proposal: Option<String>,
+    operation: &'static str,
+    risk: &'static str,
+    cancelled: bool,
+}
+
+fn holder_of(job: &Job) -> Holder {
+    let mut holder = Holder {
+        account: job_account(job).map(str::to_owned),
+        proposal: None,
+        operation: "none",
+        risk: "none",
+        cancelled: false,
+    };
+    let call = match job {
+        Job::Call(call) => Some(call.as_ref()),
+        Job::Refresh { then, .. } => then.as_deref(),
+        _ => None,
+    };
+    if let Some(call) = call {
+        holder.proposal = call.proposal.clone();
+        holder.operation = call.op.name;
+        holder.risk = call.op.risk.name();
+    }
+    if let Job::Mcp(job) = job {
+        holder.proposal = job.proposal.clone();
+        match &job.work {
+            McpWork::Start => {}
+            McpWork::Discover { .. } => {
+                holder.operation = "mcp.discover";
+                holder.risk = "read";
+            }
+            McpWork::Call { risk, .. } => {
+                holder.operation = "mcp.call";
+                holder.risk = risk;
+            }
+        }
+    }
+    holder
 }
 
 impl std::fmt::Debug for Job {
@@ -1833,8 +1887,13 @@ pub async fn execute(id: u64, job: Job, python: PathBuf, script: PathBuf) -> Don
             base,
             refresh,
             then,
+            ..
         } => Reply::Refresh {
-            outcome: run_refresh(&ex, &base, &refresh).await,
+            // No stored refresh token: refused like a rejected one, without a request.
+            outcome: match refresh {
+                Some(refresh) => run_refresh(&ex, &base, &refresh).await,
+                None => Err(Failure::new("unauthorized")),
+            },
             account,
             then,
         },
@@ -1896,7 +1955,7 @@ async fn mcp_work(job: &McpJob, python: &Path) -> Result<McpDone, &'static str> 
         McpWork::Start => mcp::start(&job.account, python, &job.script, &job.profile)
             .await
             .map(McpDone::Started),
-        McpWork::Discover => mcp::request(&job.account, "tools/list", json!({}))
+        McpWork::Discover { .. } => mcp::request(&job.account, "tools/list", json!({}))
             .await
             .map(McpDone::Listed),
         McpWork::Call { tool, args, .. } => {
@@ -1959,9 +2018,17 @@ pub struct Plan {
     pub account: String,
     shape: Shape,
     pub risk: Access,
+    /// Started by a skill step (see `McpWork::Discover`).
+    origin_skill: bool,
 }
 
 impl Plan {
+    /// Marks the plan as coming from a skill step, so an MCP discover never trusts a first catalog.
+    pub fn from_skill(mut self) -> Self {
+        self.origin_skill = true;
+        self
+    }
+
     /// Proposal arguments: the Core re-validates these on authorize, not the model.
     pub fn wrap(&self) -> Value {
         json!({
@@ -2052,6 +2119,11 @@ pub struct Manager {
     mcp_ready: BTreeMap<String, String>,
     /// Server starts per MCP account in this Core lifetime (restart limit).
     mcp_starts: BTreeMap<String, u32>,
+    /// MCP accounts whose tools were listed by a successful discover in this process (never persisted).
+    /// A reconnect, a failure or a restart clears it: `mcp.call` waits for a fresh discover.
+    discovered: BTreeSet<String>,
+    /// The job holding the network slot (set with `running`).
+    holder: Option<Holder>,
     errors: BTreeMap<String, &'static str>,
     /// Account to repo (`owner/name`) to `private`, learned from `repo.get` results only.
     visibility: BTreeMap<String, BTreeMap<String, bool>>,
@@ -2349,14 +2421,54 @@ impl Manager {
         self.queue.push_back((self.next_job, job));
     }
 
-    /// The single network slot: one job at a time, never while another is running.
-    pub fn take_job(&mut self) -> Option<(u64, Job)> {
+    /// The single network slot: one job at a time, never while another is running. A refresh reads its
+    /// refresh token now (not when it was queued). If the access token changed since it was queued, the
+    /// tokens already rotated: the refresh is skipped and its call (if any) runs with the stored token.
+    pub fn take_job(&mut self, vault: &LlmState) -> Option<(u64, Job)> {
         if self.running.is_some() {
             return None;
         }
-        let (id, job) = self.queue.pop_front()?;
-        self.running = Some(id);
-        Some((id, job))
+        loop {
+            let (id, job) = self.queue.pop_front()?;
+            let job = match job {
+                Job::Refresh {
+                    account,
+                    base,
+                    seen_access,
+                    then,
+                    ..
+                } => {
+                    let access = vault.connection_token(&account, "access");
+                    if access != seen_access {
+                        match (then, access) {
+                            (Some(mut call), Some(access)) => {
+                                call.token = access;
+                                call.retried = true;
+                                Job::Call(call)
+                            }
+                            (Some(call), None) => {
+                                let settled = self.fail_proposal(call, "reauth_required");
+                                self.settled.extend(settled);
+                                continue;
+                            }
+                            (None, _) => continue,
+                        }
+                    } else {
+                        Job::Refresh {
+                            refresh: vault.connection_token(&account, "refresh"),
+                            account,
+                            base,
+                            seen_access,
+                            then,
+                        }
+                    }
+                }
+                other => other,
+            };
+            self.holder = Some(holder_of(&job));
+            self.running = Some(id);
+            return Some((id, job));
+        }
     }
 
     pub fn busy(&self) -> bool {
@@ -2522,6 +2634,7 @@ impl Manager {
         }
         *self.mcp_starts.entry(id.to_owned()).or_insert(0) += 1;
         self.mcp_ready.remove(id);
+        self.discovered.remove(id);
         self.push(Job::Mcp(Box::new(McpJob {
             account: id.to_owned(),
             proposal: None,
@@ -2752,17 +2865,18 @@ impl Manager {
         let Some(base) = provider_by_id(&provider).and_then(|p| fake_base(p.id)) else {
             return "real_backend_unsupported";
         };
-        let Some(refresh) = vault.connection_token(id, "refresh") else {
+        if vault.connection_token(id, "refresh").is_none() {
             let _ = self.set_status(storage, id, Status::ReauthRequired, Some("reauth_required"));
             return "reauth_required";
-        };
+        }
         if self.busy() {
             return "busy";
         }
         self.push(Job::Refresh {
             account: id.to_owned(),
             base: base.to_owned(),
-            refresh,
+            refresh: None,
+            seen_access: vault.connection_token(id, "access"),
             then: None,
         });
         "ok"
@@ -2786,6 +2900,15 @@ impl Manager {
                 self.push(Job::Revoke { base, token });
             }
         }
+        // A job already running for this account is cancelled: its reply fails the proposal it carries and
+        // stores nothing (see `settle`).
+        if let Some(holder) = self
+            .holder
+            .as_mut()
+            .filter(|h| h.account.as_deref() == Some(id))
+        {
+            holder.cancelled = true;
+        }
         // Calls waiting for this account can no longer run: their proposals fail now.
         let mut kept = VecDeque::new();
         for (job_id, job) in self.queue.drain(..) {
@@ -2793,6 +2916,7 @@ impl Manager {
                 let proposal = match job {
                     Job::Call(call) => call.proposal,
                     Job::Mcp(job) => job.proposal,
+                    Job::Refresh { then, .. } => then.and_then(|call| call.proposal),
                     _ => None,
                 };
                 if let Some(proposal) = proposal {
@@ -2811,6 +2935,7 @@ impl Manager {
         self.devices.remove(id);
         self.token_wait.remove(id);
         self.mcp_ready.remove(id);
+        self.discovered.remove(id);
         // The sandboxed server dies with the account's access, whether or not a job is using it.
         crate::mcp::stop(id);
         vault.clear_connection(storage, id)?;
@@ -3007,6 +3132,7 @@ impl Manager {
             account,
             shape,
             risk,
+            origin_skill: false,
         })
     }
 
@@ -3030,6 +3156,10 @@ impl Manager {
         }
         account_gate(found, op.scope)?;
         if op.name == "mcp.call" {
+            // Trust from an earlier process or connection is not enough: the tools must be listed again first.
+            if !self.discovered.contains(&id) {
+                return Err("tool_not_verified");
+            }
             let name = shape
                 .input
                 .get("tool")
@@ -3063,6 +3193,7 @@ impl Manager {
             account: id,
             shape,
             risk,
+            origin_skill: false,
         })
     }
 
@@ -3270,7 +3401,9 @@ impl Manager {
                 risk: plan.risk.name(),
             }
         } else {
-            McpWork::Discover
+            McpWork::Discover {
+                from_skill: plan.origin_skill,
+            }
         };
         self.last_call = Some(LastCall {
             operation: plan.op.name,
@@ -3330,18 +3463,36 @@ impl Manager {
         })
     }
 
-    /// A job task ended without a reply: the single slot is released and the call is marked lost.
+    /// A job task ended without a reply: the single slot is released and the call is marked lost. The
+    /// proposal the job carried fails now (audited), so it never stays authorized forever.
     pub fn abandon(&mut self, id: u64) {
         if self.running == Some(id) {
             self.running = None;
+            let holder = self.holder.take();
+            let proposal = holder.as_ref().and_then(|h| h.proposal.clone());
             self.last_call = Some(LastCall {
                 operation: "none",
                 outcome: "failed",
                 code: Some("provider_unreachable"),
                 retry_after: None,
-                proposal_id: None,
+                proposal_id: proposal.clone(),
                 untrusted: None,
             });
+            if let Some(holder) = holder {
+                self.log(
+                    "connection_call",
+                    holder.operation,
+                    holder.risk,
+                    "provider_unreachable",
+                );
+            }
+            let settled = proposal.map(|proposal| Settled {
+                proposal,
+                state: tools::State::Failed,
+                reason: Some("provider_unreachable"),
+                result: None,
+            });
+            self.settled.extend(settled);
         }
     }
 
@@ -3358,6 +3509,9 @@ impl Manager {
             return None;
         }
         self.running = None;
+        if self.holder.take().is_some_and(|h| h.cancelled) {
+            return self.cancelled_reply(done.reply);
+        }
         match done.reply {
             Reply::Device { account, outcome } => {
                 if self.status_of(&account) != Some(Status::Connecting) {
@@ -3445,12 +3599,38 @@ impl Manager {
         }
     }
 
+    /// Reply of a job whose account was disconnected, revoked or removed while it ran: nothing is stored
+    /// or marked connected, and the proposal it carried fails (a sandboxed server it started is stopped).
+    fn cancelled_reply(&mut self, reply: Reply) -> Option<Settled> {
+        match reply {
+            Reply::Refresh { then, .. } => {
+                then.and_then(|call| self.fail_proposal(call, "not_connected"))
+            }
+            Reply::Call { call, .. } => self.fail_proposal(call, "not_connected"),
+            Reply::Mcp { job, .. } => match job.work {
+                McpWork::Start => {
+                    crate::mcp::stop(&job.account);
+                    None
+                }
+                McpWork::Discover { .. } => {
+                    self.mcp_fail_call("mcp.discover", "read", job.proposal, "not_connected")
+                }
+                McpWork::Call { risk, .. } => {
+                    self.mcp_fail_call("mcp.call", risk, job.proposal, "not_connected")
+                }
+            },
+            // Device, poll, probe and revoke replies find their account gone and change nothing.
+            _ => None,
+        }
+    }
+
     /// Process-level MCP failure: the server is gone or unusable, so the account goes to `error`
     /// (a timeout, a crash, a protocol break or an oversized line). Core keeps running.
     fn mcp_failed(&mut self, storage: &Storage, id: &str, code: &'static str) {
         if crate::mcp::fatal(code) {
             crate::mcp::stop(id);
             self.mcp_ready.remove(id);
+            self.discovered.remove(id);
             let _ = self.set_status(storage, id, Status::Error, Some(code));
         }
     }
@@ -3504,7 +3684,7 @@ impl Manager {
                 }
                 None
             }
-            McpWork::Discover => {
+            McpWork::Discover { from_skill } => {
                 let operation = "mcp.discover";
                 if self.status_of(&id) != Some(Status::Connected) {
                     return self.mcp_fail_call(operation, "read", job.proposal, "not_connected");
@@ -3519,16 +3699,18 @@ impl Manager {
                 };
                 let index = self.index(&id)?;
                 let account = &self.ledger.accounts[index];
-                let catalog =
-                    match crate::mcp::build_catalog(&listed, &account.tools, !account.catalog) {
-                        Ok(catalog) => catalog,
-                        Err(code) => {
-                            if code == "mcp_protocol" {
-                                self.mcp_failed(storage, &id, code);
-                            }
-                            return self.mcp_fail_call(operation, "read", job.proposal, code);
+                // Only a user's own discover trusts a first catalog; a skill's discover asks for approval.
+                let trust_first = !account.catalog && !from_skill;
+                let catalog = match crate::mcp::build_catalog(&listed, &account.tools, trust_first)
+                {
+                    Ok(catalog) => catalog,
+                    Err(code) => {
+                        if code == "mcp_protocol" {
+                            self.mcp_failed(storage, &id, code);
                         }
-                    };
+                        return self.mcp_fail_call(operation, "read", job.proposal, code);
+                    }
+                };
                 // An identical catalog writes nothing: the ledger revision (a CAS for the UI) stays put.
                 if account.tools != catalog || !account.catalog {
                     let mut next = self.ledger.clone();
@@ -3538,6 +3720,7 @@ impl Manager {
                         return self.mcp_fail_call(operation, "read", job.proposal, code);
                     }
                 }
+                self.discovered.insert(id.clone());
                 self.last_call = Some(LastCall {
                     operation,
                     outcome: "ok",
@@ -3731,6 +3914,13 @@ impl Manager {
         then: Option<Box<Call>>,
         outcome: Result<Refreshed, Failure>,
     ) -> Option<Settled> {
+        // The account was disconnected or removed while the refresh ran: nothing is stored or resurrected.
+        if !self
+            .account(id)
+            .is_some_and(|a| a.status != Status::Disconnected)
+        {
+            return then.and_then(|call| self.fail_proposal(call, "not_connected"));
+        }
         match outcome {
             Ok(Refreshed {
                 access,
@@ -3882,13 +4072,14 @@ impl Manager {
             Err(failure) => {
                 if failure.code == "unauthorized" && !call.retried {
                     let base = fake_base(call.provider).map(str::to_owned);
-                    if let (Some(base), Some(refresh)) =
+                    if let (Some(base), Some(_)) =
                         (base, vault.connection_token(&account, "refresh"))
                     {
                         self.push(Job::Refresh {
+                            seen_access: vault.connection_token(&account, "access"),
                             account,
                             base,
-                            refresh,
+                            refresh: None,
                             then: Some(call),
                         });
                         return None;
@@ -4306,7 +4497,172 @@ mod tests {
             tools,
             catalog: true,
         });
+        // The helper stands for a process that already discovered the tools (the normal path).
+        manager.discovered.insert("conn_m".into());
         manager
+    }
+
+    #[test]
+    fn mcp_calls_wait_for_a_discover_in_this_process() {
+        let mcp = provider_by_id("mcp").unwrap();
+        let call = operation(mcp, "mcp.call").unwrap();
+        let args = json!({"tool": "echo_note", "args": {"text": "oi"}});
+        let mut manager = mcp_manager(&["mcp.discover", "mcp.call"]);
+        // The trust sits in the ledger, but this process has not listed the tools yet.
+        manager.discovered.remove("conn_m");
+        assert_eq!(
+            manager.plan(mcp, call, Some("conn_m"), &args).err(),
+            Some("tool_not_verified")
+        );
+        manager.discovered.insert("conn_m".into());
+        assert!(manager.plan(mcp, call, Some("conn_m"), &args).is_ok());
+    }
+
+    #[test]
+    fn abandoned_job_fails_its_carried_proposal_and_audits_it() {
+        let github = github();
+        let op = operation(github, "repo.get").unwrap();
+        let shape = validate(op, &json!({"repo": "demo/private-repo"})).unwrap();
+        let carried = Call {
+            proposal: Some("prop_1".into()),
+            account: "conn_x".into(),
+            provider: github.id,
+            op,
+            shape,
+            base: String::new(),
+            token: String::new(),
+            account_ref: None,
+            idempotency: String::new(),
+            retried: false,
+        };
+        let job = Job::Call(Box::new(carried));
+        let mut manager = Manager {
+            running: Some(9),
+            holder: Some(holder_of(&job)),
+            ..Manager::default()
+        };
+        manager.abandon(9);
+        assert!(manager.running.is_none() && manager.holder.is_none());
+        let settled = manager.take_settled();
+        assert_eq!(settled.len(), 1);
+        assert_eq!(settled[0].proposal, "prop_1");
+        assert_eq!(settled[0].state, tools::State::Failed);
+        assert_eq!(settled[0].reason, Some("provider_unreachable"));
+        let audit = manager.take_audit();
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].operation, "repo.get");
+        assert_eq!(audit[0].outcome, "provider_unreachable");
+    }
+
+    #[test]
+    fn refresh_reads_its_token_at_start_and_skips_when_the_tokens_rotated() {
+        let root = std::env::temp_dir().join(format!("gideon-conn-refresh-{}", random_hex(6)));
+        let storage = Storage::open(&root).unwrap();
+        let mut manager = Manager::default();
+        manager.ledger.accounts.push(Account {
+            id: "conn_r".into(),
+            provider: "github".into(),
+            label: "r".into(),
+            account_ref: None,
+            status: Status::Connected,
+            granted_scopes: vec!["repo:read".into()],
+            created: 0,
+            last_ok: None,
+            tools: Vec::new(),
+            catalog: false,
+        });
+        storage.save_connections_ledger(&manager.ledger).unwrap();
+        let mut vault = LlmState::load(&storage, false);
+        vault
+            .set_connection_tokens(
+                &storage,
+                "conn_r",
+                Some("access-token-0000000000".into()),
+                Some("refresh-token-000000000".into()),
+            )
+            .unwrap();
+        let refresh = |seen: &str| Job::Refresh {
+            account: "conn_r".into(),
+            base: String::new(),
+            refresh: None,
+            seen_access: Some(seen.into()),
+            then: None,
+        };
+        // Queued with A0; another job rotates the tokens before this one starts: no network job.
+        manager
+            .queue
+            .push_back((1, refresh("access-token-0000000000")));
+        vault
+            .set_connection_tokens(
+                &storage,
+                "conn_r",
+                Some("access-token-1111111111".into()),
+                Some("refresh-token-111111111".into()),
+            )
+            .unwrap();
+        assert!(manager.take_job(&vault).is_none());
+        // Still the same access token: the job runs with the refresh token stored now (R1, not R0).
+        manager
+            .queue
+            .push_back((2, refresh("access-token-1111111111")));
+        let (id, job) = manager.take_job(&vault).unwrap();
+        assert_eq!(id, 2);
+        match job {
+            Job::Refresh { refresh, .. } => {
+                assert_eq!(refresh.as_deref(), Some("refresh-token-111111111"))
+            }
+            other => panic!("expected a refresh, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_skill_discover_never_trusts_a_first_catalog() {
+        let root = std::env::temp_dir().join(format!("gideon-conn-skilldisc-{}", random_hex(6)));
+        let storage = Storage::open(&root).unwrap();
+        let listed = json!({"tools": [{"name": "echo_note", "description": "Return the note.",
+            "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}},
+            "required": ["text"], "additionalProperties": false}}]});
+        for (from_skill, expected) in [
+            (true, crate::mcp::ToolState::NeedsReapproval),
+            (false, crate::mcp::ToolState::Trusted),
+        ] {
+            let mut manager = Manager::default();
+            manager.ledger.accounts.push(Account {
+                id: "conn_m".into(),
+                provider: "mcp".into(),
+                label: "m".into(),
+                account_ref: Some("fake-mcp".into()),
+                status: Status::Connected,
+                granted_scopes: vec!["mcp.discover".into()],
+                created: 0,
+                last_ok: None,
+                tools: Vec::new(),
+                catalog: false,
+            });
+            storage.save_connections_ledger(&manager.ledger).unwrap();
+            let mut vault = LlmState::load(&storage, false);
+            manager.running = Some(7);
+            let job = McpJob {
+                account: "conn_m".into(),
+                proposal: None,
+                script: PathBuf::new(),
+                profile: "good".into(),
+                work: McpWork::Discover { from_skill },
+            };
+            let done = Done {
+                id: 7,
+                reply: Reply::Mcp {
+                    job: Box::new(job),
+                    outcome: Ok(McpDone::Listed(listed.clone())),
+                },
+            };
+            manager.settle(&storage, &mut vault, done, Instant::now());
+            let tools = &manager.ledger.accounts[0].tools;
+            assert_eq!(tools.len(), 1, "from_skill={from_skill}");
+            assert_eq!(tools[0].state, expected, "from_skill={from_skill}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

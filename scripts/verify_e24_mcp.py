@@ -12,19 +12,23 @@ Reuses the wire, Core lifecycle, plugin and agent helpers of verify_e1_connectio
 Boots (one Core root each, private HOME per boot):
   A  --connections-fake-mcp good, S1 replay on: connect starts the sandboxed process (consent follows, scopes
      per consent), sandbox proof from /proc (bwrap, own net namespace with only lo, no capabilities, cleared
-     environment, rlimits, no HOME), discover (validated catalog, trusted tools, risk labels, no schema or hash
+     environment, rlimits, no HOME), mcp.call before any discover in the process is tool_not_verified (no proposal),
+     discover (validated catalog, trusted tools, risk labels, no schema or hash
      in the snapshot), call with per-call approval and the effect read from the proposal result, argument and
      tool validation, destructive tool without the destructive scope, destructive with every scope refused as
      public_disabled, kill on disconnect (no leftover pid), crash handling (SIGKILL of the server -> error, Core
      keeps running, reconnect works), timeout (SIGSTOP -> error), restart limit, revoke forgets the tools, S1
      native, leak scan.
-  B  --connections-allow-public (good): add_numbers effect, delete_note executes only after the approval.
+  B  --connections-allow-public (good): a skill-origin first discover (conn:mcp.discover step) leaves the tools
+     needs_reapproval; add_numbers effect, delete_note executes only after the approval; a skill step that would
+     delete is refused at start (destructive_disabled, no approval card).
   C  evil + --connections-allow-public + llm_engine scripted: injection in descriptions and outputs stays data,
      oversized and non-simple schemas rejected, delete_note effect verified through lookup_note, the scripted model
      follows the injected output and asks for delete_note: the run stops awaiting approval, authorize is
      destructive_disabled, the note stays, grants unchanged.
   D  changed_tools: first discover trusts, the second marks the new tool needs_reapproval and blocks it until
-     connection_trust_tools; trust survives a Core restart, the account does not (the process is gone).
+     connection_trust_tools; trust survives a Core restart, the account does not (the process is gone), and after
+     a restart a call is tool_not_verified until a discover runs in the new process.
   E  No fake flag: connect is real_backend_unsupported (no process), invalid flag value and missing
      --plugin-python make the Core refuse to start.
   F  Qt offscreen connections phase with an mcp account (tools, labels, Confiar).
@@ -284,6 +288,13 @@ def scen_a(td):
     e1.check('A consent: connected with exactly the consented scopes, account_ref from serverInfo',
              set(it['granted_scopes']) == set(BASIC) and it.get('account_ref') == 'fake-mcp', it)
     e1.check('A consent: tools are not listed before discover', not it.get('tools'), it.get('tools'))
+    # no discover in this process yet: the call is refused synchronously, before any proposal or job exists
+    ids0 = [p.get('proposal_id') for p in e1.req(root).get('tool_proposals') or []]
+    code = call(root, m, 'echo_note', {'text': 'antes de discover'})
+    e1.check('A verify: mcp.call before any discover is tool_not_verified', code == 'tool_not_verified', code)
+    e1.check('A verify: the refusal creates no proposal and queues no job (no server call)',
+             [p.get('proposal_id') for p in e1.req(root).get('tool_proposals') or []] == ids0
+             and e1.last(root).get('operation') != 'mcp.call', e1.last(root))
     e1.check('A vault: an mcp account holds no token', not any(f':{m}:' in c for c, _ in e1.vault_of(root)))
 
     tools = discover(root, m)
@@ -442,12 +453,32 @@ def scen_a(td):
 # ---- scenario B -----------------------------------------------------------------------------------
 def scen_b(td):
     root = boot(td, 'B', 'good', extra=['--connections-allow-public'])
+    sr = lambda: e1.req(root)['skills']['revision']  # noqa: E731
+    # skill-origin first discover: this account is the only MCP account, so the skill resolves to it. The tools it
+    # lists are NOT trusted (needs_reapproval); the user must trust them before any mcp.call.
+    s = add(root, 'origem skill')
+    login(root, s, ['mcp.discover'])
+    sid0 = 'skill_mcp_discover'
+    man0 = skill_discover_manifest(sid0)
+    codes0 = [e1.req(root, 'skill_validate', manifest=man0)['code'], e1.req(root, 'skill_save_draft', manifest=man0)['code'],
+              e1.req(root, 'skill_dry_run', id=sid0, skill_version='1.0.0', inputs={})['code']]
+    codes0.append(e1.req(root, 'skill_approve', id=sid0, skill_version='1.0.0', revision=sr())['code'])
+    codes0.append(e1.req(root, 'skill_enable', id=sid0, revision=sr())['code'])
+    e1.need('skill discover prepared', codes0 == ['ok'] * 5, codes0)
+    e1.need('skill discover run accepted', e1.req(root, 'skill_run', id=sid0, inputs={})['code'] == 'ok')
+    e1.wait_for(20, 'skill discover ended', lambda: (lambda h: h[-1] if h and h[-1].get('skill') == sid0
+                                                    and h[-1].get('state') in ('done', 'failed', 'blocked') else None)(
+        e1.req(root)['skills'].get('history') or []))
+    origin = e1.wait_for(20, 'skill-origin discover listed the tools', lambda: (lambda t: t if sorted(
+        x['name'] for x in t) == GOOD_TOOLS else None)(e1.find(root, s).get('tools') or []))
+    states = {t['name']: t['state'] for t in origin}
+    e1.check('B skill discover: a skill-origin first discover leaves all three tools needs_reapproval (never trusted)',
+             all(v == 'needs_reapproval' for v in states.values()), states)
     m = add(root, 'liberado')
     login(root, m, ALL3)
     # D1 skills form conn:mcp.call: refused while no tool is trusted, usable once discover trusted one
     sid = 'skill_mcp_echo'
     manifest = skill_manifest(sid, 'echo_note', {'text': 'oi'})
-    sr = lambda: e1.req(root)['skills']['revision']  # noqa: E731
     e1.check('B skill: validate and save accepted', [e1.req(root, 'skill_validate', manifest=manifest)['code'],
                                                      e1.req(root, 'skill_save_draft', manifest=manifest)['code']] == ['ok', 'ok'])
     code = e1.req(root, 'skill_dry_run', id=sid, skill_version='1.0.0', inputs={})['code']
@@ -478,14 +509,18 @@ def scen_b(td):
     steps.append(e1.req(root, 'skill_enable', id=sid2, revision=sr())['code'])
     steps.append(e1.req(root, 'skill_run', id=sid2, inputs={})['code'])
     e1.need('destructive skill prepared', steps == ['ok'] * 6, steps)
-    run = e1.wait_for(20, 'destructive skill awaiting approval', lambda: (lambda r: r if r and r.get('state') == 'awaiting_approval'
-                                                                         and r.get('skill') == sid2 else None)(e1.req(root)['skills'].get('run')))
-    e1.req(root, 'skill_decide', run_id=run['run_id'], step='eco', decision='authorize')
+    # effective risk of the plan (delete_note is destructive): the step is refused at once, before any approval card
     hist = e1.wait_for(20, 'destructive skill ended', lambda: (lambda h: h[-1] if h and h[-1].get('skill') == sid2
                                                               and h[-1].get('state') in ('done', 'failed', 'blocked') else None)(
         e1.req(root)['skills'].get('history') or []))
     e1.check('B skill: a destructive MCP tool never runs from a skill step (destructive_disabled, run failed)',
              hist.get('state') == 'failed', hist)
+    now = e1.req(root)
+    run_now = now['skills'].get('run') or {}
+    e1.check('B skill: no awaiting approval for the destructive skill step (refused at start, no card)',
+             not (run_now.get('state') == 'awaiting_approval' and run_now.get('skill') == sid2)
+             and not [p for p in now.get('tool_proposals') or [] if p.get('operation') == 'mcp.call'
+                      and p.get('state') == 'pending'], run_now)
     done = approved_call(root, m, 'delete_note', {'id': 'n2'})
     e1.check('B skill: n2 was untouched by the refused skill (the user delete still finds it)', done['state'] == 'executed', done)
     done = approved_call(root, m, 'delete_note', {'id': 'n1'})
@@ -521,6 +556,15 @@ def skill_manifest(sid, tool, args):
             'dependency_capabilities': ['conn:mcp.call'], 'permissions_required': [], 'prerequisites': [],
             'attestations': [{'kind': 'test', 'text': 'synthetic test only, never shipped'}],
             'steps': [{'id': 'eco', 'call': 'conn:mcp.call', 'args': {'tool': tool, 'args': args}}]}
+
+
+def skill_discover_manifest(sid):
+    """A skill whose only step is conn:mcp.discover (a read): its discover is skill-origin."""
+    man = skill_manifest(sid, 'echo_note', {'text': 'x'})
+    man['name'] = 'Descobrir MCP'
+    man['dependency_capabilities'] = ['conn:mcp.discover']
+    man['steps'] = [{'id': 'descobre', 'call': 'conn:mcp.discover', 'args': {}}]
+    return man
 
 
 # ---- scenario C: evil profile + agent ------------------------------------------------------------------
@@ -704,16 +748,17 @@ def scen_d(td):
              and all(len(t['sha256']) == 64 for t in stored) and stat.S_IMODE((Path(root) / 'connections.json').stat().st_mode) == 0o600,
              stored[:1])
     login(root, m, BASIC)
+    # reconnect = new process: the persisted trust is not enough, the tools must be listed again first
+    ids0 = [p.get('proposal_id') for p in e1.req(root).get('tool_proposals') or []]
     code = call(root, m, 'export_notes')
-    pid = e1.last(root)['proposal_id']
-    e1.decide(root, pid)
-    done = e1.wait_done(root, pid)
-    e1.check('D restart: a server error answer (tool not listed yet) is mcp_rpc_error and the account stays connected',
-             code == 'pending_approval' and done['state'] == 'failed' and done.get('reason') == 'mcp_rpc_error'
-             and e1.find(root, m)['status'] == 'connected', done)
+    e1.check('D restart: a call before a discover in the new process is tool_not_verified', code == 'tool_not_verified', code)
+    e1.check('D restart: the refusal creates no proposal (no server call)',
+             [p.get('proposal_id') for p in e1.req(root).get('tool_proposals') or []] == ids0)
     after = discover(root, m)
     e1.check('D restart: the server no longer lists export_notes (new process, first discover): the tool leaves the list',
              sorted(after) == GOOD_TOOLS, sorted(after))
+    e1.check('D restart: a call to the vanished tool is unknown_tool (it left the list)',
+             call(root, m, 'export_notes') == 'unknown_tool', call(root, m, 'export_notes'))
     again = discover(root, m)
     e1.check('D restart: it comes back on the second discover as a NEW tool: needs_reapproval, not callable',
              again.get('export_notes', {}).get('state') == 'needs_reapproval'
@@ -873,6 +918,10 @@ def main(argv=None):
     e1.skip('real network proof inside the sandbox (connect attempt)',
             'the fixture opens no sockets; the proof is the server network namespace holding only lo (read from /proc)')
     e1.skip('device codes and tokens in the leak scan', 'mcp accounts have no device flow and no token')
+    e1.skip('mcp_rpc_error for a tool trusted in the ledger that the server no longer lists',
+            'since the discover-before-call rule, a call after a reconnect is tool_not_verified until a discover runs in '
+            'this process, and that discover removes the vanished tool (scenario D checks unknown_tool). The error mapping '
+            'stays in src/mcp.rs (Fail::Rpc -> mcp_rpc_error); no fixture path reaches it through the gate any more')
     full = {'A', 'B', 'C', 'D', 'E', 'F'}
     out = {'gate': 'E24_MCP', 'partial': chosen != full,
            'passed': len(e1.R['passed']), 'failed': len(e1.R['failed']), 'skipped': e1.R['skipped'],

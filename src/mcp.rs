@@ -219,10 +219,17 @@ fn suggests_destructive(raw: &Map<String, Value>) -> bool {
         raw.get("description").and_then(Value::as_str).unwrap_or("")
     )
     .to_lowercase();
-    hint || ["delete", "remove", "drop"]
-        .iter()
-        .any(|w| text.contains(w))
+    // Word stems, matched at the start of each word: "remove", "removed" and "removal" all count, while
+    // "information" does not count as "format". Tools with no annotation and no such word stay write.
+    hint || text
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|word| DESTRUCTIVE_STEMS.iter().any(|stem| word.starts_with(stem)))
 }
+
+const DESTRUCTIVE_STEMS: [&str; 13] = [
+    "delet", "remov", "drop", "purg", "wip", "eras", "truncat", "destroy", "kill", "format",
+    "reset", "revok", "unlock",
+];
 
 fn digest(raw: &Value) -> String {
     // serde_json maps are ordered, so the text is canonical for equal content.
@@ -729,6 +736,32 @@ mod tests {
             assert!(suggests_destructive(raw.as_object().unwrap()));
         }
         assert!(!suggests_destructive(plain_tool.as_object().unwrap()));
+    }
+
+    #[test]
+    fn destructive_widened_words_count_but_plain_intent_stays_write() {
+        for raw in [
+            json!({"name": "wipe_inbox"}),
+            json!({"name": "x", "description": "Purge the cache"}),
+            json!({"name": "x", "description": "Erased every row"}),
+            json!({"name": "truncate_log"}),
+            json!({"name": "destroy_board"}),
+            json!({"name": "kill_job"}),
+            json!({"name": "format_disk"}),
+            json!({"name": "reset_counter"}),
+            json!({"name": "revoke_key"}),
+            json!({"name": "unlock_door"}),
+            json!({"name": "x", "description": "Removal of the note"}),
+        ] {
+            assert!(suggests_destructive(raw.as_object().unwrap()), "{raw}");
+        }
+        for raw in [
+            json!({"name": "export_notes", "description": "Export as information JSON."}),
+            json!({"name": "add_numbers", "description": "Add two numbers."}),
+            json!({"name": "lock_door", "description": "Lock the door."}),
+        ] {
+            assert!(!suggests_destructive(raw.as_object().unwrap()), "{raw}");
+        }
     }
 
     #[test]

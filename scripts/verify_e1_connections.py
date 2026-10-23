@@ -10,7 +10,8 @@ Boots (one Core root each, private HOME per boot, the fake is reset at every boo
      connect flow with consent per scope, refused unrequested scope, read (repos.list, repo.get), write
      (issues.create) pending then executed after tool_decide with the effect read back from the fake, public
      op (pulls.comment, issues.create on unknown visibility) pending and refused, scope_not_granted with no
-     request, idempotent retry (500 after create) -> exactly one issue, rate limit with retry_after, timeout,
+     request, no retry of a non-idempotent write (500 after create -> provider_error, exactly one issue, one
+     request), retry of an idempotent read after a timeout (repo.get ok), rate limit with retry_after, timeout,
      token expiry -> one refresh -> ok, revoke (server sees it, vault loses the secrets), refresh failure ->
      reauth_required, account mismatch (set_account) -> error, disconnect, S1 native after all of it, and the
      secret leak scan of the whole test home.
@@ -539,20 +540,28 @@ def scen_a(td):
     after = FAKE.state()['requests']
     check('A scope: no network request for the refused calls (counter unchanged)', after == before, (before, after))
 
-    # idempotent retry: 500 after the create, one retry with the same key, exactly one issue
+    # issues.create is idempotent:false: 500 after the create is NOT retried (no Idempotency-Key, no replay).
+    # The call fails with the real error and the fake holds exactly one issue.
     FAKE.ctl('fail_after_create', {'n': 1})
     before = FAKE.state()['requests']
-    code = op(root, p, 'issues.create', {'repo': PRIVATE, 'title': 'E1 retry uma vez'})
-    check('A retry: write waits for approval', code == 'pending_approval', code)
+    code = op(root, p, 'issues.create', {'repo': PRIVATE, 'title': 'E1 500 sem replay'})
+    check('A no-retry: write waits for approval', code == 'pending_approval', code)
     pid = last(root)['proposal_id']
     decide(root, pid)
     done = wait_done(root, pid)
-    check('A retry: executed after the retry', done['state'] == 'executed', done)
+    check('A no-retry: failed with provider_error (the real 500, not replayed)',
+          done['state'] == 'failed' and done.get('reason') == 'provider_error', done)
     state = FAKE.state()
-    copies = [i for i in state['issues'][PRIVATE] if i['title'] == 'E1 retry uma vez']
-    check('A retry: exactly one issue after a 500 and a retry', len(copies) == 1, copies)
-    check('A retry: exactly two POSTs (create, then the replayed retry)', state['requests'] - before == 2,
+    copies = [i for i in state['issues'][PRIVATE] if i['title'] == 'E1 500 sem replay']
+    check('A no-retry: exactly one issue on the fake after the 500 (no duplicate)', len(copies) == 1, copies)
+    check('A no-retry: exactly one request reached the fake (one POST, no replay)', state['requests'] - before == 1,
           state['requests'] - before)
+    # positive retry check with an idempotent op: the first repo.get is delayed past the 8 s attempt budget,
+    # the Core retries it and the retry succeeds (the call is ok, not timeout)
+    FAKE.ctl('delay', {'n': 1, 'seconds': 12})
+    need('idempotent read queued', (c := op(root, p, 'repo.get', {'repo': PRIVATE})) == 'ok', c)
+    rg = wait_outcome(root, 'repo.get', secs=40)
+    check('A retry: idempotent repo.get is retried after one timeout and ends ok', rg.get('outcome') == 'ok', rg)
 
     # rate limit: 429 with Retry-After, the account stays connected
     FAKE.ctl('rate_limit', {'n': 1, 'retry_after': 7})

@@ -120,6 +120,7 @@ CONN_MESSAGES={
     'invalid_state':'Esta conta não está aguardando um token agora',
     'tool_trust_invalid':'Escolha ao menos uma ferramenta que aguarda sua confiança',
     'tool_not_trusted':'Ferramenta nova ou alterada: confie nela na página Conexões antes de chamar; nada foi executado',
+    'tool_not_verified':'Servidor MCP reconectado ou reiniciado: liste as ferramentas de novo antes de chamar; nada foi executado',
     'tool_rejected':'Ferramenta recusada pelo Core (esquema fora do subconjunto simples ou grande demais); nada foi executado',
     'mcp_not_running':'Servidor MCP não está rodando; conecte a conta de novo',
     'mcp_crashed':'Servidor MCP parou de responder; a conta ficou com erro e o Core segue normal',

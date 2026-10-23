@@ -908,7 +908,11 @@ impl Core {
     }
     /// Next network job for the single slot; transport runs it and returns the reply.
     pub fn take_connection_job(&mut self) -> Option<(u64, crate::connections::Job)> {
-        self.connections.take_job()
+        let job = self.connections.take_job(&self.llm);
+        // Refreshes that were skipped at start may have failed their proposals: flush them now.
+        let settled = self.connections.take_settled();
+        self.connection_flush(settled);
+        job
     }
     /// Settles a finished network job: tokens, statuses, and the proposal it was serving.
     pub fn connection_reply(
@@ -931,6 +935,8 @@ impl Core {
     /// Transport reports a connection task that ended without a reply.
     pub fn connection_abandoned(&mut self, id: u64) {
         self.connections.abandon(id);
+        let settled = self.connections.take_settled();
+        self.connection_flush(settled);
     }
     /// Audit records of connection work since the last drain (closed vocabulary only).
     pub fn take_connection_audit(&mut self) -> Vec<crate::connections::Audit> {

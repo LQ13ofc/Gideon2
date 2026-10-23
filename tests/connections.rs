@@ -34,7 +34,7 @@ def reset():
         "next_issue": {}, "comments": [], "requests": [], "posts": {},
         "account": "demo-user", "refresh_mode": "ok", "fail_after_create": 0,
         "rate_left": 0, "rate_after": 1, "revoked_calls": 0, "last_device": None,
-        "last_access": None, "last_refresh": None,
+        "last_access": None, "last_refresh": None, "delay": [0, 0],
     })
 
 REPOS = {
@@ -225,9 +225,18 @@ class Handler(BaseHTTPRequestHandler):
         if name == "fail_after_create":
             ST["fail_after_create"] = int(data.get("n", 0))
             return 200, {"ok": True}, {}
+        if name == "delay":
+            # The next n provider requests answer after `seconds` (races between queued jobs).
+            ST["delay"] = [int(data.get("n", 0)), float(data.get("seconds", 0))]
+            return 200, {"ok": True}, {}
         return 404, {"error": "not_found"}, {}
     def handle_method(self, method):
         # Sleeps happen outside the lock so other requests are not held up.
+        if not self.path.startswith("/__control/") and ST["delay"][0] > 0:
+            with LOCK:
+                ST["delay"][0] -= 1
+                pause = ST["delay"][1]
+            time.sleep(pause)
         if method == "GET" and self.path.startswith("/api/repos/demo/sleep-repo"):
             time.sleep(12)
         status, obj, headers = self.route(method)
@@ -1031,8 +1040,11 @@ fn timeouts_are_reported_within_the_call_budget() {
     );
 }
 
+/// `issues.create` has no natural key and the real GitHub API ignores `Idempotency-Key`: a 500 after the
+/// create is never retried, so the failure is reported once and no second issue is posted.
+/// (scripts/verify_e1_connections.py still expects the old retry; the coordinator updates that gate.)
 #[test]
-fn idempotent_retry_reuses_the_key_and_creates_one_issue() {
+fn issues_create_is_not_retried_after_a_server_error() {
     let (_guard, dir) = fresh();
     let stub = Stub::start(&dir);
     let mut core = start_core(&dir, &stub, false);
@@ -1049,16 +1061,12 @@ fn idempotent_retry_reuses_the_key_and_creates_one_issue() {
     let proposal_id = core.last_call()["proposal_id"].as_str().unwrap().to_owned();
     core.call(json!({"op": "tool_decide", "proposal_id": proposal_id, "decision": "authorize"}));
     let done = core.wait_proposal_done(&proposal_id);
-    assert_eq!(done["state"], "executed", "{done}");
+    assert_eq!(done["state"], "failed", "{done}");
+    assert_eq!(done["reason"], "provider_error");
     let state = stub.state();
     assert_eq!(
-        state["posts"]["/api/repos/demo/private-repo/issues"], 2,
-        "one retry after 500"
-    );
-    assert_eq!(
-        state["issues"]["demo/private-repo"],
-        json!([1]),
-        "the replay did not create a second issue"
+        state["posts"]["/api/repos/demo/private-repo/issues"], 1,
+        "no retry: the descriptor is not idempotent"
     );
 }
 
@@ -1110,6 +1118,81 @@ fn network_budget_refuses_the_31st_call_in_a_minute_without_a_request() {
     assert!(core.last_call()["retry_after"].as_u64().unwrap() >= 1);
     thread::sleep(Duration::from_millis(200));
     assert_eq!(api_requests(&stub), before);
+}
+
+fn refreshes(stub: &Stub) -> usize {
+    stub.state()["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["path"] == "/login/oauth/refresh")
+        .count()
+}
+
+/// The account is disconnected while its refresh is in flight: the refresh reply stores nothing, the
+/// proposal it carries fails as `not_connected`, and the account stays disconnected.
+#[test]
+fn disconnect_during_a_refresh_fails_the_carried_call_and_resurrects_nothing() {
+    let (_guard, dir) = fresh();
+    let stub = Stub::start(&dir);
+    let mut core = start_core(&dir, &stub, false);
+    let id = core.add("github", "desliga");
+    core.login(&stub, &id, &["repo:read", "issues:write"]);
+    learn_private(&mut core, &id);
+    stub.control("expire_access", json!({}));
+    // The call's 401 answers after 3 s; the refresh that follows runs from 3 s to 6 s.
+    stub.control("delay", json!({"n": 2, "seconds": 3}));
+    let pending = core.op(
+        &id,
+        "issues.create",
+        json!({"repo": "demo/private-repo", "title": "tarde"}),
+    );
+    assert_eq!(pending["code"], "pending_approval");
+    let pid = core.last_call()["proposal_id"].as_str().unwrap().to_owned();
+    core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}));
+    thread::sleep(Duration::from_millis(4500));
+    assert_eq!(
+        core.call(json!({"op": "connection_disconnect", "id": id}))["code"],
+        "ok"
+    );
+    let done = core.wait_proposal_done(&pid);
+    assert_eq!(done["state"], "failed", "{done}");
+    assert_eq!(done["reason"], "not_connected");
+    wait_until("refresh reply arrived", || refreshes(&stub) == 1);
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(core.item(&id)["status"], "disconnected");
+    assert_eq!(
+        core.op(&id, "repo.get", json!({"repo": "demo/private-repo"}))["code"],
+        "not_connected"
+    );
+    assert!(
+        stub.state()["issues"]["demo/private-repo"].is_null(),
+        "no issue was created: the call never ran after the disconnect"
+    );
+}
+
+/// Trust of the tools is not a live discover: after a reconnect `mcp.call` waits for a new `mcp.discover`.
+#[test]
+fn mcp_calls_wait_for_a_discover_after_a_reconnect() {
+    let (_guard, dir) = fresh();
+    let mut core = mcp_core(&dir, "good", false);
+    let id = core.add("mcp", "reconecta");
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    mcp_discover(&mut core, &id);
+    assert_eq!(
+        core.call(json!({"op": "connection_disconnect", "id": id}))["code"],
+        "ok"
+    );
+    wait_until("server gone after disconnect", || mcp_servers().is_empty());
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    let args = json!({"tool": "echo_note", "args": {"text": "oi"}});
+    assert_eq!(
+        core.op(&id, "mcp.call", args.clone())["code"],
+        "tool_not_verified"
+    );
+    mcp_discover(&mut core, &id);
+    let pid = mcp_call_card(&mut core, &id, "echo_note", json!({"text": "oi"}), "write");
+    assert!(core.proposal(&pid)["result"].is_null());
 }
 
 #[test]
@@ -2415,6 +2498,8 @@ fn mcp_disconnect_kills_the_server_a_crash_is_an_error_and_revoke_forgets_the_tr
     );
     // crash
     mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    // A reconnect clears the discover of this process: the tools are listed again before any call.
+    mcp_discover(&mut core, &id);
     let pid_server = mcp_servers()[0];
     // SAFETY: SIGKILL to the sandboxed interpreter this test just started.
     unsafe { libc_kill(pid_server as i32, 9) };
