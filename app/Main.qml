@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Effects
 import Gideon.Visual 1.0
 
 ApplicationWindow {
@@ -36,7 +37,9 @@ ApplicationWindow {
     readonly property bool spacious: width >= 1080 && height >= 760
     readonly property bool packAvailable: core.wakeChoices.length > 0
     readonly property var navigation: ["Início", "Voz e Wake", "Áudio", "Aparência", "Permissões", "Diagnóstico", "Gideon Hub", "Conversa", "Modelos LLM", "Percepção e ação", "Skills", "Conexões"]
-    readonly property var navIcons: ["home", "voice", "audio", "appearance", "permissions", "diagnostics", "hub", "voice", "hub", "permissions", "hub", "permissions"]
+    readonly property bool shellRail: width < 980
+    // One short Portuguese line per page, shown under the page title in the header (index = page).
+    readonly property var pageSubtitles: ["Visão geral da Base e da conversa.", "Configure como o Gideon escuta e responde.", "Sua voz e os ajustes de áudio.", "Defina o estilo visual do Gideon.", "Cada capacidade precisa de autorização.", "Acompanhe o estado real da Base.", "Capacidades opcionais, em um só lugar.", "Converse com o motor LLM opcional.", "Escolha, teste e configure o modelo do motor LLM.", "Teste sensores e ações simulados; nada age no seu computador.", "Procedimentos sobre capacidades instaladas; não concedem permissões.", "Contas de serviços; você concede cada escopo."]
     // S4 skills: state words live here; codes go through core.codeMessage. Nothing on this page grants a permission.
     function skillStateText(s) { switch (s) { case "draft": return "rascunho"; case "validated": return "validada"; case "tested": return "testada"; case "approved": return "aprovada"; case "enabled": return "habilitada"; case "disabled": return "desabilitada"; case "revised": return "revisada"; default: return s; } }
     function skillSourceText(s) { switch (s) { case "created": return "criada"; case "imported": return "importada (publisher não verificado)"; case "llm_draft": return "rascunho do LLM"; default: return s; } }
@@ -437,49 +440,124 @@ ApplicationWindow {
             GlowButton { objectName: "confirmRemoveSkillButton"; text: "Remover"; Accessible.name: removeSkillConfirm.skill ? "Remover skill " + removeSkillConfirm.skill.id : "Remover skill"; Layout.alignment: Qt.AlignRight; onClicked: removeSkillConfirm.accept() }
         }
     }
+    // Sidebar navigation: sections of rows. Each row is one page (nav<index>, same index as before) or a dialog opener.
+    // Rail mode (window below 980 px wide) shows icons only; section titles become thin dividers.
+    component NavItem: Button {
+        id: nav
+        property string glyphName: ""
+        property bool selected: false
+        implicitHeight: 38
+        implicitWidth: window.shellRail ? 36 : 204
+        hoverEnabled: true
+        padding: 0; leftPadding: 10; rightPadding: 8
+        Accessible.name: text
+        ToolTip.visible: hovered && window.shellRail; ToolTip.text: text
+        background: Rectangle {
+            radius: 8
+            color: nav.selected ? Qt.alpha(window.accentColor, 0.18) : nav.hovered ? "#1f3461" : "transparent"
+            border.width: nav.activeFocus ? 2 : 0
+            border.color: window.accentColor
+            Rectangle { visible: nav.selected; x: 0; y: 8; width: 3; height: parent.height - 16; radius: 2; color: window.accentColor }
+        }
+        contentItem: Item {
+            Image {
+                anchors.verticalCenter: parent.verticalCenter
+                x: window.shellRail ? (parent.width - width) / 2 : 0
+                width: 20; height: 20; sourceSize.width: 20; sourceSize.height: 20; smooth: true
+                source: "icons/" + nav.glyphName + ".svg"
+                layer.enabled: true
+                layer.effect: MultiEffect { colorization: 1.0; colorizationColor: nav.selected ? window.accentColor : nav.hovered ? "#eef3ff" : "#aebfe6" }
+            }
+            Label {
+                x: 30; width: Math.max(0, parent.width - 30); anchors.verticalCenter: parent.verticalCenter
+                visible: !window.shellRail; text: nav.text; elide: Text.ElideRight
+                font.pixelSize: 14; font.bold: nav.selected
+                color: nav.enabled ? (nav.selected ? "#f5f8ff" : "#c9d6f5") : "#6f82ab"
+            }
+        }
+    }
+    component SectionTitle: Label {
+        Layout.fillWidth: true; Layout.leftMargin: 12; Layout.topMargin: 4
+        visible: !window.shellRail
+        font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.3; color: "#7d93c3"
+    }
+    component RailDivider: Rectangle {
+        visible: window.shellRail
+        Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: 20; Layout.preferredHeight: 1
+        Layout.topMargin: 8; Layout.bottomMargin: 4
+        color: "#2b3d6a"
+    }
     Rectangle {
-        id: sidebar
-        width: window.width >= 1000 ? 232 : 64
+        id: sidebar; objectName: "sidebar"
+        width: window.shellRail ? 56 : 232
         anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
         color: window.themeIndex === 2 ? "#131e2c" : window.themeIndex === 1 ? "#1b2c47" : "#142445"
         Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: "#2b3d6a" }
         ColumnLayout {
-            anchors.fill: parent; anchors.margins: sidebar.width > 100 ? 20 : 8; spacing: window.height < 760 ? 4 : 12
+            anchors.fill: parent
+            anchors.leftMargin: window.shellRail ? 10 : 14; anchors.rightMargin: window.shellRail ? 10 : 14
+            anchors.topMargin: window.height < 760 ? 12 : 20; anchors.bottomMargin: 12
+            spacing: window.height < 760 ? 6 : 12
             RowLayout {
-                Layout.topMargin: window.height < 760 ? 2 : 22; Layout.bottomMargin: window.height < 760 ? 10 : 30
-                Image { source: "assets/gideon-orb.png"; Layout.preferredWidth: 44; Layout.preferredHeight: 44; fillMode: Image.PreserveAspectFit }
+                Layout.fillWidth: true; spacing: 10
+                Image { source: "assets/gideon-orb.png"; fillMode: Image.PreserveAspectFit; Layout.preferredWidth: window.shellRail ? 30 : 40; Layout.preferredHeight: window.shellRail ? 30 : 40; Layout.leftMargin: window.shellRail ? 3 : 4 }
                 ColumnLayout {
-                    visible: sidebar.width > 100; spacing: 2
-                    Label { text: "Gideon"; color: "#f3f6ff"; font.pixelSize: 25; font.bold: true }
+                    visible: !window.shellRail; spacing: 0; Layout.fillWidth: true
+                    Label { text: "Gideon"; color: "#f3f6ff"; font.pixelSize: 22; font.bold: true }
                     Label { text: "Assistente pessoal"; color: "#aabbe1"; font.pixelSize: 12 }
                 }
             }
-            // The nav list scrolls inside the space left by the header and footer, so the footer and the last pages
-            // stay reachable at any window height (round 2: Conexões and the footer were outside the window at 904 px and 500 px).
+            // The nav list scrolls inside the space left by the logo and the footer, so every row stays reachable at any window height.
             Flickable {
                 id: navFlick; objectName: "navFlick"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 contentWidth: width; contentHeight: navColumn.implicitHeight; boundsBehavior: Flickable.StopAtBounds
                 ColumnLayout {
-                id: navColumn; width: navFlick.width; spacing: window.height < 760 ? 4 : 8
-            Repeater {
-                model: window.navigation
-                GlowButton {
-                    required property int index
-                    required property string modelData
-                    objectName: "nav" + index
-                    Layout.fillWidth: true; implicitHeight: window.height < 760 ? 40 : window.height < 980 ? 48 : 52
-                    padding: sidebar.width < 100 ? 8 : 12
-                    text: sidebar.width > 100 ? modelData : ""
-                    Accessible.name: modelData
-                    image: "assets/" + window.navIcons[index] + ".png"
-                    accent: window.accentColor; checked: window.page === index; visible: index === 7 ? core.chatAvailable : index === 8 ? core.modelsAvailable : index === 9 ? core.perceptionAvailable : index === 10 ? core.skillsAvailable : index === 11 ? core.connectionsAvailable : true
-                    onClicked: window.page = index
-                    ToolTip.visible: hovered && sidebar.width < 100; ToolTip.text: modelData
+                    id: navColumn; width: navFlick.width; spacing: 4
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: 3
+                        visible: navHome.visible || navChat.visible
+                        SectionTitle { text: "PRINCIPAL" }
+                        NavItem { id: navHome; objectName: "nav0"; text: "Início"; glyphName: "home"; selected: window.page === 0; onClicked: window.page = 0 }
+                        NavItem { id: navChat; objectName: "nav7"; text: "Conversa"; glyphName: "chat"; selected: window.page === 7; visible: core.chatAvailable; onClicked: window.page = 7 }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: 3
+                        visible: navMic.visible || navSpeaker.visible
+                        RailDivider { visible: window.shellRail }
+                        SectionTitle { text: "VOZ E ÁUDIO" }
+                        NavItem { id: navMic; objectName: "nav1"; text: "Voz e Wake"; glyphName: "mic"; selected: window.page === 1; onClicked: window.page = 1 }
+                        NavItem { id: navSpeaker; objectName: "nav2"; text: "Áudio"; glyphName: "speaker"; selected: window.page === 2; onClicked: window.page = 2 }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: 3
+                        visible: navHub.visible || navSkills.visible || navConnections.visible || navModels.visible || navPerception.visible || navPlugins.visible
+                        RailDivider {}
+                        SectionTitle { text: "EXTENSÕES" }
+                        NavItem { id: navHub; objectName: "nav6"; text: "Gideon Hub"; glyphName: "hub"; selected: window.page === 6; onClicked: window.page = 6 }
+                        NavItem { id: navSkills; objectName: "nav10"; text: "Skills"; glyphName: "sparkles"; selected: window.page === 10; visible: core.skillsAvailable; onClicked: window.page = 10 }
+                        NavItem { id: navConnections; objectName: "nav11"; text: "Conexões"; glyphName: "plug"; selected: window.page === 11; visible: core.connectionsAvailable; onClicked: window.page = 11 }
+                        NavItem { id: navModels; objectName: "nav8"; text: "Modelos LLM"; glyphName: "cpu"; selected: window.page === 8; visible: core.modelsAvailable; onClicked: window.page = 8 }
+                        NavItem { id: navPerception; objectName: "nav9"; text: "Percepção e ação"; glyphName: "eye"; selected: window.page === 9; visible: core.perceptionAvailable; onClicked: window.page = 9 }
+                        NavItem { id: navPlugins; objectName: "hubButton"; text: "Plugins"; glyphName: "puzzle"; enabled: core.connected; onClicked: hubDialog.open() }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: 3
+                        visible: navPermissions.visible || navDiagnostics.visible || navAppearance.visible || navPrefs.visible
+                        RailDivider {}
+                        SectionTitle { text: "SISTEMA" }
+                        NavItem { id: navPermissions; objectName: "nav4"; text: "Permissões"; glyphName: "shield"; selected: window.page === 4; onClicked: window.page = 4 }
+                        NavItem { id: navDiagnostics; objectName: "nav5"; text: "Diagnóstico"; glyphName: "activity"; selected: window.page === 5; onClicked: window.page = 5 }
+                        NavItem { id: navAppearance; objectName: "nav3"; text: "Aparência"; glyphName: "palette"; selected: window.page === 3; onClicked: window.page = 3 }
+                        NavItem { id: navPrefs; objectName: "settingsButton"; text: "Preferências"; glyphName: "gear"; enabled: core.connected; onClicked: preferences.open() }
+                    }
                 }
             }
-                }
+            // Footer: compact; the diagnostic line moved here from the old bottom bar (hidden in rail mode).
+            ColumnLayout {
+                visible: !window.shellRail; Layout.fillWidth: true; spacing: 6
+                Label { objectName: "diagnostics"; text: core.configurationMessage || ("Áudio virtual · " + core.diagnostic); textFormat: Text.PlainText; color: "#8fa5d0"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Diagnóstico: " + text }
+                Label { text: "Base local\ninglês · perfil virtual"; color: "#8fa5d0"; font.pixelSize: 12; Layout.fillWidth: true }
             }
-            Label { visible: sidebar.width > 100; text: "Base local\ninglês · perfil virtual"; color: "#8fa5d0"; font.pixelSize: 12; Layout.bottomMargin: 18 }
         }
     }
     ColumnLayout {
@@ -487,10 +565,30 @@ ApplicationWindow {
         anchors.left: sidebar.right; anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
         anchors.margins: window.spacious ? 24 : 14; spacing: window.spacious ? 14 : 8
         RowLayout {
-            Layout.fillWidth: true
-            Label { text: window.navigation[window.page]; color: "#a7b9df"; font.pixelSize: 14; Layout.fillWidth: true }
-            GlowButton { objectName: "hubButton"; text: window.width >= 720 ? "Plugins" : ""; image: "assets/hub.png"; Accessible.name: "Plugins"; enabled: core.connected; onClicked: hubDialog.open() }
-            GlowButton { objectName: "settingsButton"; text: window.width >= 720 ? "Preferências" : ""; image: "assets/settings.png"; Accessible.name: "Preferências"; enabled: core.connected; onClicked: preferences.open() }
+            Layout.fillWidth: true; spacing: 12
+            ColumnLayout {
+                Layout.fillWidth: true; spacing: 2
+                Label { objectName: "pageTitle"; text: window.navigation[window.page]; textFormat: Text.PlainText; color: "#f3f6ff"; font.pixelSize: 24; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { objectName: "pageSubtitle"; text: window.pageSubtitles[window.page]; textFormat: Text.PlainText; color: "#9fb3dc"; font.pixelSize: 14; elide: Text.ElideRight; Layout.fillWidth: true }
+            }
+            // State pill: the Core state in words, with a dot. The activity orb shows only when the visual feedback is on.
+            Rectangle {
+                objectName: "statePill"; Layout.alignment: Qt.AlignVCenter
+                implicitWidth: pillRow.implicitWidth + 24; implicitHeight: 30; radius: 15
+                color: window.themeIndex === 2 ? "#17242f" : "#17294b"; border.width: 1; border.color: "#354976"
+                RowLayout {
+                    id: pillRow; anchors.centerIn: parent; spacing: 8
+                    Image { objectName: "activityIndicator"; source: "assets/gideon-orb.png"; visible: core.visualFeedback; Layout.preferredWidth: 18; Layout.preferredHeight: 18; fillMode: Image.PreserveAspectFit; Accessible.name: "Indicador visual do Gideon" }
+                    Rectangle {
+                        Layout.preferredWidth: 8; Layout.preferredHeight: 8; radius: 4
+                        color: !core.connected || core.state === "offline" || core.state === "safe_mode" || core.state === "restart_required" ? "#f6c77e" : core.state === "idle" ? "#78debc" : window.accentColor
+                    }
+                    // Announce state changes: the description follows the text, so assistive tech reads the new state.
+                    Label { objectName: "aura"; text: window.stateLabels[core.state] || "Erro"; textFormat: Text.PlainText; color: "#e6edf4"; font.pixelSize: 13; Accessible.role: Accessible.StaticText; Accessible.name: "Estado do Gideon"; Accessible.description: text }
+                }
+            }
+            // Cancel appears only while a session can be cancelled (same condition as its enabled state).
+            GlowButton { objectName: "cancelButton"; text: "Cancelar"; visible: core.connected && core.sessionId.length > 0; enabled: core.connected && core.sessionId.length > 0; implicitHeight: 34; onClicked: core.cancel(); Accessible.name: "Cancelar sessão" }
         }
         RowLayout {
             visible: window.page === 0 && window.spacious
@@ -563,17 +661,6 @@ ApplicationWindow {
             Layout.fillWidth: true; Layout.fillHeight: true; clip: true
             ColumnLayout {
                 width: pageViewport.availableWidth; spacing: 16
-                GlassCard {
-                theme: window.themeIndex
-                    Layout.fillWidth: true; implicitHeight: window.width > 900 ? 185 : 150; clip: true
-                    RoundedImage { anchors.fill: parent; source: Qt.resolvedUrl("assets/hero-background.png"); opacity: window.themeIndex === 2 ? 0 : 0.4 }
-                    Image { source: "assets/gideon-orb.png"; anchors.right: parent.right; anchors.rightMargin: 26; anchors.verticalCenter: parent.verticalCenter; width: 200; height: 200; visible: window.width > 900 && core.visualFeedback }
-                    ColumnLayout {
-                        anchors.left: parent.left; anchors.leftMargin: 26; anchors.verticalCenter: parent.verticalCenter; width: window.width > 900 ? parent.width - 260 : parent.width - 52; spacing: 10
-                        Label { text: window.navigation[window.page]; color: "#f1f5ff"; font.pixelSize: window.width > 900 ? 52 : 24; font.bold: true }
-                        Label { text: window.page === 1 ? "Configure como o Gideon escuta e responde." : window.page === 3 ? "Defina o estilo visual do Gideon." : window.page === 2 ? "Sua voz, seus ajustes de áudio." : window.page === 4 ? "Cada capacidade precisa de autorização." : window.page === 5 ? "Acompanhe o estado real da Base." : window.page === 7 ? "Converse com o motor LLM opcional." : window.page === 8 ? "Escolha, teste e configure o modelo do motor LLM." : window.page === 9 ? "Teste sensores e ações simulados; nada age no seu computador." : window.page === 10 ? "Procedimentos sobre capacidades instaladas; não concedem permissões." :"Capacidades opcionais, em um só lugar."; color: "#b7caf3"; font.pixelSize: 17; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                    }
-                }
                 GlassCard {
                 theme: window.themeIndex
                     visible: window.page === 1; Layout.fillWidth: true; implicitHeight: voiceColumn.implicitHeight + 44
@@ -1283,13 +1370,6 @@ ApplicationWindow {
                 }
             }
         }
-        RowLayout {
-            Layout.fillWidth: true
-            Image { objectName: "activityIndicator"; source: "assets/gideon-orb.png"; visible: core.visualFeedback; Layout.preferredWidth: 38; Layout.preferredHeight: 38; fillMode: Image.PreserveAspectFit; Accessible.name: "Indicador visual do Gideon" }
-            // Announce state changes: the description follows the text, so assistive tech reads the new state.
-            Label { objectName: "aura"; text: window.stateLabels[core.state] || "Erro"; textFormat: Text.PlainText; color: "#e6edf4"; font.pixelSize: 20; Layout.fillWidth: true; Accessible.role: Accessible.StaticText; Accessible.name: "Estado do Gideon"; Accessible.description: text }
-            GlowButton { objectName: "cancelButton"; text: "Cancelar"; enabled: core.connected && core.sessionId.length > 0; onClicked: core.cancel(); Accessible.name: "Cancelar sessão" }
-        }
         ScrollView {
             objectName: "transcriptViewport"; visible: window.page === 0 || core.sessionId.length > 0
             Layout.minimumHeight: 48; Layout.preferredHeight: window.page === 0 ? 90 : 56; Layout.fillWidth: true; Layout.fillHeight: window.page === 0
@@ -1303,6 +1383,5 @@ ApplicationWindow {
             GlowButton { objectName: "sendButton"; text: "Enviar"; Accessible.name: "Enviar comando de texto"; enabled: core.textAvailable && input.text.trim().length > 0; onClicked: core.submitText(input.text) }
         }
         Label { objectName: "textResult"; visible: text.length > 0 && (window.page === 0 || core.sessionId.length > 0); text: core.textResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12 }
-        Label { objectName: "diagnostics"; text: core.configurationMessage || ("Áudio virtual · " + core.diagnostic); textFormat: Text.PlainText; color: "#a6b9df"; wrapMode: Text.WordWrap; Layout.fillWidth: true; font.pixelSize: 12; Accessible.name: "Diagnóstico: " + text }
     }
 }

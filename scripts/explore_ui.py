@@ -474,6 +474,7 @@ try:
         if WANT is not None and not want(token):
             continue
         btn = find(opener)
+        reveal(btn)
         click(btn)
         dialog = window.findChild(QObject, 'preferencesDialog' if label == 'preferences' else 'hubDialog')
         ok = wait_until(lambda: dialog.property('visible'), 3)
