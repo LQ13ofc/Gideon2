@@ -6,7 +6,7 @@ async fn main() -> io::Result<()> {
     if args.next().as_deref() != Some("--root") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR] [--plugin-python ABSOLUTE_PYTHON] [--net-allow-loopback (test only)]",
+            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR] [--data-dir ABSOLUTE_DIR] [--plugin-python ABSOLUTE_PYTHON] [--net-allow-loopback (test only)]",
         ));
     }
     let root = PathBuf::from(
@@ -20,6 +20,8 @@ async fn main() -> io::Result<()> {
     let mut base_pack = None;
     let mut hub_catalog = None;
     let mut home = None;
+    let mut data_dir = None;
+    let mut fixtures_dir = None;
     let mut plugin_python = None;
     let mut net_allow_loopback = false;
     // Test/dev only: S5 provider fakes on loopback (`provider=http://127.0.0.1:port`, repeatable).
@@ -48,6 +50,21 @@ async fn main() -> io::Result<()> {
                         .ok_or_else(|| io::Error::other("invalid --home"))?,
                 );
                 home = Some(path);
+            }
+            // User data (skill exports/imports, synthetic world). Packages pass a private directory in the
+            // profile state so that `--home` (the verified package) is never written.
+            "--data-dir" if data_dir.is_none() => {
+                data_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| io::Error::other("invalid --data-dir"))?,
+                ));
+            }
+            // Test/dev only: directory holding `tests/fixtures/connections/mcp_server.py`. Never in packages.
+            "--test-fixtures-dir" if fixtures_dir.is_none() => {
+                fixtures_dir =
+                    Some(PathBuf::from(args.next().ok_or_else(|| {
+                        io::Error::other("invalid --test-fixtures-dir")
+                    })?));
             }
             "--hub-catalog" if hub_catalog.is_none() => {
                 let path = PathBuf::from(
@@ -161,6 +178,12 @@ async fn main() -> io::Result<()> {
         .map_err(|_| io::Error::other("agent options already set"))?;
     if let Some(path) = home {
         transport::set_home(path)?;
+    }
+    if let Some(path) = data_dir {
+        transport::set_data_dir(path)?;
+    }
+    if let Some(path) = fixtures_dir {
+        transport::set_fixtures_dir(path)?;
     }
     // Refuse at startup an interpreter that lives under the user's HOME or in a forbidden root.
     if let Some(python) = plugin_python.as_deref() {

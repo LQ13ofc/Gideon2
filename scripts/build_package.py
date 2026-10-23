@@ -222,7 +222,8 @@ def copy_venv(name, dst):
         if Path(directory) == src / "bin":
             ignored += [n for n in names if n not in VENV_BIN_KEEP]
         if Path(directory) == src:
-            ignored += [n for n in names if n == "pyvenv.cfg"]
+            # .lock is uv's empty world-writable (0666) lock file; it is not runtime and must not ship.
+            ignored += [n for n in names if n in ("pyvenv.cfg", ".lock")]
         return ignored
 
     shutil.copytree(src, dst, symlinks=True, ignore=ignore)
@@ -361,7 +362,10 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     dropped.append("target/a1-competitive/assets symlinks replaced by dereferenced copies")
 
     # workers, app, binaries
-    for worker in ("wake_worker.py", "stt_worker.py", "tts_worker.py", "command_worker.py", "pcm_fixture.py"):
+    # net_broker.py is the Core-brokered HTTP process (LLM routes and S5 connections): without it every
+    # network call of an installed package fails (the Core resolves <home>/scripts/net_broker.py).
+    for worker in ("wake_worker.py", "stt_worker.py", "tts_worker.py", "command_worker.py", "pcm_fixture.py",
+                   "net_broker.py"):
         copy_file(REPO / "scripts" / worker, pkg / "scripts" / worker)
     app_src = REPO / "app"
     for app_file in ("main.py", "bridge.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):

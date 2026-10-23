@@ -72,7 +72,7 @@ LLM_URL_LIMIT=200
 MODEL_ID=re.compile(r'[A-Za-z0-9._:/-]{1,128}');PROPOSAL_ID=re.compile(r'[A-Za-z0-9_]{1,64}')
 TOOL_STATES=('pending','denied','authorized','executed','failed','expired','cancelled')
 TOOL_KEYS=frozenset({'proposal_id','plugin_id','call_id','tool','args','state','reason','result'})
-PARTIAL_LIMIT=16384;ARGS_LIMIT=8192;TOOL_NAME_LIMIT=256;RESULT_TEXT_LIMIT=1024;TOOL_ITEMS=4
+PARTIAL_LIMIT=16384;ARGS_LIMIT=8192;TOOL_NAME_LIMIT=256;RESULT_TEXT_LIMIT=1024;TOOL_ITEMS=8
 CHAT_CAPABILITY_SUFFIX='.chat';CHAT_TEXT_LIMIT=4096;CHAT_CONTENT_LIMIT=4096;CHAT_INPUT_LIMIT=8192;CHAT_TURNS=31;CHAT_MAX_TOKENS=512;CHAT_DEADLINE_MS=10000;CHAT_MESSAGES_KEPT=64
 HTTP_STATUS_KEY='http_status'
 # C3 agent runtime (docs/C3.md). Limits and state sets mirror the Core; the codes are an explicit allowlist, anything else refuses the snapshot.
@@ -322,7 +322,7 @@ def valid_args(args):
     """Core stores the model's arguments as found (null when the call is malformed), so any JSON value fits here."""
     return bounded_json(args,ARGS_LIMIT)
 def valid_tools(items):
-    """Core proposal view: at most four items, exact keys (plus the C3 run_id/step pair), PlainText strings, bounded args."""
+    """Core proposal view: at most eight items (src/tools.rs: HISTORY_LIMIT 8 bounds pending plus history), exact keys (plus the C3 run_id/step pair), PlainText strings, bounded args."""
     if not (isinstance(items,list) and len(items)<=TOOL_ITEMS):return False
     ids=set()
     for item in items:

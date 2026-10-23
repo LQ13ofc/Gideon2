@@ -5,7 +5,7 @@ Usage: gideon-configure ABSOLUTE_STATE_DIR
 
 Writes only inside STATE_DIR (0700, created when absent): STATE_DIR/profile/
 (rendered manifests, evidence, tts/ root with config.yaml, pack.json) and
-STATE_DIR/core/ is left to the Core. Idempotent. Stdlib only.
+STATE_DIR/data/ (0700, user data) and STATE_DIR/core/ are left to the Core. Idempotent. Stdlib only.
 """
 import fcntl
 import hashlib
@@ -173,6 +173,9 @@ def main():
     profile = os.path.join(state, "profile")
     tts_root = os.path.join(profile, "tts")
     ensure_private_dir(profile)
+    # Private user data of the Core (--data-dir): skill exports/imports and the synthetic world. The package
+    # directory (--home) is verified and read-only in spirit: nothing the Core writes may land there.
+    ensure_private_dir(os.path.join(state, "data"))
     ensure_private_dir(tts_root)
     mapping = {"@PREFIX@": PREFIX, "@PROFILE@": profile}
 

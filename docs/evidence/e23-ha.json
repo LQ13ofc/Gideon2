@@ -1,0 +1,187 @@
+{
+  "gate": "E23_HA",
+  "partial": false,
+  "passed": 101,
+  "failed": 0,
+  "skipped": [
+    {
+      "name": "device codes in the leak scan",
+      "reason": "Home Assistant has no device flow: no device code exists to leak (the token step is the only secret input)"
+    },
+    {
+      "name": "homeassistant call timeout and retries",
+      "reason": "same broker path and budget as the github and google timeouts (verify_e1_connections, verify_e22_google); not repeated to keep the gate within its time budget"
+    },
+    {
+      "name": "network budget of 30 calls per minute per account",
+      "reason": "covered by tests/connections.rs network_budget_refuses_the_31st_call_in_a_minute_without_a_request, not repeated here"
+    },
+    {
+      "name": "garage_door.* as dangerous",
+      "reason": "the owner list has five patterns (lock.unlock, lock.open, alarm_control_panel.*, cover.open_cover, cover.close_cover); garage_door is not in the fake and is not classified (docs/S5.md E2.3 open point)"
+    }
+  ],
+  "checks": [
+    "A connect: connecting with the three scopes pending and no device code",
+    "A connect: no request reached the fake before the token",
+    "A consent: a scope the account did not request is refused as scope_not_requested",
+    "A token: refused as consent_required before any consent",
+    "A token: a rejected token is accepted for the probe",
+    "A bad token: reauth_required, no scope granted, nothing stored in the vault",
+    "A bad token: the fake refused exactly one probe",
+    "A after the rejected token: snapshot holds no token value",
+    "A token: connected with exactly the consented scopes",
+    "A token: account_ref is the X-Instance of the fake",
+    "A vault holds the token of the account (vacuity guard)",
+    "A after the token probe: snapshot holds no token value",
+    "A read: states.list runs without approval (ok)",
+    "A read: exactly one request reached the fake",
+    "A read: a malformed entity id is refused as invalid_args with no request",
+    "A read: the fake answers not_found for an unknown entity",
+    "A write: light.turn_on is still off before the decision",
+    "A write: service.call waits for approval (pending_approval)",
+    "A write: card is a connection card for conn:homeassistant.service.call, risk write, pending",
+    "A write: the authorize is accepted",
+    "A write: executed after the approval",
+    "A write: the fake shows the light on with brightness 128 (effect verified)",
+    "A scope: lock.unlock without services.dangerous is scope_not_granted with no request",
+    "A dangerous: lock.unlock waits for approval (pending_approval)",
+    "A dangerous: card is a connection card for conn:homeassistant.service.call, risk destructive, pending",
+    "A dangerous: authorize refused with public_disabled without the switch",
+    "A dangerous: the proposal stays pending and the lock stays locked",
+    "A dangerous: deny closes it",
+    "A 401 on a call: reauth_required (no refresh exists for a token account)",
+    "A 401 on a call: status reauth_required and the granted scopes are kept",
+    "A after the 401: snapshot holds no token value",
+    "A disconnect of the reauth account: accepted",
+    "A disconnect of the reauth account: no vault entry left",
+    "A remove of the reauth account: accepted",
+    "A revoke: accepted",
+    "A revoke: local token removed from the vault and the account disconnected",
+    "A revoke: no request reached the fake (Home Assistant has no revoke endpoint)",
+    "A revoke: calls stop (not_connected)",
+    "A revoke: the account is removed",
+    "A disconnect: the dangerous account is disconnected",
+    "A disconnect: no vault entry left for the dangerous account",
+    "A S1 Base native after the homeassistant connections (replay)",
+    "A after all accounts: snapshot holds no token value",
+    "A: Core clean shutdown rc 0",
+    "A: no plugin or broker process left after shutdown",
+    "B dangerous: still waits for approval",
+    "B dangerous: authorize accepted when the switch is on",
+    "B dangerous: executed after the approval",
+    "B dangerous: the fake shows the lock unlocked",
+    "B dangerous: the result keeps only entity, state and friendly name",
+    "B write: switch.turn_off waits as an ordinary write, not a destructive call",
+    "B write: card is a connection card for conn:homeassistant.service.call, risk write, pending",
+    "B: Core clean shutdown rc 0",
+    "B: no plugin or broker process left after shutdown",
+    "llm_engine approve ok",
+    "llm_engine installed through the Hub",
+    "C route: fake key stored for the loopback fake provider (never printed)",
+    "C route: custom loopback route configured with consent",
+    "C agent: run one starts",
+    "C agent: one pending proposal, a connection card for the service call",
+    "C agent: the fake received only the read before the decision (one GET)",
+    "C agent: the lamp is still off before the decision",
+    "C agent: authorize accepted",
+    "C agent: the lamp is on after the approved call (effect verified on the fake)",
+    "C agent: the only service call is light.turn_on (the injection caused none)",
+    "C agent: the lock did not move",
+    "C agent: grants unchanged by the injected text",
+    "C agent: the read result is projected (entity, state, friendly name only) and the injection is data",
+    "C agent: final answer from the model",
+    "C agent: the run carries no token value",
+    "C agent: run two starts",
+    "C agent: the read runs without approval (executed, nothing pending in run two)",
+    "C agent: the read made exactly one GET",
+    "C agent: second answer from the model",
+    "C after agent: snapshot holds no token value",
+    "C: Core clean shutdown rc 0",
+    "C: no plugin or broker process left after shutdown",
+    "D qt: connections phase exit 0",
+    "D qt: all four checkpoints reached (ready, read, consent, token)",
+    "D qt: phase self-report has no failed or ignored checks",
+    "D qt: the Core connected the account after the token probe",
+    "D qt: the token value never reached the snapshot",
+    "D: Core clean shutdown rc 0",
+    "D: no plugin or broker process left after shutdown",
+    "E real backend: homeassistant connect refused as real_backend_unsupported without a fake",
+    "E real backend: the account stays disconnected",
+    "E real backend: a token is refused as invalid_state (no connect, no probe)",
+    "E: Core clean shutdown rc 0",
+    "E: no plugin or broker process left after shutdown",
+    "leak: no token value in any file of the test home (ledger, audit, logs, vault for retired accounts)",
+    "leak: vacuity guard, tokens were given to the fake and rejected or retired",
+    "A: connections.json is mode 0600",
+    "A: secrets.json is mode 0600",
+    "B: connections.json is mode 0600",
+    "B: secrets.json is mode 0600",
+    "C: connections.json is mode 0600",
+    "C: secrets.json is mode 0600",
+    "D: connections.json is mode 0600",
+    "D: secrets.json is mode 0600",
+    "E: connections.json is mode 0600",
+    "leak: audit.log exists and records connection_call with no token"
+  ],
+  "failures": [],
+  "details": {
+    "A_accounts": {
+      "principal": "conn_4fb6f1856e034805",
+      "dangerous": "conn_686e4f1690fb384f",
+      "reauth": "conn_9a937d1830fac21c"
+    },
+    "C_read_proposals": [
+      {
+        "tool": "ha_get_state",
+        "kind": "connection",
+        "state": "executed",
+        "risk": "read",
+        "operation": "state.get"
+      },
+      {
+        "tool": "ha_call_service",
+        "kind": "connection",
+        "state": "pending",
+        "risk": "write",
+        "operation": "service.call"
+      }
+    ],
+    "C_agent": {
+      "run_one_steps": [
+        "chat",
+        "tool",
+        "chat",
+        "tool",
+        "chat"
+      ],
+      "run_two_steps": [
+        "chat",
+        "tool",
+        "chat"
+      ]
+    },
+    "D_qt_stderr_tail": "",
+    "D_qt": {
+      "checks": 18,
+      "markers": [
+        "connections-ready",
+        "connections-read",
+        "connections-consented",
+        "connections-token"
+      ]
+    }
+  },
+  "sampler": {
+    "files_scanned": 42,
+    "files_in_home": 42,
+    "secret_values_scanned": 5,
+    "retired_values_scanned": 2,
+    "snapshots_scanned": 5
+  },
+  "binary_sha256": "b68a5e0106b89e4eacb31366eeab9668bf2723f8ce36484b082d258b425a33bb",
+  "commit": "c965f18063b7f4db1c8e1ffd9b785105f163424b",
+  "runtime_s": 19.0,
+  "scope": "release Core, loopback fake Home Assistant (tests/fixtures/connections/homeassistant_server.py), scripted fake LLM, no real network, no real token",
+  "physical_validation": "NOT_PERFORMED"
+}

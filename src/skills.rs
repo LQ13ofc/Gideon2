@@ -3179,8 +3179,8 @@ impl Core {
 }
 
 // ---------------------------------------------------------------------------
-// D4: `.gskill` packages. Export writes under `<home>/skill-exports`; import reads only
-// `<home>/skill-imports/<name>.gskill`, previews it, and installs a confirmed preview as `draft`.
+// D4: `.gskill` packages. Export writes under `<data>/skill-exports`; import reads only
+// `<data>/skill-imports/<name>.gskill`, previews it, and installs a confirmed preview as `draft`.
 // ---------------------------------------------------------------------------
 
 /// The package file. `package_sha256` covers the whole package with that field set to "".
@@ -3236,10 +3236,10 @@ fn import_name_ok(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// Reads `<home>/skill-imports/<name>.gskill`: a regular file, never through a symlink, at most
+/// Reads `<data>/skill-imports/<name>.gskill`: a regular file, never through a symlink, at most
 /// 64 KiB. Any other path, file type or size is refused before its content is parsed.
 fn read_package(name: &str) -> Result<Vec<u8>, &'static str> {
-    let dir = crate::transport::home().join(IMPORT_DIR);
+    let dir = crate::transport::data_dir().join(IMPORT_DIR);
     match fs::symlink_metadata(&dir) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => return Err(F_PATH),
         Ok(_) => {}
@@ -3304,7 +3304,7 @@ struct Scan {
 }
 
 impl Core {
-    /// Export of one installed version. Writes `<home>/skill-exports/<id>-<version>.gskill` (0600).
+    /// Export of one installed version. Writes `<data>/skill-exports/<id>-<version>.gskill` (0600).
     pub(crate) fn skill_export(&mut self, id: &str, version: &str) -> &'static str {
         if let Err(code) = self.skills_ready() {
             return code;
@@ -3352,7 +3352,7 @@ impl Core {
         if out.len() as u64 > PACKAGE_MAX {
             return F_TOO_LARGE;
         }
-        let dir = crate::transport::home().join(EXPORT_DIR);
+        let dir = crate::transport::data_dir().join(EXPORT_DIR);
         if let Err(code) = private_dir(&dir) {
             return code;
         }

@@ -230,6 +230,35 @@ pub fn home() -> &'static std::path::Path {
     )
 }
 
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+static FIXTURES_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Sets the user data directory once at startup (`--data-dir`). Same validation as `--home`.
+pub fn set_data_dir(path: PathBuf) -> io::Result<()> {
+    let invalid = || io::Error::new(io::ErrorKind::InvalidInput, "invalid --data-dir");
+    let validated = validate_home(&path).map_err(|_| invalid())?;
+    DATA_DIR.set(validated).map_err(|_| invalid())
+}
+
+/// Where user-visible data lives: skill exports and imports and the synthetic world. A package
+/// keeps `--home` read-only and hash-verified, so it passes a private `--data-dir`; without the
+/// option the data lives under `home()` (development layout).
+pub fn data_dir() -> &'static std::path::Path {
+    DATA_DIR.get().map_or_else(home, PathBuf::as_path)
+}
+
+/// Test only (`--test-fixtures-dir`): directory that holds `tests/fixtures/...` for the fake MCP
+/// server. Production packages never set it and carry no fixtures.
+pub fn set_fixtures_dir(path: PathBuf) -> io::Result<()> {
+    let invalid = || io::Error::new(io::ErrorKind::InvalidInput, "invalid --test-fixtures-dir");
+    let validated = validate_home(&path).map_err(|_| invalid())?;
+    FIXTURES_DIR.set(validated).map_err(|_| invalid())
+}
+
+pub fn fixtures_dir() -> &'static std::path::Path {
+    FIXTURES_DIR.get().map_or_else(home, PathBuf::as_path)
+}
+
 pub(crate) fn namespace_command(
     python: &std::path::Path,
     script: &str,

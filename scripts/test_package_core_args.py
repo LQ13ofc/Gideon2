@@ -47,7 +47,7 @@ class CoreArgsTests(unittest.TestCase):
         pkg = self.pkg.resolve()
         return [
             str(pkg / "bin/gideon-base"), "--root", f"{STATE}/core", "--home", str(pkg),
-            "--commands-sandbox",
+            "--commands-sandbox", "--data-dir", f"{STATE}/data",
             "--base-pack", f"{STATE}/profile/pack.json",
             "--tts-virtual", str(pkg / "venvs/tts/bin/python"), f"{STATE}/profile/tts-manifest.json",
             "--wake-replay", str(pkg / "venvs/a1/bin/python"), f"{STATE}/profile/replay-manifest.json", "0",

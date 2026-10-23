@@ -2525,7 +2525,7 @@ impl Manager {
         self.push(Job::Mcp(Box::new(McpJob {
             account: id.to_owned(),
             proposal: None,
-            script: crate::transport::home().join(crate::mcp::FAKE_SCRIPT),
+            script: crate::transport::fixtures_dir().join(crate::mcp::FAKE_SCRIPT),
             profile: profile.to_owned(),
             work: McpWork::Start,
         })));
@@ -3283,7 +3283,7 @@ impl Manager {
         self.push(Job::Mcp(Box::new(McpJob {
             account: plan.account.clone(),
             proposal,
-            script: crate::transport::home().join(crate::mcp::FAKE_SCRIPT),
+            script: crate::transport::fixtures_dir().join(crate::mcp::FAKE_SCRIPT),
             profile: profile.to_owned(),
             work,
         })));

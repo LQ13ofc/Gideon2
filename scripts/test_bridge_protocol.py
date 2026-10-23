@@ -422,7 +422,8 @@ class LlmContract(unittest.TestCase):
     def test_tool_proposals_reject_forged_or_oversize_items(self):
         def item(**change):return {**tool_item(),**change}
         cases=[
-            ('five items',{'tool_proposals':[tool_item(f'tool_1_{i}') for i in range(5)]}),
+            # src/tools.rs HISTORY_LIMIT is 8 (pending plus terminal entries): nine items is the first oversize list
+            ('nine items',{'tool_proposals':[tool_item(f'tool_1_{i}') for i in range(9)]}),
             ('extra authority key',{'tool_proposals':[{**tool_item(),'authority':'model'}]}),
             ('unknown state',{'tool_proposals':[item(state='approved')]}),
             ('duplicate proposal',{'tool_proposals':[tool_item(),tool_item()]}),
@@ -440,6 +441,8 @@ class LlmContract(unittest.TestCase):
         ]
         for name,change in cases:
             with self.subTest(case=name),self.assertRaises(ValueError):validate_snapshot({**BASE,**change},'r',0)
+        # the Core keeps at most eight entries (pending and terminal): eight items must load, or the page goes offline
+        validate_snapshot({**BASE,'tool_proposals':[tool_item(f'tool_1_{i}') for i in range(8)]},'r',0)
     def test_capability_result_partial_and_http_status_are_strict(self):
         validate_snapshot(chat_snapshot(result=chat_result('texto\nlinha',partial='parcial\nmais')),'r',0)
         validate_snapshot(chat_snapshot(result=chat_result(ok=False,error='http_error',extra={'http_status':429})),'r',0)

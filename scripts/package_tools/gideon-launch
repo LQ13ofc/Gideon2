@@ -7,7 +7,7 @@ Validates the ledger and layout (gideon-install's rules, including the verifier 
 current version with its gideon-verify, creates ROOT/profiles/PERFIL (0700) if missing, then execs
 current/bin/gideon-core ROOT/profiles/PERFIL [args] with GIDEON_PINNED_VERIFIER_SHA256 set.
 Core options the package pins (--root --home --base-pack --tts-virtual --wake-replay
---commands-sandbox --plugin-python, also as --opt=value) are rejected with exit 2.
+--commands-sandbox --plugin-python --data-dir, also as --opt=value) are rejected with exit 2.
 Any inconsistency exits non-zero with a message on stderr and never execs. Stdlib only; reuses
 gideon-install from the same directory.
 """
@@ -22,7 +22,7 @@ sys.dont_write_bytecode = True  # never create bin/__pycache__ inside the packag
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Options gideon-core sets itself. Keep in sync with scripts/package_tools/gideon-core.
 PINNED_OPTIONS = ("--root", "--home", "--base-pack", "--tts-virtual", "--wake-replay",
-                  "--commands-sandbox", "--plugin-python")
+                  "--commands-sandbox", "--plugin-python", "--data-dir")
 PIN_ENV = "GIDEON_PINNED_VERIFIER_SHA256"
 
 

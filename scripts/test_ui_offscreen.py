@@ -67,7 +67,7 @@ def check(name,value):
 def wait(condition,seconds=40):
     until=time.monotonic()+seconds
     while not condition():
-        if time.monotonic()>until:raise TimeoutError((bridge.state,bridge.diagnostic))
+        if time.monotonic()>until:raise TimeoutError((bridge.state,bridge.diagnostic,bridge.results.get('connections'),bridge.pending,bridge.error))
         if not trace or trace[-1]!=bridge.state:trace.append(bridge.state)
         QTest.qWait(15)
 wait(lambda:bridge.connected,5)
@@ -427,7 +427,15 @@ elif args.phase=='connections':
         wait(lambda:not bridge.connectionsBusy,60)
         check('Home Assistant consent accepted: the account keeps waiting for its token',next(c for c in bridge.connectionsItems if c['id']==account['id'])['status']=='connecting')
     else:
-        wait(lambda:not bridge.connectionsBusy and scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'],60)
+        # The Core answers "Core ocupado" (busy) while its network slot is taken, and the bridge never queues a click: the
+        # user's own consent is repeated (same ticked scope, same button) every 3 s until the Core lists the scope as granted.
+        def consented():return scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes']
+        until=time.monotonic()+60;last_click=time.monotonic()
+        while not(not bridge.connectionsBusy and consented()):
+            if time.monotonic()>until:raise TimeoutError((bridge.state,bridge.results.get('connections'),bridge.pending,bridge.error))
+            if not bridge.connectionsBusy and not consented() and time.monotonic()-last_click>3:
+                consent.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);last_click=time.monotonic()
+            QTest.qWait(15)
         check('the Core lists the consented scope as granted',scope in next(c for c in bridge.connectionsItems if c['id']==account['id'])['granted_scopes'])
     Path(args.artifacts,'connections-consented').touch()
     if os.environ.get('GIDEON_E24_MCP'):

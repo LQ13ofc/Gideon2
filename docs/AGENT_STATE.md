@@ -47,3 +47,10 @@
 
 - Sandboxed fake stdio MCP server managed by the Core (fixed registration `--connections-fake-mcp`), mcp.discover with schema validation and per-tool sha256, per-call approval, untrusted prefixed output, connection_trust_tools, mcp_call agent tool. Gate scripts/verify_e24_mcp.py 188/0 (4 skips); details and wire differences: docs/S5.md "Resultado E2.4 mcp".
 - Next: E3 registry (src/registry.rs).
+
+## 2026-10-23 — E3 registry and E4 total integration (AUTO_VERIFIED, UNCOMMITTED)
+
+- E3 evidence unchanged (`verify_e3_registry.py` 129/0, 3 skips, earlier run). E4 (`verify_e4_integration.py`): one full run 288/0, 3 skips, 603 s, evidence `target/evidence/e4-integration.json`, copy in `docs/evidence/`. Packages built from the uncommitted tree (`package_dirty_flag: true`).
+- Fixed: bridge `TOOL_ITEMS` 4 to 8 (Core history limit; page went offline with 5+ proposals); UI consent retries on busy; gate ledger, netns, profile-scoped process and sentinel-mode defects.
+- Checks at the end: cargo fmt --check OK, clippy -D warnings OK, cargo test 375 passed 0 failed, test_bridge_protocol 169 OK, test_package_core_args 9 OK, test_package_hardening 52 OK.
+- Owner rules kept: no commit, no push; E4 gate run once in full plus partial runs while debugging; no other gate script run. Remaining: owner validation per docs/HUMAN_VALIDATION.md (READY_FOR_HUMAN_VALIDATION).

@@ -289,9 +289,9 @@ impl Default for World {
     }
 }
 
-/// Directory that holds `world.json` (and the `app.json` mirror) for the current home.
+/// Directory that holds `world.json` (and the `app.json` mirror) for the current data directory.
 pub fn dir() -> PathBuf {
-    crate::transport::home().join(SUBDIR)
+    crate::transport::data_dir().join(SUBDIR)
 }
 
 /// Permission a service needs, or `None` for an unknown service name.

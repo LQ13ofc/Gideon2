@@ -534,7 +534,7 @@ class LockHeldByCoreTests(Base):
 
 # F6: user options the package pins are refused with exit 2 (gideon-core and gideon-launch).
 PINNED = ["--root", "--home", "--base-pack", "--tts-virtual", "--wake-replay", "--commands-sandbox",
-          "--plugin-python"]
+          "--plugin-python", "--data-dir"]
 
 
 def core_dry(base, *args):
