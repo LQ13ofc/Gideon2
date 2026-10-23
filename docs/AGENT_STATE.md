@@ -54,3 +54,6 @@
 - Fixed: bridge `TOOL_ITEMS` 4 to 8 (Core history limit; page went offline with 5+ proposals); UI consent retries on busy; gate ledger, netns, profile-scoped process and sentinel-mode defects.
 - Checks at the end: cargo fmt --check OK, clippy -D warnings OK, cargo test 375 passed 0 failed, test_bridge_protocol 169 OK, test_package_core_args 9 OK, test_package_hardening 52 OK.
 - Owner rules kept: no commit, no push; E4 gate run once in full plus partial runs while debugging; no other gate script run. Remaining: owner validation per docs/HUMAN_VALIDATION.md (READY_FOR_HUMAN_VALIDATION).
+
+## 2026-10-23 — S5 + E4 CLOSED, READY_FOR_HUMAN_VALIDATION
+- Final full matrix (target/run-matrix-final.sh) green except e3 gate expectation updated afterwards (130/0); verify_e4_integration 288/0 on a clean tree. Security review of connectors: 9 findings fixed (docs/S5.md). Next: owner runs docs/HUMAN_VALIDATION.md. Open decisions: Flatpak scope, package signing/update channel/autostart, worker python path.

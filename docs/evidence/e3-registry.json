@@ -1,7 +1,7 @@
 {
   "gate": "E3_REGISTRY",
   "partial": false,
-  "passed": 129,
+  "passed": 130,
   "failed": 0,
   "skipped": [
     {
@@ -78,9 +78,10 @@
     "B1 memory: the connection route remembers the success in its reason",
     "B1: snapshot holds no token value",
     "B2: approved once",
-    "B2: the fake stored the issue and answered 500, the retry replayed it: exactly one issue",
-    "B2: two POSTs reached the fake (the create and its retry with the same idempotency key)",
-    "B2: one executed proposal whose number is the fake issue number",
+    "B2 not retried: exactly one POST reached the fake (no replay after the 500)",
+    "B2 not retried: exactly one issue on the fake, the one created before the 500 (no duplicate)",
+    "B2 not retried: the one proposal failed with the real provider_error (not executed)",
+    "B2 not retried: the agent run carries the real provider_error and no second approval card is opened",
     "B3: the rate-limited create failed and no issue exists",
     "B3 memory: the connection route now remembers the failure in its reason",
     "B3: a failure does not open the visual route (connection still chosen, visual not allowed)",
@@ -168,9 +169,9 @@
     "retired_values_scanned": 16,
     "snapshots_scanned": 3
   },
-  "binary_sha256": "b68a5e0106b89e4eacb31366eeab9668bf2723f8ce36484b082d258b425a33bb",
-  "commit": "c965f18063b7f4db1c8e1ffd9b785105f163424b",
-  "runtime_s": 19.4,
+  "binary_sha256": "14cedef6183c90aec4e97fe86f0655c7d54bd87ba2901bdaebd467a7d5f9ddc9",
+  "commit": "eaf9a72190c65ecdc677abf0562f3ef0d95ba63d",
+  "runtime_s": 19.5,
   "scope": "release Core, loopback fake GitHub (tests/fixtures/connections/github_server.py), synthetic world with its fake issues site, llm_engine + computer_control through the Hub, scripted fake LLM, no real network, no real credentials",
   "physical_validation": "NOT_PERFORMED"
 }

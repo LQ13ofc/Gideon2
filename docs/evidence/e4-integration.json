@@ -132,13 +132,13 @@
     "demo connections mcp: a call waits for the user decision",
     "demo connections mcp: authorize accepted",
     "demo connections mcp: output is untrusted data prefixed by the Core",
-    "qt connections: the UI runs from the installed package (venvs/ui and app/ of 0.4.0-60461a91)",
+    "qt connections: the UI runs from the installed package (venvs/ui and app/ of 0.4.0-dc8a2789)",
     "qt connections: the packaged Qt phase exits 0",
     "qt connections: every checkpoint reached ['connections-ready', 'connections-read', 'connections-consented']",
     "qt connections: self-report has zero failed and zero ignored checks",
     "demo qt connections: the consented scope was granted by the Core",
     "demo qt connections: the extra account was disconnected and removed",
-    "qt registry: the UI runs from the installed package (venvs/ui and app/ of 0.4.0-60461a91)",
+    "qt registry: the UI runs from the installed package (venvs/ui and app/ of 0.4.0-dc8a2789)",
     "qt registry: the packaged Qt phase exits 0",
     "qt registry: every checkpoint reached ['registry-ready', 'registry-plan', 'registry-allowed', 'registry-revoked']",
     "qt registry: self-report has zero failed and zero ignored checks",
@@ -158,7 +158,7 @@
     "demo skills: skill_e4_run saved, dry-run, approved, enabled",
     "demo skills: export writes a .gskill into the profile data directory (never into the package)",
     "demo skills: export file mode 0600 in a 0700 directory",
-    "qt skills: the UI runs from the installed package (venvs/ui and app/ of 0.4.0-60461a91)",
+    "qt skills: the UI runs from the installed package (venvs/ui and app/ of 0.4.0-dc8a2789)",
     "qt skills: the packaged Qt phase exits 0",
     "qt skills: every checkpoint reached ['skills-ready', 'skills-validated', 'skills-draft', 'skills-awaiting', 'skills-run', 'skills-import']",
     "qt skills: self-report has zero failed and zero ignored checks",
@@ -306,8 +306,8 @@
     "offline: no residual Core or worker process group after stop",
     "offline: Core exit status 0 after SIGTERM",
     "offline: no process referencing this profile Core root remains after stop",
-    "final: gideon-verify passes on retained 0.4.0-60461a91 (nothing wrote into the package)",
-    "final: gideon-verify passes on retained 0.4.1-60461a91 (nothing wrote into the package)",
+    "final: gideon-verify passes on retained 0.4.0-dc8a2789 (nothing wrote into the package)",
+    "final: gideon-verify passes on retained 0.4.1-dc8a2789 (nothing wrote into the package)",
     "final: no process referencing the install root remains",
     "final: no Core still tracked",
     "final: the real HOME top-level entries are unchanged",
@@ -323,36 +323,21 @@
   "failures": [],
   "details": {},
   "identity": {
-    "commit": "60461a91eeb9e2468b8dcb763309a34d3e92af3b",
-    "tracked_changes_at_build": [
-      " M app/bridge.py",
-      " M scripts/build_package.py",
-      " M scripts/package_tools/gideon-configure",
-      " M scripts/package_tools/gideon-core",
-      " M scripts/package_tools/gideon-launch",
-      " M scripts/test_bridge_protocol.py",
-      " M scripts/test_package_core_args.py",
-      " M scripts/test_package_hardening.py",
-      " M scripts/test_ui_offscreen.py",
-      " M src/connections.rs",
-      " M src/main.rs",
-      " M src/skills.rs",
-      " M src/transport.rs",
-      " M src/world.rs"
-    ],
+    "commit": "dc8a2789ce9152368f5a2fdd366d0aadfd4f3017",
+    "tracked_changes_at_build": [],
     "package_dirty_flag": {
-      "0.4.0": true,
-      "0.4.1": true
+      "0.4.0": false,
+      "0.4.1": false
     },
     "binary_sha256": {
-      "0.4.0": "6af731bef3a4447a5f7c5934e8167d3bbc87f4333b3cdcfc1f14d8dabf84a2c2",
-      "0.4.1": "6af731bef3a4447a5f7c5934e8167d3bbc87f4333b3cdcfc1f14d8dabf84a2c2"
+      "0.4.0": "d4fcb6d5cbe1845613fe91daf50ae6b08ac04ca543d1718b16dadbbbf8943f13",
+      "0.4.1": "d4fcb6d5cbe1845613fe91daf50ae6b08ac04ca543d1718b16dadbbbf8943f13"
     },
     "package_json_sha256": {
-      "0.4.0": "132c60308df5b13894002db5cdb894db6a3b1abc5b04e4e091a33eee0ae491cc",
-      "0.4.1": "71879625019d5f9cf506130998340fa20ba728f8df6f1d1350e304141ac59cec"
+      "0.4.0": "a61ccd2e7acbfea4ebde69e6bbcf574b0f36f2b4978f780f0c4d40428f2d7a9f",
+      "0.4.1": "74a50b443a99f96f87c10d1095cb79c76bc25df1106ae06f3acd4892b91e97e6"
     },
-    "release_binary_sha256": "37610520e3525380cb56a6569162126e97c7d8fe7a5c93b133735cc90f754857"
+    "release_binary_sha256": "14cedef6183c90aec4e97fe86f0655c7d54bd87ba2901bdaebd467a7d5f9ddc9"
   },
   "idle_resources": {
     "base-only": {
@@ -360,33 +345,33 @@
       "processes": 6,
       "tree_cpu_percent_one_core": 0.0,
       "core_cpu_percent_one_core": 0.0,
-      "core_rss_mib": 6.4,
-      "tree_rss_mib_sum": 419.4
+      "core_rss_mib": 6.6,
+      "tree_rss_mib_sum": 423.3
     },
     "demo-full": {
       "seconds": 10,
       "processes": 15,
       "tree_cpu_percent_one_core": 0.0,
       "core_cpu_percent_one_core": 0.0,
-      "core_rss_mib": 6.8,
+      "core_rss_mib": 6.7,
       "tree_rss_mib_sum": 490.9
     }
   },
   "measurements": {
-    "build_0.4.0_s": 11.4,
-    "build_0.4.1_s": 11.4,
+    "build_0.4.0_s": 11.6,
+    "build_0.4.1_s": 11.5,
     "section_seconds": {
-      "build": 23.0,
-      "static": 131.0,
-      "install": 55.1,
+      "build": 23.2,
+      "static": 131.1,
+      "install": 55.2,
       "noflag": 34.9,
-      "demo": 57.4,
+      "demo": 57.5,
       "update": 63.2,
       "rollback": 45.4,
       "crash": 103.4,
       "profiles": 44.2,
       "offline": 32.8,
-      "final": 12.5
+      "final": 12.6
     },
     "key_scan": {
       "files": 27129,
@@ -434,7 +419,7 @@
     },
     "offline_chat_error": "network_unavailable"
   },
-  "runtime_s": 603.3,
+  "runtime_s": 603.9,
   "scope": "complete Linux package built by scripts/build_package.py, installed with the package gideon-install and run with the package gideon-launch/gideon-core/gideon-base and the package Qt app, under an outer bwrap without repository, uv or (except fake-using boots, which share only the host loopback) network; fakes and fixtures outside the package via test-only flags",
   "physical_validation": "NOT_PERFORMED"
 }

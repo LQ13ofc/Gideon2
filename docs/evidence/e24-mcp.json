@@ -1,7 +1,7 @@
 {
   "gate": "E24_MCP",
   "partial": false,
-  "passed": 188,
+  "passed": 194,
   "failed": 0,
   "skipped": [
     {
@@ -19,6 +19,10 @@
     {
       "name": "device codes and tokens in the leak scan",
       "reason": "mcp accounts have no device flow and no token"
+    },
+    {
+      "name": "mcp_rpc_error for a tool trusted in the ledger that the server no longer lists",
+      "reason": "since the discover-before-call rule, a call after a reconnect is tool_not_verified until a discover runs in this process, and that discover removes the vanished tool (scenario D checks unknown_tool). The error mapping stays in src/mcp.rs (Fail::Rpc -> mcp_rpc_error); no fixture path reaches it through the gate any more"
     }
   ],
   "checks": [
@@ -41,6 +45,8 @@
     "A consent: nothing granted by the refusal",
     "A consent: connected with exactly the consented scopes, account_ref from serverInfo",
     "A consent: tools are not listed before discover",
+    "A verify: mcp.call before any discover is tool_not_verified",
+    "A verify: the refusal creates no proposal and queues no job (no server call)",
     "A vault: an mcp account holds no token",
     "A discover: the three good tools, all trusted on the first discover",
     "A discover: risk labels, delete_note is destructive (annotation), the others write",
@@ -96,6 +102,7 @@
     "A snapshot: no canary, no argument text",
     "A: Core clean shutdown rc 0",
     "A: no plugin or broker process left after shutdown",
+    "B skill discover: a skill-origin first discover leaves all three tools needs_reapproval (never trusted)",
     "B skill: validate and save accepted",
     "B skill: conn:mcp.call is refused (missing_dependency) while no tool was discovered or trusted",
     "B skill: dry run, approve and enable accepted once a tool is trusted",
@@ -104,6 +111,7 @@
     "B skill: authorize accepted",
     "B skill: the run is done and the call went through mcp.call (untrusted marker set)",
     "B skill: a destructive MCP tool never runs from a skill step (destructive_disabled, run failed)",
+    "B skill: no awaiting approval for the destructive skill step (refused at start, no card)",
     "B skill: n2 was untouched by the refused skill (the user delete still finds it)",
     "B destructive: delete_note executes after the approval when the switch is on",
     "B destructive: the card was destructive",
@@ -171,8 +179,10 @@
     "D restart: the account is disconnected (the process is gone) and keeps no scope",
     "D restart: the tool list and trust state were persisted",
     "D ledger: sha256 per tool stored, no argument text, mode 0600",
-    "D restart: a server error answer (tool not listed yet) is mcp_rpc_error and the account stays connected",
+    "D restart: a call before a discover in the new process is tool_not_verified",
+    "D restart: the refusal creates no proposal (no server call)",
     "D restart: the server no longer lists export_notes (new process, first discover): the tool leaves the list",
+    "D restart: a call to the vanished tool is unknown_tool (it left the list)",
     "D restart: it comes back on the second discover as a NEW tool: needs_reapproval, not callable",
     "D restart: the old tools kept their trust through the restart",
     "D restart: trust again accepted",
@@ -271,7 +281,7 @@
         ],
         "ns": {
           "core_net": "net:[4026531833]",
-          "server_net": "net:[4026532710]"
+          "server_net": "net:[4026532704]"
         },
         "interfaces": [
           "lo"
@@ -307,9 +317,9 @@
       }
     },
     "A_accounts": {
-      "main": "conn_9d21d9fc1d39b288",
-      "destructive": "conn_6199f2c1dbc6a160",
-      "cycle": "conn_b3de6b5b19a150a0"
+      "main": "conn_b605a05bdb976dd3",
+      "destructive": "conn_12120d739d8a92be",
+      "cycle": "conn_d0ee260b919dd50b"
     },
     "F_qt_stderr_tail": "",
     "F_qt": {
@@ -323,14 +333,14 @@
     }
   },
   "sampler": {
-    "files_scanned": 49,
-    "files_in_home": 49,
+    "files_scanned": 50,
+    "files_in_home": 50,
     "secret_values_scanned": 1,
     "snapshots_scanned": 1
   },
-  "binary_sha256": "b68a5e0106b89e4eacb31366eeab9668bf2723f8ce36484b082d258b425a33bb",
-  "commit": "c965f18063b7f4db1c8e1ffd9b785105f163424b",
-  "runtime_s": 18.1,
+  "binary_sha256": "14cedef6183c90aec4e97fe86f0655c7d54bd87ba2901bdaebd467a7d5f9ddc9",
+  "commit": "eaf9a72190c65ecdc677abf0562f3ef0d95ba63d",
+  "runtime_s": 18.7,
   "scope": "release Core, sandboxed fake stdio MCP server (tests/fixtures/connections/mcp_server.py), scripted fake LLM, no real network, no real credential",
   "physical_validation": "NOT_PERFORMED"
 }

@@ -1,7 +1,7 @@
 {
   "gate": "E1_CONNECTIONS",
   "partial": false,
-  "passed": 119,
+  "passed": 120,
   "failed": 0,
   "skipped": [
     {
@@ -43,10 +43,11 @@
     "A scope: ungranted issues:write refused as scope_not_granted",
     "A scope: ungranted pulls:write refused as scope_not_granted",
     "A scope: no network request for the refused calls (counter unchanged)",
-    "A retry: write waits for approval",
-    "A retry: executed after the retry",
-    "A retry: exactly one issue after a 500 and a retry",
-    "A retry: exactly two POSTs (create, then the replayed retry)",
+    "A no-retry: write waits for approval",
+    "A no-retry: failed with provider_error (the real 500, not replayed)",
+    "A no-retry: exactly one issue on the fake after the 500 (no duplicate)",
+    "A no-retry: exactly one request reached the fake (one POST, no replay)",
+    "A retry: idempotent repo.get is retried after one timeout and ends ok",
     "A rate limit: code rate_limited with retry_after 7",
     "A rate limit: account stays connected",
     "A timeout: reported as timeout",
@@ -141,8 +142,8 @@
       "state": "open"
     },
     "A_accounts": {
-      "principal": "conn_02c735000e034101",
-      "limited": "conn_dd9aa9fccbf01799"
+      "principal": "conn_c4b3cef1375d18b3",
+      "limited": "conn_3484c8e2f33d293c"
     },
     "C_agent": {
       "run_one_steps": [
@@ -169,13 +170,13 @@
   "sampler": {
     "files_scanned": 44,
     "files_in_home": 44,
-    "secret_values_scanned": 15,
-    "retired_values_scanned": 8,
+    "secret_values_scanned": 17,
+    "retired_values_scanned": 10,
     "snapshots_scanned": 4
   },
-  "binary_sha256": "b68a5e0106b89e4eacb31366eeab9668bf2723f8ce36484b082d258b425a33bb",
-  "commit": "c965f18063b7f4db1c8e1ffd9b785105f163424b",
-  "runtime_s": 35.5,
+  "binary_sha256": "14cedef6183c90aec4e97fe86f0655c7d54bd87ba2901bdaebd467a7d5f9ddc9",
+  "commit": "eaf9a72190c65ecdc677abf0562f3ef0d95ba63d",
+  "runtime_s": 42.9,
   "scope": "release Core, loopback fake GitHub (tests/fixtures/connections/github_server.py), scripted fake LLM, no real network, no real credentials",
   "physical_validation": "NOT_PERFORMED"
 }

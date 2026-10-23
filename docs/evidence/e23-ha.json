@@ -127,9 +127,9 @@
   "failures": [],
   "details": {
     "A_accounts": {
-      "principal": "conn_4fb6f1856e034805",
-      "dangerous": "conn_686e4f1690fb384f",
-      "reauth": "conn_9a937d1830fac21c"
+      "principal": "conn_53b7a94f1661d74b",
+      "dangerous": "conn_2470c6b53c5ad419",
+      "reauth": "conn_c01c55f452bfe2d5"
     },
     "C_read_proposals": [
       {
@@ -179,9 +179,9 @@
     "retired_values_scanned": 2,
     "snapshots_scanned": 5
   },
-  "binary_sha256": "b68a5e0106b89e4eacb31366eeab9668bf2723f8ce36484b082d258b425a33bb",
-  "commit": "c965f18063b7f4db1c8e1ffd9b785105f163424b",
-  "runtime_s": 19.0,
+  "binary_sha256": "14cedef6183c90aec4e97fe86f0655c7d54bd87ba2901bdaebd467a7d5f9ddc9",
+  "commit": "eaf9a72190c65ecdc677abf0562f3ef0d95ba63d",
+  "runtime_s": 19.2,
   "scope": "release Core, loopback fake Home Assistant (tests/fixtures/connections/homeassistant_server.py), scripted fake LLM, no real network, no real token",
   "physical_validation": "NOT_PERFORMED"
 }
