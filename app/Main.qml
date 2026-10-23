@@ -143,6 +143,10 @@ ApplicationWindow {
     function gpuText(v) { switch (v) { case "none": return "não requer"; case "optional": return "opcional"; case "required": return "obrigatória"; default: return "desconhecida"; } }
     function customForm() { var prov = customProvider.currentValue; var local = prov === "local" || prov === "ollama"; return { provider: prov, model: customModelId.text, custom_url: prov === "custom" ? customUrl.text : "", local_port: local ? customPort.value : null, features: { streaming: customStreaming.currentValue, tool_use: customToolUse.currentValue, vision: customVision.currentValue, cancel: customCancel.currentValue } }; }
     function wakeText() { var pack = core.snapshotPack; if (!pack.wake_phrases) return "Não configurada"; for (var i=0;i<pack.wake_phrases.length;i++) if (pack.wake_phrases[i].id === pack.active_phrase) return pack.wake_phrases[i].text; return "Não ativa"; }
+    // Voz e Wake: the active phrase and its qualification, read from the Core pack. Nothing new is stored here.
+    function activeWake() { var c = core.wakeChoices; var id = core.snapshotPack.active_phrase; for (var i = 0; i < c.length; i++) if (c[i].id === id) return c[i]; return null }
+    // Percepção e ação: the badge colour follows the state; the words come from perceptionStateText.
+    function perceptionStateColor(s) { switch (s) { case "running": return "#78debc"; case "starting": return "#8fb4ff"; case "failed": case "quarantined": return "#ff9a9a"; default: return "#c9d6f5" } }
     // Core-owned state changes resync the controls; a rejected save must not leave the user's unsaved values on screen.
     Connections {
         target: core
@@ -503,6 +507,9 @@ ApplicationWindow {
             Label { visible: pageCard.title.length > 0; text: pageCard.title; textFormat: Text.PlainText; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true; Layout.fillWidth: true }
         }
     }
+    // Text roles for the page cards: muted body text, and the small label that sits above a field or a value group.
+    component MutedText: Label { textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+    component FieldLabel: Label { textFormat: Text.PlainText; color: "#9fb3dc"; font.pixelSize: 13; wrapMode: Text.WordWrap; Layout.fillWidth: true }
     component PrimaryButton: GlowButton {
         id: primaryBtn
         background: Rectangle {
@@ -717,61 +724,82 @@ ApplicationWindow {
         }
         ScrollView {
             id: pageViewport; objectName: "pageViewport"
-            visible: window.page !== 0
+            visible: window.page !== 0 && !chatPage.visible
             Layout.fillWidth: true; Layout.fillHeight: true; clip: true
             ColumnLayout {
                 // Content is capped at 1100 px and centred on wide windows; the scroll area is the page area under the header.
                 width: Math.min(pageViewport.availableWidth, 1100); x: Math.max(0, (pageViewport.availableWidth - width) / 2); spacing: 16
-                GlassCard {
-                theme: window.themeIndex
-                    visible: window.page === 1; Layout.fillWidth: true; implicitHeight: voiceColumn.implicitHeight + 40
-                    ColumnLayout {
-                        id: voiceColumn; anchors.fill: parent; anchors.margins: 20; spacing: 14
-                        Label { text: "Frase de despertar"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
-                        Label { text: "Escolha uma frase qualificada do pack. A alteração requer reinício do Core."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Flow {
-                            Layout.fillWidth: true; spacing: 12; Layout.preferredHeight: childrenRect.height
-                            Repeater {
-                                model: core.wakeChoices
-                                GlowButton {
-                                    required property var modelData
-                                    objectName: "wakeCard_" + modelData.id
-                                    text: modelData.text + " · " + modelData.qualification_label
-                                    Accessible.name: "Frase de wake " + modelData.text
-                                    checked: window.packAvailable && core.snapshotPack.active_phrase === modelData.id
-                                    enabled: core.preferencesAvailable && modelData.qualification === "dev_qualified"
-                                    onClicked: core.selectWake(modelData.id)
-                                }
+                // Voz e Wake (page 1) and Áudio (page 2): one titled card per group. Every value comes from the Core snapshot or the pack.
+                PageCard {
+                    objectName: "wakeCardPanel"
+                    visible: window.page === 1; title: "Frase de despertar"
+                    MutedText { text: "Escolha uma frase qualificada do pack. A alteração requer reinício do Core." }
+                    FieldLabel { text: "Frase ativa" }
+                    Label { objectName: "wakeActive"; text: window.wakeText(); textFormat: Text.PlainText; color: "#f1f5ff"; font.pixelSize: 16; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    MutedText { objectName: "wakeActiveQualification"; visible: text.length > 0; text: !window.activeWake() ? (core.wakeChoices.length > 0 ? "Frase ativa não encontrada no pack." : "") : window.activeWake().qualification === "dev_qualified" ? "Qualificada em desenvolvimento; validação física pendente" : "Requer prova de conceito: frase sem qualidade aprovada" }
+                    MutedText { objectName: "wakeStatusLine"; text: "Estado do wake: " + window.statusText(core.wakeStatus) }
+                    FieldLabel { text: "Frases disponíveis" }
+                    Flow {
+                        Layout.fillWidth: true; spacing: 12; Layout.preferredHeight: childrenRect.height
+                        Repeater {
+                            model: core.wakeChoices
+                            GlowButton {
+                                required property var modelData
+                                objectName: "wakeCard_" + modelData.id
+                                text: modelData.text + " · " + modelData.qualification_label
+                                Accessible.name: "Frase de wake " + modelData.text
+                                checked: window.packAvailable && core.snapshotPack.active_phrase === modelData.id
+                                enabled: core.preferencesAvailable && modelData.qualification === "dev_qualified"
+                                onClicked: core.selectWake(modelData.id)
                             }
                         }
-                        Label { visible: core.wakeChoices.length === 0; text: "Nenhum pack de wake configurado."; color: "#b0c3e9" }
                     }
+                    MutedText { visible: core.wakeChoices.length === 0; text: "Nenhum pack de wake configurado." }
                 }
-                GlassCard {
-                theme: window.themeIndex
-                    visible: window.page === 1 || window.page === 2; Layout.fillWidth: true; implicitHeight: captureColumn.implicitHeight + 40
-                    ColumnLayout {
-                        id: captureColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
-                        Label { text: window.page === 1 ? "Captura" : "Resposta por voz"; color: "#f1f5ff"; font.bold: true; font.pixelSize: 21 }
-                        Label { text: window.page === 1 ? "Entrada PCM virtual · pré-roll de 1 segundo · CPU. Microfone físico, AEC e redução de ruído ainda indisponíveis." : "Pocket TTS · Alba · inglês · saída virtual. Outras vozes e dispositivos físicos ainda indisponíveis."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { visible: window.page === 2; text: "Ganho atual: " + core.outputVolume + "%"; textFormat: Text.PlainText; color: "#b0c3e9" }
-                        RowLayout {
-                            visible: window.page === 2; Layout.fillWidth: true
-                            Slider { id: gainSlider; objectName: "gainSlider"; from: 0; to: 100; stepSize: 5; value: core.outputVolume; enabled: core.preferencesAvailable && core.voiceAvailable; Layout.fillWidth: true; Accessible.name: "Ganho da resposta por voz" }
-                            PrimaryButton { objectName: "applyGainButton"; text: "Aplicar"; Accessible.name: "Aplicar ganho da resposta por voz"; enabled: core.preferencesAvailable && core.voiceAvailable; onClicked: core.saveFeedback(core.visualFeedback, Math.round(gainSlider.value)) }
-                        }
+                PageCard {
+                    objectName: "captureCardPanel"
+                    visible: window.page === 1; title: "Captura"
+                    FieldLabel { text: "Entrada" }
+                    MutedText { text: "PCM virtual · pré-roll de 1 segundo · processamento na CPU. Microfone físico, AEC e redução de ruído ainda indisponíveis." }
+                    FieldLabel { text: "Estado" }
+                    MutedText { objectName: "captureStatusLine"; text: "Captura: " + window.statusText(core.sttStatus) + " · prazo da sessão: " + core.sessionTimeout + " ms" }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Item { Layout.fillWidth: true }
                         GlowButton { text: "Abrir ajustes da Base"; Accessible.name: "Abrir ajustes da Base"; enabled: core.connected; onClicked: preferences.open() }
                     }
                 }
-                GlassCard {
-                theme: window.themeIndex
-                    visible: window.page === 3; Layout.fillWidth: true; implicitHeight: appearanceColumn.implicitHeight + 40
-                    ColumnLayout {
-                        id: appearanceColumn; anchors.fill: parent; anchors.margins: 20; spacing: 16
-                        GridLayout {
-                            Layout.fillWidth: true; columns: window.width > 1000 ? 2 : 1; columnSpacing: 24; rowSpacing: 20
-                            ColumnLayout { Layout.fillWidth: true; Layout.alignment: Qt.AlignTop; spacing: 16
-                        Label { text: "Tema"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
+                PageCard {
+                    objectName: "speechCardPanel"
+                    visible: window.page === 2; title: "Resposta por voz"
+                    FieldLabel { text: "Voz" }
+                    MutedText { text: "Pocket TTS · Alba · inglês · saída virtual. Outras vozes e dispositivos físicos ainda indisponíveis." }
+                    FieldLabel { text: "Estado" }
+                    MutedText { objectName: "speechStatusLine"; text: "Resposta: " + window.statusText(core.speechStatus) }
+                }
+                PageCard {
+                    objectName: "gainCardPanel"
+                    visible: window.page === 2; title: "Volume da resposta"
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 12
+                        FieldLabel { text: "Ganho da resposta por voz" }
+                        Label { objectName: "gainCurrent"; text: "Ganho atual: " + core.outputVolume + "%"; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true }
+                    }
+                    Slider { id: gainSlider; objectName: "gainSlider"; from: 0; to: 100; stepSize: 5; value: core.outputVolume; enabled: core.preferencesAvailable && core.voiceAvailable; Layout.fillWidth: true; Accessible.name: "Ganho da resposta por voz" }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 12
+                        GlowButton { text: "Abrir ajustes da Base"; Accessible.name: "Abrir ajustes da Base"; enabled: core.connected; onClicked: preferences.open() }
+                        Item { Layout.fillWidth: true }
+                        PrimaryButton { objectName: "applyGainButton"; text: "Aplicar"; Accessible.name: "Aplicar ganho da resposta por voz"; enabled: core.preferencesAvailable && core.voiceAvailable; onClicked: core.saveFeedback(core.visualFeedback, Math.round(gainSlider.value)) }
+                    }
+                }
+                // Aparência (page 3): theme, accent and HUD in titled cards. Each choice applies at once to this window; the Core saves only the HUD switch.
+                GridLayout {
+                    objectName: "appearanceGrid"
+                    visible: window.page === 3; Layout.fillWidth: true
+                    columns: window.width > 1000 ? 2 : 1; columnSpacing: 16; rowSpacing: 16
+                    PageCard {
+                        objectName: "themeCardPanel"; title: "Tema"; Layout.alignment: Qt.AlignTop
                         Flow {
                             id: themeFlow; Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height; spacing: 12
                             Repeater { model: ["Gideon", "Clássico", "Minimalista"]
@@ -790,21 +818,23 @@ ApplicationWindow {
                                 }
                             }
                         }
-                            }
-                            ColumnLayout { Layout.fillWidth: true; Layout.alignment: Qt.AlignTop; spacing: 16
-                        Label { text: "Cor de destaque"; color: "#f1f5ff"; font.pixelSize: 18; font.bold: true }
+                        MutedText { text: "Tema e cor se aplicam a esta janela." }
+                    }
+                    PageCard {
+                        objectName: "accentCardPanel"; title: "Cor de destaque"; Layout.alignment: Qt.AlignTop
                         Flow {
                             Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height; spacing: 10
                             Repeater { model: [{name:"Azul",color:"#7693ff"}, {name:"Violeta",color:"#b386ff"}, {name:"Ciano",color:"#66dcf4"}, {name:"Rosa",color:"#f28bd7"}]
                                 GlowButton { required property var modelData; objectName: "accent" + modelData.name; text: modelData.name; accent: modelData.color; checked: window.accentColor.toString() === modelData.color; onClicked: window.accentColor = modelData.color }
                             }
                         }
-                            }
-                        }
-                        Label { text: "HUD visual"; color: "#f1f5ff"; font.pixelSize: 18; font.bold: true }
+                    }
+                    PageCard {
+                        objectName: "hudCardPanel"; title: "HUD visual"
+                        Layout.columnSpan: window.width > 1000 ? 2 : 1
                         CheckBox { id: visualPage; objectName: "visualPagePreference"; text: "Mostrar esfera e indicador de atividade"; checked: core.visualFeedback; enabled: core.preferencesAvailable; onClicked: core.saveFeedback(checked, core.outputVolume) }
-                        Label { text: "Estado textual, legendas e cancelamento permanecem disponíveis."; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { text: "Tema e cor se aplicam a esta janela. O indicador é salvo pelo Core."; color: "#a4b8dc"; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        MutedText { text: "Estado textual, legendas e cancelamento permanecem disponíveis." }
+                        MutedText { text: "O indicador é salvo pelo Core."; font.pixelSize: 12 }
                     }
                 }
                 PageCard {
@@ -872,48 +902,59 @@ ApplicationWindow {
                     }
                 }
                 // Percepção e ação (C4): shown only while a C4 plugin runs. Controls send reads only, through core.perceptionInvoke; the Core and the plugins decide everything else.
-                GlassCard {
-                objectName: "perceptionPanel"
-                theme: window.themeIndex
-                    visible: window.page === 9 && core.perceptionAvailable; Layout.fillWidth: true; implicitHeight: perceptionColumn.implicitHeight + 40
-                    ColumnLayout {
-                        id: perceptionColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
-                        Label { text: "Backends simulados: nenhum hardware pessoal é acessado nesta build."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        // Privacy indicators are always on this page: they show the last state read ("não lido" until a read).
+                ColumnLayout {
+                    objectName: "perceptionPanel"
+                    visible: window.page === 9 && core.perceptionAvailable; Layout.fillWidth: true; spacing: 16
+                    // Privacy first: the mic and camera indicators are always on this page; they show the last state read ("não lido" until a read).
+                    PageCard {
+                        objectName: "privacyCard"; title: "Privacidade"
+                        MutedText { text: "Backends simulados: nenhum hardware pessoal é acessado nesta build."; color: "#ffc674" }
                         Label { objectName: "micIndicator"; text: "Microfone · indicador: " + core.perceptionMicIndicator; textFormat: Text.PlainText; color: core.perceptionMicIndicator === "ligado" ? "#ffc674" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Indicador do microfone: " + core.perceptionMicIndicator }
                         Label { objectName: "cameraIndicator"; text: "Câmera · indicador: " + core.perceptionCameraIndicator; textFormat: Text.PlainText; color: core.perceptionCameraIndicator === "ligado" ? "#ffc674" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Indicador da câmera: " + core.perceptionCameraIndicator }
-                        Repeater {
-                            model: core.perceptionPlugins
-                            delegate: Rectangle {
-                                id: perceptionCard
-                                required property var modelData
-                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
-                                implicitHeight: perceptionCardColumn.implicitHeight + 20
-                                ColumnLayout {
-                                    id: perceptionCardColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
-                                    Label { objectName: "perceptionTitle_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id + " " + perceptionCard.modelData.semver; textFormat: Text.PlainText; color: "#f1f5ff"; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
-                                    Label { objectName: "perceptionState_" + perceptionCard.modelData.plugin_id; text: "Estado: " + window.perceptionStateText(perceptionCard.modelData.state) + (perceptionCard.modelData.last_error ? " · " + perceptionCard.modelData.last_error : ""); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    Label { objectName: "perceptionBadge_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id === "display_manipulate" ? "UNSUPPORTED" : "SINTÉTICO — sem hardware real"; textFormat: Text.PlainText; font.bold: true; color: perceptionCard.modelData.plugin_id === "display_manipulate" ? "#ffc674" : "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    Label { text: "Permissão exigida: " + (perceptionCard.modelData.permissions.map(function (p) { return core.permissionLabel(p) }).join(", ") || "nenhuma") + (perceptionCard.modelData.approved ? " · concedida" : " · não concedida"); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    Label { text: "Backend real: não suportado / pendente de validação humana"; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    Flow {
-                                        Layout.fillWidth: true; spacing: 8
-                                        Repeater {
-                                            model: window.perceptionActions[perceptionCard.modelData.plugin_id] || []
-                                            delegate: GlowButton {
-                                                required property var modelData
-                                                objectName: "perception_" + modelData.capability
-                                                text: modelData.label
-                                                Accessible.name: modelData.label + " " + modelData.capability
-                                                enabled: core.connected && perceptionCard.modelData.state === "running" && !core.perceptionBusy
-                                                onClicked: core.perceptionInvoke(modelData.capability, "{}")
-                                            }
-                                        }
+                    }
+                    Repeater {
+                        model: core.perceptionPlugins
+                        delegate: PageCard {
+                            id: perceptionCard
+                            required property var modelData
+                            objectName: "perceptionCard_" + modelData.plugin_id
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: 12
+                                Label { objectName: "perceptionTitle_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id + " " + perceptionCard.modelData.semver; textFormat: Text.PlainText; color: "#f1f5ff"; font.pixelSize: 17; font.bold: true; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                                // State badge: the words and the colour both carry the state.
+                                Rectangle {
+                                    objectName: "perceptionState_" + perceptionCard.modelData.plugin_id
+                                    Layout.alignment: Qt.AlignVCenter
+                                    implicitWidth: stateWord.implicitWidth + 20; implicitHeight: 24; radius: 12
+                                    color: Qt.alpha(window.perceptionStateColor(perceptionCard.modelData.state), 0.16)
+                                    border.width: 1; border.color: window.perceptionStateColor(perceptionCard.modelData.state)
+                                    Label { id: stateWord; anchors.centerIn: parent; text: window.perceptionStateText(perceptionCard.modelData.state); textFormat: Text.PlainText; color: window.perceptionStateColor(perceptionCard.modelData.state); font.pixelSize: 12; font.bold: true }
+                                }
+                            }
+                            MutedText { objectName: "perceptionError_" + perceptionCard.modelData.plugin_id; visible: !!perceptionCard.modelData.last_error; text: "Último erro: " + perceptionCard.modelData.last_error }
+                            Label { objectName: "perceptionBadge_" + perceptionCard.modelData.plugin_id; text: perceptionCard.modelData.plugin_id === "display_manipulate" ? "UNSUPPORTED" : "SINTÉTICO — sem hardware real"; textFormat: Text.PlainText; font.bold: true; color: perceptionCard.modelData.plugin_id === "display_manipulate" ? "#ffc674" : "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            MutedText { text: "Permissão exigida: " + (perceptionCard.modelData.permissions.map(function (p) { return core.permissionLabel(p) }).join(", ") || "nenhuma") + (perceptionCard.modelData.approved ? " · concedida" : " · não concedida") }
+                            MutedText { text: "Backend real: não suportado / pendente de validação humana" }
+                            Flow {
+                                Layout.fillWidth: true; spacing: 8
+                                Repeater {
+                                    model: window.perceptionActions[perceptionCard.modelData.plugin_id] || []
+                                    delegate: GlowButton {
+                                        required property var modelData
+                                        objectName: "perception_" + modelData.capability
+                                        text: modelData.label
+                                        Accessible.name: modelData.label + " " + modelData.capability
+                                        enabled: core.connected && perceptionCard.modelData.state === "running" && !core.perceptionBusy
+                                        onClicked: core.perceptionInvoke(modelData.capability, "{}")
                                     }
                                 }
                             }
                         }
-                        Label { objectName: "perceptionResult"; text: core.perceptionResult; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado da percepção: " + text }
+                    }
+                    PageCard {
+                        objectName: "perceptionResultCard"; title: "Último resultado"
+                        visible: perceptionResult.text.length > 0
+                        Label { id: perceptionResult; objectName: "perceptionResult"; text: core.perceptionResult; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado da percepção: " + text }
                     }
                 }
                 // Skills (S4): list, manifest editor, LLM draft, dry run, run with per-step decisions, import preview and history. Every value is the Core snapshot 'skills' block; PlainText only.
@@ -1199,83 +1240,6 @@ ApplicationWindow {
                         Label { objectName: "chatUnavailable"; text: "Motor LLM não está ativo. O plugin llm_engine é opcional: instale e ative pelo Gideon Hub. Voz, wake e comandos da Base funcionam sem ele."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
-                GlassCard {
-                objectName: "chatPanel"
-                theme: window.themeIndex
-                    visible: window.page === 7 && core.chatAvailable; Layout.fillWidth: true; implicitHeight: chatColumn.implicitHeight + 40
-                    ColumnLayout {
-                        id: chatColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
-                        Label { text: "Conversa"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
-                        Label { objectName: "chatState"; text: "Estado: " + core.chatStateLabel; textFormat: Text.PlainText; color: "#b0c3e9"; Accessible.name: "Estado da conversa: " + core.chatStateLabel }
-                        Label { objectName: "chatConsentHint"; visible: core.llmConfig.cloud_consent !== true; text: "Consentimento de nuvem desativado: envios são recusados até você marcá-lo em Motor LLM."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { objectName: "chatEmpty"; visible: core.chatMessages.length === 0 && core.chatState === "idle"; text: "Nenhuma mensagem ainda. O motor LLM é opcional: voz, wake e comandos da Base funcionam sem ele."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Repeater {
-                            model: core.chatMessages
-                            delegate: Rectangle {
-                                required property var modelData
-                                Layout.fillWidth: true; radius: 12; color: modelData.role === "user" ? "#243b66" : "#132341"; border.color: "#304572"
-                                implicitHeight: bubbleColumn.implicitHeight + 20
-                                ColumnLayout {
-                                    id: bubbleColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
-                                    Label { text: (modelData.role === "user" ? "Você" : "Gideon") + (modelData.state === "cancelled" ? " · cancelada" : modelData.state === "error" ? " · erro" : ""); textFormat: Text.PlainText; color: "#aebfe7"; font.pixelSize: 12 }
-                                    TextEdit { text: modelData.text || "(sem texto)"; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#edf2ff"; Layout.fillWidth: true; Accessible.name: (modelData.role === "user" ? "Mensagem enviada: " : "Resposta: ") + text }
-                                }
-                            }
-                        }
-                        Rectangle {
-                            objectName: "chatStreaming"
-                            visible: core.chatState === "waiting" || core.chatState === "streaming"
-                            Layout.fillWidth: true; radius: 12; color: "#132341"; border.color: "#5a73b5"
-                            implicitHeight: streamColumn.implicitHeight + 20
-                            ColumnLayout {
-                                id: streamColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
-                                Label { text: core.chatStateLabel; textFormat: Text.PlainText; color: "#aebfe7"; font.pixelSize: 12 }
-                                TextEdit { text: core.chatPartial || "Aguardando resposta…"; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#dce7ff"; Layout.fillWidth: true; Accessible.name: "Resposta em andamento" }
-                            }
-                        }
-                        Repeater {
-                            model: core.toolProposals
-                            delegate: Rectangle {
-                                required property var modelData
-                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
-                                implicitHeight: toolColumn.implicitHeight + 20
-                                ColumnLayout {
-                                    id: toolColumn; anchors.fill: parent; anchors.margins: 10; spacing: 6
-                                    Label { objectName: "toolTitle_" + modelData.proposal_id; text: "Ferramenta " + modelData.tool + " · " + window.toolStateText(modelData.state); textFormat: Text.PlainText; color: "#edf2ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    // S5: a connection proposal names its provider, account, operation and risk before the user decides (PlainText, from the snapshot).
-                                    Label { objectName: "connProposal_" + modelData.proposal_id; visible: modelData.kind === "connection"; text: window.connProposalText(modelData); textFormat: Text.PlainText; color: "#dce7ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Proposta de conexão: " + text }
-                                    Label { text: "Argumentos: " + JSON.stringify(modelData.args); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
-                                    Label { visible: modelData.reason !== null; text: "Motivo: " + core.codeMessage(modelData.reason || ""); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    Label { visible: modelData.result !== null; text: "Resultado: " + (modelData.result || ""); textFormat: Text.PlainText; color: "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                                    // Only a pending proposal offers decisions. Negar is listed first: it is the safe choice.
-                                    RowLayout {
-                                        visible: modelData.state === "pending"; Layout.fillWidth: true
-                                        GlowButton { objectName: "deny_" + modelData.proposal_id; text: "Negar"; Accessible.name: "Negar " + modelData.tool + " " + modelData.proposal_id; onClicked: core.decideTool(modelData.proposal_id, "deny") }
-                                        GlowButton { objectName: "authorize_" + modelData.proposal_id; text: "Autorizar"; Accessible.name: "Autorizar " + modelData.tool + " " + modelData.proposal_id; onClicked: core.decideTool(modelData.proposal_id, "authorize") }
-                                    }
-                                }
-                            }
-                        }
-                        Label { objectName: "toolResult"; visible: core.toolResult.length > 0; text: core.toolResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                        Label { objectName: "chatResult"; visible: core.chatResult.length > 0; text: core.chatResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Aviso da conversa: " + text }
-                        RowLayout {
-                            Layout.fillWidth: true
-                            TextField {
-                                id: chatInput; objectName: "chatInput"; Layout.fillWidth: true
-                                maximumLength: 4096; placeholderText: "Mensagem para o motor LLM"; Accessible.name: "Mensagem para o motor LLM"
-                                enabled: core.chatAvailable && core.chatState !== "waiting" && core.chatState !== "streaming"
-                                color: "#dce7ff"; placeholderTextColor: "#a3b6db"
-                                background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
-                                Component.onCompleted: text = window.draftValue("#chat", "text")
-                                onTextEdited: window.setDraft("#chat", "text", text)
-                                onAccepted: window.sendChatDraft()
-                            }
-                            PrimaryButton { objectName: "chatSend"; text: "Enviar"; Accessible.name: "Enviar mensagem ao motor LLM"; enabled: core.chatAvailable && chatInput.enabled && core.chatTextProblem(chatInput.text) === ""; onClicked: window.sendChatDraft() }
-                            GlowButton { objectName: "chatCancel"; text: "Cancelar"; Accessible.name: "Cancelar resposta do motor LLM"; enabled: core.chatState === "waiting" || core.chatState === "streaming"; onClicked: core.cancelChat() }
-                        }
-                        Label { objectName: "chatInputProblem"; visible: chatInput.text.length > 0 && core.chatTextProblem(chatInput.text).length > 0; text: core.chatTextProblem(chatInput.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                    }
-                }
                 // S5 connections: accounts, consent per scope, operations with risk labels, read-only tests and the last call. Everything shown comes from the Core snapshot 'connections' block; PlainText only.
                 ColumnLayout {
                     id: connectionsWrap; objectName: "connectionsPanel"
@@ -1433,17 +1397,131 @@ ApplicationWindow {
                         }
                     }
                 }
-                // C3 agent: same visibility rule as the chat, only while the LLM plugin runs. Everything shown comes from the Core snapshot 'agent' block.
-                GlassCard {
-                objectName: "agentPanel"
+            }
+        }
+        // Conversa (page 7): the message area scrolls inside its card and the input row is anchored at its bottom. Tool proposals and the agent are separate titled cards in the side area, which scrolls on its own.
+        ColumnLayout {
+            id: chatPage; objectName: "chatPage"
+            visible: window.page === 7 && core.chatAvailable
+            Layout.fillWidth: true; Layout.fillHeight: true; Layout.maximumWidth: 1100; Layout.alignment: Qt.AlignHCenter
+            spacing: 16
+            GlassCard {
+                objectName: "chatPanel"
                 theme: window.themeIndex
-                    visible: window.page === 7 && core.chatAvailable; Layout.fillWidth: true; implicitHeight: agentColumn.implicitHeight + 40
-                    ColumnLayout {
-                        id: agentColumn; anchors.fill: parent; anchors.margins: 20; spacing: 12
-                        Label { text: "Agente"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true }
+                visible: window.page === 7 && core.chatAvailable
+                Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 260
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 20; spacing: 12
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 12
+                        Label { text: "Conversa"; color: "#f1f5ff"; font.pixelSize: 19; font.bold: true; Layout.fillWidth: true }
+                        Label { objectName: "chatState"; text: "Estado: " + core.chatStateLabel; textFormat: Text.PlainText; color: "#b0c3e9"; Accessible.name: "Estado da conversa: " + core.chatStateLabel }
+                    }
+                    Label { objectName: "chatConsentHint"; visible: core.llmConfig.cloud_consent !== true; text: "Consentimento de nuvem desativado: envios são recusados até você marcá-lo em Motor LLM."; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    // The message area scrolls on its own; a new message moves the view to its end.
+                    ScrollView {
+                        id: chatScroll; objectName: "chatMessages"
+                        Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                        ColumnLayout {
+                            id: messageColumn
+                            width: chatScroll.availableWidth; spacing: 12
+                            // Runs after the layout: a new or growing message keeps the latest text in view.
+                            onHeightChanged: Qt.callLater(function () { var f = chatScroll.contentItem; f.contentY = Math.max(0, f.contentHeight - f.height) })
+                            Label { objectName: "chatEmpty"; visible: core.chatMessages.length === 0 && core.chatState === "idle"; text: "Nenhuma mensagem ainda. O motor LLM é opcional: voz, wake e comandos da Base funcionam sem ele."; textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                            Repeater {
+                                model: core.chatMessages
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    Layout.fillWidth: true; radius: 12; color: modelData.role === "user" ? "#243b66" : "#132341"; border.color: "#304572"
+                                    implicitHeight: bubbleColumn.implicitHeight + 20
+                                    ColumnLayout {
+                                        id: bubbleColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
+                                        Label { text: (modelData.role === "user" ? "Você" : "Gideon") + (modelData.state === "cancelled" ? " · cancelada" : modelData.state === "error" ? " · erro" : ""); textFormat: Text.PlainText; color: "#aebfe7"; font.pixelSize: 12 }
+                                        TextEdit { text: modelData.text || "(sem texto)"; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#edf2ff"; Layout.fillWidth: true; Accessible.name: (modelData.role === "user" ? "Mensagem enviada: " : "Resposta: ") + text }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                objectName: "chatStreaming"
+                                visible: core.chatState === "waiting" || core.chatState === "streaming"
+                                Layout.fillWidth: true; radius: 12; color: "#132341"; border.color: "#5a73b5"
+                                implicitHeight: streamColumn.implicitHeight + 20
+                                ColumnLayout {
+                                    id: streamColumn; anchors.fill: parent; anchors.margins: 10; spacing: 4
+                                    Label { text: core.chatStateLabel; textFormat: Text.PlainText; color: "#aebfe7"; font.pixelSize: 12 }
+                                    TextEdit { text: core.chatPartial || "Aguardando resposta…"; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: "#dce7ff"; Layout.fillWidth: true; Accessible.name: "Resposta em andamento" }
+                                }
+                            }
+                        }
+                    }
+                    Label { objectName: "chatResult"; visible: core.chatResult.length > 0; text: core.chatResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Aviso da conversa: " + text }
+                    // The input row sits at the bottom of the card: field, then Enviar (primary), then Cancelar while a reply runs.
+                    FieldLabel { text: "Mensagem" }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 10
+                        TextField {
+                            id: chatInput; objectName: "chatInput"; Layout.fillWidth: true
+                            maximumLength: 4096; placeholderText: "Mensagem para o motor LLM"; Accessible.name: "Mensagem para o motor LLM"
+                            enabled: core.chatAvailable && core.chatState !== "waiting" && core.chatState !== "streaming"
+                            color: "#dce7ff"; placeholderTextColor: "#a3b6db"
+                            background: Rectangle { color: "#132341"; radius: 10; border.color: "#304572" }
+                            Component.onCompleted: text = window.draftValue("#chat", "text")
+                            onTextEdited: window.setDraft("#chat", "text", text)
+                            onAccepted: window.sendChatDraft()
+                        }
+                        PrimaryButton { objectName: "chatSend"; text: "Enviar"; Accessible.name: "Enviar mensagem ao motor LLM"; enabled: core.chatAvailable && chatInput.enabled && core.chatTextProblem(chatInput.text) === ""; onClicked: window.sendChatDraft() }
+                        GlowButton { objectName: "chatCancel"; text: "Cancelar"; Accessible.name: "Cancelar resposta do motor LLM"; enabled: core.chatState === "waiting" || core.chatState === "streaming"; onClicked: core.cancelChat() }
+                    }
+                    Label { objectName: "chatInputProblem"; visible: chatInput.text.length > 0 && core.chatTextProblem(chatInput.text).length > 0; text: core.chatTextProblem(chatInput.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                }
+            }
+            ScrollView {
+                id: chatSide; objectName: "chatSide"
+                visible: window.page === 7 && core.chatAvailable
+                Layout.fillWidth: true; clip: true
+                // Bounded by the window, not by the page height: a binding to the parent's height makes the two layouts rearrange each other.
+                Layout.preferredHeight: Math.min(sideColumn.implicitHeight, Math.max(120, window.height * 0.3))
+                Layout.maximumHeight: Math.max(120, window.height * 0.3)
+                ColumnLayout {
+                    id: sideColumn
+                    width: chatSide.availableWidth; spacing: 16
+                    // Tool proposals: only pending ones offer decisions; Negar is listed first because it is the safe choice.
+                    PageCard {
+                        objectName: "toolPanel"; title: "Propostas de ferramenta"
+                        visible: window.page === 7 && core.chatAvailable && core.toolProposals.length > 0
+                        Repeater {
+                            model: core.toolProposals
+                            delegate: Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true; radius: 12; color: "#17294b"; border.color: "#354976"
+                                implicitHeight: toolColumn.implicitHeight + 20
+                                ColumnLayout {
+                                    id: toolColumn; anchors.fill: parent; anchors.margins: 10; spacing: 6
+                                    Label { objectName: "toolTitle_" + modelData.proposal_id; text: "Ferramenta " + modelData.tool + " · " + window.toolStateText(modelData.state); textFormat: Text.PlainText; color: "#edf2ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    // S5: a connection proposal names its provider, account, operation and risk before the user decides (PlainText, from the snapshot).
+                                    Label { objectName: "connProposal_" + modelData.proposal_id; visible: modelData.kind === "connection"; text: window.connProposalText(modelData); textFormat: Text.PlainText; color: "#dce7ff"; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Proposta de conexão: " + text }
+                                    Label { text: "Argumentos: " + JSON.stringify(modelData.args); textFormat: Text.PlainText; color: "#b0c3e9"; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                                    Label { visible: modelData.reason !== null; text: "Motivo: " + core.codeMessage(modelData.reason || ""); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    Label { visible: modelData.result !== null; text: "Resultado: " + (modelData.result || ""); textFormat: Text.PlainText; color: "#78debc"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                                    RowLayout {
+                                        visible: modelData.state === "pending"; Layout.fillWidth: true
+                                        Item { Layout.fillWidth: true }
+                                        GlowButton { objectName: "deny_" + modelData.proposal_id; text: "Negar"; Accessible.name: "Negar " + modelData.tool + " " + modelData.proposal_id; onClicked: core.decideTool(modelData.proposal_id, "deny") }
+                                        GlowButton { objectName: "authorize_" + modelData.proposal_id; text: "Autorizar"; Accessible.name: "Autorizar " + modelData.tool + " " + modelData.proposal_id; onClicked: core.decideTool(modelData.proposal_id, "authorize") }
+                                    }
+                                }
+                            }
+                        }
+                        Label { objectName: "toolResult"; visible: core.toolResult.length > 0; text: core.toolResult; textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    }
+                    // C3 agent: same visibility rule as the chat, only while the LLM plugin runs. Everything shown comes from the Core snapshot 'agent' block.
+                    PageCard {
+                        objectName: "agentPanel"; title: "Agente"
+                        visible: window.page === 7 && core.chatAvailable
                         // Banner: the run state in words, with the Core code when the run ended on one. Hidden without a run.
                         Label { objectName: "agentBanner"; visible: core.agentState.length > 0; text: core.agentStateLabel; textFormat: Text.PlainText; color: core.agentState === "failed" || core.agentState === "blocked" ? "#ff9a9a" : "#b0c3e9"; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Estado do agente: " + text }
                         Label { objectName: "agentBudget"; visible: core.agentState.length > 0; text: "Tokens: " + (core.agentBudget.tokens_used || 0) + " de " + (core.agentBudget.tokens_max || 0); textFormat: Text.PlainText; color: "#a6b9df"; font.pixelSize: 12; Layout.fillWidth: true }
+                        FieldLabel { text: "Objetivo" }
                         TextField {
                             id: agentGoal; objectName: "agentGoal"; Layout.fillWidth: true
                             maximumLength: 1024; placeholderText: "Objetivo para o agente"; Accessible.name: "Objetivo para o agente"
@@ -1455,9 +1533,10 @@ ApplicationWindow {
                         }
                         Label { objectName: "agentGoalProblem"; visible: agentGoal.text.length > 0 && core.agentGoalProblem(agentGoal.text).length > 0; text: core.agentGoalProblem(agentGoal.text); textFormat: Text.PlainText; color: "#ffc674"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                         RowLayout {
-                            Layout.fillWidth: true
-                            PrimaryButton { objectName: "agentStart"; text: "Iniciar"; Accessible.name: "Iniciar agente"; enabled: core.chatAvailable && !core.agentActive && core.agentGoalProblem(agentGoal.text) === ""; onClicked: core.agentStart(agentGoal.text) }
+                            Layout.fillWidth: true; spacing: 10
+                            Item { Layout.fillWidth: true }
                             GlowButton { objectName: "agentAbort"; text: "Abortar"; Accessible.name: "Abortar agente"; enabled: core.agentActive; onClicked: core.agentAbort() }
+                            PrimaryButton { objectName: "agentStart"; text: "Iniciar"; Accessible.name: "Iniciar agente"; enabled: core.chatAvailable && !core.agentActive && core.agentGoalProblem(agentGoal.text) === ""; onClicked: core.agentStart(agentGoal.text) }
                         }
                         Repeater {
                             model: core.agentSteps
