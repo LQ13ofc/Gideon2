@@ -16,7 +16,7 @@ Boots (one Core root each):
      credential problem; S1 native after all of it.
   B  --agent-synthetic --agent-allow-destructive --connections-allow-public, llm_engine and computer_control through the
      Hub, scripted LLM: route_create_issue by the connection route (one approved card, injection text as data, the
-     issue read back from the fake), idempotent retry (fail_after_create) creates exactly one issue, a failed
+     issue read back from the fake), a 500 after create (fail_after_create) is not retried: one POST, one issue, provider_error, a failed
      create is remembered, tool arguments cannot choose a route or change a grant, disconnect and revoke give
      route_unavailable (not_connected) with no visual use, expired/reauth and scope-denied accounts get no visual
      fallback even when it is allowed (the world file is byte-identical, zero UI actions), no connection plus visual
@@ -380,24 +380,26 @@ def scen_b(td, cloud_url):
              'último resultado: ok' in cand(root, 'connection')['reason'], cand(root, 'connection'))
     e1.snap_clean(root, 'B1')
 
-    # -- B2: idempotent retry creates exactly one issue --
+    # -- B2: issues.create (idempotent:false) is not retried after a 500: no Idempotency-Key, no replay --
     before = requests_now()
     fake.ctl('fail_after_create', {'n': 1})
-    title = 'Issue com retry idempotente'
+    title = 'Issue com 500 nao reenviada'
     rid, s = run_tool(root, [e1.step(calls=[('r2', TOOL, {'title': title, 'body': 'corpo'})]),
-                             e1.step(text='Criada apesar do 500.')], 'Crie com retry', 'awaiting_approval')
+                             e1.step(text='Falhou com o erro real do provedor.')], 'Crie com 500', 'awaiting_approval')
     pend = pending(s, rid)
     e1.need('B2 one card', len(pend) == 1, pend)
     e1.check('B2: approved once', e1.decide(root, pend[0]['proposal_id']) == 'ok')
-    e1.wait_agent(root, lambda x: x['state'] == 'done', 40, 'B2 done')
+    fin = e1.wait_agent(root, lambda x: x['state'] == 'done', 40, 'B2 done')
     made = issues_of(PUBLIC, title)
-    e1.check('B2: the fake stored the issue and answered 500, the retry replayed it: exactly one issue', len(made) == 1, made)
-    e1.check('B2: two POSTs reached the fake (the create and its retry with the same idempotency key)',
-             requests_now() - before == 2, requests_now() - before)
-    props = e1.run_props(e1.req(root), rid)
-    result = json.loads(props[0]['result']) if props and props[0].get('result') else {}
-    e1.check('B2: one executed proposal whose number is the fake issue number', len(props) == 1 and props[0]['state'] == 'executed'
-             and made and result.get('number') == made[0]['number'], (result, made))
+    e1.check('B2 not retried: exactly one POST reached the fake (no replay after the 500)',
+             requests_now() - before == 1, requests_now() - before)
+    e1.check('B2 not retried: exactly one issue on the fake, the one created before the 500 (no duplicate)',
+             len(made) == 1, made)
+    props = e1.run_props(fin, rid)
+    e1.check('B2 not retried: the one proposal failed with the real provider_error (not executed)',
+             len(props) == 1 and props[0]['state'] == 'failed' and props[0].get('reason') == 'provider_error', props)
+    e1.check('B2 not retried: the agent run carries the real provider_error and no second approval card is opened',
+             'provider_error' in json.dumps(fin.get('agent')) and not pending(fin, rid), fin.get('agent'))
 
     # -- B3: a failed create is remembered and reported ---
     before = requests_now()
