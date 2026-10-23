@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Launch the thin QML client against an explicit private Core root."""
-import argparse,sys
+import argparse,os,sys
 from pathlib import Path
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickWindow
@@ -17,6 +17,8 @@ def create(app,root):
     if not isinstance(engine.rootObjects()[0],QQuickWindow):raise RuntimeError('Quick window required')
     return bridge,engine
 if __name__=='__main__':
+    # The client ships its own look: never inherit a desktop style (e.g. org.kde.desktop) that is not bundled.
+    os.environ['QT_QUICK_CONTROLS_STYLE']='Basic'
     parser=argparse.ArgumentParser();parser.add_argument('--root',type=Path,required=True);args=parser.parse_args()
     if not args.root.is_absolute():parser.error('absolute private root required')
     app=QGuiApplication(sys.argv);bridge,engine=create(app,args.root);code=app.exec()
