@@ -112,6 +112,8 @@ ApplicationWindow {
         audible.checked = core.audibleFeedback; timeout.value = core.sessionTimeout; visual.checked = core.visualFeedback; volume.value = core.outputVolume
         visualPage.checked = core.visualFeedback; gainSlider.value = core.outputVolume
     }
+    // Qt's standard Close button is English by default; the client is Portuguese.
+    function localizeClose(d) { var b = d.standardButton(Dialog.Close); if (b) b.text = "Fechar" }
     function approvalDone() { if (!reviewPlugin) return false; var entries = core.hubEntries; for (var i=0;i<entries.length;i++) if (entries[i].plugin_id === reviewPlugin.plugin_id && entries[i].manifest_sha256 === reviewPlugin.manifest_sha256) return entries[i].permissions_approved === true; return false; }
     function pluginFor(pluginId) { var items = core.pluginItems; for (var i=0;i<items.length;i++) if (items[i].plugin_id === pluginId) return items[i]; return null; }
     function pluginEnabledFor(pluginId) { var item = pluginFor(pluginId); return !!item && item.enabled === true; }
@@ -154,7 +156,7 @@ ApplicationWindow {
         anchors.centerIn: parent; width: Math.min(420, window.width - 32)
         standardButtons: Dialog.Close
         background: GlassCard { theme: window.themeIndex }
-        onOpened: window.syncPreferenceControls()
+        onOpened: { window.syncPreferenceControls(); window.localizeClose(preferences) }
         contentItem: ScrollView {
             implicitHeight: Math.min(settingsColumn.implicitHeight, window.height - 120)
             clip: true
@@ -195,6 +197,7 @@ ApplicationWindow {
         title: "Plugins — Gideon Hub"; modal: true
         anchors.centerIn: parent; width: Math.min(420, window.width - 32)
         standardButtons: Dialog.Close
+        onOpened: window.localizeClose(hubDialog)
         background: GlassCard { theme: window.themeIndex }
         contentItem: ScrollView {
             implicitHeight: Math.min(hubColumn.implicitHeight, window.height - 120); clip: true
@@ -275,6 +278,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         background: GlassCard { theme: window.themeIndex }
         onOpened: {
+            window.localizeClose(llmDialog)
             window.llmRevisionCaptured = core.llmRevision
             providerBox.currentIndex = Math.max(0, providerBox.indexOfValue(core.llmConfig.provider || "openrouter"))
             modelField.text = core.llmConfig.model || ""; urlField.text = core.llmConfig.custom_url || ""
@@ -337,7 +341,7 @@ ApplicationWindow {
     Dialog {
         id: reviewDialog; objectName: "hubReviewDialog"
         // The approval target is captured when the dialog opens; the bridge refuses it if the live record changed.
-        onOpened: { core.beginHubReview(); window.reviewRevision = core.hubApprovalRevision }
+        onOpened: { core.beginHubReview(); window.reviewRevision = core.hubApprovalRevision; window.localizeClose(reviewDialog) }
         title: "Revisar permissões"; modal: true; anchors.centerIn: parent
         width: Math.min(440, window.width - 32); standardButtons: Dialog.Close
         background: GlassCard { theme: window.themeIndex }
@@ -440,9 +444,9 @@ ApplicationWindow {
         color: window.themeIndex === 2 ? "#131e2c" : window.themeIndex === 1 ? "#1b2c47" : "#142445"
         Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: "#2b3d6a" }
         ColumnLayout {
-            anchors.fill: parent; anchors.margins: sidebar.width > 100 ? 20 : 8; spacing: window.height < 640 ? 4 : 12
+            anchors.fill: parent; anchors.margins: sidebar.width > 100 ? 20 : 8; spacing: window.height < 760 ? 4 : 12
             RowLayout {
-                Layout.topMargin: window.height < 640 ? 2 : 22; Layout.bottomMargin: window.height < 640 ? 10 : 30
+                Layout.topMargin: window.height < 760 ? 2 : 22; Layout.bottomMargin: window.height < 760 ? 10 : 30
                 Image { source: "assets/gideon-orb.png"; Layout.preferredWidth: 44; Layout.preferredHeight: 44; fillMode: Image.PreserveAspectFit }
                 ColumnLayout {
                     visible: sidebar.width > 100; spacing: 2
@@ -456,7 +460,7 @@ ApplicationWindow {
                     required property int index
                     required property string modelData
                     objectName: "nav" + index
-                    Layout.fillWidth: true; implicitHeight: window.height < 640 ? 40 : 52
+                    Layout.fillWidth: true; implicitHeight: window.height < 760 ? 40 : 52
                     padding: sidebar.width < 100 ? 8 : 12
                     text: sidebar.width > 100 ? modelData : ""
                     Accessible.name: modelData

@@ -11,6 +11,8 @@ WAKE_STATES=('unavailable','starting','replaying','failed','replay_finished')
 STT_STATES=('unavailable','starting','ready','failed')
 SPEECH_STATES=('unavailable','idle','muted','disabled','speaking','completed','failed','cancelled','timed_out','audio_error','stt_failed','stt_unavailable','transcript_final','capture_completed','no_speech','capture_too_long')
 OUTPUT_LIMIT=8192;TEXT_LIMIT=512;HEX=frozenset('0123456789abcdef')
+# Portuguese words for the Core state codes shown in the diagnostic line (same words as Main.qml statusLabels).
+DIAG_LABELS={'unavailable':'indisponível','starting':'iniciando','replaying':'reproduzindo','failed':'falhou','replay_finished':'replay encerrado','ready':'pronto','idle':'em espera','muted':'mudo','disabled':'desligado','speaking':'respondendo','completed':'concluído','cancelled':'cancelado','timed_out':'tempo esgotado','audio_error':'erro de áudio','stt_failed':'falha na transcrição','stt_unavailable':'transcrição indisponível','transcript_final':'transcrição final','capture_completed':'captura concluída','no_speech':'sem fala detectada','capture_too_long':'captura longa demais'}
 # Runtime state of an installed plugin: `disabled` when not enabled, else the host state (src/plugins.rs runtime_of).
 # `stopped` is a host state too (a late stop event can land after a re-enable), so it is accepted.
 RUNTIME_STATES=('disabled','starting','running','failed','stopped')
@@ -1783,7 +1785,7 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def diagnostic(self):
         if not self.online:return self.error
-        return self.configurationMessage or ' · '.join([self.snapshot.get('wake_status','unavailable'),self.snapshot.get('stt_status','unavailable'),self.snapshot.get('speech_status','unavailable')])
+        return self.configurationMessage or ' · '.join(DIAG_LABELS.get(self.snapshot.get(k,'unavailable'),'indisponível') for k in ('wake_status','stt_status','speech_status'))
     # ---- C4 perception and action. Only the allowlist above reaches the Core, as capability_invoke with a 5 s deadline; every answer is checked against its C4 rule before QML shows it.
     def _perception_items(self):
         entries={e.get('plugin_id'):e for e in (self.snapshot.get('hub') or {}).get('entries',[])}
