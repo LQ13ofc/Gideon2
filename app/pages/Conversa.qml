@@ -77,6 +77,15 @@ PageFrame {
         text: "Esta resposta veio do modelo reserva (fallback)."
     }
 
+    // B12: the last turn failed with a Core code the user can fix in Provedor e chaves (the banner names the cause).
+    Banner {
+        objectName: "chatErrorBanner"
+        kind: "warn"
+        text: core.chatErrorBanner.text || ""
+        actionText: core.chatErrorBanner.action || ""
+        onActionRequested: Window.window.openLlm()
+    }
+
     ColumnLayout {
         objectName: "chatPanel"
         visible: core.chatAvailable
@@ -298,6 +307,17 @@ PageFrame {
                 enabled: page.inFlight
                 onClicked: core.cancelChat()
             }
+        }
+        // B13 counter for the chat turn (4096 UTF-8 bytes, the Core rule the problem text names).
+        Text {
+            objectName: "chatCounter"
+            text: L.byteCounter(chatInput.text, 4096)
+            textFormat: Text.PlainText
+            color: page.inputProblem.length > 0 ? Theme.warning : Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            Layout.fillWidth: true
+            Accessible.name: "Tamanho da mensagem: " + text
         }
         // Enter sends. A problem with the text replaces that hint; while a reply is in flight it says why input is off.
         Text {

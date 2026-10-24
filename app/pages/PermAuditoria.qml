@@ -175,17 +175,36 @@ PageFrame {
         message: page.filter === "Todos" ? "Nenhum evento nesta sessão do Core." : "Nenhum evento de " + page.filter + " nesta sessão."
     }
 
+    // B9: the log is <diretório do Core>/audit.log (src/storage.rs). Copiar escreve o caminho na área de transferência.
+    readonly property string logPath: core.coreRootPath.length > 0 ? core.coreRootPath + "/audit.log" : ""
+
     Collapsible {
         objectName: "auditAdvanced"
         visible: Theme.advanced
         title: "Detalhes técnicos (Avançado)"
-        Text {
-            text: "Caminho do log: indisponível nesta build. A ponte ainda não expõe o diretório do Core."
-            textFormat: Text.PlainText
-            color: Theme.textMuted
-            font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp
-            wrapMode: Text.WordWrap
+        RowLayout {
             Layout.fillWidth: true
+            spacing: Theme.space(12)
+            Text {
+                objectName: "auditLogPath"
+                text: "Caminho do log: " + (page.logPath.length > 0 ? page.logPath : "não informado")
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: "monospace"; font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WrapAnywhere
+                Layout.fillWidth: true
+            }
+            GButton {
+                objectName: "copyAuditLogPath"
+                variant: "secondary"
+                text: "Copiar"
+                enabled: page.logPath.length > 0
+                Accessible.name: "Copiar o caminho do log de auditoria"
+                onClicked: {
+                    if (core.copyText(page.logPath)) AppState.toast("Caminho do log copiado.")
+                    else AppState.toast("Não foi possível copiar o caminho do log.")
+                }
+            }
         }
     }
 }

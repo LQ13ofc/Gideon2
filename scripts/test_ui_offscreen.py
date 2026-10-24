@@ -57,6 +57,8 @@ BASE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(BASE/'app'))
 from PySide6.QtGui import QGuiApplication,QAccessible
 from PySide6.QtCore import QObject,Qt,QCoreApplication,QEvent,QPointF
 from PySide6.QtTest import QTest
+# The first-run guide (B1) would cover the pages these phases drive: they run with it suppressed (read by uisettings.py).
+os.environ['GIDEON_UI_NO_ONBOARDING']='1'
 from main import create
 parser=argparse.ArgumentParser();parser.add_argument('--root',required=True);parser.add_argument('--artifacts',required=True);parser.add_argument('--llm',choices=['yes','no'],default='no',help='skills phase: yes = llm_engine runs (Gerar com LLM is used), no = plugin absent (the button must say so)');parser.add_argument('--phase',choices=['voice','cancel','reconnect','timeout','preferences','safe_mode','pack','feedback','hub','hub_quarantine','design','permissions','staging','lifecycle','plugins','chat','models','agent','perception','skills','connections','registry'],required=True);args=parser.parse_args()
 app=QGuiApplication(sys.argv);QAccessible.setActive(True);bridge,engine=create(app,args.root);window=engine.rootObjects()[0];checks=[];trace=[];deltas=[];metrics={}

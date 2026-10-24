@@ -60,17 +60,21 @@ PageFrame {
         return ""
     }
 
+    // B7: a JSON object within the limits (the same refusals as the bridge, shown before the send).
+    readonly property bool jsonReady: jsonArea.text.trim().length > 0 && page.jsonProblem.length === 0
+
     function sendTest() { if (testSend.enabled) core.submitText(testField.text) }
 
     // Versões, hashes e revisões (V01–V09). Campo que a ponte não expõe: "não informado" (N8, N7).
     readonly property var versionLines: {
         var lines = []
-        lines.push("Versão da Base: não informada")
+        var pkg = core.packageInfo
+        lines.push("Versão da Base: " + (pkg.installed ? pkg.version + (pkg.commit ? " · commit " + pkg.commit : "") : "não é um pacote instalado"))
         lines.push("Protocolo do Core: não informado")
         lines.push("Pacote de voz: " + (pack.id || "não informado") + " · escopo " + (pack.scope || "não informado"))
         lines.push("Motores: wake " + (engines.wake || "não informado") + " · stt " + (engines.stt || "não informado") + " · tts " + (engines.tts || "não informado"))
         lines.push("SHA-256 do pacote de voz: não informado")
-        lines.push("SHA-256 do catálogo do Hub: não informado")
+        lines.push("SHA-256 do catálogo do Hub: " + (core.hubStorage.catalogSha ? core.hubStorage.catalogSha + "…" : "não informado"))
         var entries = core.hubEntries || []
         var shown = 0
         for (var i = 0; i < entries.length; i++) {
@@ -81,8 +85,9 @@ PageFrame {
         }
         if (shown === 0) lines.push("Nenhum plugin instalado")
         lines.push("Revisões: preferências " + core.preferencesRevision + " · motor LLM " + core.llmRevision)
-        lines.push("Binário e PACKAGE.json: não informado")
-        lines.push("SHA-256 da última captura: não informado")
+        lines.push("PACKAGE.json: " + (pkg.installed ? "versão " + pkg.version + " · commit " + (pkg.commit || "não informado") + " · runtime " + pkg.runtime : "não é um pacote instalado"))
+        var sha = String(core.captureSummary.pcm_sha256 || "")
+        lines.push("SHA-256 da última captura: " + (sha.length > 0 ? sha.slice(0, 12) + "…" : "nenhuma captura nesta sessão"))
         return lines
     }
     readonly property var badgeLines: [
@@ -164,14 +169,26 @@ PageFrame {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
-            // O disparo de wake de teste ainda não existe na ponte (N3): desabilitado com o motivo.
+            // B6: envia virtual_wake. O Core só aceita com --virtual-input; a recusa aparece na linha de resultado.
             GButton {
                 objectName: "virtualWakeButton"
                 variant: "secondary"
                 text: "Disparar wake de teste"
-                enabled: false
+                enabled: core.virtualWakeAvailable && !page.sessionActive
+                onClicked: core.virtualWake()
             }
-            FNote { small: true; text: "Indisponível: a ponte ainda não envia o wake de teste." }
+            Text {
+                objectName: "wakeResult"
+                visible: text.length > 0
+                text: core.wakeResult
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            FNote { small: true; text: "Exige o Core iniciado com --virtual-input; sem ele, o Core recusa o wake de teste." }
             Text {
                 text: "Replay de wake: " + page.replayText
                 textFormat: Text.PlainText
@@ -240,11 +257,6 @@ PageFrame {
                 }
             }
             FNote { visible: page.modeId === "json" && page.jsonProblem.length > 0; tone: "error"; small: true; text: page.jsonProblem }
-            FNote {
-                visible: page.modeId === "json"
-                small: true
-                text: "Indisponível: a ponte ainda não envia objeto JSON para a capacidade."
-            }
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.space(12)
@@ -252,10 +264,31 @@ PageFrame {
                     objectName: "invokeCapabilityButton"
                     variant: "primary"
                     text: "Invocar"
-                    enabled: page.modeId === "text" && page.capabilities.length > 0 && capBox.currentText.length > 0 && core.pluginsAvailable
-                    onClicked: core.invokeCapability(capBox.currentText, capText.text)
+                    enabled: page.capabilities.length > 0 && capBox.currentText.length > 0 && core.pluginsAvailable && !core.capabilityPending
+                             && (page.modeId === "text" || page.jsonReady)
+                    onClicked: page.modeId === "text" ? core.invokeCapability(capBox.currentText, capText.text)
+                                                      : core.invokeCapabilityJson(capBox.currentText, jsonArea.text)
                 }
-                FNote { small: true; text: "Prazo: 3 s" }
+                GButton {
+                    objectName: "cancelCapabilityButton"
+                    variant: "secondary"
+                    text: "Cancelar invocação"
+                    visible: core.capabilityPending
+                    enabled: core.capabilityInFlight.length > 0 && core.pluginsAvailable
+                    onClicked: core.cancelCapability(core.capabilityInFlight)
+                }
+                FNote { small: true; text: page.modeId === "text" ? "Prazo: 3 s" : "Prazo: 10 s (30 s no selftest do modelo)" }
+            }
+            Text {
+                objectName: "capabilityStatus"
+                visible: text.length > 0
+                text: core.pluginResult
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
             FieldLabel { text: "Resultado" }
             Rectangle {

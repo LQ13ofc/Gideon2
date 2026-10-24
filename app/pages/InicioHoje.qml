@@ -28,7 +28,9 @@ PageFrame {
         if (!core.textAvailable) return "Indisponível: a entrada de texto só existe no perfil de teste."
         return ""
     }
-    readonly property bool canSend: textTypeable && input.text.trim().length > 0
+    // B13: the Core rule for the command line (1..512 UTF-8 bytes, no control characters); a problem disables Enviar and says why.
+    readonly property string inputProblem: input.text.length > 0 ? core.commandProblem(input.text) : ""
+    readonly property bool canSend: textTypeable && input.text.trim().length > 0 && inputProblem.length === 0
 
     // The state shown in words and by the orb. Order = the priorities of 10-assistente.md §2.2 (first true wins).
     readonly property var hud: {
@@ -102,6 +104,15 @@ PageFrame {
                 : "Modo: Base + LLM (" + ((core.modelsSelected && core.modelsSelected.model) ? core.modelsSelected.model : "sem modelo") + ")"
             onClicked: Window.window.goPage(core.chatAvailable ? "modelos" : "plugins")
         }
+    }
+
+    // B12: the last chat turn failed with a Core code the user can fix in Provedor e chaves.
+    Banner {
+        objectName: "hojeChatError"
+        kind: "warn"
+        text: core.chatErrorBanner.text || ""
+        actionText: core.chatErrorBanner.action || ""
+        onActionRequested: Window.window.openLlm()
     }
 
     // The state: orb and phrase. Not a box: it is the first thing of the page.
@@ -192,7 +203,8 @@ PageFrame {
                 id: input
                 objectName: "textInput"
                 Layout.fillWidth: true
-                maximumLength: 512
+                // Characters are bounded here only against a huge paste; the limit that counts is the byte counter below.
+                maximumLength: 2048
                 placeholderText: "Diga ou digite um comando"
                 enabled: page.textTypeable
                 Accessible.name: "Comando para o Gideon"
@@ -205,6 +217,31 @@ PageFrame {
                 Accessible.name: "Enviar comando"
                 enabled: page.canSend
                 onClicked: page.submit()
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(12)
+            Text {
+                objectName: "commandCounter"
+                text: L.byteCounter(input.text, 512)
+                textFormat: Text.PlainText
+                color: page.inputProblem.length > 0 ? Theme.warning : Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                Accessible.name: "Tamanho do comando: " + text
+            }
+            Text {
+                objectName: "commandProblem"
+                visible: page.inputProblem.length > 0
+                text: page.inputProblem
+                textFormat: Text.PlainText
+                color: Theme.warning
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: "Motivo: " + text
             }
         }
         Text {

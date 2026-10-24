@@ -186,6 +186,7 @@ def ui_base(pkg, state):
             "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp",
             "--setenv", "XDG_CACHE_HOME", "/tmp/cache", "--setenv", "XDG_CONFIG_HOME", "/tmp/config",
             "--setenv", "XDG_RUNTIME_DIR", "/tmp/runtime", "--setenv", "QT_QPA_PLATFORM", "offscreen",
+            "--setenv", "GIDEON_UI_NO_ONBOARDING", "1",
             "--setenv", "QT_QUICK_BACKEND", "software", "--setenv", "QT_SCALE_FACTOR", "2",
             "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib", "/lib64",
             "--symlink", "usr/bin", "/bin", "--symlink", "usr/bin", "/sbin",

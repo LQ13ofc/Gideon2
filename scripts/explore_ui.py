@@ -48,6 +48,8 @@ out.mkdir(parents=True, exist_ok=True)
 
 # Same as app/main.py __main__: the client ships its own look.
 os.environ['QT_QUICK_CONTROLS_STYLE'] = 'Basic'
+# The first-run guide (B1) covers the pages the explorer visits: it starts suppressed (read by uisettings.py).
+os.environ['GIDEON_UI_NO_ONBOARDING'] = '1'
 
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QGuiApplication

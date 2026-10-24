@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """App-side UI settings (app/uisettings.py): schema, validation, contrast, import/export, persistence. No GUI is opened."""
-import json,os,stat,sys,tempfile,unittest
+import json,os,shlex,stat,sys,tempfile,unittest
 from pathlib import Path
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
 import bridge as bridge_module
-from uisettings import APP_KEYS,CORE_KEYS,PRESETS,SCHEMA,SPECS,UiSettings,contrast_ratio,parse_color,settings_path,validate_tokens
+from uisettings import APP_KEYS,CORE_KEYS,PRESETS,SCHEMA,SPECS,UiSettings,_legacy_path,contrast_ratio,parse_color,settings_path,validate_tokens
+# Every test here runs with a private XDG_CONFIG_HOME (self.home); no real home or autostart folder is touched.
 
 # docs/ui-spec/01-ajustes-minimalismo.md 3.1 (minimum set) plus the Core-backed entries of docs/ui-spec/40-configuracoes.md.
 MINIMUM_KEYS={'theme.mode','theme.preset','theme.accent','theme.density','theme.radius','theme.fontSize','theme.fontFamily','theme.contrast','theme.animation','theme.translucency','theme.shadow','theme.titleWeight','theme.lineHeight','theme.colors','theme.orb','theme.orbSize','behavior.startTab','behavior.rememberWindow','behavior.tips','behavior.shortcuts','behavior.advanced','behavior.devMode','behavior.toastSeconds','behavior.confirmWrites','behavior.reduceMotionFollowSystem','voice.partials','voice.showConfidence','audio.cues'}
@@ -227,6 +229,104 @@ class UiSettingsTests(unittest.TestCase):
         self.assertEqual(bridge_module.code_message('zzz_unknown_code'),'Não foi possível concluir a operação. Código: zzz_unknown_code')
         self.ui.reset('behavior.advanced')
         self.assertEqual(bridge_module.code_message('zzz_unknown_code'),'Não foi possível concluir a operação.')
+
+    def test_onboarding_and_low_power_entries(self):
+        self.assertIs(self.ui.values['behavior.onboardingDone'],False)
+        self.assertIs(self.ui.values['perf.lowPower'],False)
+        spec=next(entry for entry in self.ui.schema if entry['key']=='perf.lowPower')
+        self.assertEqual((spec['type'],spec['label'],spec['source']),('bool','Modo econômico','app'))
+        self.assertTrue(self.ui.set('perf.lowPower',True)['ok'])
+        self.assertTrue(self.ui.set('behavior.onboardingDone',True)['ok'])
+        self.assertEqual(sorted(self.ui.modifiedKeys),['behavior.onboardingDone','perf.lowPower'])
+        self.assertEqual(self.ui.set('perf.lowPower','sim')['code'],'invalid_value')
+
+    def test_no_onboarding_switch_comes_from_the_environment(self):
+        with patch.dict(os.environ,{'GIDEON_UI_NO_ONBOARDING':'1'}):self.assertTrue(self.ui.noOnboarding)
+        with patch.dict(os.environ,{'GIDEON_UI_NO_ONBOARDING':'0'}):self.assertFalse(self.ui.noOnboarding)
+
+    def test_legacy_single_file_becomes_the_padrao_profile(self):
+        legacy=_legacy_path('/srv/gideon-core',self.home);legacy.parent.mkdir(parents=True,exist_ok=True)
+        legacy.write_text(json.dumps({'schemaVersion':1,'values':{'theme.radius':5}}),encoding='utf-8')
+        ui=self.new()
+        self.assertEqual(ui.values['theme.radius'],5);self.assertEqual(ui.activeProfile,'Padrão')
+        self.assertFalse(legacy.exists(),'moved, never copied');self.assertTrue(self.file().exists())
+
+    def test_profiles_create_duplicate_switch_rename_delete(self):
+        ui=self.ui
+        ui.set('theme.radius',4)
+        self.assertEqual([p['name'] for p in ui.profiles()],['Padrão'])
+        for name in ('','   ','x'*33,'a/b','Padrão','padrao','Padrao ','..','ç'):
+            with self.subTest(name=name):
+                result=ui.createProfile(name);self.assertEqual((result['ok'],result['code']),(False,'profile_name'))
+        self.assertTrue(ui.createProfile('Trabalho')['ok'])
+        self.assertEqual(ui.createProfile('trabalho')['code'],'profile_exists')
+        self.assertEqual([p['name'] for p in ui.profiles()],['Padrão','Trabalho'])
+        self.assertTrue(ui.duplicateProfile('Padrão','Copia')['ok'])
+        self.assertEqual(ui.duplicateProfile('Inexistente','X')['code'],'profile_missing')
+        self.assertEqual(ui.values['theme.radius'],4)
+        self.assertTrue(ui.switchProfile('Trabalho')['ok'])
+        self.assertEqual(ui.values['theme.radius'],8);self.assertEqual(ui.activeProfile,'Trabalho');self.assertEqual(list(ui.modifiedKeys),[])
+        ui.set('theme.radius',12)
+        self.assertTrue(ui.switchProfile('Copia')['ok'])
+        self.assertEqual(ui.values['theme.radius'],4,'the duplicate starts with the values it was copied from')
+        self.assertTrue(ui.switchProfile('Padrão')['ok'])
+        self.assertEqual(ui.switchProfile('Nada')['code'],'profile_missing')
+        self.assertEqual(ui.deleteProfile('Padrão')['code'],'profile_reserved')
+        self.assertEqual(ui.renameProfile('Padrão','Outro')['code'],'profile_reserved')
+        self.assertEqual(ui.deleteProfile('Copia')['ok'],True)
+        ui.switchProfile('Trabalho')
+        self.assertEqual(ui.deleteProfile('Trabalho')['code'],'profile_active','the active profile is never deleted')
+        ui.switchProfile('Padrão')
+        self.assertEqual(ui.deleteProfile('Trabalho')['ok'],True)
+        self.assertFalse(settings_path('/srv/gideon-core',self.home,'Trabalho').exists())
+        self.assertTrue(ui.createProfile('Pessoal')['ok'])
+        self.assertEqual(ui.renameProfile('Pessoal','pessoal')['ok'],True,'case-only rename is allowed')
+        self.assertEqual(ui.renameProfile('pessoal','Padrao')['code'],'profile_name')
+        ui.switchProfile('pessoal');self.assertEqual(ui.renameProfile('pessoal','Casa')['ok'],True)
+        self.assertEqual(ui.activeProfile,'Casa')
+        reloaded=self.new()
+        self.assertEqual(reloaded.activeProfile,'Casa','the active profile survives a restart')
+        self.assertEqual([p['name'] for p in ui.profiles()],['Padrão','Casa'])
+        for index in range(18):self.assertTrue(ui.createProfile(f'Perfil {index}')['ok'])  # 2 + 18 = 20, the limit
+        self.assertEqual(ui.createProfile('mais um')['code'],'profile_limit')
+
+    def test_autostart_writes_and_removes_only_its_own_entry(self):
+        folder=Path(self.home)/'bin';folder.mkdir(parents=True,exist_ok=True)
+        fake=folder/'gideon-launch';fake.write_text('#!/bin/sh\n',encoding='utf-8');fake.chmod(0o755)
+        entry=Path(self.home)/'autostart'/'gideon.desktop'
+        command=f'{fake} --install-root /srv/gideon profile-a'
+        with patch.dict(os.environ,{'GIDEON_LAUNCH_CMD':command}):
+            state=self.ui.autostartState()
+            self.assertEqual((state['supported'],state['enabled'],state['exists']),(True,False,False))
+            self.assertFalse(entry.exists())
+            self.assertEqual(self.ui.setAutostart(True),{'ok':True,'enabled':True})
+            self.assertEqual(stat.S_IMODE(os.stat(entry).st_mode),0o644)
+            self.assertEqual(stat.S_IMODE(os.stat(entry.parent).st_mode),0o700)
+            lines=entry.read_text(encoding='utf-8').splitlines()
+            for line in ('[Desktop Entry]','Type=Application','Name=Gideon',f'Exec={command}','X-GNOME-Autostart-enabled=true'):
+                self.assertIn(line,lines)
+            state=self.ui.autostartState();self.assertTrue(state['enabled'] and state['managed'])
+            self.assertEqual(self.ui.setAutostart(False),{'ok':True,'enabled':False})
+            self.assertFalse(entry.exists())
+            self.assertEqual(self.ui.setAutostart(False)['ok'],True)
+        with patch.dict(os.environ,{'GIDEON_LAUNCH_CMD':''}):
+            state=self.ui.autostartState()
+            self.assertEqual((state['supported'],state['reason']),(False,'não foi possível descobrir o comando de inicialização'))
+            refused=self.ui.setAutostart(True)
+            self.assertEqual(refused['code'],'autostart_unavailable');self.assertFalse(entry.exists())
+        spaced_dir=Path(self.home)/'pasta com espaço';spaced_dir.mkdir()
+        spaced=spaced_dir/'gideon-launch';spaced.write_text('#!/bin/sh\n',encoding='utf-8');spaced.chmod(0o755)
+        with patch.dict(os.environ,{'GIDEON_LAUNCH_CMD':f'{shlex.quote(str(spaced))} --install-root /srv/x perfil'}):
+            self.assertEqual(self.ui.setAutostart(True)['ok'],True)
+            self.assertIn(f'Exec="{spaced}" --install-root /srv/x perfil',entry.read_text(encoding='utf-8').splitlines())
+            self.ui.setAutostart(False)
+        entry.parent.mkdir(parents=True,exist_ok=True)
+        entry.write_text('[Desktop Entry]\nName=Outro\nExec=/bin/true\n',encoding='utf-8')
+        with patch.dict(os.environ,{'GIDEON_LAUNCH_CMD':command}):
+            self.assertEqual(self.ui.setAutostart(True)['code'],'autostart_foreign')
+            self.assertEqual(self.ui.setAutostart(False)['code'],'autostart_foreign')
+            self.assertTrue(entry.exists());state=self.ui.autostartState()
+            self.assertTrue(state['exists'] and not state['managed'])
 
     def test_bridge_messages_are_portuguese_and_never_raw(self):
         for code in ('stale_preferences','invalid_preferences','preferences_storage_error','preferences_unavailable'):

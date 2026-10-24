@@ -162,6 +162,21 @@ Item {
     property string highlightKey: ""
     property bool onlyModified: false
 
+    // First-run guide (app/components/OOnboarding.qml). Main sets onboardingOpen at start when the profile has not seen it.
+    property bool onboardingOpen: false
+    // Why the guide cannot show or be started now ("" when it can): it never appears offline or during a voice session.
+    function introBlockReason() {
+        if (typeof core === "undefined" || !core || !core.connected) return "Core desconectado"
+        if (String(core.sessionId || "").length > 0) return "sessão de voz em andamento"
+        return ""
+    }
+    function openOnboarding() {
+        var reason = introBlockReason()
+        if (reason.length > 0) { toast("Introdução indisponível: " + reason + "."); return false }
+        onboardingOpen = true
+        return true
+    }
+
     // The state notice of the Configurações tab ("" when nothing to say).
     function configNotice() {
         if (typeof core === "undefined" || !core) return ""

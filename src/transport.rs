@@ -581,7 +581,12 @@ pub async fn serve(
                     .unwrap_or_default();
             }
             r.active_phrase = Some(descriptor.active_phrase.clone());
-            Some(WakeInput::new(descriptor).map_err(|_| io::Error::other("invalid wake catalog"))?)
+            let mut input =
+                WakeInput::new(descriptor).map_err(|_| io::Error::other("invalid wake catalog"))?;
+            input
+                .set_sensitivity(storage.config.wake_sensitivity)
+                .map_err(|_| io::Error::other("invalid wake sensitivity"))?;
+            Some(input)
         }
         None => None,
     };
@@ -696,7 +701,10 @@ pub async fn serve(
                 }
             },
             Some(call) = rx.recv() => {
-                let response = core.handle_with_storage(call.request, std::time::Instant::now(), Some(&mut storage)); storage.audit(response.sequence)?;
+                let response = core.handle_with_storage(call.request, std::time::Instant::now(), Some(&mut storage));
+                // Live wake sensitivity: the detector follows the ledger after every control call.
+                if let Some(input) = wake_input.as_mut() { let _ = input.set_sensitivity(storage.config.wake_sensitivity); }
+                storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
                 if core.restart_requested() {
                     // The peer task writes the `ok` line after this turn; give it time before the

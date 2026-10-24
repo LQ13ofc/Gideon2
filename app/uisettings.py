@@ -1,10 +1,14 @@
 """App-side UI settings (docs/ui-spec/01-ajustes-minimalismo.md 3.1 and 3.3).
 
-One schema declares every interface option. Entries with source 'app' live in a per-profile JSON file
-under $XDG_CONFIG_HOME/gideon-app/. Entries with source 'core' are read and written through the bridge
-(the Core owns them). Secrets are never part of the schema, so they are never stored or exported.
+One schema declares every interface option. Entries with source 'app' live in a JSON file per settings profile under
+$XDG_CONFIG_HOME/gideon-app/<core hash>/<profile>.json, and the active profile name lives in active.json next to them.
+Entries with source 'core' are read and written through the bridge (the Core owns them). Secrets are never part of the
+schema, so they are never stored or exported.
+
+Also here: the XDG autostart entry ("Iniciar no login", $XDG_CONFIG_HOME/autostart/gideon.desktop), which only this app
+creates and removes, and the environment switch GIDEON_UI_NO_ONBOARDING=1 that keeps the first-run guide out of tests.
 """
-import copy,hashlib,json,math,os,re,tempfile,unicodedata
+import copy,hashlib,json,math,os,re,shlex,subprocess,tempfile,unicodedata
 from pathlib import Path
 from PySide6.QtCore import QObject,Property,Signal,Slot
 from bridge import CODE_MESSAGES,set_code_detail
@@ -23,6 +27,19 @@ TEXT_BACKGROUNDS=('bg','surface','surfaceVariant')
 THEME_KEYS=frozenset({'theme.preset','theme.accent','theme.colors','theme.contrast'})
 HEX=re.compile(r'#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})')
 CONTROL=re.compile(r'[\x00-\x1f\x7f]')
+# Settings profiles (docs/ui-spec/01-ajustes-minimalismo.md 3.1; docs/research/ux-config-navegacao.md item 11).
+PROFILE_DEFAULT='Padrão'
+PROFILE_NAME=re.compile(r'[A-Za-z0-9 _-]{1,32}')
+PROFILE_LIMIT=20
+ACTIVE_FILE='active.json'
+# XDG autostart (Desktop Entry spec). The marker line says the file was written by this app; only such a file is removed.
+AUTOSTART_NAME='gideon.desktop'
+AUTOSTART_MARK='X-Gideon-Managed=true'
+AUTOSTART_NO_COMMAND='não foi possível descobrir o comando de inicialização'
+ONBOARDING_ENV='GIDEON_UI_NO_ONBOARDING'
+LAUNCH_ENV='GIDEON_LAUNCH_CMD'
+PLAIN_ARG=re.compile(r'[A-Za-z0-9_./:=@+-]+')
+PROFILE_ARG=re.compile(r'[A-Za-z0-9_.-]{1,64}')
 # Presets (docs/research/ux-temas.md 6.4), values in ROLES order.
 PRESET_ROWS=(
     ('gideon-escuro','Gideon escuro',('#121417','#1b1f24','#262c33','#7d8794','#e6e9ee','#a7b0bc','#7aa2f7','#0b1020','#6bcb8b','#e8b04b','#f07178','#6cb6ff')),
@@ -42,6 +59,15 @@ MESSAGES={
     'contrast':'Cor não atende ao contraste mínimo e não pode ser corrigida; nada foi alterado',
     'storage':CODE_MESSAGES['preferences_storage_error'],
     'unavailable':CODE_MESSAGES['preferences_unavailable'],
+    'profile_name':'Nome inválido: use de 1 a 32 letras sem acento, números, espaço, _ ou -; nada foi alterado',
+    'profile_reserved':'Padrão é o perfil inicial: não pode ser criado, renomeado nem excluído; nada foi alterado',
+    'profile_exists':'Já existe um perfil com esse nome; nada foi alterado',
+    'profile_missing':'Perfil não encontrado; nada foi alterado',
+    'profile_active':'O perfil ativo não pode ser excluído: troque de perfil antes; nada foi alterado',
+    'profile_limit':f'Limite de {PROFILE_LIMIT} perfis atingido; exclua um perfil antes',
+    'autostart_foreign':'Já existe um atalho de inicialização que o Gideon não criou; nada foi alterado',
+    'autostart_unavailable':AUTOSTART_NO_COMMAND,
+    'autostart_storage':'Não foi possível gravar o atalho de inicialização; nada foi alterado',
 }
 
 
@@ -77,9 +103,11 @@ SCHEMA=(
     _entry('behavior.shortcuts','Ajuda','Geral','bool',True,'Atalhos de teclado','Liga os atalhos de teclado neste app.',keywords=('atalho','teclado','ctrl')),
     _entry('behavior.advanced','Opções','Geral','bool',False,'Mostrar opções avançadas','Revela opções avançadas em todas as telas. Não altera valores.',keywords=('avancado','opcoes','avancadas','detalhe')),
     _entry('behavior.devMode','Opções','Geral','bool',False,'Modo desenvolvedor','Mostra ferramentas de desenvolvimento em Diagnóstico.',level='dev',keywords=('desenvolvedor','dev','debug','teste')),
+    _entry('behavior.onboardingDone','Introdução','Geral','bool',False,'Introdução concluída','Marca que a primeira execução guiada já foi vista neste perfil. Refazer fica em Geral.',level='advanced',keywords=('introducao','onboarding','primeira','execucao','guia','boas-vindas')),
     _entry('behavior.toastSeconds','Avisos','Geral','int',4,'Duração dos avisos','Tempo, em segundos, que um aviso fica na tela.',mn=2,mx=10,keywords=('aviso','toast','mensagem','segundos')),
     _entry('behavior.confirmWrites','Avisos','Geral','bool',True,'Confirmar ações que gravam','Pede confirmação antes de ações que gravam dados.',keywords=('confirmar','gravar','salvar','confirmacao')),
-    _entry('behavior.reduceMotionFollowSystem','Movimento','Geral','bool',False,'Seguir a preferência de movimento do sistema','Reduz animações quando o sistema pede menos movimento.',level='advanced',keywords=('movimento','reduzir','sistema','animacao')),
+    _entry('behavior.reduceMotionFollowSystem','Movimento','Geral','bool',False,'Seguir a preferência de movimento do sistema','Reduz animações quando o sistema pede menos movimento (GNOME: animações desligadas).',level='advanced',keywords=('movimento','reduzir','sistema','animacao')),
+    _entry('perf.lowPower','Desempenho','Geral','bool',False,'Modo econômico','Desliga animações e translucidez e reduz sombras. Vale na hora.',keywords=('economico','bateria','desempenho','energia','animacao','sombra','lento')),
     _entry('core.wakePhrase','Frase de despertar',_VOZ,'enum','','Frase de despertar','Só frases certificadas do pacote. A troca vale depois de reiniciar o Core.',restart=True,keywords=('wake','frase','despertar','hey gideon','ativacao'),source='core'),
     _entry('core.sessionTimeoutMs','Sessão',_VOZ,'int',30000,'Prazo da sessão (ms)','Tempo máximo de uma sessão de voz, em milissegundos. Vale na próxima sessão.',level='advanced',mn=50,mx=60000,keywords=('prazo','timeout','sessao','tempo','segundos'),source='core'),
     _entry('voice.partials','Transcrição',_VOZ,'bool',True,'Mostrar transcrição parcial','Mostra o texto enquanto você fala.',keywords=('parcial','transcricao','ao vivo','legenda')),
@@ -258,25 +286,49 @@ def build_schema(bridge=None):
     return entries
 
 
+# ---- paths -------------------------------------------------------------------------------------------------------------
 def _xdg_config_home():
     base=os.environ.get('XDG_CONFIG_HOME','')
     return Path(base) if base and os.path.isabs(base) else Path.home()/'.config'
 
 
-def settings_path(root=None,config_home=None):
-    """$XDG_CONFIG_HOME/gideon-app/<profile>.json; the profile is a hash of the Core root."""
-    base=Path(config_home) if config_home else _xdg_config_home()
-    profile=hashlib.sha256(str(Path(root).resolve()).encode('utf-8')).hexdigest()[:16] if root else 'default'
-    return base/'gideon-app'/f'{profile}.json'
+def _config_base(config_home=None):
+    return Path(config_home) if config_home else _xdg_config_home()
 
 
-def _atomic_write(path,payload):
+def _root_hash(root):
+    return hashlib.sha256(str(Path(root).resolve()).encode('utf-8')).hexdigest()[:16] if root else 'default'
+
+
+def profile_dir(root=None,config_home=None):
+    """$XDG_CONFIG_HOME/gideon-app/<core hash>: the settings profiles of one Core root."""
+    return _config_base(config_home)/'gideon-app'/_root_hash(root)
+
+
+def settings_path(root=None,config_home=None,name=PROFILE_DEFAULT):
+    """File of one settings profile (default: 'Padrão', the profile every install starts with)."""
+    return profile_dir(root,config_home)/f'{name}.json'
+
+
+def _legacy_path(root,config_home):
+    """The single-file layout of earlier builds: $XDG_CONFIG_HOME/gideon-app/<core hash>.json."""
+    return _config_base(config_home)/'gideon-app'/f'{_root_hash(root)}.json'
+
+
+def profile_name_problem(name):
+    """None when `name` may be created or renamed to, else the reason (Portuguese, for the user)."""
+    if not isinstance(name,str) or not PROFILE_NAME.fullmatch(name) or name!=name.strip():return MESSAGES['profile_name']
+    if _fold(name)==_fold(PROFILE_DEFAULT):return MESSAGES['profile_reserved']
+    return None
+
+
+def _atomic_write(path,payload,mode=0o600,private_folder=True):
     folder=path.parent
     folder.mkdir(parents=True,exist_ok=True,mode=0o700)
-    os.chmod(folder,0o700)
+    if private_folder:os.chmod(folder,0o700)
     fd,tmp=tempfile.mkstemp(dir=str(folder),prefix='.'+path.name+'.',suffix='.tmp')
     try:
-        os.fchmod(fd,0o600)
+        os.fchmod(fd,mode)
         with os.fdopen(fd,'wb') as handle:
             handle.write(payload);handle.flush();os.fsync(handle.fileno())
         os.replace(tmp,path)
@@ -291,6 +343,11 @@ def _atomic_write(path,payload):
     except OSError:pass
 
 
+def _payload(values):
+    data={'schemaVersion':SCHEMA_VERSION,'values':dict(sorted(values.items()))}
+    return (json.dumps(data,ensure_ascii=False,indent=2,sort_keys=True)+'\n').encode('utf-8')
+
+
 def _fail(code,error,value=None):
     return {'ok':False,'code':code,'error':error,'value':value}
 
@@ -300,6 +357,67 @@ def _store(values,key,value):
     else:values[key]=value
 
 
+# ---- autostart (XDG) ---------------------------------------------------------------------------------------------------
+def _profile_of(root,install):
+    """The Core profile name when `root` is <install>/profiles/<name> (or .../<name>/core), else None."""
+    if not root:return None
+    path=Path(root).resolve();profiles=install/'profiles'
+    if path.parent==profiles:name=path.name
+    elif path.name=='core' and path.parent.parent==profiles:name=path.parent.name
+    else:return None
+    return name if PROFILE_ARG.fullmatch(name) and not name.startswith('.') else None
+
+
+def discover_launch(root=None):
+    """(argv, None) for the command that starts this install and profile, or (None, reason).
+    GIDEON_LAUNCH_CMD (an absolute executable and its arguments) wins; otherwise the packaged layout:
+    <install>/versions/<v>/app/uisettings.py with <install>/current/bin/gideon-launch."""
+    override=os.environ.get(LAUNCH_ENV,'').strip()
+    if override:
+        try:argv=shlex.split(override)
+        except ValueError:return None,AUTOSTART_NO_COMMAND
+        if argv and os.path.isabs(argv[0]) and os.access(argv[0],os.X_OK):return argv,None
+        return None,AUTOSTART_NO_COMMAND
+    package=Path(__file__).resolve().parents[1]
+    if len(package.parents)<2 or package.parent.name!='versions':return None,AUTOSTART_NO_COMMAND
+    install=package.parent.parent
+    profile=_profile_of(root,install)
+    launch=install/'current'/'bin'/'gideon-launch'
+    if profile is None or not os.access(launch,os.X_OK):return None,AUTOSTART_NO_COMMAND
+    return [str(launch),'--install-root',str(install),profile],None
+
+
+def _exec_value(argv):
+    """Desktop Entry Exec value: quoted arguments (XDG Exec rules), then string escaping and %% for field codes."""
+    parts=[]
+    for arg in argv:
+        if any(ord(c)<32 for c in arg):return None
+        parts.append(arg if PLAIN_ARG.fullmatch(arg) else '"'+re.sub(r'(["`$\\])',r'\\\1',arg)+'"')
+    return ' '.join(parts).replace('\\','\\\\').replace('%','%%')
+
+
+def _desktop_text(exec_value):
+    return ('[Desktop Entry]\nType=Application\nName=Gideon\nComment=Abre o Gideon ao entrar no computador\n'
+            f'Exec={exec_value}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n{AUTOSTART_MARK}\n')
+
+
+def _autostart_file(config_home=None):
+    return _config_base(config_home)/'autostart'/AUTOSTART_NAME
+
+
+def _read_autostart(path):
+    """None when absent. Else {'managed','enabled'}: enabled when the entry is not Hidden and not switched off by X-GNOME."""
+    try:
+        if not path.exists():return None
+        if path.stat().st_size>FILE_LIMIT:raise ValueError('too large')
+        lines={line.strip() for line in path.read_text(encoding='utf-8').splitlines()}
+    except (OSError,ValueError):
+        return {'managed':False,'enabled':False}
+    managed=AUTOSTART_MARK in lines
+    enabled=('Hidden=true' not in lines) and ('X-GNOME-Autostart-enabled=false' not in lines)
+    return {'managed':managed,'enabled':enabled}
+
+
 class UiSettings(QObject):
     changed=Signal(str)
     valuesChanged=Signal()
@@ -307,10 +425,14 @@ class UiSettings(QObject):
     def __init__(self,bridge=None,root=None,config_home=None,parent=None):
         super().__init__(parent)
         self._bridge=bridge
+        self._root=root;self._config_home=config_home
         self._values={}
         self._revision=0
-        self.path=settings_path(root,config_home)
-        self._load()
+        self._reduced_system=None
+        self._migrate_legacy()
+        self.profile=self._read_active()
+        self.path=settings_path(root,config_home,self.profile)
+        self._values=self._load_values(self.path)
         set_code_detail(bool(self._values.get('behavior.advanced',False)))
         if bridge is not None:
             for name in ('preferencesChanged','packChanged'):
@@ -318,16 +440,55 @@ class UiSettings(QObject):
                 if signal is not None:signal.connect(self._core_changed)
         self._core_cache=self._core_snapshot()
 
-    # ---- persistence
-    def _load(self):
-        path=self.path
+    # ---- profiles: files and active profile
+    def _dir(self):return profile_dir(self._root,self._config_home)
+
+    def _file(self,name):return settings_path(self._root,self._config_home,name)
+
+    def _migrate_legacy(self):
+        """Earlier builds kept one file per Core root; it becomes the 'Padrão' profile (moved, never copied)."""
+        legacy=_legacy_path(self._root,self._config_home)
+        target=self._file(PROFILE_DEFAULT)
         try:
-            if not path.exists():return
+            if legacy.exists() and not target.exists():
+                target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+                os.replace(legacy,target)
+        except OSError:pass
+
+    def _names(self):
+        names={PROFILE_DEFAULT}
+        try:
+            for path in self._dir().glob('*.json'):
+                stem=path.stem
+                if path.name!=ACTIVE_FILE and (stem==PROFILE_DEFAULT or PROFILE_NAME.fullmatch(stem)):names.add(stem)
+        except OSError:pass
+        return names
+
+    def _read_active(self):
+        try:
+            data=json.loads((self._dir()/ACTIVE_FILE).read_bytes().decode('utf-8'))
+            name=data.get('active') if isinstance(data,dict) else None
+        except (OSError,ValueError):name=None
+        return name if isinstance(name,str) and name in self._names() else PROFILE_DEFAULT
+
+    def _write_active(self,name):
+        payload=(json.dumps({'schemaVersion':SCHEMA_VERSION,'active':name},ensure_ascii=False,sort_keys=True)+'\n').encode('utf-8')
+        try:
+            _atomic_write(self._dir()/ACTIVE_FILE,payload)
+            return True
+        except OSError:
+            return False
+
+    # ---- persistence
+    def _load_values(self,path):
+        """Validated values of one profile file. A file that cannot be read is moved aside (.bad) and gives defaults."""
+        try:
+            if not path.exists():return {}
             if path.stat().st_size>FILE_LIMIT:raise ValueError('file too large')
             data=json.loads(path.read_bytes().decode('utf-8'))
             if not isinstance(data,dict) or data.get('schemaVersion')!=SCHEMA_VERSION or not isinstance(data.get('values'),dict):raise ValueError('unexpected shape')
         except (OSError,ValueError):
-            self._quarantine();return
+            self._quarantine(path);return {}
         values={}
         for key,raw in data['values'].items():
             spec=SPECS.get(key)
@@ -337,17 +498,15 @@ class UiSettings(QObject):
         values,_fixes,errors=enforce(values)
         if errors:
             values.pop('theme.accent',None);values.pop('theme.colors',None)
-        self._values=values
+        return values
 
-    def _quarantine(self):
-        try:os.replace(self.path,self.path.with_name(self.path.name+'.bad'))
+    def _quarantine(self,path):
+        try:os.replace(path,path.with_name(path.name+'.bad'))
         except OSError:pass
 
     def _save(self):
-        data={'schemaVersion':SCHEMA_VERSION,'values':dict(sorted(self._values.items()))}
-        payload=(json.dumps(data,ensure_ascii=False,indent=2,sort_keys=True)+'\n').encode('utf-8')
         try:
-            _atomic_write(self.path,payload)
+            _atomic_write(self.path,_payload(self._values))
             return True
         except OSError:
             return False
@@ -431,6 +590,20 @@ class UiSettings(QObject):
 
     @Property(int,notify=valuesChanged)
     def revision(self):return self._revision
+
+    @Property(str,notify=valuesChanged)
+    def activeProfile(self):return self.profile
+
+    @Property(bool,notify=valuesChanged)
+    def noOnboarding(self):
+        """True when GIDEON_UI_NO_ONBOARDING=1: explorers and gates start without the first-run guide."""
+        return os.environ.get(ONBOARDING_ENV,'')=='1'
+
+    @Property(bool,notify=valuesChanged)
+    def reducedMotionSystem(self):
+        """The desktop asks for less motion (GNOME enable-animations false). Probed once; False when unknown."""
+        if self._reduced_system is None:self._reduced_system=_system_reduced_motion()
+        return self._reduced_system
 
     @Slot(str,'QVariant',result='QVariantMap')
     def set(self,key,value):
@@ -550,3 +723,114 @@ class UiSettings(QObject):
         first,second=parse_color(a),parse_color(b)
         if first is None or second is None:return 0.0
         return contrast_ratio(first,second)
+
+    # ---- settings profiles (docs/ui-spec/01-ajustes-minimalismo.md 3.1)
+    @Slot(result='QVariantList')
+    def profiles(self):
+        return [{'name':name,'active':name==self.profile,'default':name==PROFILE_DEFAULT} for name in sorted(self._names(),key=lambda n:(n!=PROFILE_DEFAULT,_fold(n)))]
+
+    def _known(self,name):return isinstance(name,str) and name in self._names()
+
+    def _values_of(self,name):
+        return dict(self._values) if name==self.profile else self._load_values(self._file(name))
+
+    @Slot(str,result='QVariantMap')
+    def createProfile(self,name):
+        problem=profile_name_problem(name)
+        if problem is not None:return _fail('profile_name',problem)
+        if any(_fold(existing)==_fold(name) for existing in self._names()):return _fail('profile_exists',MESSAGES['profile_exists'])
+        if len(self._names())>=PROFILE_LIMIT:return _fail('profile_limit',MESSAGES['profile_limit'])
+        try:_atomic_write(self._file(name),_payload({}))
+        except OSError:return _fail('storage',MESSAGES['storage'])
+        return {'ok':True,'name':name}
+
+    @Slot(str,str,result='QVariantMap')
+    def duplicateProfile(self,source,name):
+        if not self._known(source):return _fail('profile_missing',MESSAGES['profile_missing'])
+        problem=profile_name_problem(name)
+        if problem is not None:return _fail('profile_name',problem)
+        if any(_fold(existing)==_fold(name) for existing in self._names()):return _fail('profile_exists',MESSAGES['profile_exists'])
+        if len(self._names())>=PROFILE_LIMIT:return _fail('profile_limit',MESSAGES['profile_limit'])
+        try:_atomic_write(self._file(name),_payload(self._values_of(source)))
+        except OSError:return _fail('storage',MESSAGES['storage'])
+        return {'ok':True,'name':name}
+
+    @Slot(str,result='QVariantMap')
+    def switchProfile(self,name):
+        if not self._known(name):return _fail('profile_missing',MESSAGES['profile_missing'])
+        if name==self.profile:return {'ok':True,'name':name,'changed':0}
+        old_profile,old_path,old_values=self.profile,self.path,self._values
+        new_path=self._file(name);new_values=self._load_values(new_path)
+        if not self._write_active(name):return _fail('storage',MESSAGES['storage'])
+        self.profile=name;self.path=new_path;self._values=new_values
+        changed_keys=[key for key in APP_KEYS if self._value_in(old_values,key)!=self._value_in(new_values,key)]
+        self._revision+=1
+        for key in changed_keys:self.changed.emit(key)
+        self.valuesChanged.emit()
+        set_code_detail(bool(self._current('behavior.advanced')))
+        return {'ok':True,'name':name,'changed':len(changed_keys),'previous':old_profile,'path':str(old_path)}
+
+    @Slot(str,result='QVariantMap')
+    def deleteProfile(self,name):
+        if name==PROFILE_DEFAULT:return _fail('profile_reserved',MESSAGES['profile_reserved'])
+        if not self._known(name):return _fail('profile_missing',MESSAGES['profile_missing'])
+        if name==self.profile:return _fail('profile_active',MESSAGES['profile_active'])
+        try:os.unlink(self._file(name))
+        except OSError:return _fail('storage',MESSAGES['storage'])
+        return {'ok':True,'name':name}
+
+    @Slot(str,str,result='QVariantMap')
+    def renameProfile(self,old,new):
+        if old==PROFILE_DEFAULT:return _fail('profile_reserved',MESSAGES['profile_reserved'])
+        if not self._known(old):return _fail('profile_missing',MESSAGES['profile_missing'])
+        problem=profile_name_problem(new)
+        if problem is not None:return _fail('profile_name',problem)
+        if any(_fold(existing)==_fold(new) and existing!=old for existing in self._names()):return _fail('profile_exists',MESSAGES['profile_exists'])
+        source,target=self._file(old),self._file(new)
+        if source==target:return {'ok':True,'name':new}
+        try:os.replace(source,target)
+        except OSError:return _fail('storage',MESSAGES['storage'])
+        if old==self.profile:
+            if not self._write_active(new):
+                try:os.replace(target,source)
+                except OSError:pass
+                return _fail('storage',MESSAGES['storage'])
+            self.profile=new;self.path=target
+            self.valuesChanged.emit()
+        return {'ok':True,'name':new}
+
+    # ---- Iniciar no login (XDG autostart)
+    @Slot(result='QVariantMap')
+    def autostartState(self):
+        argv,reason=discover_launch(self._root)
+        path=_autostart_file(self._config_home)
+        found=_read_autostart(path)
+        return {'supported':argv is not None,'reason':reason or '','path':str(path),'exists':found is not None,
+                'managed':bool(found and found['managed']),'enabled':bool(found and found['enabled'])}
+
+    @Slot(bool,result='QVariantMap')
+    def setAutostart(self,enable):
+        path=_autostart_file(self._config_home)
+        found=_read_autostart(path)
+        if not enable:
+            if found is None:return {'ok':True,'enabled':False}
+            if not found['managed']:return _fail('autostart_foreign',MESSAGES['autostart_foreign'])
+            try:os.unlink(path)
+            except OSError:return _fail('autostart_storage',MESSAGES['autostart_storage'])
+            return {'ok':True,'enabled':False}
+        argv,reason=discover_launch(self._root)
+        if argv is None:return _fail('autostart_unavailable',MESSAGES['autostart_unavailable'])
+        if found is not None and not found['managed']:return _fail('autostart_foreign',MESSAGES['autostart_foreign'])
+        exec_value=_exec_value(argv)
+        if exec_value is None:return _fail('autostart_unavailable',MESSAGES['autostart_unavailable'])
+        try:_atomic_write(path,_desktop_text(exec_value).encode('utf-8'),mode=0o644,private_folder=False)
+        except OSError:return _fail('autostart_storage',MESSAGES['autostart_storage'])
+        return {'ok':True,'enabled':True}
+
+
+def _system_reduced_motion():
+    """GNOME's 'enable-animations' is false. Other desktops expose nothing Qt can read here, so they count as not reduced."""
+    try:
+        done=subprocess.run(['gsettings','get','org.gnome.desktop.interface','enable-animations'],capture_output=True,text=True,timeout=1,env={'PATH':'/usr/bin:/bin'})
+    except (OSError,subprocess.SubprocessError):return False
+    return done.returncode==0 and done.stdout.strip()=='false'

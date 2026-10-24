@@ -36,6 +36,35 @@ PageFrame {
         }
         return null
     }
+    // B8 formatting. Capture times are microseconds from the Core (shown as ms); peak and RMS are 0 to 1 (shown with a comma, 3 decimals).
+    readonly property var captureReasons: ({capture_completed: "captura concluída", cancelled: "cancelada", audio_error: "erro de áudio",
+        stt_failed: "falha na transcrição", stt_unavailable: "transcrição indisponível", transcript_final: "transcrição final",
+        no_speech: "sem fala detectada", capture_too_long: "captura longa demais"})
+    function msOf(us) { return Math.round(Number(us) / 1000) + " ms" }
+    function fixed3(x) { return Number(x).toFixed(3).replace(".", ",") }
+    function shortHash(h) { return String(h || "").slice(0, 12) }
+    readonly property var captureLines: {
+        var c = core.captureSummary
+        var t = core.transcriptSummary
+        var out = []
+        if (c.session_id === undefined) out.push("Captura: nenhuma nesta sessão do Core.")
+        else {
+            out.push("Captura: início " + page.msOf(c.start_us) + " · fim " + page.msOf(c.end_us))
+            out.push("Amostras: " + c.samples + " · SHA-256 " + page.shortHash(c.pcm_sha256) + " · motivo: " + (page.captureReasons[c.reason] || "não informado"))
+        }
+        if (t.session_id !== undefined) out.push("Transcrição: " + (t.is_final ? "final" : "parcial") + " · revisão " + t.revision + " · confiança desconhecida")
+        return out
+    }
+    readonly property var speechLines: {
+        var s = core.speechSummary
+        if (s.session_id === undefined) return ["Resposta: nenhuma nesta sessão do Core."]
+        return [
+            "Resposta: " + s.samples + " amostras a " + s.sample_rate + " Hz · " + s.chunks + " pedaços",
+            "Pico " + page.fixed3(s.peak) + " · RMS " + page.fixed3(s.rms),
+            "Primeiro áudio em " + s.first_pcm_ms + " ms · tempo total " + s.elapsed_ms + " ms",
+            "Saída: " + E.audioOutputLabel(s.sink) + " · SHA-256 " + page.shortHash(s.pcm_sha256)
+        ]
+    }
     readonly property bool llmFallbackUsed: {
         var events = core.events || []
         for (var i = 0; i < events.length; i++) if (events[i].kind === "llm_fallback_used") return true
@@ -266,25 +295,34 @@ PageFrame {
         Section {
             title: "Última captura e resposta"
             Layout.alignment: Qt.AlignTop
-            // A captura e a resposta do Core ainda não chegam à interface (N7): a linha diz o motivo.
-            Text {
-                text: "Captura: " + page.offlineText
-                textFormat: Text.PlainText
-                color: Theme.text
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontBody
-                Layout.fillWidth: true
+            // B8: the blocks capture, transcript and speech of this Core session, already validated by the bridge. Absent block = nothing this session.
+            Repeater {
+                model: page.captureLines
+                delegate: Text {
+                    required property string modelData
+                    text: modelData
+                    textFormat: Text.PlainText
+                    color: Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontBody
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
             }
-            Text {
-                text: "Resposta: " + page.offlineText
-                textFormat: Text.PlainText
-                color: Theme.text
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontBody
-                Layout.fillWidth: true
+            Repeater {
+                model: page.speechLines
+                delegate: Text {
+                    required property string modelData
+                    text: modelData
+                    textFormat: Text.PlainText
+                    color: Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontBody
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
             }
-            FNote { text: "Indisponível: a ponte ainda não informa a última captura nem a última resposta." }
-            FNote { visible: Theme.advanced; small: true; text: "Confiança da transcrição: não medida" }
+            FNote { visible: Theme.advanced; small: true; text: "Confiança da transcrição: desconhecida (o motor não informa)." }
         }
     }
 

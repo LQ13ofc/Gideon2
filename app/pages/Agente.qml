@@ -110,6 +110,17 @@ PageFrame {
             onTextEdited: AppState.setDraft("#agent", "goal", text)
             onAccepted: if (page.canStart) core.agentStart(agentGoal.text)
         }
+        // B13 counter for the goal (1024 UTF-8 bytes, trimmed by the Core rule).
+        Text {
+            objectName: "agentGoalCounter"
+            text: L.byteCounter(agentGoal.text, 1024)
+            textFormat: Text.PlainText
+            color: page.goalProblem.length > 0 ? Theme.warning : Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            Layout.fillWidth: true
+            Accessible.name: "Tamanho do objetivo: " + text
+        }
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.space(10)

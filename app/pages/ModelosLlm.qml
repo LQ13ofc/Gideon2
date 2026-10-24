@@ -22,6 +22,9 @@ PageFrame {
     readonly property bool customTab: modelsTabs.currentIndex === 1
     readonly property bool wide: width > 900
     readonly property bool hasCurrent: !!core.modelsSelected.provider
+    // Recommended list state from the paged output (B14): loaded so far against the Core total.
+    readonly property bool recommendedMoreLeft: core.modelsRecommended.length < core.modelsRecommendedTotal
+    readonly property bool recommendedNotLoaded: core.modelsRecommendedTotal === 0 && core.modelsRecommended.length === 0
     readonly property var allModels: core.modelsRecommended.concat(core.modelsCustom)
     readonly property var fallbackPicked: L.modelById(allModels, fallbackPick.currentValue)
     readonly property bool fallbackIsCloud: L.isCloudProvider(core.modelsFallback.provider) || (!!fallbackPicked && fallbackPicked.kind === "cloud")
@@ -264,8 +267,9 @@ PageFrame {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+            // B14 (P8-C5): shown only while the recommended list is incomplete (or not loaded yet); a complete list hides it.
             GButton {
-                visible: page.hasCurrent && page.currentModel() === null
+                visible: page.hasCurrent && page.currentModel() === null && (page.recommendedMoreLeft || page.recommendedNotLoaded)
                 variant: "secondary"
                 text: "Carregar mais"
                 Accessible.name: "Carregar mais modelos"

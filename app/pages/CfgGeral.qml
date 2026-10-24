@@ -6,18 +6,84 @@ import "../theme"
 import "../components"
 import "../shell"
 
-// Configurações > Geral: the advanced switch and the general options, the items this version does not have (each with its
-// reason), the export and import of the settings, the rollback of the Core preferences, and the danger zone (restore the
-// app settings, behind a confirmation that asks for the profile name).
+// Configurações > Geral: the advanced switch and the general options; the first-run guide (again); "Iniciar no login"
+// (a real XDG autostart entry, confirmed); the low-power mode; the shortcuts list (read-only); the settings profiles
+// (create, duplicate, rename, switch, delete with confirmation); the export and import of the settings; the rollback of the
+// Core preferences; and the danger zone (restore the app settings, behind a confirmation that asks for the profile name).
 PageFrame {
     id: page
     objectName: "page_cfg_geral"
     anchors.fill: parent
     visible: Window.window && Window.window.pageId === "cfg_geral"
+    onVisibleChanged: if (visible) { readAutostart(); refreshProfiles() }
 
-    // This version has one profile; the danger zone asks for its name, as the profile would be named.
-    readonly property string profileName: "Principal"
+    // The name of the settings profile in use; the danger zone asks for it.
+    readonly property string profileName: AppState.uiLive() ? String(ui.activeProfile) : "Padrão"
     readonly property bool safeMode: core.configurationStatus === "safe_mode"
+
+    // Iniciar no login: what the file says now (read on page load and after each change).
+    property var autostart: ({supported: false, reason: "configurações do app indisponíveis", enabled: false, exists: false, managed: false, path: ""})
+    property bool autostartWanted: false
+    // Perfis de configurações: the list as the app reports it now.
+    property var profileList: []
+    property string profileMode: "create"
+    property string profileSource: ""
+    property string pendingProfile: ""
+
+    function readAutostart() {
+        if (!AppState.uiLive()) return
+        autostart = ui.autostartState()
+    }
+    function askAutostart(want) {
+        autostartWanted = want
+        autostartConfirm.open()
+    }
+    function applyAutostart() {
+        if (!AppState.uiLive()) return
+        var result = ui.setAutostart(autostartWanted)
+        AppState.toast(result.ok ? (autostartWanted ? "O Gideon abre no login." : "O Gideon não abre mais no login.") : result.error)
+        readAutostart()
+    }
+
+    function refreshProfiles() { profileList = AppState.uiLive() ? ui.profiles() : [] }
+    function openProfileName(mode, source) {
+        profileMode = mode
+        profileSource = source
+        profileNameField.text = mode === "rename" ? source : ""
+        profileNameError.text = ""
+        profileNameDialog.open()
+    }
+    function submitProfileName() {
+        if (!AppState.uiLive()) return
+        var name = profileNameField.text.trim()
+        var result
+        if (profileMode === "create") result = ui.createProfile(name)
+        else if (profileMode === "duplicate") result = ui.duplicateProfile(profileSource, name)
+        else result = ui.renameProfile(profileSource, name)
+        if (!result.ok) { profileNameError.text = result.error; return }
+        AppState.toast(profileMode === "create" ? "Perfil criado." : profileMode === "duplicate" ? "Perfil duplicado." : "Perfil renomeado.")
+        refreshProfiles()
+        profileNameDialog.close()
+    }
+    function switchProfile(name) {
+        if (!AppState.uiLive()) return
+        var result = ui.switchProfile(name)
+        AppState.toast(result.ok ? "Perfil " + name + " em uso." : result.error)
+        refreshProfiles()
+    }
+    function deleteProfile() {
+        if (!AppState.uiLive()) return
+        var result = ui.deleteProfile(pendingProfile)
+        AppState.toast(result.ok ? "Perfil excluído." : result.error)
+        refreshProfiles()
+        profileDeleteConfirm.close()
+    }
+
+    Connections {
+        target: AppState.uiLive() ? ui : null
+        function onValuesChanged() { page.refreshProfiles() }
+    }
+    Component.onCompleted: { readAutostart(); refreshProfiles() }
 
     function restoreApp() {
         if (!AppState.uiLive()) return
@@ -28,7 +94,7 @@ PageFrame {
 
     PageHeader {
         title: "Geral"
-        subtitle: "Idioma, inicialização, opções avançadas e restauração da configuração."
+        subtitle: "Idioma, inicialização, perfis, atalhos e restauração da configuração."
     }
     ECfgSearch {}
     ECfgNotice {}
@@ -89,6 +155,14 @@ PageFrame {
     }
 
     Section {
+        title: "Desempenho"
+        SettingRow {
+            settingKey: "perf.lowPower"
+            EToggleSetting { settingKey: "perf.lowPower" }
+        }
+    }
+
+    Section {
         title: "Idioma e inicialização"
         EValueRow {
             label: "Idioma da interface"
@@ -107,23 +181,159 @@ PageFrame {
         }
         SettingRow {
             label: "Iniciar no login"
-            help: "Abrir o Gideon ao entrar no computador."
-            disabledReason: "inicialização automática no login não existe neste pacote"
+            help: page.autostart.exists && !page.autostart.managed
+                ? "Já existe um atalho de inicialização que o Gideon não criou; ele não será alterado."
+                : "Abre o Gideon ao entrar no computador. Cria um atalho do usuário no sistema."
+            disabledReason: page.autostart.supported ? "" : page.autostart.reason
             Toggle {
-                enabled: false
-                checked: false
-                Accessible.name: "Iniciar no login (indisponível)"
+                id: autostartToggle
+                objectName: "autostartToggle"
+                checked: page.autostart.enabled === true
+                Accessible.name: "Iniciar no login"
+                onToggled: {
+                    var want = autostartToggle.checked
+                    autostartToggle.checked = Qt.binding(function () { return page.autostart.enabled === true })
+                    page.askAutostart(want)
+                }
             }
         }
-        SettingRow {
-            label: "Desempenho"
-            help: "Controle de uso do processador."
-            disabledReason: "não há controle de desempenho; o processamento usa CPU fixa"
+        Text {
+            visible: page.autostart.supported && page.autostart.path.length > 0
+            text: "Arquivo: " + page.autostart.path + (page.autostart.enabled ? " (ativo)" : " (inativo)")
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontCaption
+            wrapMode: Text.WrapAnywhere
+            Layout.fillWidth: true
         }
+    }
+
+    Section {
+        title: "Introdução"
         SettingRow {
-            label: "Perfis de configuração"
-            help: "Um conjunto de opções por perfil."
-            disabledReason: "só existe um perfil nesta versão"
+            label: "Refazer introdução"
+            help: "Revê os quatro passos: privacidade, frase de despertar, dispositivos e volume, e atalhos."
+            disabledReason: AppState.introBlockReason()
+            GButton {
+                objectName: "redoOnboardingButton"
+                variant: "secondary"
+                text: "Refazer introdução"
+                Accessible.name: "Refazer a introdução"
+                enabled: AppState.introBlockReason().length === 0
+                onClicked: AppState.openOnboarding()
+            }
+        }
+    }
+
+    Section {
+        title: "Atalhos de teclado"
+        Text {
+            text: AppState.uiGet("behavior.shortcuts", true) === true
+                ? "Ligados. Para desligá-los, use o interruptor 'Atalhos de teclado' nesta página."
+                : "Desligados neste app: nenhum atalho desta lista responde até você ligá-los de novo."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Repeater {
+            model: [
+                {keys: "Ctrl+K", text: "Paleta: vá a páginas, configurações e comandos."},
+                {keys: "Ctrl+1 … Ctrl+5", text: "Troca de aba de nível 1."},
+                {keys: "Ctrl+Tab", text: "Próxima sub-aba. Ctrl+Shift+Tab, a anterior."},
+                {keys: "Ctrl+M", text: "Encerra a escuta quando há uma; sem escuta, avisa que o microfone não está disponível."},
+                {keys: "Esc", text: "Cancela a escuta, ou fecha a caixa aberta (nunca as duas coisas)."}
+            ]
+            delegate: Rectangle {
+                required property var modelData
+                Layout.fillWidth: true
+                implicitHeight: Math.max(Theme.rowHeight - Theme.space(12), shortcutRow.implicitHeight + Theme.space(12))
+                color: "transparent"
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hairline }
+                RowLayout {
+                    id: shortcutRow
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.space(16)
+                    KeyCap {
+                        keys: modelData.keys
+                        Layout.preferredWidth: 170
+                    }
+                    Text {
+                        text: modelData.text
+                        textFormat: Text.PlainText
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontHelp
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+        }
+    }
+
+    Section {
+        title: "Perfis de configurações"
+        Text {
+            text: "Cada perfil guarda o seu conjunto de opções do app. Trocar aplica o perfil na hora. Até 20 perfis."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Repeater {
+            model: page.profileList
+            delegate: ListRow {
+                required property var modelData
+                objectName: "profileRow_" + modelData.name
+                title: modelData.name
+                detail: modelData.active ? "Em uso" : (modelData.default ? "Perfil inicial" : "Pronto para usar")
+                selected: modelData.active === true
+                GButton {
+                    objectName: "profileUse_" + modelData.name
+                    variant: "ghost"
+                    text: "Usar"
+                    enabled: !modelData.active
+                    Accessible.name: "Usar o perfil " + modelData.name
+                    onClicked: page.switchProfile(modelData.name)
+                }
+                GButton {
+                    objectName: "profileDuplicate_" + modelData.name
+                    variant: "ghost"
+                    text: "Duplicar"
+                    Accessible.name: "Duplicar o perfil " + modelData.name
+                    onClicked: page.openProfileName("duplicate", modelData.name)
+                }
+                GButton {
+                    objectName: "profileRename_" + modelData.name
+                    variant: "ghost"
+                    text: "Renomear"
+                    enabled: !modelData.default
+                    Accessible.name: "Renomear o perfil " + modelData.name
+                    onClicked: page.openProfileName("rename", modelData.name)
+                }
+                GButton {
+                    objectName: "profileDelete_" + modelData.name
+                    variant: "danger"
+                    text: "Excluir"
+                    enabled: !modelData.default && !modelData.active
+                    Accessible.name: "Excluir o perfil " + modelData.name
+                    onClicked: { page.pendingProfile = modelData.name; profileDeleteConfirm.open() }
+                }
+            }
+        }
+        GButton {
+            objectName: "newProfileButton"
+            variant: "secondary"
+            text: "Novo perfil…"
+            enabled: AppState.uiLive()
+            onClicked: page.openProfileName("create", "")
         }
     }
 
@@ -146,7 +356,7 @@ PageFrame {
             }
         }
         Text {
-            text: "Arquivo JSON sem segredos. Importar valida cada opção antes de aplicar; as que não passam são listadas."
+            text: "Arquivo JSON sem segredos, do perfil em uso. Importar valida cada opção antes de aplicar; as que não passam são listadas."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -224,7 +434,7 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "Tema, cores, densidade, fonte, atalhos e avisos voltam ao padrão. A frase de despertar, o volume e o prazo do Core não mudam. Pede o nome do perfil."
+                    text: "Tema, cores, densidade, fonte, atalhos e avisos do perfil " + page.profileName + " voltam ao padrão. A frase de despertar, o volume e o prazo do Core não mudam. Pede o nome do perfil."
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -250,13 +460,109 @@ PageFrame {
         title: "Como funciona"
         summary: "Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões."
         Text {
-            text: "Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões. Restaurar os padrões do app não apaga o arquivo anterior."
+            text: "Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões. Restaurar os padrões do app não apaga o arquivo anterior. Cada perfil tem o seu arquivo; excluir um perfil apaga só o dele."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
+        }
+    }
+
+    Modal {
+        id: autostartConfirm
+        objectName: "autostartConfirm"
+        title: page.autostartWanted ? "Iniciar o Gideon no login?" : "Parar de iniciar no login?"
+        Text {
+            text: page.autostartWanted
+                ? "Cria o arquivo " + page.autostart.path + " para abrir o Gideon ao entrar no computador. Nada mais muda."
+                : "Remove o arquivo " + page.autostart.path + ". O Gideon só abre quando você o iniciar."
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WrapAnywhere
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "confirmAutostartButton"
+            variant: "primary"
+            text: page.autostartWanted ? "Iniciar no login" : "Parar no login"
+            Layout.alignment: Qt.AlignRight
+            onClicked: {
+                page.applyAutostart()
+                autostartConfirm.close()
+            }
+        }
+    }
+
+    Modal {
+        id: profileNameDialog
+        objectName: "profileNameDialog"
+        title: page.profileMode === "create" ? "Novo perfil"
+            : page.profileMode === "duplicate" ? "Duplicar o perfil " + page.profileSource
+            : "Renomear o perfil " + page.profileSource
+        FieldLabel { text: "Nome do perfil: letras sem acento, números, espaço, _ ou -; até 32 caracteres" }
+        TextField {
+            id: profileNameField
+            objectName: "profileNameField"
+            Layout.fillWidth: true
+            placeholderText: "Nome do perfil"
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            selectByMouse: true
+            Accessible.name: "Nome do perfil"
+            onAccepted: page.submitProfileName()
+            background: Rectangle {
+                radius: Theme.radius
+                color: Theme.bg
+                border.width: profileNameField.activeFocus ? 2 : 1
+                border.color: profileNameField.activeFocus ? Theme.focusRing : Theme.strongOutline
+            }
+        }
+        Text {
+            id: profileNameError
+            objectName: "profileNameError"
+            text: ""
+            visible: text.length > 0
+            textFormat: Text.PlainText
+            color: Theme.error
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "confirmProfileNameButton"
+            variant: "primary"
+            text: page.profileMode === "create" ? "Criar perfil" : page.profileMode === "duplicate" ? "Duplicar" : "Renomear"
+            Layout.alignment: Qt.AlignRight
+            enabled: profileNameField.text.trim().length > 0
+            onClicked: page.submitProfileName()
+        }
+    }
+
+    Modal {
+        id: profileDeleteConfirm
+        objectName: "profileDeleteConfirm"
+        title: "Excluir o perfil " + page.pendingProfile + "?"
+        Text {
+            text: "Os ajustes deste perfil são apagados do disco. Os outros perfis não mudam. Não é possível desfazer."
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "confirmDeleteProfileButton"
+            variant: "danger"
+            text: "Excluir perfil"
+            Layout.alignment: Qt.AlignRight
+            onClicked: page.deleteProfile()
         }
     }
 

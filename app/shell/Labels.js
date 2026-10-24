@@ -107,3 +107,6 @@ function modelById(list, ident) { for (var i = 0; i < list.length; i++) if (list
 // Voz e Wake: the active phrase and its qualification, read from the Core pack.
 function wakeText(pack) { if (!pack.wake_phrases) return "Não configurada"; for (var i = 0; i < pack.wake_phrases.length; i++) if (pack.wake_phrases[i].id === pack.active_phrase) return pack.wake_phrases[i].text; return "Não ativa" }
 function activeWake(choices, id) { for (var i = 0; i < choices.length; i++) if (choices[i].id === id) return choices[i]; return null }
+// Input limits are in UTF-8 bytes (Core rule), not characters: the counters under the text fields use this.
+function utf8Bytes(text) { var n = 0; for (var i = 0; i < text.length; i++) { var c = text.charCodeAt(i); if (c < 0x80) n += 1; else if (c < 0x800) n += 2; else if (c >= 0xD800 && c <= 0xDBFF) { n += 4; i++ } else n += 3 } return n }
+function byteCounter(text, limit) { return utf8Bytes(text) + "/" + limit + " bytes" }

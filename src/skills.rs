@@ -1158,7 +1158,8 @@ fn retriable(code: &str) -> bool {
 /// Public step entry: id (`child/step` when nested), state, code and risk. No args, no content.
 /// `risk` and `effect_id` are set on steps that asked for a decision: the step call's risk class
 /// (`read`, `state_changing`, `destructive`, as in tool proposals) and, for a registry tool, the
-/// closed effect template id (`open_app`, `set_volume`, `mute`, ...).
+/// closed effect template id (`open_app`, `set_volume`, `mute`, ...). `effect` is the same closed
+/// effect object tool proposals carry (id plus its typed parameters), so the UI shows real arguments.
 #[derive(Debug, Clone, Serialize)]
 pub struct StepView {
     pub id: String,
@@ -1169,6 +1170,8 @@ pub struct StepView {
     pub risk: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effect_id: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect: Option<tools::Effect>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2123,16 +2126,17 @@ impl Core {
             code: None,
             risk: None,
             effect_id: None,
+            effect: None,
         });
         run.steps.len() - 1
     }
 
-    /// Records the risk class and effect id of a step that waits for a decision (public fields only).
+    /// Records the risk class and effect of a step that waits for a decision (public fields only).
     fn set_decision_meta(
         &mut self,
         view: usize,
         risk: &'static str,
-        effect_id: Option<&'static str>,
+        effect: Option<tools::Effect>,
     ) {
         if let Some(step) = self
             .skills
@@ -2141,7 +2145,8 @@ impl Core {
             .and_then(|run| run.steps.get_mut(view))
         {
             step.risk = Some(risk);
-            step.effect_id = effect_id;
+            step.effect_id = effect.as_ref().map(|effect| effect.id);
+            step.effect = effect;
         }
     }
 
@@ -2255,13 +2260,11 @@ impl Core {
             } else {
                 let view = self.view_for(root, &step.id, "awaiting_decision");
                 // Same vocabulary as tool proposals: the call's risk class and, for a registry tool, its effect.
-                let effect_id = match parse_target(&step.call) {
-                    Ok(Target::Tool(name)) => {
-                        crate::tools::effect(&name, &args).map(|effect| effect.id)
-                    }
+                let effect = match parse_target(&step.call) {
+                    Ok(Target::Tool(name)) => crate::tools::effect(&name, &args),
                     _ => None,
                 };
-                self.set_decision_meta(view, risk.name(), effect_id);
+                self.set_decision_meta(view, risk.name(), effect);
                 self.set_awaiting(Await::Decision { view });
                 return;
             };
@@ -2952,6 +2955,7 @@ impl Core {
                         code: s.code.map(wire_code),
                         risk: s.risk,
                         effect_id: s.effect_id,
+                        effect: s.effect.clone(),
                     })
                     .collect(),
                 outputs: run

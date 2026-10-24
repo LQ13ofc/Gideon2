@@ -72,12 +72,21 @@ pub enum Operation {
     RecoverConfiguration {
         revision: u64,
     },
+    /// Optional fields (`wake_sensitivity`, device names) keep the stored value when absent.
     Preferences {
         revision: u64,
         audible_feedback: bool,
         session_timeout_ms: u64,
+        wake_sensitivity: Option<f32>,
+        audio_input_device: Option<String>,
+        audio_output_device: Option<String>,
     },
     RollbackPreferences {
+        revision: u64,
+    },
+    /// Backs up `config.json` to `config.json.bak`, then resets every preference to its default.
+    /// CAS on `revision`; refused with `busy` during a voice session.
+    PreferencesRestoreDefaults {
         revision: u64,
     },
     Text {
@@ -520,8 +529,19 @@ enum WireRequest {
         revision: u64,
         audible_feedback: bool,
         session_timeout_ms: u64,
+        #[serde(default)]
+        wake_sensitivity: Option<f32>,
+        #[serde(default)]
+        audio_input_device: Option<String>,
+        #[serde(default)]
+        audio_output_device: Option<String>,
     },
     RollbackPreferences {
+        version: u16,
+        request_id: String,
+        revision: u64,
+    },
+    PreferencesRestoreDefaults {
         version: u16,
         request_id: String,
         revision: u64,
@@ -988,6 +1008,9 @@ impl<'de> Deserialize<'de> for Request {
                 revision,
                 audible_feedback,
                 session_timeout_ms,
+                wake_sensitivity,
+                audio_input_device,
+                audio_output_device,
             } => (
                 version,
                 request_id,
@@ -995,6 +1018,9 @@ impl<'de> Deserialize<'de> for Request {
                     revision,
                     audible_feedback,
                     session_timeout_ms,
+                    wake_sensitivity,
+                    audio_input_device,
+                    audio_output_device,
                 },
             ),
             WireRequest::RollbackPreferences {
@@ -1005,6 +1031,15 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
                 Operation::RollbackPreferences { revision },
+            ),
+            WireRequest::PreferencesRestoreDefaults {
+                version,
+                request_id,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::PreferencesRestoreDefaults { revision },
             ),
             WireRequest::Snapshot {
                 version,

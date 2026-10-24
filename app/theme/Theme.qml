@@ -113,9 +113,17 @@ Item {
     }
     readonly property int titleWeight: Math.max(500, Math.min(800, Number(val("theme.titleWeight", 700))))
     readonly property real lineHeight: Math.max(1.2, Math.min(1.8, Number(val("theme.lineHeight", 1.4))))
-    readonly property string animationMode: String(val("theme.animation", "normal"))
+    // Low power ("Modo econômico", perf.lowPower) wins over everything: no animation, no translucency, no shadow.
+    // The desktop's reduced-motion request (behavior.reduceMotionFollowSystem) turns animation to the reduced mode.
+    readonly property bool lowPower: val("perf.lowPower", false) === true
+    // The desktop probe runs only when the user asked to follow the system (short-circuit: the value is read on demand).
+    readonly property bool followSystemMotion: val("behavior.reduceMotionFollowSystem", false) === true && theme.live && ui.reducedMotionSystem === true
+    readonly property string animationMode: lowPower ? "off"
+        : (followSystemMotion && String(val("theme.animation", "normal")) === "normal") ? "reduced"
+        : String(val("theme.animation", "normal"))
     readonly property int animDuration: animationMode === "off" ? 0 : animationMode === "reduced" ? 80 : 200
-    readonly property real shadowAlpha: Math.max(0, Math.min(100, Number(val("theme.shadow", 0)))) / 100
+    readonly property int translucency: lowPower ? 0 : Math.max(0, Math.min(24, Number(val("theme.translucency", 0))))
+    readonly property real shadowAlpha: lowPower ? 0 : Math.max(0, Math.min(100, Number(val("theme.shadow", 0)))) / 100
 
     // Type scale: title 24, section 16, body 14, help 13, caption 12 at the default size (scales with fontSize).
     readonly property int fontTitle: Math.round(fontSize * 24 / 14)

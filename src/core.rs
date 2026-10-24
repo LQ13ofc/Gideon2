@@ -1722,8 +1722,44 @@ impl Core {
                 "wake_not_qualified"
             }
             Operation::Preferences {
-                session_timeout_ms, ..
-            } if !(50..=60000).contains(&session_timeout_ms) => "invalid_preferences",
+                session_timeout_ms,
+                wake_sensitivity,
+                audio_input_device,
+                audio_output_device,
+                ..
+            } if !(50..=60000).contains(&session_timeout_ms)
+                || wake_sensitivity
+                    .is_some_and(|value| !crate::storage::valid_wake_sensitivity(value))
+                || audio_input_device
+                    .as_deref()
+                    .is_some_and(|name| !crate::storage::valid_audio_device(name))
+                || audio_output_device
+                    .as_deref()
+                    .is_some_and(|name| !crate::storage::valid_audio_device(name)) =>
+            {
+                "invalid_preferences"
+            }
+            Operation::PreferencesRestoreDefaults { revision }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::PreferencesRestoreDefaults { .. } if self.session.is_some() => "busy",
+            Operation::PreferencesRestoreDefaults { revision } => {
+                if let Some(storage) = storage {
+                    let result = storage.restore_preferences_defaults(revision);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        // Content-free: the kind alone says what happened.
+                        self.emit(req.request_id.clone(), None, "preferences_restored");
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
             operation @ (Operation::Preferences { .. } | Operation::RollbackPreferences { .. }) => {
                 if let Some(storage) = storage {
                     let result = match operation {
@@ -1731,10 +1767,18 @@ impl Core {
                             revision,
                             audible_feedback,
                             session_timeout_ms,
-                        } => storage.update_preferences(
+                            wake_sensitivity,
+                            audio_input_device,
+                            audio_output_device,
+                        } => storage.update_preferences_with(
                             revision,
                             audible_feedback,
                             session_timeout_ms,
+                            crate::storage::OptionalPreferences {
+                                wake_sensitivity,
+                                audio_input_device,
+                                audio_output_device,
+                            },
                         ),
                         Operation::RollbackPreferences { revision } => {
                             storage.rollback_preferences(revision)

@@ -165,15 +165,29 @@ PageFrame {
                 font.pixelSize: Theme.fontBody
                 Layout.fillWidth: true
             }
-            // Não existe no app ainda: a versão vem do PACKAGE.json do pacote instalado (N8).
+            // B5: versão, commit e data de geração lidos do PACKAGE.json do pacote instalado (a raiz do pacote é o pai de app/).
             Text {
-                text: "Versão da Base: não informada"
+                objectName: "packageVersionText"
+                text: "Versão da Base: " + (core.packageInfo.installed ? core.packageInfo.version + (core.packageInfo.commit ? " · commit " + core.packageInfo.commit : "") : "—")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
+                wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+            Text {
+                visible: core.packageInfo.installed
+                text: "Pacote gerado em: " + core.packageInfo.built + " · runtime: " + core.packageInfo.runtime
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            FNote { visible: core.packageInfo.installed && core.packageInfo.dirty; tone: "warn"; small: true; text: "O pacote foi gerado com alterações não commitadas." }
+            FNote { visible: !core.packageInfo.installed; small: true; text: "Não é um pacote instalado: checkout de desenvolvimento, sem PACKAGE.json." }
             FNote { text: "Sem histórico de conversas. Áudio e legendas ficam só em memória." }
             SettingRow {
                 label: "Modo desenvolvedor"

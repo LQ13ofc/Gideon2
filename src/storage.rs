@@ -11,7 +11,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+/// `PartialEq` only: `wake_sensitivity` is a float, so there is no `Eq`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreviousPreferences {
     #[serde(default)]
@@ -22,8 +23,14 @@ pub struct PreviousPreferences {
     #[serde(default = "full_volume")]
     pub output_volume_percent: u8,
     pub session_timeout_ms: u64,
+    #[serde(default = "default_wake_sensitivity")]
+    pub wake_sensitivity: f32,
+    #[serde(default = "default_audio_device")]
+    pub audio_input_device: String,
+    #[serde(default = "default_audio_device")]
+    pub audio_output_device: String,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u16,
@@ -40,12 +47,50 @@ pub struct Config {
     pub output_volume_percent: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_preferences: Option<PreviousPreferences>,
+    /// Wake threshold scale in `WAKE_SENSITIVITY_MIN..=WAKE_SENSITIVITY_MAX`; see `wake::accept_threshold`.
+    #[serde(default = "default_wake_sensitivity")]
+    pub wake_sensitivity: f32,
+    /// Preferred capture device name (`default` = system default). Bounded by `valid_audio_device`.
+    #[serde(default = "default_audio_device")]
+    pub audio_input_device: String,
+    /// Preferred playback device name (`default` = system default). Bounded by `valid_audio_device`.
+    #[serde(default = "default_audio_device")]
+    pub audio_output_device: String,
 }
 fn full_volume() -> u8 {
     100
 }
 fn enabled() -> bool {
     true
+}
+pub const WAKE_SENSITIVITY_MIN: f32 = 0.5;
+pub const WAKE_SENSITIVITY_MAX: f32 = 1.5;
+pub const AUDIO_DEVICE_MAX: usize = 128;
+pub const DEFAULT_AUDIO_DEVICE: &str = "default";
+fn default_wake_sensitivity() -> f32 {
+    1.0
+}
+fn default_audio_device() -> String {
+    DEFAULT_AUDIO_DEVICE.into()
+}
+/// Strict range check; NaN and infinities are outside every range and therefore rejected.
+pub fn valid_wake_sensitivity(value: f32) -> bool {
+    (WAKE_SENSITIVITY_MIN..=WAKE_SENSITIVITY_MAX).contains(&value)
+}
+/// 1..=128 bytes from `[A-Za-z0-9._:@/+ -]`. Names are labels only: no shell, control or non-ASCII bytes.
+pub fn valid_audio_device(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= AUDIO_DEVICE_MAX
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._:@/+ -".contains(&b))
+}
+/// Optional fields of the `preferences` op: `None` keeps the stored value.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct OptionalPreferences {
+    pub wake_sensitivity: Option<f32>,
+    pub audio_input_device: Option<String>,
+    pub audio_output_device: Option<String>,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -58,6 +103,9 @@ impl Default for Config {
             visual_feedback: true,
             output_volume_percent: 100,
             previous_preferences: None,
+            wake_sensitivity: default_wake_sensitivity(),
+            audio_input_device: default_audio_device(),
+            audio_output_device: default_audio_device(),
         }
     }
 }
@@ -66,9 +114,15 @@ impl Config {
         if self.version != 1
             || self.output_volume_percent > 100
             || !(50..=60000).contains(&self.session_timeout_ms)
+            || !valid_wake_sensitivity(self.wake_sensitivity)
+            || !valid_audio_device(&self.audio_input_device)
+            || !valid_audio_device(&self.audio_output_device)
             || self.previous_preferences.as_ref().is_some_and(|p| {
                 p.output_volume_percent > 100
                     || !(50..=60000).contains(&p.session_timeout_ms)
+                    || !valid_wake_sensitivity(p.wake_sensitivity)
+                    || !valid_audio_device(&p.audio_input_device)
+                    || !valid_audio_device(&p.audio_output_device)
                     || p.wake_phrase
                         .as_deref()
                         .is_some_and(|id| !crate::protocol::valid_id(id))
@@ -631,6 +685,20 @@ impl Storage {
         audible: bool,
         timeout_ms: u64,
     ) -> io::Result<()> {
+        self.update_preferences_with(
+            revision,
+            audible,
+            timeout_ms,
+            OptionalPreferences::default(),
+        )
+    }
+    pub fn update_preferences_with(
+        &mut self,
+        revision: u64,
+        audible: bool,
+        timeout_ms: u64,
+        optional: OptionalPreferences,
+    ) -> io::Result<()> {
         if self.configuration_status != ConfigurationStatus::Ready {
             return Err(io::Error::other("configuration not ready"));
         }
@@ -643,6 +711,35 @@ impl Storage {
             .ok_or_else(|| io::Error::other("revision exhausted"))?;
         next.audible_feedback = audible;
         next.session_timeout_ms = timeout_ms;
+        if let Some(sensitivity) = optional.wake_sensitivity {
+            next.wake_sensitivity = sensitivity;
+        }
+        if let Some(device) = optional.audio_input_device {
+            next.audio_input_device = device;
+        }
+        if let Some(device) = optional.audio_output_device {
+            next.audio_output_device = device;
+        }
+        self.commit_preferences(next)
+    }
+    /// `config.json.bak` keeps the bytes of the file replaced by a restore (one generation, 0600,
+    /// atomic). The reset itself is a normal commit: revision + 1, and `previous_preferences` holds
+    /// the pre-reset values, so `rollback_preferences` can still undo it.
+    pub fn restore_preferences_defaults(&mut self, revision: u64) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+        {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let current = read_config_bytes(&self.root.join("config.json"))?;
+        self.replace_json("config.json.bak", &current)?;
+        File::open(&self.root)?.sync_all()?;
+        let next = Config {
+            revision: revision
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("revision exhausted"))?,
+            ..Config::default()
+        };
         self.commit_preferences(next)
     }
     fn commit_preferences(&mut self, mut next: Config) -> io::Result<()> {
@@ -653,6 +750,9 @@ impl Storage {
             visual_feedback: self.config.visual_feedback,
             output_volume_percent: self.config.output_volume_percent,
             session_timeout_ms: self.config.session_timeout_ms,
+            wake_sensitivity: self.config.wake_sensitivity,
+            audio_input_device: self.config.audio_input_device.clone(),
+            audio_output_device: self.config.audio_output_device.clone(),
         });
         let changed_wake = next.wake_phrase != self.config.wake_phrase;
         self.replace("config.json", &next)?;
@@ -711,6 +811,9 @@ impl Storage {
             visual_feedback: previous.visual_feedback,
             output_volume_percent: previous.output_volume_percent,
             session_timeout_ms: previous.session_timeout_ms,
+            wake_sensitivity: previous.wake_sensitivity,
+            audio_input_device: previous.audio_input_device,
+            audio_output_device: previous.audio_output_device,
             ..self.config.clone()
         };
         self.commit_preferences(next)

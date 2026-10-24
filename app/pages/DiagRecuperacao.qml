@@ -17,6 +17,10 @@ PageFrame {
     readonly property bool restartNeeded: core.connected && core.configurationStatus === "restart_required"
     readonly property string restartBadge: !core.connected ? "Indisponível" : restartNeeded ? "Necessário agora" : "Não necessário"
     readonly property string restartTone: !core.connected ? "neutral" : restartNeeded ? "warning" : "neutral"
+    // B9: catalog storage (core.hubStorage: state none | verified | quarantined, reason, orphans, repository, first 12 hex of the catalog SHA-256).
+    readonly property var store: core.hubStorage
+    readonly property string storageText: !core.connected ? "—" : store.state === "none" ? "catálogo não configurado"
+        : store.state === "quarantined" ? "em quarentena" + (store.reason ? ": " + store.reason : "") : "ok"
     readonly property var commands: [
         {label: "Instalar", command: "gideon-install --install-root <RAIZ> install <PACOTE>"},
         {label: "Atualizar", command: "gideon-install --install-root <RAIZ> update <PACOTE>"},
@@ -171,8 +175,44 @@ PageFrame {
                 font.weight: 600
                 Layout.topMargin: Theme.space(8)
             }
-            FNote { tone: "text"; text: "Situação de armazenamento: Indisponível: a ponte ainda não informa o armazenamento do catálogo." }
-            FNote { small: true; text: "O catálogo é verificado por SHA-256; o valor aparece em Desenvolvedor." }
+            // B9: the catalog storage as the Core reports it in the hub view. Values the Core does not send read "não informado".
+            Text {
+                objectName: "catalogStorageText"
+                text: "Situação de armazenamento: " + page.storageText
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Text {
+                text: "Itens órfãos: " + (page.store.orphans === null || page.store.orphans === undefined ? "—" : page.store.orphans)
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                Layout.fillWidth: true
+            }
+            Text {
+                text: "Repositório: " + (page.store.repository || "não informado")
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                wrapMode: Text.WrapAnywhere
+                Layout.fillWidth: true
+            }
+            Text {
+                text: "SHA-256 do catálogo: " + (page.store.catalogSha ? page.store.catalogSha + "…" : "não informado")
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: "monospace"
+                font.pixelSize: Theme.fontHelp
+                Layout.fillWidth: true
+            }
+            FNote { small: true; text: "Erro de armazenamento do catálogo: não informado pelo Core." }
+            FNote { small: true; text: "O catálogo é verificado por SHA-256; o valor completo aparece em Desenvolvedor." }
         }
     }
 

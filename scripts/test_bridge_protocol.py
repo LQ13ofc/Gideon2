@@ -13,15 +13,22 @@ from bridge import CONN_ACCESS,CONN_ARGS_LIMIT,CONN_CODES,CONN_MESSAGES,CONN_STA
 from bridge import REG_MESSAGES,REG_PURPOSES,REG_STATUSES,REG_VISUAL_WARNING,valid_agent_step
 from bridge import RESTART_BACK_TEXT,RESTART_TIMEOUT_MS,RESTART_TIMEOUT_TEXT,RESTART_WAIT_TEXT
 from bridge import display_effect,display_risk,grant_rows,pending_count
+from bridge import CAP_DEADLINE_MS,CAP_RESULT_LIMIT,CAPABILITY_MESSAGES,capability_code_message,capability_request,clip_bytes,hub_storage,package_info
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
-QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child'];QML_CONNECTIONS_CHILD=sys.argv[1:2]==['--qml-connections-child']
+QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child'];QML_CONNECTIONS_CHILD=sys.argv[1:2]==['--qml-connections-child'];QML_SHELL_CHILD=sys.argv[1:2]==['--qml-shell-child'];QML_INTRO_CHILD=sys.argv[1:2]==['--qml-intro-child']
+# Every QML child gets a private configuration home (uisettings.py writes there, never to the real ~/.config). Only the
+# children that drive pages set GIDEON_UI_NO_ONBOARDING; the intro child is the one that shows the first-run guide.
+if QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_INTRO_CHILD:
+    os.environ['XDG_CONFIG_HOME']=tempfile.mkdtemp(prefix='gideon-xdg-')
+if QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD:
+    os.environ['GIDEON_UI_NO_ONBOARDING']='1'
 def offered(window,page_id):
     # The window lists the pages the Core offers now (Main.qml offeredPages); the sub-bar shows only the active tab's pages.
     ids=window.property('offeredPages');ids=ids.toVariant() if hasattr(ids,'toVariant') else ids
     return page_id in [str(x) for x in ids]
-APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD) else QCoreApplication([])
+APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_INTRO_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
 EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
 BASE={'version':1,'request_id':'r','code':'ok','state':'idle','sequence':1,'session_id':None,'transcript':None,'command':None,'events':[],'text_input_available':True,'speech_samples':0,'speech_status':'idle','wake_status':'unavailable','stt_status':'unavailable','plugins':{'revision':0,'status':'ok','items':[]},'llm':EMPTY_LLM,'tool_proposals':[]}
@@ -736,6 +743,15 @@ def _qml_chat_checks(bridge,window,check,checks):
     check('send enabled for trimmed text',find('chatSend').property('enabled'))
     chat_input.setProperty('text','   ');QTest.qWait(20)
     check('blank text cannot be sent',not find('chatSend').property('enabled'))
+    chat_input.setProperty('text','á'*2049);QTest.qWait(20)
+    check('chat counter counts bytes, not characters',find('chatCounter').property('text')=='4098/4096 bytes')
+    check('chat send blocked when the bytes exceed the limit',not find('chatSend').property('enabled'))
+    chat_input.setProperty('text','oi');QTest.qWait(20)
+    check('chat counter follows the text',find('chatCounter').property('text')=='2/4096 bytes')
+    bridge.chat_last_error='key_missing';bridge.chatChanged.emit();QTest.qWait(30)
+    check('chat error banner names the missing key with its link',find('chatErrorBanner').property('visible') and find('chatErrorBanner').property('text')=='Falta a chave do provedor' and find('chatErrorBanner').property('actionText')=='Abrir Provedor e chaves')
+    bridge.chat_last_error='';bridge.chatChanged.emit();QTest.qWait(30)
+    check('chat error banner hidden without an actionable code',not find('chatErrorBanner').property('visible'))
     # C3 agent section: driven only by injected Core snapshots (no Core, no LLM).
     tool=tool_item('tool_1_9',tool='synth_counter_inc',args={'epoch':1});tool.update(run_id='run_1_7',step=1)
     window.setProperty('pageId','agente');QTest.qWait(30)
@@ -756,10 +772,24 @@ def _qml_chat_checks(bridge,window,check,checks):
     check('Iniciar enabled after a finished run with a goal',find('agentStart').property('enabled') and not find('agentAbort').property('enabled'))
     find('agentGoal').setProperty('text','   ');QTest.qWait(20)
     check('blank agent goal cannot start',not find('agentStart').property('enabled'))
+    find('agentGoal').setProperty('text','á'*513);QTest.qWait(20)
+    check('agent goal counter counts bytes and blocks Iniciar',find('agentGoalCounter').property('text')=='1026/1024 bytes' and not find('agentStart').property('enabled'))
+    find('agentGoal').setProperty('text','');QTest.qWait(10)
     push(agent_snap(agent_run('failed',error='loop_blocked')))
     check('failed banner names the Core code in Portuguese',find('agentBanner').property('text')=='Falhou · O agente repetiu a mesma ação; execução bloqueada')
     push(chat_snapshot(tools=tools,llm=llm_state(config=LLM_CONFIG)))
     check('no agent run: banner hidden',not find('agentBanner').property('visible') and not find('agentAnswer').property('visible'))
+    # Hoje: the same chat error banner, and the command line counts bytes and disables Enviar with the reason.
+    window.setProperty('pageId','hoje');QTest.qWait(50)
+    bridge.chat_last_error='cloud_not_authorized';bridge.chatChanged.emit();QTest.qWait(30)
+    check('Hoje names the cloud consent problem',find('hojeChatError').property('visible') and find('hojeChatError').property('text')=='Consentimento de nuvem necessário')
+    bridge.chat_last_error='';bridge.chatChanged.emit();QTest.qWait(10)
+    command=find('textInput');command.setProperty('text','oi');QTest.qWait(20)
+    check('command with a valid text can be sent',find('sendButton').property('enabled') and not find('commandProblem').property('visible'))
+    command.setProperty('text','á'*257);QTest.qWait(20)
+    check('command counter shows bytes over 512',find('commandCounter').property('text')=='514/512 bytes')
+    check('command explains the byte limit and disables Enviar',find('commandProblem').property('visible') and find('commandProblem').property('text')=='Texto acima de 512 bytes' and not find('sendButton').property('enabled'))
+    command.setProperty('text','');QTest.qWait(10)
     print(f'qml chat checks ok: {len(checks)}');return 0
 def qml_child():
     from PySide6.QtGui import QAccessible,QGuiApplication
@@ -1299,10 +1329,154 @@ class ModelsBridge(unittest.TestCase):
         bridge,peer=connect_bridge(self,snap);bridge.models_flow={'label':'x','next':None,'reason_text':'','latency':None}
         bridge.sendChat('oi');self.assertEqual(bridge.chatResult,'Aguarde o gerenciador de modelos')
         bridge.configureLlm('google','gemini-3.5-flash-lite','',True,'1');self.assertEqual(bridge.llmResult,'Aguarde o gerenciador de modelos');quiet(self,peer)
+    def test_shell_shortcuts_follow_the_qml_rules(self):
+        # B15: Ctrl+1..5, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+K, Ctrl+M, Esc, behavior.shortcuts off; B3 low power (Theme).
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
+        proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-shell-child'],env=env,capture_output=True,text=True,timeout=240)
+        self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
+    def test_first_run_guide_follows_qml_rules(self):
+        # B1: four steps, Pular/Voltar/Próximo, hidden offline and during a voice session, saved once, redo from Geral.
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
+        env.pop('GIDEON_UI_NO_ONBOARDING',None)
+        proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-intro-child'],env=env,capture_output=True,text=True,timeout=240)
+        self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
     def test_models_page_follows_qml_rules(self):
         env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
         proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-models-child'],env=env,capture_output=True,text=True,timeout=240)
         self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
+# ---- B1/B3/B15 children: real window, real Shortcut and Keys handling (QTest key events), Core answers faked in Python.
+def _qml_child_run(name,body):
+    from PySide6.QtGui import QAccessible,QGuiApplication
+    from PySide6.QtCore import QCoreApplication,QEvent
+    from main import create
+    app=QGuiApplication(sys.argv[:1]);QAccessible.setActive(True);checks=[]
+    def check(label,value):
+        if not value:raise AssertionError(label)
+        checks.append(label)
+    with tempfile.TemporaryDirectory(prefix=f'gideon-qml-{name}-') as td:
+        bridge,engine=create(app,td);window=engine.rootObjects()[0]
+        bridge.retry.stop();bridge.online=True
+        try:return body(bridge,engine,window,check,checks)
+        finally:
+            for w in engine.rootObjects():w.close();w.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            del engine;del bridge
+def _qml_items(window):
+    stack=[window.contentItem()];found=[]
+    while stack:
+        current=stack.pop();found.append(current);stack.extend(current.childItems())
+    return found
+def _qml_find(window,name):
+    """Items under the window first, then the QObject tree (popups and dialogs live under the window's overlay)."""
+    from PySide6.QtCore import QObject
+    item=next((i for i in _qml_items(window) if i.objectName()==name),None)
+    if item is None:item=window.findChild(QObject,name)
+    if item is None:raise AssertionError('missing '+name)
+    return item
+def qml_shell_child():return _qml_child_run('shell',_shell_checks)
+def _shell_checks(bridge,engine,window,check,checks):
+    from PySide6.QtCore import QMetaObject,QObject,Qt
+    from PySide6.QtTest import QTest
+    ui=engine.rootContext().contextProperty('ui')
+    find=lambda name:_qml_find(window,name)
+    texts=lambda:[i.property('text') for i in _qml_items(window) if isinstance(i.property('text'),str)]
+    sent=[];bridge._request=lambda op,**kw:sent.append(op) or True   # records the Core requests; nothing is sent
+    def key(k,mods=Qt.KeyboardModifier.NoModifier):QTest.keyClick(window,k,mods);QTest.qWait(40)
+    def push(snap):bridge._apply(validate_snapshot(copy.deepcopy(snap),'r',0));QTest.qWait(30)
+    def palette_open():return find('paletteList').property('visible') is True
+    capturing={**copy.deepcopy(BASE),'state':'capturing','session_id':1,'sequence':2}
+    ctrl=Qt.KeyboardModifier.ControlModifier
+    window.setProperty('pageId','hoje');QTest.qWait(40)
+    key(Qt.Key.Key_2,ctrl);check('Ctrl+2 opens Extensões',window.property('currentTab')=='extensoes')
+    key(Qt.Key.Key_4,ctrl);check('Ctrl+4 opens Configurações',window.property('currentTab')=='configuracoes')
+    key(Qt.Key.Key_3,ctrl);check('Ctrl+3 opens Permissões',window.property('currentTab')=='permissoes')
+    key(Qt.Key.Key_5,ctrl);check('Ctrl+5 opens Diagnóstico at its first sub-tab',window.property('currentTab')=='diagnostico' and window.property('pageId')=='diag_estado')
+    key(Qt.Key.Key_Tab,ctrl);check('Ctrl+Tab moves to the next sub-tab',window.property('pageId')=='diag_motores')
+    key(Qt.Key.Key_Tab,ctrl|Qt.KeyboardModifier.ShiftModifier);check('Ctrl+Shift+Tab moves back',window.property('pageId')=='diag_estado')
+    key(Qt.Key.Key_1,ctrl);check('Ctrl+1 opens Assistente',window.property('currentTab')=='assistente')
+    key(Qt.Key.Key_K,ctrl);check('Ctrl+K opens the palette',palette_open())
+    key(Qt.Key.Key_Escape);check('Esc closes the palette',not palette_open())
+    sent.clear();push(capturing)
+    key(Qt.Key.Key_K,ctrl);check('palette opens over a capture',palette_open())
+    key(Qt.Key.Key_Escape);check('Esc with the palette open closes it and does not cancel the capture',not palette_open() and 'cancel' not in sent)
+    sent.clear();key(Qt.Key.Key_Escape)
+    check('Esc cancels a running capture exactly once',sent.count('cancel')==1)
+    sent.clear();key(Qt.Key.Key_M,ctrl)
+    check('Ctrl+M ends the running capture',sent.count('cancel')==1 and any(t=='Escuta encerrada.' for t in texts()))
+    push(BASE);sent.clear();key(Qt.Key.Key_M,ctrl)
+    check('Ctrl+M without a capture says the microphone is unavailable',sent==[] and any(t=='Microfone indisponível: sem entrada de áudio neste perfil' for t in texts()))
+    sent.clear();key(Qt.Key.Key_Escape)
+    check('Esc without a capture sends nothing',sent==[])
+    # behavior.shortcuts off: every shortcut stops; Esc stops cancelling too.
+    ui.set('behavior.shortcuts',False);QTest.qWait(30)
+    window.setProperty('pageId','hoje');QTest.qWait(30)
+    push(capturing);sent.clear()
+    key(Qt.Key.Key_2,ctrl);key(Qt.Key.Key_K,ctrl);key(Qt.Key.Key_M,ctrl);key(Qt.Key.Key_Escape)
+    check('shortcuts off: no tab change, no palette, no capture change',window.property('pageId')=='hoje' and not palette_open() and sent==[])
+    ui.set('behavior.shortcuts',True);QTest.qWait(30)
+    key(Qt.Key.Key_2,ctrl);check('shortcuts back on: Ctrl+2 works again',window.property('currentTab')=='extensoes')
+    push(BASE)
+    # B3: Modo econômico reaches the Theme singleton (animation off, no translucency, no shadow); back to normal after.
+    theme=window.property('themeRef')
+    check('default: animation normal, shadow 30 %',theme.property('animDuration')==200 and abs(theme.property('shadowAlpha')-0.3)<1e-6)
+    ui.set('perf.lowPower',True);QTest.qWait(30)
+    check('low power: animation off',theme.property('animDuration')==0 and theme.property('animationMode')=='off')
+    check('low power: no translucency and no shadow',theme.property('translucency')==0 and theme.property('shadowAlpha')==0)
+    ui.set('perf.lowPower',False);QTest.qWait(30)
+    check('low power off: animation back to normal',theme.property('animDuration')==200)
+    # B2/B4/B1 surfaces in Geral: profile list, shortcut table, autostart reason (no packaged layout here), redo button.
+    window.setProperty('pageId','cfg_geral');QTest.qWait(80)
+    check('Geral lists the Padrão profile in use',find('profileRow_Padrão') is not None and any(t=='Em uso' for t in texts()))
+    check('Geral: Iniciar no login says why it is unavailable here',any('não foi possível descobrir o comando de inicialização' in t for t in texts() if t))
+    check('Geral: shortcut table lists Ctrl+M',any(t=='Encerra a escuta quando há uma; sem escuta, avisa que o microfone não está disponível.' for t in texts() if t))
+    check('Geral: redo introduction is offered with the Core online',find('redoOnboardingButton').property('enabled') is True)
+    check('Geral: low power row is there',any(t=='Modo econômico' for t in texts() if t))
+    print(f'qml shell checks ok: {len(checks)}');return 0
+def qml_intro_child():
+    os.environ.pop('GIDEON_UI_NO_ONBOARDING',None)   # this child is the one that shows the guide
+    return _qml_child_run('intro',_intro_checks)
+def _intro_checks(bridge,engine,window,check,checks):
+    from PySide6.QtCore import QMetaObject,QObject,Qt
+    from PySide6.QtTest import QTest
+    ui=engine.rootContext().contextProperty('ui')
+    find=lambda name:_qml_find(window,name)
+    def key(k,mods=Qt.KeyboardModifier.NoModifier):QTest.keyClick(window,k,mods);QTest.qWait(40)
+    def click(name):QMetaObject.invokeMethod(find(name),'click');QTest.qWait(40)
+    def push(snap):bridge._apply(validate_snapshot(copy.deepcopy(snap),'r',0));QTest.qWait(30)
+    def shown():return find('onboarding_root').property('visible') is True
+    def step():return find('onboarding_step').property('text')
+    def go_online(flag):bridge.online=flag;bridge.changed.emit();QTest.qWait(40)
+    capturing={**copy.deepcopy(BASE),'state':'capturing','session_id':1,'sequence':2}
+    go_online(False)
+    check('first run: the guide waits while the Core is offline',not shown() and not bridge.connected)
+    go_online(True)
+    check('first run: the guide shows once the Core is online',shown() and step()=='Passo 1 de 4')
+    key(Qt.Key.Key_2,Qt.KeyboardModifier.ControlModifier)
+    check('the guide covers the shell: Ctrl+2 does not change the page',window.property('pageId')=='hoje')
+    click('onboarding_next');click('onboarding_next')
+    check('Próximo moves two steps',step()=='Passo 3 de 4')
+    check('step 3: physical devices are shown unavailable with a reason',find('onboarding_physical_mic').property('text').startswith('Microfone físico: indisponível'))
+    click('onboarding_next')
+    check('last step offers Concluir',step()=='Passo 4 de 4' and find('onboarding_next').property('text')=='Concluir')
+    click('onboarding_back');check('Voltar goes back one step',step()=='Passo 3 de 4')
+    go_online(False)
+    check('Core offline hides the guide and keeps its step',not shown())
+    go_online(True)
+    check('back online: the guide returns at the same step',shown() and step()=='Passo 3 de 4')
+    push(capturing)
+    check('a voice session hides the guide',not shown())
+    push(BASE)
+    check('the guide returns when the session ends',shown() and step()=='Passo 3 de 4')
+    click('onboarding_skip')
+    check('Pular hides the guide',not shown())
+    check('Pular saves behavior.onboardingDone for this profile',ui.values['behavior.onboardingDone'] is True)
+    check('the saved flag is on disk for this profile',ui.path.exists() and '"behavior.onboardingDone": true' in ui.path.read_text(encoding='utf-8'))
+    window.setProperty('pageId','cfg_geral');QTest.qWait(60)
+    click('redoOnboardingButton')
+    check('redo from Geral shows the guide at step 1',shown() and step()=='Passo 1 de 4')
+    key(Qt.Key.Key_Escape)
+    check('Esc finishes the guide like Pular',not shown() and ui.values['behavior.onboardingDone'] is True)
+    print(f'qml intro checks ok: {len(checks)}');return 0
 def qml_models_child():
     from PySide6.QtGui import QAccessible,QGuiApplication
     from PySide6.QtCore import QCoreApplication,QEvent
@@ -2443,9 +2617,11 @@ class EventsGrantsEffects(unittest.TestCase):
         conn=dict(tool_item('tool_1_9',tool='conn:github.repo.read'),kind='connection',connection_id='gh_1',operation='repo.read',risk='read')
         self.assertTrue(valid_tools([conn]))
     def test_effect_and_risk_display_text_is_portuguese_and_empty_when_absent(self):
-        self.assertEqual(display_effect({'id':'open_app','app':'com.brave.Browser'}),'Abrir o aplicativo com.brave.Browser')
-        self.assertEqual(display_effect({'id':'set_volume','level':40}),'Definir o volume em 40%')
-        self.assertEqual(display_effect({'id':'mute'}),'Silenciar o áudio')
+        self.assertEqual(display_effect({'id':'open_app','app':'brave'}),'Abrir brave')
+        self.assertEqual(display_effect({'id':'set_volume','level':40}),'Volume 40')
+        self.assertEqual(display_effect({'id':'mute'}),'Silenciar')
+        # A template without its parameters is not a sentence: the absence text applies (never 'Volume ' with a blank).
+        self.assertEqual([display_effect({'id':'set_volume'}),display_effect({'id':'open_app'}),display_effect({'id':'open_app','app':''})],['','',''])
         self.assertEqual(display_effect(None),'');self.assertEqual(display_effect({'id':'unknown'}),'')
         self.assertEqual([display_risk(r) for r in ('read','state_changing','destructive')],['baixo','médio','alto'])
         self.assertEqual(display_risk(None),'')
@@ -2475,7 +2651,7 @@ class EventsGrantsEffects(unittest.TestCase):
         # Each MCP tool that needs re-approval is one pending item, the same rows the Visão geral queue lists.
         bridge.snapshot={'connections':{'items':[{'id':'mcp_1','provider':'mcp','label':'Servidor','tools':[{'name':'a','state':'needs_reapproval'},{'name':'b','state':'needs_reapproval'},{'name':'c','state':'trusted'}]}]}}
         self.assertEqual(bridge.pendingCount,2)
-        self.assertEqual(bridge.effectText({'id':'mute'}),'Silenciar o áudio');self.assertEqual(bridge.riskText('destructive'),'alto')
+        self.assertEqual(bridge.effectText({'id':'mute'}),'Silenciar');self.assertEqual(bridge.riskText('destructive'),'alto')
 class DisplayMapping(unittest.TestCase):
     """Round 2 display table (app/bridge.py): raw Core values and English labels become the text the user reads.
     The Core wire values are never changed by these functions."""
@@ -2596,14 +2772,14 @@ class CoreWire(unittest.TestCase):
                 with self.assertRaises(ValueError):validate_snapshot(bad,'r',0)
     def test_skill_paths_permissions_and_decision_risk_are_exposed_and_checked(self):
         item=dict(skill_item(),permissions_required=['camera_capture'])
-        run=awaiting_run();run['steps'][1].update(risk='state_changing',effect_id='set_volume')
+        run=awaiting_run();run['steps'][1].update(risk='state_changing',effect_id='set_volume',effect={'id':'set_volume','level':40})
         block=skills_block(items=[item],run=run);block['paths']={'imports':'/home/u/gideon/skill-imports','exports':'/home/u/gideon/skill-exports'}
         bridge,peer=connect_bridge(self,skills_snap(block))
         self.assertEqual(bridge.skillsItems[0]['permissionsRequired'],['camera_capture'])
         self.assertEqual(bridge.skillPaths,block['paths'])
         step=bridge.skillCurrentRun['steps'][1]
         self.assertEqual((step['risk'],step['effect_id']),('state_changing','set_volume'))
-        self.assertEqual(bridge.riskText(step['risk']),'médio');self.assertTrue(bridge.effectText({'id':step['effect_id']}).startswith('Definir o volume'))
+        self.assertEqual(bridge.riskText(step['risk']),'médio');self.assertEqual(bridge.effectText(step['effect']),'Volume 40')
         for change in ({'paths':{'imports':'relativo','exports':'/x'}},{'paths':{'imports':'/x'}}):
             with self.subTest(change=change):
                 bad=copy.deepcopy(skills_snap(dict(block,**change)))
@@ -2617,8 +2793,168 @@ class CoreWire(unittest.TestCase):
         bridge,peer=connect_bridge(self,conns_snap(block))
         self.assertEqual([i['grantedAtMs'] for i in bridge.connectionsItems],[1700000000000,None])
         with self.assertRaises(ValueError):validate_snapshot(conns_snap(conns_block(items=[conn_item(granted_at_ms=-1)])),'r',0)
+class ActionableRound3(unittest.TestCase):
+    """B11-B14: skill steps carry the closed effect with its arguments; chat errors name the fix; command and chat limits count UTF-8 bytes; catalog totals follow the paged output."""
+    def test_skill_step_effect_object_is_checked_and_shown_with_its_arguments(self):
+        run=awaiting_run();run['steps'][1].update(risk='state_changing',effect_id='set_volume',effect={'id':'set_volume','level':40})
+        bridge,peer=connect_bridge(self,skills_snap(skills_block(items=[skill_item()],run=run)))
+        step=bridge.skillCurrentRun['steps'][1]
+        self.assertEqual((bridge.effectText(step['effect']),bridge.effectText({'id':'open_app','app':'brave'}),bridge.effectText({'id':'mute'})),('Volume 40','Abrir brave','Silenciar'))
+        for change in ({'effect':{'id':'set_volume','level':40,'app':'brave'}},{'effect':{'id':'mute','level':1}},{'effect_id':'mute'},{'effect':{'id':'set_volume','level':40},'effect_id':'mute'},{'effect':{'id':'unknown'},'effect_id':'unknown'},{'effect':{'id':'set_volume','level':101}}):
+            with self.subTest(change=change):
+                patched=dict(run['steps'][1]);patched.update(change)
+                bad=skills_snap(skills_block(items=[skill_item()],run=dict(run,steps=[run['steps'][0],patched])))
+                with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(bad),'r',0)
+    def test_chat_error_codes_show_the_actionable_banner_and_clear_on_the_next_turn(self):
+        bridge,peer=connect_bridge(self,chat_snapshot())
+        bridge.sendChat('oi');answer(peer,next_request(peer),chat_snapshot(),code='provider_not_configured');settle(bridge)
+        self.assertEqual(bridge.chatLastErrorCode,'provider_not_configured')
+        self.assertEqual(bridge.chatErrorBanner,{'code':'provider_not_configured','text':'Nenhum provedor configurado','action':'Abrir Provedor e chaves'})
+        cases=(('key_missing','Falta a chave do provedor'),('cloud_not_authorized','Consentimento de nuvem necessário'),('model_unsupported_feature','O modelo atual não suporta o recurso exigido'),('http_error',None))
+        for code,text in cases:
+            with self.subTest(code=code):
+                bridge.sendChat('de novo');answer(peer,next_request(peer),chat_snapshot(),code='ok');settle(bridge)
+                self.assertEqual(bridge.chatLastErrorCode,'')
+                bridge.refresh();respond(bridge,peer,chat_snapshot(result=chat_result(ok=False,error=code)))
+                self.assertEqual(bridge.chatLastErrorCode,code)
+                self.assertEqual(bridge.chatErrorBanner,{} if text is None else {'code':code,'text':text,'action':'Abrir Provedor e chaves'})
+        bridge.sendChat('ok agora');answer(peer,next_request(peer),chat_snapshot(),code='ok');settle(bridge)
+        bridge.refresh();respond(bridge,peer,chat_snapshot(result=chat_result('Feito')))
+        self.assertEqual((bridge.chatLastErrorCode,bridge.chatErrorBanner),('',{}))
+    def test_command_problem_counts_utf8_bytes_and_names_the_core_rule(self):
+        bridge,peer=connect_bridge(self,chat_snapshot())
+        self.assertEqual((bridge.commandProblem('á'*256),bridge.commandProblem('x'*512)),('',''))  # 512 bytes is the last valid size
+        self.assertEqual(bridge.commandProblem('á'*257),'Texto acima de 512 bytes')  # 514 bytes, though only 257 characters
+        self.assertEqual(bridge.commandProblem('x'*513),'Texto acima de 512 bytes')
+        self.assertEqual((bridge.commandProblem(''),bridge.commandProblem('   ')),('Texto vazio','Texto vazio'))
+        self.assertTrue(bridge.commandProblem('a\nb') and bridge.commandProblem('a\tb'))
+        self.assertEqual((bridge.chatTextProblem('á'*2048),bridge.chatTextProblem('á'*2049)),('','Mensagem acima de 4096 bytes'))
+        self.assertEqual((bridge.agentGoalProblem('á'*512),bridge.agentGoalProblem('á'*513)),('','Objetivo acima de 1024 bytes'))
+    def test_catalog_totals_follow_the_paged_output_and_reset_with_the_connection(self):
+        snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
+        out=models_output(custom=custom_models(8))
+        fetch(bridge,peer,snap,lambda:bridge.listModels('recommended'),page_of(out,'recommended'))
+        self.assertEqual((len(bridge.modelsRecommended),bridge.modelsRecommendedTotal),(2,2))
+        fetch(bridge,peer,snap,lambda:bridge.listModels('custom'),page_of(out,'custom',0))
+        self.assertEqual((len(bridge.modelsCustom),bridge.modelsCustomTotal),(6,8))
+        fetch(bridge,peer,snap,lambda:bridge.loadMoreModels('custom'),page_of(out,'custom',6))
+        self.assertEqual((len(bridge.modelsCustom),bridge.modelsCustomTotal),(8,8))
+        seen=[];bridge.modelsCatalogChanged.connect(lambda:seen.append(1))
+        bridge._models_reset()
+        self.assertTrue(seen);self.assertEqual((bridge.modelsCustom,bridge.modelsCustomTotal,bridge.modelsRecommendedTotal),([],0,0))
+# ---- B5-B10 (docs/PENDENCIAS_IMPLEMENTACAO.md): package identity, test wake, JSON invocation, last capture and reply, catalog storage, grant dates.
+PACKAGE_OBJ={'format':1,'version':'0.9.0','target':'linux_x86_64','commit':'0123456789abcdef0123456789abcdef01234567','dirty':False,'plugin_runtime':{'interpreter':'@PREFIX@/runtime/python/bin/python3','runtime_dir':'@PREFIX@/runtime/python'}}
+def package_root(test,text=None):
+    """A temporary layout <root>/app and, when text is given, <root>/PACKAGE.json next to it (the installed package shape)."""
+    td=tempfile.TemporaryDirectory(prefix='gideon-pkg-');test.addCleanup(td.cleanup)
+    root=Path(td.name);(root/'app').mkdir()
+    if text is not None:(root/'PACKAGE.json').write_text(text)
+    return root/'app'
+def capture_block(**change):return {'session_id':3,'start_us':1500,'end_us':9000,'samples':7500,'pcm_sha256':'c'*64,'reason':'capture_completed',**change}
+def speech_block(**change):return {'output_volume_percent':100,'session_id':3,'sample_rate':24000,'samples':51840,'chunks':27,'pcm_sha256':'d'*64,'peak':0.77,'rms':0.08,'first_pcm_ms':7934,'elapsed_ms':10438,'sink':'virtual',**change}
+def transcript_block(**change):return {'source':'voice','session_id':3,'revision':2,'audio_end_us':9000,'raw':'abrir brave','normalized':'abrir brave','is_final':True,'confidence':None,**change}
+def idle_plugin():
+    """Enabled plugin with no capability result yet: the snapshot a Core sends right after an invoke is acknowledged."""
+    snap=ready(plugin_snapshot('running',True));snap.pop('capability_result');return snap
+class DeveloperDiagnostics(unittest.TestCase):
+    def test_package_info_reads_the_installed_package_and_refuses_a_checkout(self):
+        info=package_info(package_root(self,json.dumps(PACKAGE_OBJ)))
+        self.assertEqual((info['installed'],info['version'],info['commit'],info['runtime'],info['dirty']),(True,'0.9.0','01234567','Python embutido no pacote',False))
+        self.assertRegex(info['built'],r'^\d{2}/\d{2}/\d{4} \d{2}:\d{2}$')
+        self.assertFalse(package_info(package_root(self))['installed'])
+        self.assertEqual(package_info(package_root(self,json.dumps(dict(PACKAGE_OBJ,commit='not-a-hash'))))['commit'],'')
+        for text in ('not json','[1]','{"version":5}','{"version":""}','x'*70000):
+            with self.subTest(text=text[:20]):self.assertFalse(package_info(package_root(self,text))['installed'])
+        bridge,_=connect_bridge(self,ready(copy.deepcopy(BASE)))
+        self.assertFalse(bridge.packageInfo['installed'])
+    def test_virtual_wake_is_sent_only_when_idle_and_shows_the_core_refusal(self):
+        bridge,peer=connect_bridge(self,ready(copy.deepcopy(BASE)))
+        self.assertTrue(bridge.virtualWakeAvailable)
+        bridge.virtualWake();request=next_request(peer)
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'virtual_wake'})
+        ack(bridge,peer,request,ready(copy.deepcopy(BASE)),code='virtual_input_disabled')
+        self.assertEqual(bridge.wakeResult,CODE_MESSAGES['virtual_input_disabled'])
+        bridge.virtualWake();request=next_request(peer);ack(bridge,peer,request,ready(copy.deepcopy(BASE)))
+        self.assertEqual(bridge.wakeResult,OPS['virtual_wake'][1])
+        apply_snap(bridge,{**ready(copy.deepcopy(BASE)),'state':'capturing','session_id':9})
+        self.assertFalse(bridge.virtualWakeAvailable)
+        bridge.virtualWake();quiet(self,peer)
+        self.assertEqual(bridge.wakeResult,'Indisponível: há uma sessão de voz em andamento')
+    def test_json_invocation_is_checked_before_the_core_sees_it(self):
+        bridge,peer=connect_bridge(self,idle_plugin())
+        self.assertTrue(bridge.pluginsAvailable)
+        refused=[('Dummy.Echo','{}'),('dummy_echo.echo',''),('dummy_echo.echo','   '),('dummy_echo.echo','[1]'),('dummy_echo.echo','{"a":'),('dummy_echo.echo','{"a":NaN}'),
+                 ('dummy_echo.echo','{"a":{"b":{"c":{"d":{"e":1}}}}}'),('dummy_echo.echo','{"s":"'+'x'*2100+'"}'),('dummy_echo.echo','{"s":"'+'é'*1100+'"}')]
+        for capability,text in refused:
+            with self.subTest(capability=capability,text=text[:12]):
+                bridge.invokeCapabilityJson(capability,text);quiet(self,peer)
+                self.assertEqual(bridge.pluginResult,capability_request(capability,text)[0])
+        bridge.invokeCapabilityJson('dummy_echo.echo','{"text":"hi","n":2}');request=next_request(peer)
+        self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':'capability_invoke','capability':'dummy_echo.echo','input':{'text':'hi','n':2},'deadline_ms':10000})
+        self.assertEqual(CAP_DEADLINE_MS,10000)
+        ack(bridge,peer,request,idle_plugin())
+        self.assertEqual(bridge.pluginResult,'Invocando capability…');self.assertTrue(bridge.capabilityPending);self.assertEqual(bridge.capabilityInFlight,'dummy_echo.echo')
+        bridge.invokeCapabilityJson('dummy_echo.echo','{}');quiet(self,peer)
+        self.assertEqual(bridge.pluginResult,'Já há uma capacidade em execução; aguarde ou cancele')
+        bridge.refresh();answer(peer,next_request(peer),{**idle_plugin(),'capability_result':{'capability':'dummy_echo.echo','plugin_id':'dummy_echo','ok':True,'output':{'text':'HELLO','count':1},'elapsed_ms':4}});bridge.poll.stop()
+        pump(lambda:bridge.capabilityResultText=='HELLO');self.assertFalse(bridge.capabilityPending);self.assertEqual(bridge.capabilityInFlight,'')
+    def test_json_invocation_can_be_cancelled_and_selftest_has_its_own_deadline(self):
+        bridge,peer=connect_bridge(self,idle_plugin())
+        bridge.invokeCapabilityJson('dummy_echo.echo','{"text":"slow"}');request=next_request(peer);ack(bridge,peer,request,idle_plugin())
+        bridge.cancelCapability(bridge.capabilityInFlight);request=next_request(peer)
+        self.assertEqual({k:v for k,v in request.items() if k!='request_id'},{'version':1,'op':'capability_cancel','capability':'dummy_echo.echo'})
+        ack(bridge,peer,request,idle_plugin())
+        bridge2,peer2=connect_bridge(self,idle_plugin())
+        bridge2.invokeCapabilityJson('llm_engine.models','{"action":"selftest"}');request=next_request(peer2)
+        self.assertEqual((request['capability'],request['deadline_ms']),('llm_engine.models',30000))
+        self.assertEqual(capability_request('llm_engine.models','{"action":"list"}')[2],CAP_DEADLINE_MS)
+    def test_capability_errors_and_results_are_portuguese_and_bounded(self):
+        self.assertEqual(capability_code_message('capability_unavailable'),CAPABILITY_MESSAGES['capability_unavailable'])
+        self.assertEqual(capability_code_message('invalid_input'),CAPABILITY_MESSAGES['invalid_input'])
+        self.assertEqual(capability_code_message('busy'),CAPABILITY_MESSAGES['busy'])
+        self.assertEqual(capability_code_message('shell_now'),code_message('shell_now'))
+        self.assertEqual(clip_bytes('é'*600,CAP_RESULT_LIMIT),'é'*512);self.assertEqual(clip_bytes('ab',1),'a')
+        bridge,peer=connect_bridge(self,idle_plugin())
+        apply_snap(bridge,{**idle_plugin(),'capability_result':{'capability':'dummy_echo.echo','plugin_id':'dummy_echo','ok':False,'error':'invalid_input','elapsed_ms':3}})
+        self.assertEqual(bridge.capabilityResultText,CAPABILITY_MESSAGES['invalid_input'])
+        apply_snap(bridge,{**idle_plugin(),'capability_result':{'capability':'dummy_echo.echo','plugin_id':'dummy_echo','ok':True,'output':{'blob':'é'*400},'elapsed_ms':3}})
+        text=bridge.capabilityResultText
+        self.assertTrue(text.startswith('{') and len(text.encode('utf-8'))<=CAP_RESULT_LIMIT)
+    def test_capture_speech_and_transcript_blocks_reach_the_bridge(self):
+        snap={**ready(copy.deepcopy(BASE)),'capture':capture_block(),'speech':speech_block(),'transcript':transcript_block()}
+        bridge,peer=connect_bridge(self,snap)
+        self.assertEqual(bridge.captureSummary['pcm_sha256'],'c'*64)
+        self.assertEqual((bridge.speechSummary['peak'],bridge.speechSummary['sink'],bridge.speechSummary['chunks']),(0.77,'virtual',27))
+        self.assertIsNone(bridge.transcriptSummary['confidence'])
+        apply_snap(bridge,ready(copy.deepcopy(BASE)))
+        self.assertEqual((bridge.captureSummary,bridge.speechSummary,bridge.transcriptSummary),({},{},{}))
+        for change in ({'reason':'unknown'},{'pcm_sha256':'short'}):
+            with self.subTest(capture=change),self.assertRaises(ValueError):validate_snapshot({**BASE,'capture':capture_block(**change)},'r',0)
+    def test_catalog_storage_and_core_directory_are_exposed_honestly(self):
+        bridge,_=connect_bridge(self,ready(plugin_snapshot('disabled',False)))
+        store=bridge.hubStorage
+        self.assertEqual((store['state'],store['orphans'],store['catalogSha'],store['repository']),('verified',0,'b'*12,'https://github.com/a/b'))
+        self.assertTrue(Path(bridge.coreRootPath).is_dir())
+        self.assertEqual(hub_storage(None),{'state':'none','reason':'','orphans':None,'repository':'','catalogSha':''})
+        self.assertEqual(hub_storage({'status':'quarantined','reason':'ledger_invalid','orphans':2,'repository':None,'catalog_sha256':None}),
+                         {'state':'quarantined','reason':'registro de aprovações inválido','orphans':2,'repository':'','catalogSha':''})
+    def test_approved_plugin_keeps_its_grant_date_and_unknown_dates_stay_absent(self):
+        snap=ready(plugin_snapshot('running',True));entry=snap['hub']['entries'][0]
+        entry.update(permissions=['network.llm'],permissions_approved=True,approved_at_ms=1700000000000)
+        bridge,_=connect_bridge(self,copy.deepcopy(snap))
+        self.assertEqual(bridge.hubEntries[0]['approved_at_ms'],1700000000000)
+        row=next(r for r in grant_rows(bridge.snapshot) if r['origin']=='plugin')
+        self.assertEqual((row['state'],row['approved_at_ms']),('approved',1700000000000))
+        unknown=copy.deepcopy(snap);del unknown['hub']['entries'][0]['approved_at_ms']
+        validate_snapshot(unknown,'r',0)
+        self.assertNotIn('approved_at_ms',next(r for r in grant_rows(unknown) if r['origin']=='plugin'))
+        for bad in ({'approved_at_ms':0},{'approved_at_ms':-1}):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):validate_snapshot({**snap,'hub':{**snap['hub'],'entries':[{**entry,**bad}]}},'r',0)
+        with self.subTest(case='date without approval'),self.assertRaises(ValueError):validate_snapshot({**snap,'hub':{**snap['hub'],'entries':[{**entry,'permissions_approved':False}]}},'r',0)
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
+    if QML_SHELL_CHILD:sys.exit(qml_shell_child())
+    if QML_INTRO_CHILD:sys.exit(qml_intro_child())
     if QML_CONNECTIONS_CHILD:sys.exit(qml_connections_child())
     if QML_SKILLS_CHILD:sys.exit(qml_skills_child())
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())

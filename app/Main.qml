@@ -132,8 +132,11 @@ ApplicationWindow {
         {label: "Abrir Motor LLM", target: "cmd:llm"},
         {label: "Restaurar padrões do app", target: "page:cfg_geral"},
         {label: "Ligar modo desenvolvedor", target: "page:diag_estado"},
-        {label: "Trocar tema ou cor", target: "page:cfg_aparencia"}
+        {label: "Trocar tema ou cor", target: "page:cfg_aparencia"},
+        {label: "Refazer introdução", target: "cmd:intro"}
     ]
+    // The theme singleton, for the QML tests (scripts/test_bridge_protocol.py reads the effective effects through it).
+    readonly property var themeRef: Theme
     function settingPage(key) {
         if (key.indexOf("theme.") === 0) return "cfg_aparencia"
         if (key.indexOf("voice.") === 0 || key.indexOf("wake") >= 0) return "cfg_voz"
@@ -158,17 +161,39 @@ ApplicationWindow {
         if (target.indexOf("page:") === 0) goPage(target.substring(5))
         else if (target === "cmd:cancel") core.cancel()
         else if (target === "cmd:llm") openLlm()
+        else if (target === "cmd:intro") AppState.openOnboarding()
     }
 
     // ---- Shortcuts ---------------------------------------------------------------------------------------------
-    Shortcut { sequences: ["Ctrl+1"]; enabled: Theme.shortcutsOn; onActivated: window.pickTab("assistente") }
-    Shortcut { sequences: ["Ctrl+2"]; enabled: Theme.shortcutsOn; onActivated: window.pickTab("extensoes") }
-    Shortcut { sequences: ["Ctrl+3"]; enabled: Theme.shortcutsOn; onActivated: window.pickTab("permissoes") }
-    Shortcut { sequences: ["Ctrl+4"]; enabled: Theme.shortcutsOn; onActivated: window.pickTab("configuracoes") }
-    Shortcut { sequences: ["Ctrl+5"]; enabled: Theme.shortcutsOn; onActivated: window.pickTab("diagnostico") }
-    Shortcut { sequences: ["Ctrl+Tab"]; enabled: Theme.shortcutsOn; onActivated: window.cycleSub(1) }
-    Shortcut { sequences: ["Ctrl+Shift+Tab"]; enabled: Theme.shortcutsOn; onActivated: window.cycleSub(-1) }
-    Shortcut { sequences: ["Ctrl+K"]; onActivated: palette.open() }
+    // All of them follow behavior.shortcuts (Theme.shortcutsOn). While the first-run guide is up, the shell keys wait.
+    readonly property bool shortcutsEnabled: Theme.shortcutsOn && !onboarding.visible
+    Shortcut { sequences: ["Ctrl+1"]; enabled: window.shortcutsEnabled; onActivated: window.pickTab("assistente") }
+    Shortcut { sequences: ["Ctrl+2"]; enabled: window.shortcutsEnabled; onActivated: window.pickTab("extensoes") }
+    Shortcut { sequences: ["Ctrl+3"]; enabled: window.shortcutsEnabled; onActivated: window.pickTab("permissoes") }
+    Shortcut { sequences: ["Ctrl+4"]; enabled: window.shortcutsEnabled; onActivated: window.pickTab("configuracoes") }
+    Shortcut { sequences: ["Ctrl+5"]; enabled: window.shortcutsEnabled; onActivated: window.pickTab("diagnostico") }
+    Shortcut { sequences: ["Ctrl+Tab"]; enabled: window.shortcutsEnabled; onActivated: window.cycleSub(1) }
+    Shortcut { sequences: ["Ctrl+Shift+Tab"]; enabled: window.shortcutsEnabled; onActivated: window.cycleSub(-1) }
+    Shortcut { sequences: ["Ctrl+K"]; enabled: window.shortcutsEnabled; onActivated: palette.open() }
+    // Ctrl+M: the Core has no way to start a capture from the app (its virtual wake is not offered to the client), so
+    // this ends a running capture and says so when there is none. Documented in docs/PENDENCIAS_IMPLEMENTACAO.md B15.
+    Shortcut { sequences: ["Ctrl+M"]; enabled: window.shortcutsEnabled; onActivated: window.toggleListening() }
+    function toggleListening() {
+        if (core.connected && core.state === "capturing" && core.sessionId.length > 0) {
+            core.cancel()
+            AppState.toast("Escuta encerrada.")
+        } else {
+            AppState.toast("Microfone indisponível: sem entrada de áudio neste perfil")
+        }
+    }
+    // Esc cancels a running capture. It is handled by the shell layout, which is the focus chain of the pages: when a
+    // dialog or the palette is open the focus is inside it, the key stops there, and nothing is cancelled (one action only).
+    function escapeCancels() {
+        if (!Theme.shortcutsOn || onboarding.visible) return false
+        if (!core.connected || core.state !== "capturing") return false
+        core.cancel()
+        return true
+    }
 
     // ---- Core -------------------------------------------------------------------------------------------------
     Connections {
@@ -178,12 +203,14 @@ ApplicationWindow {
         // Core answers to preference saves become short toasts.
         function onPrefsSettled(message) { if (message && message.length > 0) AppState.toast(message) }
     }
-    Component.onCompleted: { if (!window.availability[window.pageId]) window.pageId = "hoje" }
 
     // ---- Layout ------------------------------------------------------------------------------------------------
     ColumnLayout {
+        id: shellLayout
         anchors.fill: parent
         spacing: 0
+        focus: true
+        Keys.onEscapePressed: function (event) { event.accepted = window.escapeCancels() }
 
         TopBar {
             id: topBar
@@ -257,4 +284,14 @@ ApplicationWindow {
         onActivated: function (item) { window.runTarget(item.target) }
     }
 
+    // First-run guide: above the shell, below nothing. Shown once per profile (behavior.onboardingDone), suppressed by
+    // GIDEON_UI_NO_ONBOARDING=1 (explorers and gates), never while the Core is offline or a voice session runs.
+    OOnboarding {
+        id: onboarding
+    }
+
+    Component.onCompleted: {
+        if (!window.availability[window.pageId]) window.pageId = "hoje"
+        AppState.onboardingOpen = AppState.uiLive() && !ui.noOnboarding && ui.values["behavior.onboardingDone"] !== true
+    }
 }

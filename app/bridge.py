@@ -36,7 +36,11 @@ HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision',
 HUB_REQUIRED=HUB_KEYS-{'reason'}
 ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','approved_at_ms','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
 ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities','approved_at_ms'}
-PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences'})
+PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','audio_input_device','audio_output_device'})
+# Core bounds (src/storage.rs): sensitivity 0.5..=1.5; device names 1..=128 bytes from this charset.
+DEVICE_CHARS=frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:@/+ -')
+def wake_sensitivity_ok(value):return type(value) in (int,float) and math.isfinite(value) and 0.5<=value<=1.5
+def audio_device_ok(value):return isinstance(value,str) and 1<=len(value.encode('utf-8'))<=128 and all(c in DEVICE_CHARS for c in value)
 PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output'})
 TRANSCRIPT_KEYS=frozenset({'source','session_id','revision','audio_end_us','raw','normalized','is_final','confidence'})
 CAPTURE_KEYS=frozenset({'session_id','start_us','end_us','samples','pcm_sha256','reason'})
@@ -543,11 +547,17 @@ def validate_snapshot(data,request_id,min_sequence):
         require(integer(prefs.get('revision')) and integer(prefs.get('session_timeout_ms'),50,60000))
         require(type(prefs.get('audible_feedback')) is bool)
         require(type(prefs['visual_feedback']) is bool and integer(prefs['output_volume_percent'],0,100))
+        if 'wake_sensitivity' in prefs:require(wake_sensitivity_ok(prefs['wake_sensitivity']))
+        for key in ('audio_input_device','audio_output_device'):
+            if key in prefs:require(audio_device_ok(prefs[key]))
         previous=prefs.get('previous_preferences')
         if previous is not None:
             require(isinstance(previous,dict) and type(previous.get('audible_feedback')) is bool and integer(previous.get('session_timeout_ms'),50,60000))
             if 'visual_feedback' in previous:require(type(previous['visual_feedback']) is bool)
             if 'output_volume_percent' in previous:require(integer(previous['output_volume_percent'],0,100))
+            if 'wake_sensitivity' in previous:require(wake_sensitivity_ok(previous['wake_sensitivity']))
+            for key in ('audio_input_device','audio_output_device'):
+                if key in previous:require(audio_device_ok(previous[key]))
         wake=prefs.get('wake_phrase')
         require(wake is None or (short(wake) and len(wake)>0 and all(c.isascii() and (c.isalnum() or c in '_-') for c in wake)))
     hub=data.get('hub')
@@ -788,6 +798,8 @@ CODE_MESSAGES={
     'unsupported':'Backend real não suportado neste ambiente; nada foi executado',
     'unknown_service':'Serviço de percepção indisponível nesta build',
     'capability_timeout':'Plugin de percepção não respondeu no prazo',
+    # B6: the Core refuses the test wake unless it was started with --virtual-input (src/core.rs VirtualWake).
+    'virtual_input_disabled':'Wake de teste indisponível: o Core foi iniciado sem --virtual-input',
 }
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
 # Display mapping (round 2). The Core wire values never change; these tables only choose the text the user reads.
@@ -813,12 +825,14 @@ def display_permission(permission):
     """Permission id as the user reads it. Unknown ids are shown as the Core sent them (they are never translated by guess)."""
     return PERMISSION_LABELS.get(permission,permission or '')
 # Registry effect templates (src/tools.rs effect) and risk classes as Portuguese text. Unknown ids show no text (QML shows the absence text).
-EFFECT_TEXT={'open_app':'Abrir o aplicativo {app}','set_volume':'Definir o volume em {level}%','mute':'Silenciar o áudio',
+EFFECT_TEXT={'open_app':'Abrir {app}','set_volume':'Volume {level}','mute':'Silenciar',
              'get_status':'Consultar o estado do sistema','get_time':'Consultar a hora','get_date':'Consultar a data'}
 RISK_TEXT={'read':'baixo','state_changing':'médio','destructive':'alto','public':'alto'}
 def display_effect(effect):
     """Portuguese sentence for a registry effect, or '' when the proposal has no effect (the card then says 'não informado pelo plugin')."""
     if not (isinstance(effect,dict) and effect.get('id') in EFFECT_TEXT):return ''
+    # A template whose parameters are missing (an old step with effect_id only) has no honest sentence: the absence text applies.
+    if any(effect.get(param) in (None,'') for param in EFFECT_PARAMS[effect['id']]):return ''
     return EFFECT_TEXT[effect['id']].format(app=effect.get('app',''),level=effect.get('level',''))
 def display_risk(risk):
     """'baixo', 'médio' or 'alto'; '' when the proposal declares no risk (the card then says 'não declarado')."""
@@ -850,6 +864,9 @@ def pending_count(snapshot):
     count+=sum(1 for i in items if i.get('pending_scopes'))
     return count+sum(1 for i in items for t in i.get('tools') or [] if t.get('state')=='needs_reapproval')
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
+# B12: actionable chat errors (Core codes of a failed chat turn). Each banner links to Extensões › Modelos LLM › Provedor e chaves.
+CHAT_ERROR_BANNERS={'key_missing':'Falta a chave do provedor','provider_not_configured':'Nenhum provedor configurado','cloud_not_authorized':'Consentimento de nuvem necessário','model_unsupported_feature':'O modelo atual não suporta o recurso exigido'}
+CHAT_ERROR_ACTION='Abrir Provedor e chaves'
 # Raw Core codes never reach the screen. Unknown codes get one generic sentence; the code is appended only when the advanced setting (behavior.advanced) is on.
 GENERIC_FAILURE='Não foi possível concluir a operação.'
 CODE_DETAIL={'on':False}
@@ -929,7 +946,7 @@ SKILL_DRAFT_CAPABILITY='llm_engine.skill_draft';SKILL_DRAFT_PLUGIN='llm_engine';
 PENDING_SKILL_DRAFT='Gerando skill com o LLM…';SKILL_ARM=object()
 SKILL_OPS=frozenset({'skill_validate','skill_save_draft','skill_dry_run','skill_approve','skill_enable','skill_disable','skill_rollback','skill_remove','skill_run','skill_decide','skill_cancel','skill_export','skill_import','skill_import_confirm'})
 SKILL_ITEM_KEYS=frozenset({'id','name','version','state','source','active','deps_ok','permissions_ok','missing'});SKILL_ITEM_OPTIONAL=frozenset({'permissions_required'})
-SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code','risk','effect_id'});SKILL_RISKS=('read','state_changing','destructive');SKILL_EFFECT=re.compile(r'[a-z_]{1,32}')
+SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code','risk','effect_id','effect'});SKILL_RISKS=('read','state_changing','destructive');SKILL_EFFECT=re.compile(r'[a-z_]{1,32}')
 SKILL_HISTORY_KEYS=frozenset({'run_id','skill','version','state','step','codes'})
 SKILL_IMPORT_KEYS=frozenset({'name','id','version','publisher','unverified','permissions_required','missing_deps','permission_delta','permissions_escalated','duplicate','findings'})
 SKILL_FINDING_KEYS=frozenset({'code','field'})
@@ -984,6 +1001,8 @@ def valid_skill_run(run):
         # Decision steps only: the call's risk class (tool-proposal vocabulary) and the registry effect id.
         if 'risk' in step and step['risk'] not in SKILL_RISKS:return False
         if 'effect_id' in step and not (isinstance(step['effect_id'],str) and SKILL_EFFECT.fullmatch(step['effect_id'])):return False
+        # The same closed effect object as a tool proposal (src/skills.rs StepView.effect); it must agree with effect_id.
+        if 'effect' in step and not (valid_effect(step['effect']) and step.get('effect_id')==step['effect']['id']):return False
         ids.add(step['id'])
         if step['state']=='awaiting_approval':awaiting.append(step['id'])
     current=run['step']
@@ -1148,6 +1167,59 @@ def valid_registry(block):
     if len(set(ids))!=len(ids):return False
     allowed=block['visual_allowed']
     return isinstance(allowed,list) and len(allowed)<=len(REG_VISUAL_PURPOSES) and all(a in REG_VISUAL_PURPOSES for a in allowed) and len(set(allowed))==len(allowed)
+# B5-B10 (docs/PENDENCIAS_IMPLEMENTACAO.md): package identity, developer tools and diagnostics. The Core decides; these checks only refuse what the Core would refuse, before a round trip.
+PACKAGE_JSON_LIMIT=65536;PACKAGE_COMMIT=re.compile(r'[0-9a-f]{7,40}')
+CAP_INPUT_LIMIT=2048;CAP_JSON_DEPTH=4;CAP_DEADLINE_MS=10000;CAP_SELFTEST_DEADLINE_MS=30000;CAP_RESULT_LIMIT=1024
+HUB_REASON_LABELS={'ledger_missing':'registro de aprovações ausente','ledger_invalid':'registro de aprovações inválido'}
+# Codes of a plugin capability invocation (capability_invoke ack or capability_result error). Others fall back to code_message.
+CAPABILITY_MESSAGES={'unknown_capability':'Capacidade desconhecida ou sem plugin instalado','capability_unavailable':'Plugin desativado ou não está em execução',
+    'invalid_input':'Entrada recusada: objeto JSON inválido ou acima do limite','busy':'Outra capacidade está em execução; aguarde','invoke_cancelled':'Invocação cancelada','cancelled':'Invocação cancelada',
+    'capability_timeout':'Plugin não respondeu no prazo','timeout':'Tempo esgotado','plugin_error':'Plugin retornou erro interno','plugin_output_invalid':'Resposta do plugin fora do formato',
+    'plugin_not_runnable':'Plugin não pode ser executado','plugin_cpu_exceeded':'Plugin passou do limite de processamento','response_too_large':'Resposta grande demais','permission_denied':'Permissão negada ao plugin'}
+def clip_bytes(text,limit):
+    """Text cut to at most `limit` UTF-8 bytes; never inside a character."""
+    raw=text.encode('utf-8')
+    return text if len(raw)<=limit else raw[:limit].decode('utf-8',errors='ignore')
+def capability_code_message(code):return CAPABILITY_MESSAGES.get(code) or code_message(code)
+def json_depth_ok(item,depth=0):
+    """Same nesting rule as the Core (src/plugins.rs depth_ok): at most 4 container levels."""
+    if isinstance(item,dict):return depth<CAP_JSON_DEPTH and all(json_depth_ok(v,depth+1) for v in item.values())
+    if isinstance(item,list):return depth<CAP_JSON_DEPTH and all(json_depth_ok(v,depth+1) for v in item)
+    return True
+def capability_request(capability,text):
+    """Developer JSON invocation (B7): (message, value, deadline_ms). message is None when the request may be sent.
+    Refuses an identifier outside the grammar, more than 2 KiB of UTF-8, a value that is not an object, or nesting the Core refuses."""
+    if not (isinstance(capability,str) and len(capability)<=64 and CAPABILITY_ID.fullmatch(capability)):return 'Identificador de capacidade inválido; use a forma plugin.capacidade.',None,0
+    if not isinstance(text,str) or not text.strip():return 'Entrada vazia: escreva um objeto JSON entre chaves.',None,0
+    if utf8_len(text)>CAP_INPUT_LIMIT:return 'Entrada acima de 2 KiB (2 048 bytes).',None,0
+    try:value=json.loads(text,parse_constant=_no_constant)
+    except (ValueError,RecursionError):return 'JSON inválido: use um objeto entre chaves.',None,0
+    if not isinstance(value,dict):return 'A entrada deve ser um objeto JSON.',None,0
+    if not json_depth_ok(value):return 'Objeto aninhado demais: no máximo 4 níveis.',None,0
+    selftest=capability==MODEL_CAPABILITY and value.get('action')=='selftest'
+    return None,value,CAP_SELFTEST_DEADLINE_MS if selftest else CAP_DEADLINE_MS
+def package_info(app_dir):
+    """Identity of the installed package (B5): PACKAGE.json at the package root, the parent of app/. A dev checkout has none, so installed is False."""
+    absent={'installed':False,'version':'','commit':'','built':'','runtime':'','dirty':False}
+    try:
+        path=Path(app_dir).resolve().parent/'PACKAGE.json';info=path.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size>PACKAGE_JSON_LIMIT:return absent
+        obj=json.loads(path.read_bytes().decode('utf-8'))
+    except (OSError,ValueError,RecursionError):return absent
+    version=obj.get('version') if isinstance(obj,dict) else None
+    if not (isinstance(version,str) and 0<len(version)<=64):return absent
+    commit=obj.get('commit');runtime=obj.get('plugin_runtime')
+    return {'installed':True,'version':version,'commit':commit[:8] if isinstance(commit,str) and PACKAGE_COMMIT.fullmatch(commit) else '',
+            # PACKAGE.json has no build time; the file's own modification time is when the package was written.
+            'built':datetime.datetime.fromtimestamp(info.st_mtime).strftime('%d/%m/%Y %H:%M'),
+            'runtime':'Python embutido no pacote' if isinstance(runtime,dict) and runtime.get('runtime_dir') else 'não informado',
+            'dirty':obj.get('dirty') is True}
+def hub_storage(hub):
+    """Catalog storage for Recuperação (B9). The hub view has no storage_error field, so the screen reports that as not informed."""
+    if not hub:return {'state':'none','reason':'','orphans':None,'repository':'','catalogSha':''}
+    quarantined=hub.get('status')=='quarantined'
+    return {'state':'quarantined' if quarantined else 'verified','reason':HUB_REASON_LABELS.get(hub.get('reason'),'') if quarantined else '',
+            'orphans':hub.get('orphans'),'repository':hub.get('repository') or '','catalogSha':(hub.get('catalog_sha256') or '')[:12]}
 # op -> (result channel, done message or builder). One table drives every Core answer.
 OPS={
     'preferences':('prefs',PREFS_DONE),'rollback_preferences':('prefs',PREFS_DONE),'select_wake':('prefs',PREFS_DONE),'feedback_preferences':('prefs',PREFS_DONE),
@@ -1181,14 +1253,14 @@ OPS.update({
     'connection_trust_tools':('connections','Ferramentas confiadas pelo usuário; cada chamada ainda pede aprovação'),
     'connection_revoke_scope':('connections','Escopo revogado; chamadas que precisam dele pedem concessão de novo'),
     # C-wire: restart is answered by the Core, then the socket drops (see _restart_ack); the plugin clear answers on the plugin channel.
-    'core_restart':('core','Reinício pedido ao Core'),'plugin_settings_clear':('plugin','Dados do plugin apagados'),
+    'core_restart':('core','Reinício pedido ao Core'),'plugin_settings_clear':('plugin','Dados do plugin apagados'),'virtual_wake':('wake','Wake de teste enviado ao Core'),
     'registry_plan':('registry','Rota planejada; nada foi executado'),'registry_allow_visual':('registry','Fallback visual atualizado pelo Core'),
 })
 PENDING.update({
     'connection_add':'Criando conta no Core…','connection_connect':'Iniciando conexão no Core…','connection_consent':'Enviando consentimento ao Core…','connection_refresh':'Atualizando conta no Core…',
     'connection_disconnect':'Desconectando conta no Core…','connection_revoke':'Revogando acesso no Core…','connection_remove':'Removendo conta no Core…','connection_call':'Chamando operação pelo Core…',
     'connection_set_token':'Validando token no Core…','connection_trust_tools':'Confiando nas ferramentas no Core…','connection_revoke_scope':'Revogando escopo no Core…',
-    'core_restart':'Pedindo reinício ao Core…','plugin_settings_clear':'Apagando dados do plugin…',
+    'core_restart':'Pedindo reinício ao Core…','plugin_settings_clear':'Apagando dados do plugin…','virtual_wake':'Enviando wake de teste…',
     'registry_plan':'Planejando rota no Core…','registry_allow_visual':'Atualizando fallback visual no Core…',
 })
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
@@ -1203,9 +1275,11 @@ class Bridge(QObject):
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':'','wake':''};self.hub_target='';self.capability_pending=False;self.plugin_capability='';self._package=package_info(Path(__file__).resolve().parent);self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
+        # B12: the Core code of the last failed chat turn (refusal of the invoke, or the plugin's error). '' when the last turn did not fail with a known code.
+        self.chat_last_error=''
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
         # models_marker is the response count when the awaited capability invoke was acknowledged; only a later response can carry its answer.
         self.models_req=None;self.models_wait=None;self.models_marker=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_message=''
@@ -1292,7 +1366,7 @@ class Bridge(QObject):
             if code=='ok':self.textSent.emit(sent or '')
             return
         if code!='ok':
-            self.results[channel]=code_message(code)
+            self.results[channel]=capability_code_message(code) if op=='capability_invoke' else code_message(code)
             if op=='capability_invoke':self.capability_pending=False
         elif op=='capability_invoke':self.capability_pending=True;self.results[channel]=PENDING[op]
         else:self.results[channel]=done(self.hub_target) if callable(done) else done
@@ -1377,6 +1451,16 @@ class Bridge(QObject):
     def chatAvailable(self):return self.pluginsAvailable and self._chat_target() is not None
     @Slot(str,result=str)
     def chatTextProblem(self,text):return chat_problem(text) or ''
+    # B13: the command line rule (1..512 UTF-8 bytes, no control characters). '' means the text may be sent.
+    @Slot(str,result=str)
+    def commandProblem(self,text):return text_problem(text) or ''
+    @Property(str,notify=chatChanged)
+    def chatLastErrorCode(self):return self.chat_last_error
+    # B12: the banner for the last failed chat turn: {'code','text','action'}, or {} when there is nothing actionable.
+    @Property('QVariantMap',notify=chatChanged)
+    def chatErrorBanner(self):
+        text=CHAT_ERROR_BANNERS.get(self.chat_last_error)
+        return {'code':self.chat_last_error,'text':text,'action':CHAT_ERROR_ACTION} if text else {}
     @Slot(str,result=str)
     def codeMessage(self,code):return code_message(code) if isinstance(code,str) and SNAKE_CODE.fullmatch(code) else ''
     # Write-only clipboard for the copyable terminal commands (Diagnóstico > Recuperação). Bounded; never reads the clipboard.
@@ -1422,14 +1506,15 @@ class Bridge(QObject):
         messages=chat_messages_for(self.chat_messages,text) if problem is None else None
         if problem is None and messages is None:problem='Mensagem grande demais para o contexto do motor'
         if problem is not None:self.results['chat']=problem;self.chatChanged.emit();return
-        self.chat_request={'text':text,'target':target};self.pending_chat=True
+        self.chat_request={'text':text,'target':target};self.pending_chat=True;self.chat_last_error=''
         input_={'messages':messages,'tools':True,'max_tokens':CHAT_MAX_TOKENS}
         if self._request('capability_invoke',capability=target['capability'],input=input_,deadline_ms=CHAT_DEADLINE_MS):self.results['chat']=PENDING['capability_invoke']
         else:self.chat_request=None;self.pending_chat=False;self.results['chat']='Core indisponível'
         self.chatChanged.emit()
     def _chat_accepted(self,code):
         request,self.chat_request=self.chat_request,None
-        if code!='ok':self.results['chat']=code_message(code);self.chatChanged.emit();return
+        if code!='ok':self.chat_last_error=code;self.results['chat']=code_message(code);self.chatChanged.emit();return
+        self.chat_last_error=''
         self.chat_messages.append({'role':'user','text':request['text'],'state':'done'});del self.chat_messages[:-CHAT_MESSAGES_KEPT]
         self.chat_inflight=request['target'];self.chat_state='waiting';self.results['chat']=''
         self.chatSent.emit(request['text']);self.chatChanged.emit()
@@ -1439,11 +1524,13 @@ class Bridge(QObject):
         result=self.snapshot.get('capability_result')
         if not result or result['capability']!=self.chat_inflight['capability'] or result['plugin_id']!=self.chat_inflight['plugin_id']:return
         self.chat_inflight=None;self.chat_cancel_pending=False;partial=result.get('partial') or ''
+        self.chat_last_error=''
         if result['ok']:
             text=result['output'].get('text');self.chat_messages.append({'role':'assistant','text':text if isinstance(text,str) else '','state':'done'})
             self.chat_state='done';self.results['chat']=''
         else:
             state='cancelled' if result['error'] in CANCEL_CODES else 'error';self.chat_state=state
+            if state=='error':self.chat_last_error=result['error'] if isinstance(result['error'],str) else ''
             if partial:self.chat_messages.append({'role':'assistant','text':partial,'state':state})
             self.results['chat']='' if state=='cancelled' else (f"Erro HTTP {result[HTTP_STATUS_KEY]}" if result['error']=='http_error' and HTTP_STATUS_KEY in result else code_message(result['error']))
         del self.chat_messages[:-CHAT_MESSAGES_KEPT];self.chatChanged.emit()
@@ -1945,9 +2032,11 @@ class Bridge(QObject):
     def capabilityResultText(self):
         result=self.snapshot.get('capability_result')
         if not result:return ''
-        if not result['ok']:return result['error']
+        if not result['ok']:return capability_code_message(result['error'])
+        # B7: text is shown as is; an output without text is shown as its JSON (both PlainText, at most 1 KiB).
         output=result['output'];text=output.get('text')
-        return (text if isinstance(text,str) else 'Resultado recebido; sem texto para mostrar.')[:512]
+        if not isinstance(text,str):text=json.dumps(output,ensure_ascii=False,indent=2,allow_nan=False)
+        return clip_bytes(text,CAP_RESULT_LIMIT)
     @Slot(str)
     def enablePlugin(self,plugin):
         if self.pluginsAvailable:self._preferences('plugin_enable',revision=int(self.pluginsRevision),plugin_id=plugin)
@@ -1961,10 +2050,24 @@ class Bridge(QObject):
         self._preferences('plugin_revoke',revision=int(revision),plugin_id=plugin)
     @Slot(str,str)
     def invokeCapability(self,capability,text):
-        if self.pluginsAvailable:self._preferences('capability_invoke',capability=capability,input={'text':text[:256]},deadline_ms=3000)
+        if self.pluginsAvailable:self.plugin_capability=capability;self._preferences('capability_invoke',capability=capability,input={'text':text[:256]},deadline_ms=3000)
     @Slot(str)
     def cancelCapability(self,capability):
         if self.pluginsAvailable:self._preferences('capability_cancel',capability=capability)
+    @Slot(str,str)
+    def invokeCapabilityJson(self,capability,jsonText):
+        """B7: developer invocation with a JSON object (2 KiB). Refusals stay here; the deadline is 10 s, or 30 s for the model selftest."""
+        message,value,deadline=capability_request(capability,jsonText)
+        if message is None and self.capability_pending:message='Já há uma capacidade em execução; aguarde ou cancele'
+        if message is None and self._models_busy_now():message=CODE_MESSAGES['busy']
+        if message is None and not self.pluginsAvailable:message='Plugins indisponíveis agora: o Core precisa estar conectado, sem sessão de voz e com catálogo verificado'
+        if message is not None:self.results['plugin']=message;self.changed.emit();return
+        self.plugin_capability=capability
+        self._preferences('capability_invoke',capability=capability,input=value,deadline_ms=deadline)
+    @Property(bool,notify=changed)
+    def capabilityPending(self):return bool(self.capability_pending)
+    @Property(str,notify=changed)
+    def capabilityInFlight(self):return self.plugin_capability if self.capability_pending else ''
     @Property(bool,notify=changed)
     def hubImportActive(self):return self.online and bool((self.snapshot.get('hub') or {}).get('import'))
     @Property(str,notify=changed)
@@ -2327,3 +2430,27 @@ class Bridge(QObject):
     def registryPurposes(self):return [dict(p) for p in self._reg_block().get('purposes',[])]
     @Property('QVariantList',notify=registryChanged)
     def registryVisualAllowed(self):return list(self._reg_block().get('visual_allowed',[]))
+    # ---- B5-B10 (docs/PENDENCIAS_IMPLEMENTACAO.md): package identity, test wake, diagnostics of the last capture and reply, catalog storage.
+    @Property('QVariantMap',constant=True)
+    def packageInfo(self):return dict(self._package)
+    @Property(str,constant=True)
+    def coreRootPath(self):return str(self.root)
+    @Property(bool,notify=changed)
+    def virtualWakeAvailable(self):return self.online and self.configurationStatus=='ready' and not self.sessionId
+    @Property(str,notify=changed)
+    def wakeResult(self):return self.results['wake']
+    @Slot()
+    def virtualWake(self):
+        """B6: the Core's test wake (op virtual_wake). The Core refuses it unless it was started with --virtual-input; that refusal arrives as virtual_input_disabled."""
+        if not self.virtualWakeAvailable:
+            self.results['wake']='Indisponível: o Core está desconectado' if not self.online else 'Indisponível: há uma sessão de voz em andamento' if self.sessionId else 'Indisponível agora: a configuração precisa estar pronta'
+        else:self.results['wake']=PENDING['virtual_wake'] if self._request('virtual_wake') else CODE_MESSAGES['busy']
+        self.changed.emit()
+    @Property('QVariantMap',notify=sessionChanged)
+    def captureSummary(self):return dict(self.snapshot.get('capture') or {})
+    @Property('QVariantMap',notify=sessionChanged)
+    def speechSummary(self):return dict(self.snapshot.get('speech') or {})
+    @Property('QVariantMap',notify=sessionChanged)
+    def transcriptSummary(self):return dict(self.snapshot.get('transcript') or {})
+    @Property('QVariantMap',notify=changed)
+    def hubStorage(self):return hub_storage(self.snapshot.get('hub'))

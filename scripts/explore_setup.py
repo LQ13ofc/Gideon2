@@ -3,6 +3,8 @@
 
 Run: /usr/bin/python3 -I -B scripts/explore_setup.py [--keep-dir]
      (start it in the background; it stays alive until SIGTERM/SIGINT, then stops the Core and the fakes)
+The Qt client that explores this Core (scripts/explore_ui.py) sets GIDEON_UI_NO_ONBOARDING=1 itself, so the first-run
+guide does not cover the pages it visits. This script starts no Qt client.
 
 Everything lives in a fresh temp dir (printed as TMP=...): Core root, data dir, private HOME, logs. The repo is
 only read: --home is the repo (scripts, target assets), every write goes to --data-dir. Nothing touches

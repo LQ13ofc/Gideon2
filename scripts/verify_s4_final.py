@@ -157,7 +157,7 @@ def llm_setup(root, url, steps):
 
 # ---- CONTRACT -----------------------------------------------------------------------------
 def part_contract():
-    env = dict(os.environ, QT_QPA_PLATFORM='offscreen')
+    env = dict(os.environ, QT_QPA_PLATFORM='offscreen', GIDEON_UI_NO_ONBOARDING='1')
     done = subprocess.run([str(UI_PY), str(CONTRACT), '-v'], cwd=BASE, env=env, capture_output=True, text=True,
                           timeout=480)
     text = done.stdout + done.stderr

@@ -1362,3 +1362,32 @@ fn connection_writes_are_never_retried_unless_the_descriptor_is_idempotent() {
         "an idempotent read may retry"
     );
 }
+
+#[test]
+fn decision_step_carries_the_registry_effect_with_its_arguments() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("effect");
+    let mut core = Core::boot(&dir, &specs());
+    core.promote(manifest(
+        "skill_volume",
+        &["tool:set_volume"],
+        json!([{"id": "volume", "call": "tool:set_volume", "args": {"level": 40}}]),
+    ));
+    assert_eq!(core.run_skill("skill_volume", json!({})), "ok");
+    let waiting = core.wait_for("the volume step waits", |snap| {
+        snap["skills"]["run"]["state"] == "awaiting_approval"
+    });
+    let run = &waiting["skills"]["run"];
+    let step = run["steps"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(step["risk"], "state_changing", "{run}");
+    assert_eq!(step["effect_id"], "set_volume", "{run}");
+    // Same shape as a tool proposal's effect: the id and its typed parameters, never the raw args.
+    assert_eq!(
+        step["effect"],
+        json!({"id": "set_volume", "level": 40}),
+        "{run}"
+    );
+    assert!(!run.to_string().contains("\"args\""), "{run}");
+    let run_id = run["run_id"].as_str().unwrap().to_owned();
+    assert_eq!(core.decide(&run_id, "volume", "deny"), "ok");
+}

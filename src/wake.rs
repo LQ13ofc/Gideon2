@@ -47,11 +47,26 @@ pub struct Packet {
     pub speech: Option<bool>,
 }
 
+/// Acceptance threshold of a scored detection at sensitivity 1.0.
+pub const BASE_ACCEPT_CONFIDENCE: f32 = 0.6;
+/// Effective acceptance threshold: `BASE_ACCEPT_CONFIDENCE * factor`, with `factor = 2 - sensitivity`.
+/// Sensitivity 0.5 gives factor 1.5 (threshold 0.9: stricter); 1.0 gives 0.6; 1.5 gives factor 0.5
+/// (threshold 0.3: more sensitive). A higher sensitivity therefore lowers the threshold.
+pub fn accept_threshold(sensitivity: f32) -> f32 {
+    BASE_ACCEPT_CONFIDENCE * (2.0 - sensitivity)
+}
+/// Decision for one detection. A detection without a score was already decided by the engine and
+/// passes unchanged; a scored one must reach `accept_threshold(sensitivity)`.
+pub fn accepts(confidence: Option<f32>, sensitivity: f32) -> bool {
+    confidence.is_none_or(|c| c >= accept_threshold(sensitivity))
+}
+
 pub struct WakeInput {
     descriptor: WakeDescriptor,
     last_end: u64,
     last_wake: Option<u64>,
     pre_roll: VecDeque<f32>,
+    sensitivity: f32,
 }
 impl WakeInput {
     pub fn new(descriptor: WakeDescriptor) -> Result<Self, AudioError> {
@@ -61,7 +76,19 @@ impl WakeInput {
             last_end: 0,
             last_wake: None,
             pre_roll: VecDeque::new(),
+            sensitivity: crate::storage::Config::default().wake_sensitivity,
         })
+    }
+    /// Live preference: applies to the following packets. Out-of-range values are refused.
+    pub fn set_sensitivity(&mut self, sensitivity: f32) -> Result<(), AudioError> {
+        if !crate::storage::valid_wake_sensitivity(sensitivity) {
+            return Err(AudioError::InvalidFormat);
+        }
+        self.sensitivity = sensitivity;
+        Ok(())
+    }
+    pub fn sensitivity(&self) -> f32 {
+        self.sensitivity
     }
     pub fn accept(&mut self, packet: Packet) -> Result<Option<Detection>, AudioError> {
         let frame = AudioFrame {
@@ -95,6 +122,10 @@ impl WakeInput {
         }
         let detection = packet.detections.into_iter().next();
         if let Some(d) = detection {
+            // Below-threshold scores are dropped before the cooldown, which only tracks accepted wakes.
+            if !accepts(d.confidence, self.sensitivity) {
+                return Ok(None);
+            }
             if self
                 .last_wake
                 .is_some_and(|t| d.end_us.saturating_sub(t) < 2_000_000)
@@ -194,5 +225,29 @@ mod tests {
         assert!(input.accept(bad).is_err());
         assert_eq!(input.buffered_samples(), 0);
         assert!(input.accept(packet(0, None)).is_ok());
+    }
+    #[test]
+    fn sensitivity_scales_the_acceptance_threshold() {
+        // Higher sensitivity lowers the threshold: 0.5 -> 0.9, 1.0 -> 0.6, 1.5 -> 0.3.
+        assert!(accept_threshold(0.5) > accept_threshold(1.0));
+        assert!(accept_threshold(1.0) > accept_threshold(1.5));
+        assert!(!accepts(Some(0.7), 0.5));
+        assert!(accepts(Some(0.7), 1.0));
+        assert!(!accepts(Some(0.35), 1.0));
+        assert!(accepts(Some(0.35), 1.5));
+        assert!(!accepts(Some(0.29), 1.5));
+        // Unscored detections were decided by the engine and are never re-gated.
+        assert!(accepts(None, 0.5));
+    }
+    #[test]
+    fn set_sensitivity_refuses_out_of_range_values() {
+        let mut input = input("hey_gideon");
+        assert_eq!(input.sensitivity(), 1.0);
+        for bad in [0.49, 1.51, f32::NAN, f32::INFINITY] {
+            assert!(input.set_sensitivity(bad).is_err());
+        }
+        assert_eq!(input.sensitivity(), 1.0);
+        input.set_sensitivity(1.5).unwrap();
+        assert_eq!(input.sensitivity(), 1.5);
     }
 }

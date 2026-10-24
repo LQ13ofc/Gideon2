@@ -238,3 +238,122 @@ fn startup_sweep_quarantines_leftovers_and_orphans_without_deleting() {
         0o700
     );
 }
+
+#[test]
+fn legacy_ledgers_load_with_wake_sensitivity_and_device_defaults() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    drop(Storage::open(&root).unwrap());
+    // A ledger written before A1-A3: no wake_sensitivity, no device names, legacy previous block.
+    fs::write(
+        root.join("config.json"),
+        br#"{"version":1,"session_timeout_ms":9000,"revision":4,"audible_feedback":false,"visual_feedback":true,"output_volume_percent":80,"previous_preferences":{"audible_feedback":true,"session_timeout_ms":30000}}"#,
+    )
+    .unwrap();
+    fs::set_permissions(root.join("config.json"), fs::Permissions::from_mode(0o600)).unwrap();
+    let store = Storage::open(&root).unwrap();
+    assert_eq!(
+        store.configuration_status,
+        gideon_base::storage::ConfigurationStatus::Ready
+    );
+    assert_eq!(store.config.revision, 4);
+    assert_eq!(store.config.wake_sensitivity, 1.0);
+    assert_eq!(store.config.audio_input_device, "default");
+    assert_eq!(store.config.audio_output_device, "default");
+    let previous = store.config.previous_preferences.as_ref().unwrap();
+    assert_eq!(previous.wake_sensitivity, 1.0);
+    assert_eq!(previous.audio_output_device, "default");
+}
+
+#[test]
+fn wake_sensitivity_and_device_bounds_are_strict() {
+    use gideon_base::storage::{valid_audio_device, valid_wake_sensitivity};
+    for ok in [0.5_f32, 1.0, 1.5] {
+        assert!(valid_wake_sensitivity(ok));
+    }
+    for bad in [0.4999_f32, 1.5001, -1.0, f32::NAN, f32::INFINITY] {
+        assert!(!valid_wake_sensitivity(bad));
+    }
+    for ok in [
+        "default",
+        "alsa_input.usb-Logitech_C920-00.analog-stereo",
+        "bluez_output.AA:BB:CC+dd/x",
+        "Built In Audio",
+        &"x".repeat(128),
+    ] {
+        assert!(valid_audio_device(ok), "{ok}");
+    }
+    for bad in [
+        "",
+        &"x".repeat(129),
+        "a;b",
+        "$(id)",
+        "tab\tname",
+        "é",
+        "a,b",
+        "a\0",
+    ] {
+        assert!(!valid_audio_device(bad), "{bad:?}");
+    }
+    // The same bounds apply on load: a hand-edited bad device makes the ledger invalid (safe mode).
+    let config = Config {
+        audio_input_device: "a;b".into(),
+        ..Default::default()
+    };
+    assert!(config.validate().is_err());
+    let config = Config {
+        wake_sensitivity: 1.6,
+        ..Default::default()
+    };
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn restore_defaults_refuses_stale_revision_and_keeps_one_backup_generation() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let mut store = Storage::open(&root).unwrap();
+    store
+        .update_preferences_with(
+            0,
+            false,
+            9000,
+            gideon_base::storage::OptionalPreferences {
+                wake_sensitivity: Some(0.5),
+                audio_input_device: Some("mic-a".into()),
+                audio_output_device: None,
+            },
+        )
+        .unwrap();
+    assert!(store.restore_preferences_defaults(0).is_err());
+    assert_eq!(store.config.revision, 1);
+    store.restore_preferences_defaults(1).unwrap();
+    assert_eq!(store.config.revision, 2);
+    assert_eq!(store.config.wake_sensitivity, 1.0);
+    let first = fs::read(root.join("config.json.bak")).unwrap();
+    // A second restore replaces the single backup generation with the newer pre-reset bytes.
+    store
+        .update_preferences_with(
+            2,
+            true,
+            9000,
+            gideon_base::storage::OptionalPreferences {
+                wake_sensitivity: Some(1.5),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let newer = fs::read(root.join("config.json")).unwrap();
+    store.restore_preferences_defaults(3).unwrap();
+    assert_eq!(fs::read(root.join("config.json.bak")).unwrap(), newer);
+    assert_ne!(first, newer);
+    assert_eq!(
+        fs::metadata(root.join("config.json.bak"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert!(!root.join(".config.json.bak.pending").exists());
+}

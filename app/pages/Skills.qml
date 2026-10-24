@@ -552,7 +552,7 @@ PageFrame {
                     Text {
                         objectName: "skillDecision_" + modelData.id
                         visible: modelData.state === "awaiting_approval"
-                        text: "Efeito: " + (core.effectText({id: modelData.effect_id || ""}) || "não informado pelo plugin") + " · Risco: " + (core.riskText(modelData.risk || "") || "não declarado")
+                        text: "Efeito: " + (core.effectText(modelData.effect || {id: modelData.effect_id || ""}) || "não informado pelo plugin") + " · Risco: " + (core.riskText(modelData.risk || "") || "não declarado")
                         textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
                     Text {
