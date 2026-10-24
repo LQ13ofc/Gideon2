@@ -6,6 +6,7 @@ import "../theme"
 import "../components"
 import "../shell"
 import "../shell/Labels.js" as L
+import "../components/Reveal.js" as Reveal
 
 // Extensões > Modelos LLM. Parts: Modelo atual, Catálogo, Personalizados, Provedor e chaves (the Motor LLM form, which
 // also works without the models plugin, since it talks to the Core), Fallback e hardware. Without the plugin only
@@ -80,9 +81,27 @@ PageFrame {
         if (part === "catalogo") modelsTabs.currentIndex = 0
         if (part === "personalizados") modelsTabs.currentIndex = 1
     }
+    // A saved custom model is listed below the form, out of sight at a small window: once the Core lists it, its row is scrolled into view.
+    property var customBefore: []
+    property bool revealCustom: false
+    function revealNewCustom() {
+        var fresh = core.modelsCustom.filter(function (m) { return page.customBefore.indexOf(m.id) < 0 })
+        if (core.modelsBusy) return
+        page.revealCustom = false
+        if (fresh.length === 0) return
+        Qt.callLater(function () {
+            for (var i = 0; i < modelRows.count; i++) {
+                var row = modelRows.itemAt(i)
+                if (row && row.modelData && row.modelData.id === fresh[0].id) { Reveal.revealItem(row); return }
+            }
+        })
+    }
     Connections {
         target: core
-        function onModelsStateChanged() { if (!core.modelsBusy) AppState.modelsRevisionCaptured = core.llmRevision }
+        function onModelsStateChanged() {
+            if (!core.modelsBusy) AppState.modelsRevisionCaptured = core.llmRevision
+            if (page.revealCustom) page.revealNewCustom()
+        }
     }
     Component.onCompleted: { AppState.modelsRevisionCaptured = core.llmRevision }
 
@@ -359,7 +378,7 @@ PageFrame {
             text: "Salvar modelo personalizado"
             Accessible.name: "Salvar modelo personalizado"
             enabled: core.modelsAvailable && !core.modelsBusy && core.customFormProblem(page.customForm()) === ""
-            onClicked: core.saveCustomModel(page.customForm())
+            onClicked: { page.customBefore = core.modelsCustom.map(function (m) { return m.id }); page.revealCustom = true; core.saveCustomModel(page.customForm()) }
         }
     }
 

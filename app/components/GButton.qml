@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import "../theme"
+import "Reveal.js" as Reveal
 
 // Button with four variants: primary (the one action of a page), secondary, danger (always behind a confirmation),
 // ghost (inline text action). Minimum height 36 px. Name is GButton so it never shadows QtQuick.Controls.Button.
@@ -21,6 +22,7 @@ Button {
     font.pixelSize: Theme.fontBody
     Accessible.name: text
     Accessible.role: Accessible.Button
+    onActiveFocusChanged: if (activeFocus) Reveal.revealItem(control)
 
     background: Rectangle {
         radius: Theme.radius

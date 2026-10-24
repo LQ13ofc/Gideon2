@@ -716,7 +716,7 @@ UI_MARKERS = ['chat-ready', 'tool-pending', 'tool-done', 'cancelled', 'config-sa
 UI_REQUIRED = [
     'actual Core connection', 'accessible cancel name', 'QML minimum is 480x520', 'minimum layout size respected',
     'Conversa offered only because llm_engine chat runs', 'Conversa page shows the chat panel',
-    'chat input and send present while idle', 'partials grew before the final text',
+    'chat input and send present while idle', 'partials grew while the reply streamed',
     'streaming state was observed', 'final assistant text is shown once', 'live bubble hidden once the final reply is shown',
     'tool proposal card offers Autorizar and Negar only while pending', 'authorized tool reaches executed with a sandbox receipt',
     'decision buttons disappear after the decision', 'cancel enabled during slow reply',

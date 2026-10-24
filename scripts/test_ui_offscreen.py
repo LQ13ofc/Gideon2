@@ -93,7 +93,7 @@ def open_page(page_id,tab):
     sub.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:window.property('pageId')==page_id,3)
 def mouse_click(item):
-    # A real click at the centre of the item: list rows (ListRow) take mouse input only, no keyboard focus.
+    # A real click at the centre of the item (the item must be in the visible part of its page; list rows scroll into view on focus).
     point=item.mapToItem(window.contentItem(),QPointF(item.width()/2,item.height()/2))
     QTest.mouseClick(window,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,point.toPoint())
     QTest.qWait(30)
@@ -182,16 +182,21 @@ elif args.phase=='models':
     check('Local filter hides cloud recommendations',all(not has_item('model_'+m['id']) for m in bridge.modelsRecommended if m['kind']=='cloud'))
     visual_item('modelsFilter').setProperty('currentIndex',0)
     Path(args.artifacts,'models-ready').touch()
+    # The user opens the Personalizados part first (the form and the custom list are that part's); the page starts on Modelo atual.
+    choose_segment('Personalizados')
     visual_item('modelsTabs').setProperty('currentIndex',1);QTest.qWait(50)
     def save_custom(label,port,tool='unknown'):
         visual_item('customProvider').setProperty('currentIndex',0);visual_item('customModelId').setProperty('text',label)
         visual_item('customPort').setProperty('value',port);visual_item('customToolUse').setProperty('currentIndex',{'unknown':0,'supported':1,'unsupported':2}[tool])
         wait(lambda:not bridge.modelsBusy,40)  # the save button is disabled while a model request runs
         save=visual_item('saveCustomButton');save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
-        wait(lambda:any(m['label']==label for m in bridge.modelsCustom),30)
+        wait(lambda:any(m['label']==label for m in bridge.modelsCustom),30);QTest.qWait(80)  # the new row is scrolled into view after the list updates
     def custom_id(label):return next(m['id'] for m in bridge.modelsCustom if m['label']==label)
+    def select_row(item):
+        # A list row takes keyboard focus first (Reveal.js scrolls it into view of the page), then the user's click lands on it.
+        item.forceActiveFocus();QTest.qWait(30);mouse_click(item)
     def use(label):
-        mouse_click(visual_item('model_'+custom_id(label)))
+        select_row(visual_item('model_'+custom_id(label)))
         before=bridge.modelsResult;button=visual_item('useModelButton');button.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
         wait(lambda:not bridge.modelsBusy and bridge.modelsResult!=before,90)
     save_custom('fake-ok',ports['ok'])
@@ -210,7 +215,7 @@ elif args.phase=='models':
     if bridge.modelsResult.startswith('Modelo ativo: fake-text'):check('text-only model shows INDISPONÍVEL for tool use',bridge.modelsStatus=='INDISPONÍVEL: tool_use não suportado')
     else:check('text-only model failed its test and was rolled back',"configuração anterior restaurada" in bridge.modelsResult)
     Path(args.artifacts,'status-unavailable').touch()
-    mouse_click(visual_item('model_'+custom_id('fake-fail')))
+    select_row(visual_item('model_'+custom_id('fake-fail')))
     remove=visual_item('removeCustomButton');remove.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     confirm=window.findChild(QObject,'removeCustomConfirm');wait(lambda:confirm.property('visible'),3)
     confirm.close();QTest.qWait(50)
@@ -225,7 +230,7 @@ elif args.phase=='chat':
     # fake OpenAI-compatible provider and a fake key written by the gate (this phase never sees or types a key).
     # Message prefixes understood by the fake provider:
     #   (none)  - SSE partials that grow, then a final text
-    #   tool:   - proposes open_app (a state change, so it waits for Autorizar)
+    #   tool:open_app - proposes open_app (a state change, so it waits for Autorizar); the fake matches this prefix (fake_llm_server.py PREFIXES)
     #   slow:   - keeps the reply open until the Core cancels it
     # Markers written to --artifacts, in order:
     #   chat-ready   - Conversa offered by the running engine, input and send present
@@ -268,7 +273,7 @@ elif args.phase=='chat':
     observe_until(lambda:bridge.chatState=='done',40,observe)
     check('final assistant text is shown once',[m['role'] for m in bridge.chatMessages].count('assistant')==assistant_before+1 and bridge.chatMessages[-1]['text']!='')
     check('live bubble hidden once the final reply is shown',not visual_item('chatStreaming').property('visible'))
-    submit('tool: abra o navegador')
+    submit('tool:open_app abra o navegador')
     observe_until(lambda:any(p['state']=='pending' for p in bridge.toolProposals),40,observe)
     pending=next(p for p in bridge.toolProposals if p['state']=='pending');pid=pending['proposal_id']
     check('tool proposal card offers Autorizar and Negar only while pending',visual_item('authorize_'+pid).property('visible') and visual_item('deny_'+pid).property('visible'))
@@ -384,6 +389,8 @@ elif args.phase=='skills':
     enabled=next((s for s in bridge.skillsItems if s['state']=='enabled'),None)
     check('enabled fixture row reads habilitada',enabled is not None and visual_item('skillState_'+enabled['id']+'_'+enabled['version']).property('text').startswith('Estado: habilitada'))
     Path(args.artifacts,'skills-ready').touch()
+    # The Criar part holds the manifest editor and the Gerar com LLM card; the page starts on Minhas, so the user opens Criar first.
+    choose_segment('Criar')
     before=[(s['id'],s['version'],s['state']) for s in bridge.skillsItems]
     manifest=visual_item('skillManifest');manifest.forceActiveFocus();manifest.setProperty('text','{"schema_version": 2}');QTest.qWait(20)
     validate=visual_item('skillValidate');validate.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
@@ -411,6 +418,7 @@ elif args.phase=='skills':
     else:
         check('Gerar com LLM says llm_engine is not running and stays disabled',not bridge.skillLlmAvailable and visual_item('skillLlmUnavailable').property('visible') and not visual_item('skillDraftWithLlm').property('enabled'))
     Path(args.artifacts,'skills-draft').touch()
+    choose_segment('Minhas')
     run=visual_item('skillRun_'+enabled['id']);run.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bridge.skillCurrentRun.get('state')=='awaiting_approval',60)
     awaiting=next(s for s in bridge.skillCurrentRun['steps'] if s['state']=='awaiting_approval')
@@ -425,6 +433,7 @@ elif args.phase=='skills':
     runline=visual_item('skillHistory_'+str(len(bridge.skillHistory)-1));expression=QQmlExpression(QQmlEngine.contextForObject(runline),runline,'textFormat === Text.PlainText');plain=expression.evaluate();plain=plain[0] if isinstance(plain,tuple) else plain
     check('run outcome shown as PlainText in Histórico',plain is True and not expression.hasError() and 'concluída' in runline.property('text'))
     Path(args.artifacts,'skills-run').touch()
+    choose_segment('Importar/Exportar')
     name=visual_item('skillImportName');name.forceActiveFocus();name.setProperty('text','fixture-note');QTest.qWait(20)
     visual_item('skillImport').forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bool(bridge.skillImportPreview.get('name')) and not bridge.skillsBusy,40)

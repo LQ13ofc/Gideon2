@@ -1,10 +1,12 @@
 import QtQuick
 import QtQuick.Layouts
 import "../theme"
+import "Reveal.js" as Reveal
 
 // One 56 px list row: optional leading icon, title, one line of detail, and actions on the right.
 // Clicking the text area emits clicked; the trailing actions keep their own clicks.
 // The row is also reachable by Tab; Enter and Space activate it the same way a click does, and it shows a focus ring.
+// Taking keyboard focus scrolls the row into view of its page (Reveal.js), so a row below the fold is never focused out of sight.
 Rectangle {
     id: row
     property string title: ""
@@ -20,6 +22,7 @@ Rectangle {
     color: selected ? Theme.tint : (mouse.containsMouse ? Theme.hover : "transparent")
     opacity: dim ? 0.6 : 1
     activeFocusOnTab: true
+    onActiveFocusChanged: if (activeFocus) Reveal.revealItem(row)
     Accessible.role: Accessible.ListItem
     Accessible.name: row.title
     Keys.onReturnPressed: function (event) { row.clicked(); event.accepted = true }
