@@ -1,0 +1,17 @@
+#!/usr/bin/python3
+"""Test-only fake of pw-play for A5. Reads raw s16le from stdin until EOF.
+
+--target NAME: `fake-sha-<hex>` exits 0 only when the received bytes have sha256 <hex>, else 4;
+`fake-fail*` exits 3 after draining; anything else exits 0. It writes no files (sandboxed).
+"""
+import hashlib
+import sys
+
+args = sys.argv[1:]
+target = args[args.index('--target') + 1] if '--target' in args else 'default'
+data = sys.stdin.buffer.read()
+if target.startswith('fake-fail'):
+    sys.exit(3)
+if target.startswith('fake-sha-'):
+    sys.exit(0 if hashlib.sha256(data).hexdigest() == target[len('fake-sha-'):] else 4)
+sys.exit(0)

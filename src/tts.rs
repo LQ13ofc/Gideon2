@@ -134,6 +134,7 @@ pub async fn speak(
     config: Config,
     job: Job,
     progress: tokio::sync::mpsc::Sender<(u64, usize)>,
+    playback: Option<crate::live::Playback>,
 ) -> io::Result<Summary> {
     if job.text.is_empty()
         || job.text.len() > 256
@@ -163,6 +164,9 @@ pub async fn speak(
         .env("HF_HUB_DISABLE_TELEMETRY", "1")
         .stdin(Stdio::piped());
     let mut child = command.spawn()?;
+    // A5 opt-in: the same PCM also goes to a supervised player when `--live-audio` is on.
+    let mut live = crate::live::LiveOutput::new(playback);
+    live.start();
     let result = tokio::time::timeout(Duration::from_secs(20), async {
         let mut input = child
             .stdin
@@ -204,6 +208,7 @@ pub async fn speak(
                         first = started.elapsed().as_millis() as u64;
                     }
                     sink.accept(&samples)?;
+                    live.write(&samples, job.output_volume_percent).await;
                     let _ = progress.try_send((job.session_id, sink.samples));
                     // Pace the virtual endpoint; Tokio sleeps leave Core/IPC/cancel responsive.
                     tokio::time::sleep(Duration::from_secs_f64(samples.len() as f64 / 24000.))
@@ -227,6 +232,7 @@ pub async fn speak(
         let _ = child.kill().await;
         let _ = child.wait().await;
     }
+    live.finish(result.is_ok()).await;
     result
 }
 #[cfg(test)]

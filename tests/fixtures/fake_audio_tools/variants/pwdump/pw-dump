@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test-only variant: only pw-dump exists on PATH (no pactl).
+dir=${0%/*}
+exec /usr/bin/cat "$dir/../../data/pwdump.json"

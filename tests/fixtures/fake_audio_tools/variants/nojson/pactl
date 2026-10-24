@@ -1,0 +1,10 @@
+#!/bin/sh
+# Test-only variant: pactl without JSON output. `list short` still answers.
+dir=${0%/*}
+data="$dir/../../data"
+case "$*" in
+    "list short sources") exec cat "$data/short_sources.tsv" ;;
+    "list short sinks") exec cat "$data/short_sinks.tsv" ;;
+    "--format=json info") exec cat "$data/pactl_info.json" ;;
+    *) exit 1 ;;
+esac

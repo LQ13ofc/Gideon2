@@ -1,0 +1,3 @@
+#!/bin/sh
+# Test-only variant: never answers, so the 3 s budget must cut it off.
+exec sleep 30

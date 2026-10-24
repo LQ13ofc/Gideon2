@@ -1,0 +1,6 @@
+{
+  "engine": "test-energy-detector",
+  "test_only": true,
+  "supported_phrases": {"hey_gideon": "HEY"},
+  "active_phrase": "hey_gideon"
+}

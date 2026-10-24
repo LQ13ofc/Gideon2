@@ -30,7 +30,7 @@ STAGED_ERRORS=('staged_payload_invalid',)
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections','registry'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections','registry','audio'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
@@ -41,6 +41,30 @@ PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revisio
 DEVICE_CHARS=frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:@/+ -')
 def wake_sensitivity_ok(value):return type(value) in (int,float) and math.isfinite(value) and 0.5<=value<=1.5
 def audio_device_ok(value):return isinstance(value,str) and 1<=len(value.encode('utf-8'))<=128 and all(c in DEVICE_CHARS for c in value)
+# A4/A5 snapshot block `audio` (src/live.rs, src/devices.rs). `live` is always present from the Core; `devices` only after audio_devices.
+AUDIO_SOURCES=('pactl','pw-dump','none')
+AUDIO_REASONS=('no_audio_tool','audio_tool_failed')
+LIVE_INPUT_STATES=('idle','capturing','error')
+LIVE_OUTPUT_STATES=('idle','playing','error')
+LIVE_ERRORS=('recorder_unavailable','recorder_exited','sandbox_unavailable','wake_worker_unavailable','wake_worker_failed','restart_limit','invalid_device','player_unavailable','player_write_failed','player_failed','player_timeout')
+def audio_devices_ok(d):
+    if not isinstance(d,dict) or not {'inputs','outputs','source'}<=set(d)<={'inputs','outputs','source','reason'}:return False
+    lists=(d['inputs'],d['outputs'])
+    if not all(isinstance(x,list) and len(x)<=16 for x in lists) or d['source'] not in AUDIO_SOURCES:return False
+    for item in lists[0]+lists[1]:
+        if not isinstance(item,dict) or set(item)!={'id','label','default'} or not audio_device_ok(item['id']) or type(item['default']) is not bool:return False
+        if not isinstance(item['label'],str) or not 1<=len(item['label'].encode('utf-8'))<=128:return False
+    if d['source']=='none':return 'reason' in d and d['reason'] in AUDIO_REASONS and not lists[0] and not lists[1]
+    return 'reason' not in d
+def audio_live_ok(live):
+    if not isinstance(live,dict) or not {'enabled','input_state','output_state','mic_active'}<=set(live)<={'enabled','input_state','output_state','mic_active','last_error'}:return False
+    if type(live['enabled']) is not bool or type(live['mic_active']) is not bool:return False
+    if live['input_state'] not in LIVE_INPUT_STATES or live['output_state'] not in LIVE_OUTPUT_STATES:return False
+    if 'last_error' in live and live['last_error'] not in LIVE_ERRORS:return False
+    # The microphone indicator is only true while the recorder captures; a disabled feature is idle.
+    if live['mic_active']!=(live['input_state']=='capturing'):return False
+    return live['enabled'] or (live['input_state']=='idle' and not live['mic_active'])
+def audio_ok(audio):return isinstance(audio,dict) and set(audio)<={'devices','live'} and 'live' in audio and audio_live_ok(audio['live']) and ('devices' not in audio or audio_devices_ok(audio['devices']))
 PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output'})
 TRANSCRIPT_KEYS=frozenset({'source','session_id','revision','audio_end_us','raw','normalized','is_final','confidence'})
 CAPTURE_KEYS=frozenset({'session_id','start_us','end_us','samples','pcm_sha256','reason'})
@@ -532,6 +556,7 @@ def validate_snapshot(data,request_id,min_sequence):
     if 'code' in data:require(short(data['code']))
     for key,states in (('wake_status',WAKE_STATES),('stt_status',STT_STATES),('speech_status',SPEECH_STATES)):
         if key in data:require(data[key] in states)
+    if 'audio' in data:require(audio_ok(data['audio']))
     if 'text_input_available' in data:require(type(data['text_input_available']) is bool)
     if 'speech_samples' in data:require(integer(data['speech_samples'],0,240000))
     if 'configuration_status' in data:

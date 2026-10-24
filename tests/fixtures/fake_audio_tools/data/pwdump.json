@@ -1,0 +1,6 @@
+[
+  {"id": 40, "type": "PipeWire:Interface:Node", "info": {"props": {"media.class": "Audio/Source", "node.name": "pw-mic.2", "node.description": "PW Mic"}}},
+  {"id": 41, "type": "PipeWire:Interface:Node", "info": {"props": {"media.class": "Audio/Source", "node.name": "pw-mic.2.monitor", "node.description": "Monitor"}}},
+  {"id": 42, "type": "PipeWire:Interface:Node", "info": {"props": {"media.class": "Audio/Sink", "node.name": "pw-spk.1", "node.nick": "Spk"}}},
+  {"id": 43, "type": "PipeWire:Interface:Client", "info": {"props": {"application.name": "ignored"}}}
+]

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Test-only fake pactl (A4). Answers exactly the calls the Core makes; data sits in ./data.
+dir=${0%/*}
+data="$dir/data"
+case "$*" in
+    "--format=json info") exec cat "$data/pactl_info.json" ;;
+    "--format=json list sources") exec cat "$data/pactl_sources.json" ;;
+    "--format=json list sinks") exec cat "$data/pactl_sinks.json" ;;
+    "list short sources") exec cat "$data/short_sources.tsv" ;;
+    "list short sinks") exec cat "$data/short_sinks.tsv" ;;
+    *) exit 2 ;;
+esac

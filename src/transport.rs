@@ -18,7 +18,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
     process::Command,
-    sync::{mpsc, oneshot, Semaphore},
+    sync::{mpsc, oneshot, watch, Semaphore},
     task::JoinSet,
 };
 
@@ -344,7 +344,34 @@ pub(crate) fn namespace_command_in(
         .kill_on_drop(true);
     Ok(cmd)
 }
-async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>) {
+/// Live wiring handed to the wake pipeline when `--live-audio` is on (settings follow the ledger).
+type LiveWiring = (
+    watch::Receiver<crate::live::Settings>,
+    mpsc::UnboundedSender<crate::live::LiveEvent>,
+);
+
+/// Starts the single wake producer: the live input supervisor when wiring is present (A5), otherwise
+/// the fixture replay worker, which takes its threshold at spawn time.
+fn start_wake(
+    replay: WakeReplay,
+    tx: mpsc::Sender<Result<Packet, ()>>,
+    live: &mut Option<LiveWiring>,
+    threshold: f32,
+) -> tokio::task::JoinHandle<()> {
+    match live.take() {
+        Some((settings, events)) => {
+            let wake = crate::live::WakeSpec {
+                python: replay.python,
+                manifest: replay.manifest,
+                active_phrase: replay.active_phrase,
+            };
+            tokio::spawn(crate::live::run_input(wake, settings, tx, events))
+        }
+        None => tokio::spawn(replay_worker(replay, tx, threshold)),
+    }
+}
+
+async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>, threshold: f32) {
     let outcome = async {
         let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&replay.manifest)?)?;
         let fixture = manifest["fixtures"]
@@ -360,13 +387,14 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>)
         if !fixture_root.is_absolute() || !std::path::Path::new(asset_root).is_absolute() {
             return Err(io::Error::other("absolute assets required"));
         }
-        let mut args = vec![
-            replay.manifest.to_string_lossy().into_owned(),
-            replay.fixture.to_string(),
-        ];
-        if let Some(phrase) = replay.active_phrase {
-            args.extend(["--active-phrase".into(), phrase]);
-        }
+        let args = crate::wake::worker_args(
+            &replay.manifest.to_string_lossy(),
+            crate::wake::WorkerMode::Replay {
+                fixture: replay.fixture,
+            },
+            replay.active_phrase.as_deref(),
+            threshold,
+        );
         let mut command = namespace_command(
             &replay.python,
             "scripts/wake_worker.py",
@@ -455,6 +483,7 @@ pub async fn serve(
     hub_catalog: Option<(std::path::PathBuf, String)>,
     plugin_python: Option<std::path::PathBuf>,
     net_allow_loopback: bool,
+    live_audio: bool,
 ) -> io::Result<bool> {
     let mut base_pack =
         if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
@@ -502,6 +531,14 @@ pub async fn serve(
     core.configure_connections(&storage);
     core.configure_registry(&storage);
     core.configure_skills(&storage);
+    core.configure_live(live_audio);
+    // A5: live settings (input device, spotter threshold) and live status. Settings are published
+    // only between voice sessions, so a running utterance is never cut by a preference change.
+    let (live_settings_tx, live_settings_rx) =
+        watch::channel(crate::live::Settings::from_config(&storage.config));
+    let (live_events_tx, mut live_events_rx) = mpsc::unbounded_channel::<crate::live::LiveEvent>();
+    let mut live_wiring: Option<LiveWiring> =
+        live_audio.then(|| (live_settings_rx, live_events_tx.clone()));
     if let Some((path, digest)) = hub_catalog {
         core.configure_hub(
             crate::hub::load(&path, &digest)
@@ -631,14 +668,17 @@ pub async fn serve(
     } else {
         None
     };
+    let startup_threshold = crate::wake::keywords_threshold(storage.config.wake_sensitivity);
     let mut wake_task = if pending_replay.is_some() {
         None
     } else {
         replay.map(|r| {
-            tokio::spawn(replay_worker(
+            start_wake(
                 r,
                 wake_tx.take().expect("single audio producer"),
-            ))
+                &mut live_wiring,
+                startup_threshold,
+            )
         })
     };
     if wake_task.is_some() || pending_replay.is_some() {
@@ -690,6 +730,7 @@ pub async fn serve(
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
+            Some(event)=live_events_rx.recv() => {core.live_event(event);},
             Some(wire) = plugin_events.recv() => {
                 if let Some(event) = plugins.accept(wire) {
                     // Plugin logs and partial text are high-rate and never audited (no amplification).
@@ -720,7 +761,7 @@ pub async fn serve(
                         let ready=matches!(r,SttReply::Ready{..});
                         core.stt_reply(r,std::time::Instant::now());
                         if ready && core.response(String::new(),"ok").stt_status=="ready" {
-                            if let Some(replay)=pending_replay.take() { wake_task=Some(tokio::spawn(replay_worker(replay,wake_tx.take().expect("single audio producer")))); }
+                            if let Some(replay)=pending_replay.take() { let threshold=crate::wake::keywords_threshold(storage.config.wake_sensitivity); wake_task=Some(start_wake(replay,wake_tx.take().expect("single audio producer"),&mut live_wiring,threshold)); }
                         }
                     },
                     Some(Err(())) | None => {
@@ -809,10 +850,26 @@ pub async fn serve(
         }
         if let Some(job) = core.take_speech_job() {
             let config = tts.as_ref().expect("configured TTS").clone();
+            let playback = live_audio.then(|| crate::live::Playback {
+                device: storage.config.audio_output_device.clone(),
+                events: live_events_tx.clone(),
+            });
             speech_task = Some((
                 job.session_id,
-                tokio::spawn(crate::tts::speak(config, job, speech_progress.clone())),
+                tokio::spawn(crate::tts::speak(
+                    config,
+                    job,
+                    speech_progress.clone(),
+                    playback,
+                )),
             ));
+        }
+        // A5: a changed device or sensitivity reaches the live input only between voice sessions.
+        if live_audio && !core.voice_active() {
+            let desired = crate::live::Settings::from_config(&storage.config);
+            if *live_settings_tx.borrow() != desired {
+                live_settings_tx.send_replace(desired);
+            }
         }
         pump_plugins(
             &mut core,

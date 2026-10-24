@@ -57,6 +57,8 @@ pub enum Operation {
         plugin_id: String,
     },
     Snapshot,
+    /// A4: read-only enumeration of audio devices; the result is the snapshot block `audio.devices`.
+    AudioDevices,
     /// Replies `ok`, then the Core exits with `transport::RESTART_EXIT_CODE` after flushing. Refused
     /// with `busy` while a voice session, agent run, skill run or plugin invocation is active.
     CoreRestart,
@@ -425,6 +427,7 @@ pub struct Response {
     pub transcript: Option<crate::stt::Transcript>,
     pub capture: Option<crate::capture::CaptureSummary>,
     pub wake_status: &'static str,
+    pub audio: crate::live::AudioView,
     pub version: u16,
     pub request_id: String,
     pub code: &'static str,
@@ -547,6 +550,10 @@ enum WireRequest {
         revision: u64,
     },
     Snapshot {
+        version: u16,
+        request_id: String,
+    },
+    AudioDevices {
         version: u16,
         request_id: String,
     },
@@ -1045,6 +1052,10 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
             } => (version, request_id, Operation::Snapshot),
+            WireRequest::AudioDevices {
+                version,
+                request_id,
+            } => (version, request_id, Operation::AudioDevices),
             WireRequest::CoreRestart {
                 version,
                 request_id,

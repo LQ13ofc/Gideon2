@@ -91,6 +91,16 @@ class Tests(unittest.TestCase):
         for key,value in [('version',True),('revision',True),('revision',-1),('revision',2**64),('audible_feedback','yes'),('visual_feedback','yes'),('output_volume_percent',True),('output_volume_percent',101),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':30000,'output_volume_percent':-1}),('session_timeout_ms',0),('session_timeout_ms',60001),('wake_phrase','../private'),('previous_preferences',[]),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':0})]:
             cfg=copy.deepcopy(BASE);cfg['preferences']={**valid,key:value}
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
+    def test_audio_block_accepts_core_shapes_and_rejects_fakes(self):
+        # A4/A5 (src/live.rs, src/devices.rs): the mic indicator and device lists must match what the Core can report.
+        live={'enabled':True,'input_state':'capturing','output_state':'idle','mic_active':True}
+        devices={'inputs':[{'id':'usb-mic.1','label':'USB Microphone','default':True}],'outputs':[],'source':'pactl'}
+        validate_snapshot({**BASE,'audio':{'live':live}},'r',0)
+        validate_snapshot({**BASE,'audio':{'live':{'enabled':False,'input_state':'idle','output_state':'idle','mic_active':False},'devices':{'inputs':[],'outputs':[],'source':'none','reason':'no_audio_tool'}}},'r',0)
+        for bad in [{**live,'input_state':'idle'},{**live,'mic_active':False},{'enabled':False,'input_state':'capturing','output_state':'idle','mic_active':True},{**live,'last_error':'shell_exec'},{**live,'output_state':'listening'},{**live,'extra':1}]:
+            with self.subTest(live=bad),self.assertRaises(ValueError):validate_snapshot({**BASE,'audio':{'live':bad}},'r',0)
+        for bad in [{**devices,'source':'pulse'},{**devices,'inputs':[{'id':'bad$name','label':'x','default':False}]},{**devices,'inputs':[{'id':'ok','label':'x','default':'yes'}]},{'inputs':[],'outputs':[],'source':'none'},{'inputs':[],'outputs':[],'source':'pactl','reason':'no_audio_tool'},{**devices,'inputs':[{'id':f'd{i}','label':'x','default':False} for i in range(17)]}]:
+            with self.subTest(devices=bad),self.assertRaises(ValueError):validate_snapshot({**BASE,'audio':{'live':live,'devices':bad}},'r',0)
     def test_configuration_health_cannot_present_active_sessions(self):
         for status in ('safe_mode','restart_required'):
             valid={**BASE,'text_input_available':False,'configuration_status':status,'configuration_recovery_available':status=='safe_mode'}

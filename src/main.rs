@@ -6,7 +6,7 @@ async fn main() -> io::Result<()> {
     if args.next().as_deref() != Some("--root") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR] [--data-dir ABSOLUTE_DIR] [--plugin-python ABSOLUTE_PYTHON] [--net-allow-loopback (test only)]",
+            "usage: gideon-base --root ABSOLUTE_PRIVATE_ROOT [--virtual-input] [--home ABSOLUTE_DIR] [--data-dir ABSOLUTE_DIR] [--plugin-python ABSOLUTE_PYTHON] [--live-audio (opt-in; needs --wake-replay)] [--net-allow-loopback (test only)]",
         ));
     }
     let root = PathBuf::from(
@@ -14,6 +14,7 @@ async fn main() -> io::Result<()> {
             .ok_or_else(|| io::Error::other("root required"))?,
     );
     let mut virtual_input = false;
+    let mut live_audio = false;
     let mut replay = None;
     let mut commands_sandbox = false;
     let mut tts = None;
@@ -126,6 +127,9 @@ async fn main() -> io::Result<()> {
                 connections_allow_public = true
             }
             "--virtual-input" if !virtual_input => virtual_input = true,
+            // A5 opt-in, default OFF: live mic capture and speech playback through sandboxed
+            // pw-record/pw-play (or parecord/paplay). Needs `--wake-replay` for the wake worker.
+            "--live-audio" if !live_audio => live_audio = true,
             "--commands-sandbox" if !commands_sandbox => commands_sandbox = true,
             "--tts-virtual" if tts.is_none() => {
                 let python =
@@ -212,6 +216,10 @@ async fn main() -> io::Result<()> {
     if tts.is_some() && !commands_sandbox {
         return Err(io::Error::other("TTS requires command profile"));
     }
+    // The live input feeds the wake worker of the replay profile; without it there is no pipeline.
+    if live_audio && replay.is_none() {
+        return Err(io::Error::other("--live-audio requires --wake-replay"));
+    }
     let restart = transport::serve(
         Storage::open_for_runtime(&root)?,
         virtual_input,
@@ -222,6 +230,7 @@ async fn main() -> io::Result<()> {
         hub_catalog,
         plugin_python,
         net_allow_loopback,
+        live_audio,
     )
     .await?;
     // A `core_restart` accepted by the Core: ledgers are flushed; the launcher starts it again.

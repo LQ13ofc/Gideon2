@@ -1,23 +1,56 @@
-"""Offline CPU inference for A1. No devices/network and no client authority."""
+"""Offline CPU inference. No devices/network and no client authority.
+
+Two drivers share one engine:
+- replay: `wake_worker.py MANIFEST FIXTURE_INDEX` streams a fixture at real cadence (finite).
+- live: `wake_worker.py MANIFEST --live --start-us N` reads raw s16le mono 16 kHz PCM on stdin in
+  320-sample (20 ms) frames and writes one JSON packet per frame on stdout. Timestamps continue from
+  --start-us, so the Core's audio clock never restarts when the worker is restarted.
+
+`--keywords-threshold T` is the keyword-spotter threshold. The Core derives it from the preference
+`wake_sensitivity` (src/wake.rs `keywords_threshold`): sensitivity 0.5 -> 0.375 (stricter),
+1.0 -> 0.25 (the default, unchanged), 1.5 -> 0.125 (more sensitive). Accepted range: 0.1..0.5.
+Lower thresholds admit more detections; the engine reports no score, so this is the only lever.
+
+A manifest with `"test_only": true` and engine `test-energy-detector` selects a pure-Python energy
+onset detector for the Rust integration tests (no sherpa, no numpy). Production manifests never
+carry it. Heavy imports (sherpa_onnx, soundfile through pcm_fixture) happen only on the real path.
+"""
 from collections import deque
-import hashlib
+import argparse
 import json
+import math
 from pathlib import Path
 import sys
 import time
-import numpy as np
-import sherpa_onnx
+
+try:
+    import numpy as np
+except ImportError:  # only the test-only detector runs without numpy
+    np = None
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pcm_fixture import check_hash, read_fixture
 
 ENGINE = 'sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8/competitive-v2'
+TEST_ENGINE = 'test-energy-detector'
+FRAME_SAMPLES = 320  # 20 ms at 16 kHz; live frames are exactly this many s16 samples
+THRESHOLD_MIN = 0.1
+THRESHOLD_MAX = 0.5
 
 
+def check_threshold(value):
+    if not THRESHOLD_MIN <= value <= THRESHOLD_MAX: raise ValueError('invalid keyword threshold')
+    return value
+
+
+def read_fixture(row):
+    from pcm_fixture import read_fixture as _read_fixture
+    return _read_fixture(row)
 
 
 class WakeEngine:
-    def __init__(self, manifest, *, dev_threshold=0.25):
-        if not 0.25 <= dev_threshold <= 1: raise ValueError('invalid DEV threshold')
+    def __init__(self, manifest, *, dev_threshold=0.25, start_us=0):
+        check_threshold(dev_threshold)
+        import sherpa_onnx
+        from pcm_fixture import check_hash
         if manifest['engine'] != ENGINE or sherpa_onnx.__version__ != '1.13.8':
             raise ValueError('engine version mismatch')
         phrases = manifest['supported_phrases']
@@ -48,14 +81,18 @@ class WakeEngine:
             declared.append(tokens[-1][1:])
         if len(declared) != len(self.labels) or set(declared) != self.labels:
             raise ValueError('keyword catalog mismatch')
+        self.start_us = start_us
         self.kws = sherpa_onnx.KeywordSpotter(tokens=str(assets/'tokens.txt'), encoder=str(assets/manifest['encoder']), decoder=str(assets/manifest['decoder']), joiner=str(assets/manifest['joiner']), keywords_file=str(assets/'keywords.txt'), num_threads=1, provider='cpu', keywords_threshold=dev_threshold, keywords_score=1.0)
         self.reset()
 
     def reset(self):
         self.stream = self.kws.create_stream()
-        self.last_end = 0
-        self.stream_start_us = 0
+        self.last_end = self.start_us
+        self.stream_start_us = self.start_us
         self.recent = deque()
+
+    def frame_samples(self, raw):
+        return np.frombuffer(raw, dtype='<i2').astype(np.float32) / np.float32(32768)
 
     def decode(self):
         events = []
@@ -94,7 +131,67 @@ class WakeEngine:
         return events
 
 
+class EnergyOnsetEngine:
+    """Test-only onset detector: one detection per loud run (RMS >= 0.05). Never selected by production."""
 
+    def __init__(self, manifest, *, dev_threshold=0.25, start_us=0):
+        check_threshold(dev_threshold)
+        phrases = manifest['supported_phrases']
+        self.supported_phrases = tuple(phrases)
+        self.active_phrase = manifest['active_phrase']
+        if self.active_phrase not in phrases:
+            raise ValueError('unsupported active phrase')
+        self.start_us = start_us
+        self.reset()
+
+    def reset(self):
+        self.last_end = self.start_us
+        self.loud = False
+
+    def frame_samples(self, raw):
+        return [int.from_bytes(raw[i:i+2], 'little', signed=True) / 32768.0 for i in range(0, len(raw), 2)]
+
+    def accept(self, samples, timestamp_us):
+        count = len(samples)
+        if timestamp_us != self.last_end or not 0 < count <= 1280 or any(not math.isfinite(x) or abs(x) > 1 for x in samples):
+            raise ValueError('invalid audio frame')
+        end = timestamp_us + count*1_000_000//16000
+        loud = math.sqrt(sum(x*x for x in samples)/count) >= 0.05
+        events = []
+        if loud and not self.loud:
+            events.append({'phrase_id':self.active_phrase,'confidence':None,'start_us':timestamp_us,'end_us':end,'engine':TEST_ENGINE})
+        self.loud = loud
+        self.last_end = end
+        return events
+
+
+class VadEngine:
+    def __init__(self, manifest):
+        import sherpa_onnx
+        from pcm_fixture import check_hash
+        if manifest['engine']!='silero-vad-v5.0/sherpa-onnx-1.13.8':raise ValueError('unsupported VAD')
+        check_hash(Path(manifest['path']),manifest['sha256'])
+        config=sherpa_onnx.VadModelConfig()
+        config.silero_vad.model=manifest['path'];config.silero_vad.threshold=0.5
+        config.silero_vad.min_speech_duration=0.1;config.silero_vad.min_silence_duration=0.1
+        config.silero_vad.max_speech_duration=30.;config.silero_vad.window_size=512
+        config.sample_rate=16000;config.num_threads=1;config.provider='cpu'
+        self.vad=sherpa_onnx.VoiceActivityDetector(config,buffer_size_in_seconds=1.)
+    def accept(self, samples):
+        self.vad.accept_waveform(samples)
+        result=self.vad.is_speech_detected()
+        while not self.vad.empty():self.vad.pop()
+        return bool(result)
+
+
+def make_engine(manifest, threshold, start_us=0):
+    if manifest.get('test_only') is True and manifest.get('engine') == TEST_ENGINE:
+        return EnergyOnsetEngine(manifest, dev_threshold=threshold, start_us=start_us)
+    return WakeEngine(manifest, dev_threshold=threshold, start_us=start_us)
+
+
+def plain(samples):
+    return samples.tolist() if hasattr(samples, 'tolist') else list(samples)
 
 
 def replay(manifest, row, emit=None):
@@ -112,26 +209,7 @@ def replay(manifest, row, emit=None):
     return {'detections': detections, 'wall_s': time.monotonic()-started, 'audio_s': len(samples)/16000}
 
 
-class VadEngine:
-    def __init__(self, manifest):
-        if manifest['engine']!='silero-vad-v5.0/sherpa-onnx-1.13.8':raise ValueError('unsupported VAD')
-        check_hash(Path(manifest['path']),manifest['sha256'])
-        config=sherpa_onnx.VadModelConfig()
-        config.silero_vad.model=manifest['path'];config.silero_vad.threshold=0.5
-        config.silero_vad.min_speech_duration=0.1;config.silero_vad.min_silence_duration=0.1
-        config.silero_vad.max_speech_duration=30.;config.silero_vad.window_size=512
-        config.sample_rate=16000;config.num_threads=1;config.provider='cpu'
-        self.vad=sherpa_onnx.VoiceActivityDetector(config,buffer_size_in_seconds=1.)
-    def accept(self, samples):
-        self.vad.accept_waveform(samples)
-        result=self.vad.is_speech_detected()
-        while not self.vad.empty():self.vad.pop()
-        return bool(result)
-
-
-def stream_fixture(manifest, row):
-    engine = WakeEngine(manifest)
-    vad = VadEngine(manifest["vad"]) if "vad" in manifest else None
+def stream_fixture(engine, vad, manifest, row):
     samples = np.concatenate([read_fixture(row), np.zeros(16000, dtype=np.float32)])
     for offset in range(0, len(samples), 1280):
         chunk = samples[offset:offset+1280]
@@ -142,9 +220,52 @@ def stream_fixture(manifest, row):
         time.sleep(len(chunk)/16000)
 
 
+def read_exact(stream, count):
+    data = bytearray()
+    while len(data) < count:
+        chunk = stream.read(count - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return bytes(data)
+
+
+def live(engine, vad, stdin, stdout):
+    """Frame loop for the Core's live path: one packet per 20 ms frame, bounded by the stdin pipe."""
+    while True:
+        raw = read_exact(stdin, FRAME_SAMPLES * 2)
+        if raw is None:
+            return
+        timestamp = engine.last_end
+        samples = engine.frame_samples(raw)
+        events = engine.accept(samples, timestamp)
+        speech = vad.accept(samples) if vad else None
+        stdout.write(json.dumps({'timestamp_us': timestamp, 'samples': plain(samples), 'detections': events, 'speech': speech}) + '\n')
+        stdout.flush()
+
+
+def parse(argv):
+    parser = argparse.ArgumentParser(description='wake worker (replay fixture or live PCM)')
+    parser.add_argument('manifest')
+    parser.add_argument('fixture', nargs='?', type=int)
+    parser.add_argument('--live', action='store_true')
+    parser.add_argument('--start-us', type=int, default=0)
+    parser.add_argument('--active-phrase')
+    parser.add_argument('--keywords-threshold', type=float, default=0.25)
+    args = parser.parse_args(argv)
+    if args.live == (args.fixture is not None): raise ValueError('invalid arguments')
+    if args.start_us < 0: raise ValueError('invalid start')
+    check_threshold(args.keywords_threshold)
+    return args
+
+
 if __name__ == '__main__':
-    manifest = json.loads(Path(sys.argv[1]).read_text())
-    if len(sys.argv) == 5 and sys.argv[3] == '--active-phrase': manifest['active_phrase'] = sys.argv[4]
-    elif len(sys.argv) != 3: raise ValueError('invalid arguments')
-    row = manifest['fixtures'][int(sys.argv[2])]
-    stream_fixture(manifest, row)
+    arguments = parse(sys.argv[1:])
+    manifest = json.loads(Path(arguments.manifest).read_text())
+    if arguments.active_phrase: manifest['active_phrase'] = arguments.active_phrase
+    engine = make_engine(manifest, arguments.keywords_threshold, arguments.start_us)
+    vad = VadEngine(manifest['vad']) if 'vad' in manifest else None
+    if arguments.live:
+        live(engine, vad, sys.stdin.buffer, sys.stdout)
+    else:
+        stream_fixture(engine, vad, manifest, manifest['fixtures'][arguments.fixture])

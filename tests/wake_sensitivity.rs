@@ -148,3 +148,47 @@ fn live_sensitivity_change_applies_to_the_following_packets() {
     assert!(input.set_sensitivity(1.51).is_err());
     assert_eq!(input.sensitivity(), 1.5);
 }
+
+#[test]
+fn sensitivity_maps_to_the_worker_threshold_within_safe_bounds() {
+    use gideon_base::wake::keywords_threshold;
+    // The default (1.0) keeps the engine's 0.25; higher sensitivity lowers the threshold.
+    assert_eq!(keywords_threshold(1.0), 0.25);
+    assert_eq!(keywords_threshold(0.5), 0.375);
+    assert_eq!(keywords_threshold(1.5), 0.125);
+    assert!(keywords_threshold(0.5) > keywords_threshold(1.0));
+    assert!(keywords_threshold(1.0) > keywords_threshold(1.5));
+    // Every valid preference stays inside the worker's accepted range 0.1..=0.5.
+    for step in 0..=100 {
+        let s = 0.5 + step as f32 * 0.01;
+        let t = keywords_threshold(s);
+        assert!((0.1..=0.5).contains(&t), "{s} -> {t}");
+    }
+}
+
+#[test]
+fn worker_arguments_carry_mode_phrase_and_threshold() {
+    use gideon_base::wake::{worker_args, WorkerMode};
+    assert_eq!(
+        worker_args("/m.json", WorkerMode::Replay { fixture: 0 }, None, 0.25),
+        ["/m.json", "0", "--keywords-threshold", "0.2500"]
+    );
+    assert_eq!(
+        worker_args(
+            "/m.json",
+            WorkerMode::Live { start_us: 40_000 },
+            Some("okay_gideon"),
+            0.375
+        ),
+        [
+            "/m.json",
+            "--live",
+            "--start-us",
+            "40000",
+            "--active-phrase",
+            "okay_gideon",
+            "--keywords-threshold",
+            "0.3750",
+        ]
+    );
+}

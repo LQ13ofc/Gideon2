@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test-only fake pw-dump (A4): prints the fixture graph.
+dir=${0%/*}
+exec cat "$dir/data/pwdump.json"

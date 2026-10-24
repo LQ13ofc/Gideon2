@@ -1,0 +1,6 @@
+[
+  {"index": 1, "name": "alsa_input.pci-0000_00_1f.3.analog-stereo", "description": "Mic (Built-in) ação", "monitor_of_sink": null},
+  {"index": 2, "name": "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor", "description": "Monitor of Speakers", "monitor_of_sink": "alsa_output.pci-0000_00_1f.3.analog-stereo"},
+  {"index": 3, "name": "bad$name", "description": "Never offered", "monitor_of_sink": null},
+  {"index": 4, "name": "usb-mic.1", "description": "USB Microphone", "monitor_of_sink": null}
+]

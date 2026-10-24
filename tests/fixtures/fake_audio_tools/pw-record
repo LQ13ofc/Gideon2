@@ -1,0 +1,30 @@
+#!/usr/bin/python3
+"""Test-only fake of pw-record for A5. Writes 20 ms s16le mono 16 kHz frames to stdout in real time.
+
+--target NAME selects the behaviour (absent means default): NAME starting with `fake-crash` exits at
+once with status 1; any other name writes 1 s of silence, then 1 s of a 440 Hz tone, repeatedly.
+It writes no files: the real sandbox has no writable host path. Nothing here models a microphone.
+"""
+import math
+import struct
+import sys
+import time
+
+args = sys.argv[1:]
+target = args[args.index('--target') + 1] if '--target' in args else 'default'
+if target.startswith('fake-crash'):
+    sys.exit(1)
+out = sys.stdout.buffer
+frame = 0
+try:
+    while True:
+        if (frame // 50) % 2 == 0:
+            samples = [0] * 320
+        else:
+            samples = [int(0.3 * 32767 * math.sin(2 * math.pi * 440 * (frame * 320 + i) / 16000)) for i in range(320)]
+        out.write(struct.pack('<320h', *samples))
+        out.flush()
+        frame += 1
+        time.sleep(0.02)
+except BrokenPipeError:
+    pass

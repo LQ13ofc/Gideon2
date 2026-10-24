@@ -61,6 +61,50 @@ pub fn accepts(confidence: Option<f32>, sensitivity: f32) -> bool {
     confidence.is_none_or(|c| c >= accept_threshold(sensitivity))
 }
 
+/// Keyword-spotter threshold at sensitivity 1.0 (the engine default, unchanged).
+pub const BASE_KEYWORDS_THRESHOLD: f32 = 0.25;
+/// Safe bounds of the spotter threshold handed to the worker (`wake_worker.py` refuses others).
+pub const KEYWORDS_THRESHOLD_MIN: f32 = 0.1;
+pub const KEYWORDS_THRESHOLD_MAX: f32 = 0.5;
+/// Maps the preference to the spotter threshold: `BASE * (2 - sensitivity)`, clamped to the safe
+/// bounds. Sensitivity 0.5 gives 0.375 (stricter), 1.0 gives 0.25 (unchanged), 1.5 gives 0.125
+/// (more sensitive). Higher sensitivity lowers the threshold, as `accept_threshold` does for scores.
+pub fn keywords_threshold(sensitivity: f32) -> f32 {
+    (BASE_KEYWORDS_THRESHOLD * (2.0 - sensitivity))
+        .clamp(KEYWORDS_THRESHOLD_MIN, KEYWORDS_THRESHOLD_MAX)
+}
+
+/// How a `wake_worker.py` process is driven: a fixture replay (finite) or a live PCM stream on stdin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkerMode {
+    Replay { fixture: usize },
+    Live { start_us: u64 },
+}
+
+/// Argument vector of `scripts/wake_worker.py`. Threshold is always explicit (4 decimals).
+pub fn worker_args(
+    manifest: &str,
+    mode: WorkerMode,
+    active_phrase: Option<&str>,
+    threshold: f32,
+) -> Vec<String> {
+    let mut args = vec![manifest.to_string()];
+    match mode {
+        WorkerMode::Replay { fixture } => args.push(fixture.to_string()),
+        WorkerMode::Live { start_us } => {
+            args.push("--live".into());
+            args.push("--start-us".into());
+            args.push(start_us.to_string());
+        }
+    }
+    if let Some(phrase) = active_phrase {
+        args.extend(["--active-phrase".into(), phrase.to_string()]);
+    }
+    args.push("--keywords-threshold".into());
+    args.push(format!("{threshold:.4}"));
+    args
+}
+
 pub struct WakeInput {
     descriptor: WakeDescriptor,
     last_end: u64,

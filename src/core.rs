@@ -71,6 +71,10 @@ pub struct Core {
     pub(crate) registry: crate::registry::Registry,
     /// Set by an accepted `core_restart`; `transport::serve` stops and the process exits 75.
     restart_requested: bool,
+    /// A4: last `audio_devices` result (absent until the op runs).
+    audio_devices: Option<crate::devices::Devices>,
+    /// A5: `--live-audio` state (off unless the flag is set).
+    live: crate::live::LiveState,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -116,7 +120,17 @@ impl Core {
             connections: Default::default(),
             registry: Default::default(),
             restart_requested: false,
+            audio_devices: None,
+            live: Default::default(),
         }
+    }
+    /// A5: called once by `transport::serve` from the `--live-audio` flag.
+    pub(crate) fn configure_live(&mut self, enabled: bool) {
+        self.live.set_enabled(enabled);
+    }
+    /// A5: status from the live input or output supervisors.
+    pub(crate) fn live_event(&mut self, event: crate::live::LiveEvent) {
+        self.live.apply(event);
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
         self.next_session = seed;
@@ -847,6 +861,10 @@ impl Core {
             transcript: self.transcript.clone(),
             capture: self.capture_summary.clone(),
             wake_status: self.wake_status,
+            audio: crate::live::AudioView {
+                devices: self.audio_devices.clone(),
+                live: self.live.view(),
+            },
             request_id,
             code,
             state: self
@@ -1990,6 +2008,11 @@ impl Core {
                 revision,
             ),
             Operation::Snapshot => unreachable!(),
+            // A4: bounded, read-only enumeration; the result is served by the next snapshot.
+            Operation::AudioDevices => {
+                self.audio_devices = Some(crate::devices::enumerate());
+                "ok"
+            }
         };
         self.sweep_tools();
         self.response(req.request_id, code)
