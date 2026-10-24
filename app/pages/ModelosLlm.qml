@@ -226,13 +226,16 @@ PageFrame {
             Flow {
                 Layout.fillWidth: true
                 spacing: Theme.space(8)
-                GButton { objectName: "testModelButton"; variant: "secondary"; text: "Testar"; enabled: false; Accessible.name: "Testar modelo atual" }
-                GButton { objectName: "rollbackModelButton"; variant: "secondary"; text: "Voltar ao último bom"; enabled: false; Accessible.name: "Voltar ao último bom" }
+                GButton { objectName: "testModelButton"; variant: "secondary"; text: "Testar"; enabled: core.llmTestAvailable; Accessible.name: "Testar modelo atual"; onClicked: core.llmSelftest() }
+                GButton { objectName: "rollbackModelButton"; variant: "secondary"; text: "Voltar ao último bom"; enabled: core.llmRollbackAvailable; Accessible.name: "Voltar ao último bom"; onClicked: core.llmRollback() }
                 GButton { objectName: "otherModelButton"; variant: "secondary"; text: "Usar outro modelo"; enabled: core.modelsAvailable; Accessible.name: "Usar outro modelo"; onClicked: page.part = "catalogo" }
             }
             Text {
                 objectName: "testModelReason"
-                text: page.hasCurrent ? "Teste isolado e volta ao último bom ainda não estão disponíveis neste build." : "Configure um modelo antes de testar."
+                text: !page.hasCurrent ? "Configure um modelo antes de testar."
+                    : !core.modelsAvailable ? "Teste indisponível: o plugin llm_engine não está ativo."
+                    : core.modelsBusy ? "Aguarde a operação de modelo em andamento."
+                    : "O resultado do teste aparece acima. Voltar ao último bom usa a configuração marcada como boa."
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily

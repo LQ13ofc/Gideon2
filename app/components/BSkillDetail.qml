@@ -123,6 +123,18 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+            // The manifest's permissions_required, as labels (the Core's list; never a grant).
+            Text {
+                objectName: "skillRequired"
+                visible: panel.has
+                text: panel.has ? "Necessárias: " + ((panel.skill.permissionsRequired || []).length ? panel.skill.permissionsRequired.map(function (p) { return core.permissionLabel(p) }).join(", ") : "nenhuma") : ""
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
             Text {
                 text: "Aprovar permissões não concede nada à skill: ela só usa capacidades já instaladas e aprovadas."
                 textFormat: Text.PlainText

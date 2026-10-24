@@ -49,15 +49,41 @@ PageFrame {
             Badge { text: page.restartBadge; tone: page.restartTone }
             FNote { tone: "text"; text: "Reinício exigido ao trocar a frase de despertar, mudar o feedback ou alterar plugins." }
             FNote { visible: page.restartNeeded; tone: "warn"; text: "A configuração salva só vale depois do reinício." }
-            // Não existe operação de reinício na ponte nem no Core (N2): fica desabilitado com o motivo.
+            // Reinício pelo app: o Core responde e sai com código 75; gideon-launch o inicia de novo. Confirmação antes; sessões ativas bloqueiam.
             GButton {
                 objectName: "restartCoreButton"
                 variant: "secondary"
                 text: "Reiniciar Core"
-                enabled: false
-                Accessible.description: "Indisponível: o Core ainda não oferece reinício pelo app"
+                enabled: core.coreRestartAvailable
+                Accessible.name: "Reiniciar o Core"
+                onClicked: restartConfirm.open()
             }
-            FNote { small: true; text: "Indisponível: o Core ainda não oferece reinício pelo app" }
+            FNote {
+                small: true
+                visible: !core.coreRestartAvailable && !core.coreRestartBusy
+                text: !core.connected ? "Indisponível: Core desconectado."
+                    : core.sessionId.length > 0 ? "Indisponível: sessão de voz em andamento."
+                    : "Indisponível agora."
+            }
+            GProgressBar {
+                objectName: "restartProgress"
+                visible: core.coreRestartBusy
+                indeterminate: true
+                Layout.fillWidth: true
+                Accessible.name: "Reinício do Core em andamento"
+            }
+            Text {
+                objectName: "restartResult"
+                visible: text.length > 0
+                text: core.coreRestartResult
+                textFormat: Text.PlainText
+                color: core.coreRestartBusy ? Theme.text : Theme.warning
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: "Reinício do Core: " + text
+            }
 
             Text {
                 text: "Configuração"
@@ -121,15 +147,21 @@ PageFrame {
                 font.pixelSize: Theme.fontBody
                 font.weight: 600
             }
-            // A ponte ainda não informa a configuração boa salva (N5): o texto diz isso e o botão fica desabilitado.
-            FNote { tone: "text"; text: "A última configuração boa ainda não é informada pelo app." }
+            // The last good config is saved by the Core when a model passes its test; without one the button stays disabled, with the reason.
+            FNote { tone: "text"; text: "Guardada quando um modelo passa no teste em Modelos LLM. Voltar troca a configuração do motor." }
             GButton {
                 objectName: "rollbackLlmButton"
                 variant: "secondary"
                 text: "Voltar à última configuração boa"
-                enabled: false
+                enabled: core.llmRollbackAvailable
+                Accessible.name: "Voltar à última configuração boa do motor LLM"
+                onClicked: core.llmRollback()
             }
-            FNote { small: true; text: "Indisponível: o app ainda não oferece voltar à última configuração boa." }
+            FNote {
+                small: true
+                visible: !core.llmRollbackAvailable
+                text: (core.llmConfig.lkg ? "Indisponível agora: o motor LLM está ocupado ou o Core não responde." : "Indisponível: nenhuma configuração boa foi salva ainda.")
+            }
             Text {
                 text: "Catálogo de plugins"
                 textFormat: Text.PlainText
@@ -179,6 +211,43 @@ PageFrame {
         }
     }
 
+    // Reinício do Core: Cancelar é o foco inicial; confirmar envia core_restart (a ponte cuida da reconexão e do prazo de 30 s).
+    Modal {
+        id: restartConfirm
+        objectName: "restartConfirm"
+        title: "Reiniciar o Core agora?"
+        standardButtons: Dialog.NoButton
+        onOpened: restartCancel.forceActiveFocus()
+        onAccepted: core.coreRestart()
+        Text {
+            text: "O Core será reiniciado. Sessões ativas bloqueiam o reinício."
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(10)
+            Item { Layout.fillWidth: true }
+            GButton {
+                id: restartCancel
+                objectName: "cancelRestartButton"
+                variant: "secondary"
+                text: "Cancelar"
+                onClicked: restartConfirm.reject()
+            }
+            GButton {
+                objectName: "confirmRestartButton"
+                variant: "primary"
+                text: "Reiniciar Core"
+                Accessible.name: "Reiniciar o Core"
+                onClicked: restartConfirm.accept()
+            }
+        }
+    }
     Modal {
         id: recoverConfirm
         objectName: "recoverConfirm"

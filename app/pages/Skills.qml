@@ -67,6 +67,11 @@ PageFrame {
         return (list || []).length ? list.map(function (p) { return page.permissionText(p) }).join(", ") : "nenhuma"
     }
     function askRemove(skill) { removeSkillConfirm.skill = skill; removeSkillConfirm.open() }
+    // Write-only clipboard for the folder paths the Core reports (skills.paths). Nothing is read or executed.
+    function copyFolder(path, label) {
+        if (path && core.copyText(path)) AppState.toast("Pasta copiada.")
+        else AppState.toast("Não foi possível copiar a pasta " + label + ".")
+    }
 
     PageHeader {
         title: "Skills"
@@ -322,10 +327,22 @@ PageFrame {
                     text: "Coloque o arquivo .gskill na pasta de importação e informe o nome, sem caminho e sem extensão."
                     textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
                 }
-                Text {
-                    objectName: "skillImportFolder"
-                    text: "Pasta: pasta de importação não informada"
-                    textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space(10)
+                    Text {
+                        objectName: "skillImportFolder"
+                        text: "Pasta: " + (core.skillPaths.imports || "pasta de importação não informada")
+                        textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+                    }
+                    GButton {
+                        objectName: "skillCopyImportFolder"
+                        variant: "secondary"
+                        text: "Copiar"
+                        enabled: !!core.skillPaths.imports
+                        Accessible.name: "Copiar a pasta de importação"
+                        onClicked: page.copyFolder(core.skillPaths.imports, "de importação")
+                    }
                 }
                 FieldLabel { text: "Nome do pacote, sem caminho" }
                 RowLayout {
@@ -360,6 +377,23 @@ PageFrame {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignTop
                 title: "Exportar skill"
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space(10)
+                    Text {
+                        objectName: "skillExportFolder"
+                        text: "Pasta: " + (core.skillPaths.exports || "pasta de exportação não informada")
+                        textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+                    }
+                    GButton {
+                        objectName: "skillCopyExportFolder"
+                        variant: "secondary"
+                        text: "Copiar"
+                        enabled: !!core.skillPaths.exports
+                        Accessible.name: "Copiar a pasta de exportação"
+                        onClicked: page.copyFolder(core.skillPaths.exports, "de exportação")
+                    }
+                }
                 Text {
                     visible: page.exportables.length === 0
                     text: "Nenhuma skill exportável. Aprove uma skill em Minhas."
@@ -513,6 +547,13 @@ PageFrame {
                             Accessible.name: "Autorizar o passo " + modelData.id
                             onClicked: core.skillDecide(core.skillCurrentRun.run_id, modelData.id, "authorize")
                         }
+                    }
+                    // The decision's call: its effect and risk (same vocabulary as tool proposals; absent fields say so).
+                    Text {
+                        objectName: "skillDecision_" + modelData.id
+                        visible: modelData.state === "awaiting_approval"
+                        text: "Efeito: " + (core.effectText({id: modelData.effect_id || ""}) || "não informado pelo plugin") + " · Risco: " + (core.riskText(modelData.risk || "") || "não declarado")
+                        textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
                     Text {
                         visible: modelData.state === "awaiting_approval"

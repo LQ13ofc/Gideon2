@@ -142,6 +142,7 @@ function grantRows(ctx) {
                    item: e.plugin_id + " " + e.semver, groupKey: "plugin:" + e.plugin_id, groupLabel: e.plugin_id + " " + e.semver,
                    sub: "", perm: permText(e.permissions, ctx.labelOf), permIds: e.permissions, permTone: "",
                    permNote: "", access: "", risk: false, state: st, pending: pluginPending(e),
+                   granted: approved ? L.grantedDate(e.approved_at_ms) : "",
                    rank: st.tone === "warning" ? 0 : approved ? 2 : 1, action: action, ref: e})
     }
     var skills = ctx.skills
@@ -172,7 +173,8 @@ function grantRows(ctx) {
                        item: line, groupKey: "conn:" + item.id, groupLabel: groupLabel, sub: "", perm: sc.label,
                        permIds: [sc.id], permTone: "", permNote: "", access: accessText(sc.access), risk: HIGH_RISK[sc.access] === true,
                        state: {text: "Concedido", tone: "success"}, pending: false, rank: 2,
-                       action: {kind: "revokeAccount", text: "Revogar conta", danger: true, enabled: canRevoke,
+                       granted: L.grantedDate(item.grantedAtMs),
+                       action: {kind: "revokeScope", text: "Revogar escopo", danger: true, enabled: canRevoke,
                                 tip: !f.online ? "Core desconectado." : canRevoke ? "" : "Conta sem acesso concedido para revogar."},
                        ref: item, scope: sc.id})
         }

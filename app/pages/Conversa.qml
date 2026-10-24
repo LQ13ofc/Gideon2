@@ -57,6 +57,25 @@ PageFrame {
         actionText: "Abrir Modelos LLM"
         onActionRequested: Window.window.openLlm()
     }
+    // The last answer came from the fallback model (Core flag and time only, no content). The notice lasts 60 s: a clock re-checks it.
+    property double nowMs: Date.now()
+    readonly property bool fallbackRecent: core.llmLastChat.used_fallback === true && (nowMs - Number(core.llmLastChat.at_ms || 0)) < 60000
+    Timer {
+        interval: 5000
+        repeat: true
+        running: page.visible && core.llmLastChat.used_fallback === true
+        onTriggered: page.nowMs = Date.now()
+    }
+    Connections {
+        target: core
+        function onLlmChanged() { page.nowMs = Date.now() }
+    }
+    Banner {
+        objectName: "chatFallbackNotice"
+        kind: "info"
+        visible: core.chatAvailable && page.fallbackRecent
+        text: "Esta resposta veio do modelo reserva (fallback)."
+    }
 
     ColumnLayout {
         objectName: "chatPanel"

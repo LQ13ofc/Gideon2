@@ -11,6 +11,7 @@ from bridge import CAPABILITY_ERRORS,PERCEPTION_CAPABILITIES,PERCEPTION_DEADLINE
 from bridge import PENDING_SKILL_DRAFT,SKILL_CODES,SKILL_DRAFT_CAPABILITY,SKILL_DRAFT_DEADLINE_MS,SKILL_HISTORY_LIMIT,SKILL_ITEMS_LIMIT,SKILL_JSON_LIMIT,SKILL_OP_CODES,SKILL_OP_MESSAGES,SKILL_REASON_MESSAGES,SKILL_REASONS,SKILL_SOURCES,SKILL_STATES,SKILL_STEPS_LIMIT,code_message,skill_code_ok,skill_json,valid_skill_draft,valid_skills
 from bridge import CONN_ACCESS,CONN_ARGS_LIMIT,CONN_CODES,CONN_MESSAGES,CONN_STATUSES,conn_label_problem
 from bridge import REG_MESSAGES,REG_PURPOSES,REG_STATUSES,REG_VISUAL_WARNING,valid_agent_step
+from bridge import RESTART_BACK_TEXT,RESTART_TIMEOUT_MS,RESTART_TIMEOUT_TEXT,RESTART_WAIT_TEXT
 from bridge import display_effect,display_risk,grant_rows,pending_count
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
@@ -1537,7 +1538,8 @@ class AgentBridge(unittest.TestCase):
         bridge=Bridge('/nonexistent-gideon-root');bridge.online=True
         bridge._apply(validate_snapshot(agent_snap(agent_run('done',steps=[agent_chat_step(1,1),agent_tool_step(1,2,state='done',risk='read')],answer='ok')),'r',0))
         self.assertEqual([s['kind'] for s in bridge.agentSteps],['chat','tool'])
-        self.assertEqual(bridge.agentBudget,{'tokens_used':10,'tokens_max':4096})
+        # Budget line (C3 clocks): steps, clocks and tokens; the clocks fall back to started_ms_ago on an older Core.
+        self.assertEqual(bridge.agentBudget,{'steps':1,'max_steps':6,'elapsed_ms':40,'max_run_ms':None,'tokens_used':10,'tokens_max':4096})
         self.assertEqual((bridge.agentAnswer,bridge.agentStateLabel),('ok','Concluído'))
         self.assertNotIn('goal',repr(bridge.agentSteps))
 # C4 perception and action (docs/C4.md). The output samples are the real C4 plugin shapes that test_snapshot_contract.py captures from the real Core.
@@ -2512,6 +2514,109 @@ class DisplayMapping(unittest.TestCase):
         self.assertEqual(display_provider('custom'),'personalizado')
         self.assertEqual(display_provider('novo_provedor'),'novo_provedor')
         self.assertEqual(display_provider(None),'')
+def wire(request):
+    """The request without its id: the exact fields the Core must receive."""
+    return {k:v for k,v in request.items() if k!='request_id'}
+class CoreWire(unittest.TestCase):
+    """Wire of the Core features the UI now drives: core_restart, connection_revoke_scope, plugin_settings_clear, llm rollback/mark-good/selftest, and the new optional snapshot fields."""
+    def test_core_restart_sends_one_bare_frame_and_waits_for_the_new_core(self):
+        snap=conns_snap();bridge,peer=connect_bridge(self,snap)
+        self.assertTrue(bridge.coreRestartAvailable)
+        request=skill_round(bridge,peer,lambda:bridge.coreRestart(),snap)
+        self.assertEqual(wire(request),{'version':1,'op':'core_restart'})
+        self.assertEqual((bridge.coreRestartResult,bridge.coreRestartBusy,bridge.coreRestartAvailable),(RESTART_WAIT_TEXT,True,False))
+        bridge.coreRestart();quiet(self,peer)
+        bridge._offline();bridge.retry.stop()
+        self.assertEqual((bridge.coreRestartResult,bridge.coreRestartBusy),(RESTART_WAIT_TEXT,True))
+        bridge._restart_done()
+        # Still offline in this test (the socket was dropped above), so the button stays unavailable until the snapshot returns.
+        self.assertEqual((bridge.coreRestartResult,bridge.coreRestartBusy,bridge.coreRestartAvailable),(RESTART_BACK_TEXT,False,False))
+    def test_core_restart_timeout_names_gideon_launch(self):
+        self.assertEqual(RESTART_TIMEOUT_MS,30000)
+        snap=conns_snap();bridge,peer=connect_bridge(self,snap)
+        self.assertEqual(bridge.restart_timer.interval(),RESTART_TIMEOUT_MS)
+        skill_round(bridge,peer,lambda:bridge.coreRestart(),snap)
+        bridge._restart_timeout()
+        self.assertEqual(bridge.coreRestartResult,RESTART_TIMEOUT_TEXT);self.assertFalse(bridge.coreRestartBusy)
+        self.assertEqual(RESTART_TIMEOUT_TEXT,'O Core não voltou em 30 s; use gideon-launch')
+        # A timed-out restart can be asked again: only a restart in progress blocks the button.
+        self.assertTrue(bridge.coreRestartAvailable)
+        bridge.coreRestart();request=next_request(peer)
+        self.assertEqual(wire(request),{'version':1,'op':'core_restart'})
+    def test_core_restart_refusals_show_the_core_message_and_offline_never_sends(self):
+        snap=conns_snap();bridge,peer=connect_bridge(self,snap)
+        bridge.coreRestart();request=next_request(peer)
+        answer(peer,request,snap,code='busy');settle(bridge)
+        self.assertEqual((bridge.coreRestartResult,bridge.coreRestartBusy,bridge.coreRestartAvailable),(CODE_MESSAGES['busy'],False,True))
+        offline=Bridge('/nonexistent-gideon-root');offline.coreRestart()
+        self.assertEqual(offline.coreRestartResult,'Core desconectado: nada a reiniciar');self.assertFalse(offline.coreRestartAvailable)
+    def test_revoke_scope_sends_the_live_revision_and_refuses_what_is_not_granted(self):
+        snap=conns_snap();bridge,peer=connect_bridge(self,snap)
+        request=skill_round(bridge,peer,lambda:bridge.connectionRevokeScope('gh_1','repo:read'),snap)
+        self.assertEqual(wire(request),{'version':1,'op':'connection_revoke_scope','id':'gh_1','scope':'repo:read','revision':4})
+        self.assertEqual(bridge.connectionsResult,OPS['connection_revoke_scope'][1])
+        for ident,scope,message in [('gh_1','issues:write',CONN_MESSAGES['scope_not_granted']),('gh_1','ghost:scope',CONN_MESSAGES['scope_not_granted']),
+                                    ('ghost','repo:read',CONN_MESSAGES['unknown_connection']),('../x','repo:read','Id de conta inválido')]:
+            with self.subTest(ident=ident,scope=scope):
+                bridge.connectionRevokeScope(ident,scope);quiet(self,peer);self.assertEqual(bridge.connectionsResult,message)
+    def test_clear_plugin_settings_of_sends_the_plugin_id_only(self):
+        snap=ready(plugin_snapshot('running',True));bridge,peer=connect_bridge(self,snap)
+        request=skill_round(bridge,peer,lambda:bridge.clearPluginSettingsOf('dummy_echo'),snap)
+        self.assertEqual(wire(request),{'version':1,'op':'plugin_settings_clear','plugin_id':'dummy_echo'})
+        self.assertEqual(bridge.pluginResult,OPS['plugin_settings_clear'][1])
+        for ident in ('../etc','','x'*65):
+            with self.subTest(ident=ident):
+                bridge.clearPluginSettingsOf(ident);quiet(self,peer);self.assertEqual(bridge.pluginResult,'Id de plugin inválido')
+    def test_llm_rollback_mark_good_and_selftest_use_the_live_revision_and_payloads(self):
+        lkg={'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'local_port':None,'cloud_consent':True}
+        snap=models_snapshot(revision=7,config={**LLM_CONFIG,'lkg':lkg});bridge,peer=connect_bridge(self,snap)
+        self.assertTrue(bridge.llmRollbackAvailable);self.assertTrue(bridge.llmTestAvailable)
+        bridge.llmRollback();request=next_request(peer)
+        self.assertEqual(wire(request),{'version':1,'op':'llm_rollback','revision':7})
+        ack(bridge,peer,request,snap);self.assertEqual(bridge.modelsResult,'Configuração anterior restaurada')
+        bridge.llmMarkGood();request=next_request(peer)
+        self.assertEqual(wire(request),{'version':1,'op':'llm_mark_good','revision':7})
+        ack(bridge,peer,request,snap);self.assertEqual(bridge.modelsResult,'Configuração marcada como boa')
+        bridge.llmSelftest();probe=next_request(peer)
+        self.assertEqual((probe['op'],probe['capability'],probe['input'],probe['deadline_ms']),('capability_invoke','llm_engine.models',{'action':'selftest'},30000))
+        ack(bridge,peer,probe,snap)
+        bridge.refresh();serve(bridge,peer,with_result(models_snapshot(revision=7,config={**LLM_CONFIG,'lkg':lkg}),models_result(SELFTEST_OK)))
+        self.assertEqual(bridge.modelsResult,'Teste ok: resposta em 120 ms');self.assertFalse(bridge.modelsBusy);quiet(self,peer)
+    def test_rollback_without_a_last_good_config_is_refused_before_the_core(self):
+        bridge,peer=connect_bridge(self,models_snapshot(revision=7,config=LLM_CONFIG))
+        self.assertFalse(bridge.llmRollbackAvailable)
+        bridge.llmRollback();quiet(self,peer);self.assertEqual(bridge.modelsResult,CODE_MESSAGES['no_lkg'])
+    def test_last_chat_is_exposed_and_validated_as_a_flag_and_a_time_only(self):
+        snap=models_snapshot(revision=2,config=LLM_CONFIG);snap['llm']['last_chat']={'used_fallback':True,'at_ms':1700000000000}
+        bridge,peer=connect_bridge(self,snap)
+        self.assertEqual(bridge.llmLastChat,{'used_fallback':True,'at_ms':1700000000000})
+        for last in ({'used_fallback':1,'at_ms':1},{'used_fallback':True,'at_ms':0},{'used_fallback':True,'at_ms':1,'text':'x'}):
+            with self.subTest(last=last):
+                bad=copy.deepcopy(snap);bad['llm']['last_chat']=last
+                with self.assertRaises(ValueError):validate_snapshot(bad,'r',0)
+    def test_skill_paths_permissions_and_decision_risk_are_exposed_and_checked(self):
+        item=dict(skill_item(),permissions_required=['camera_capture'])
+        run=awaiting_run();run['steps'][1].update(risk='state_changing',effect_id='set_volume')
+        block=skills_block(items=[item],run=run);block['paths']={'imports':'/home/u/gideon/skill-imports','exports':'/home/u/gideon/skill-exports'}
+        bridge,peer=connect_bridge(self,skills_snap(block))
+        self.assertEqual(bridge.skillsItems[0]['permissionsRequired'],['camera_capture'])
+        self.assertEqual(bridge.skillPaths,block['paths'])
+        step=bridge.skillCurrentRun['steps'][1]
+        self.assertEqual((step['risk'],step['effect_id']),('state_changing','set_volume'))
+        self.assertEqual(bridge.riskText(step['risk']),'médio');self.assertTrue(bridge.effectText({'id':step['effect_id']}).startswith('Definir o volume'))
+        for change in ({'paths':{'imports':'relativo','exports':'/x'}},{'paths':{'imports':'/x'}}):
+            with self.subTest(change=change):
+                bad=copy.deepcopy(skills_snap(dict(block,**change)))
+                with self.assertRaises(ValueError):validate_snapshot(bad,'r',0)
+        for step_change in ({'risk':'maybe'},{'effect_id':'Bad Id'}):
+            with self.subTest(step=step_change):
+                bad=copy.deepcopy(skills_snap(skills_block(items=[item],run=dict(run,steps=[run['steps'][0],dict(run['steps'][1],**step_change)]))))
+                with self.assertRaises(ValueError):validate_snapshot(bad,'r',0)
+    def test_connection_grant_date_is_exposed_as_grantedAtMs(self):
+        block=conns_block(items=[conn_item(granted_at_ms=1700000000000),conn_item('ha_1','homeassistant','Casa',granted=('states:read',),pending=())])
+        bridge,peer=connect_bridge(self,conns_snap(block))
+        self.assertEqual([i['grantedAtMs'] for i in bridge.connectionsItems],[1700000000000,None])
+        with self.assertRaises(ValueError):validate_snapshot(conns_snap(conns_block(items=[conn_item(granted_at_ms=-1)])),'r',0)
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_CONNECTIONS_CHILD:sys.exit(qml_connections_child())

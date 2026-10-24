@@ -213,7 +213,10 @@ FEATURE_KEYS=('streaming','tool_use','vision','cancel');FEATURE_STATES=('support
 CERT_BADGES={'certified':'Certificado','candidate':'Candidato','declared':'Declarado','probed':'Testado'}
 FEATURE_LABELS={'supported':'Suportado','unsupported':'Não suportado','unknown':'Desconhecido'}
 SELFTEST_DEADLINE_MS=30000;MODELS_DEADLINE_MS=5000
-PENDING_MODELS={'list':'Carregando modelos…','selftest':'Testando modelo…','save_custom':'Salvando modelo personalizado…','delete_custom':'Removendo modelo personalizado…'}
+PENDING_MODELS={'list':'Carregando modelos…','selftest':'Testando modelo…','manual_selftest':'Testando modelo…','save_custom':'Salvando modelo personalizado…','delete_custom':'Removendo modelo personalizado…'}
+# Core restart (Diagnóstico > Recuperação): the Core exits 75 after acking; gideon-launch starts it again. The bridge waits this long for the snapshot.
+RESTART_TIMEOUT_MS=30000;RESTART_WAIT_TEXT='Reiniciando o Core…';RESTART_BACK_TEXT='Core reiniciado e conectado de novo';RESTART_TIMEOUT_TEXT='O Core não voltou em 30 s; use gideon-launch'
+FALLBACK_NOTICE_MS=60000
 def finite_number(value,limit):return value is None or (type(value) in (int,float) and math.isfinite(value) and 0<=value<=limit)
 def feature_ok(features):
     if not (isinstance(features,dict) and set(features)==set(FEATURE_KEYS)|{'context_tokens'}):return False
@@ -1168,7 +1171,7 @@ PENDING={'agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao C
     'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…',
     'skill_validate':'Validando manifest no Core…','skill_save_draft':'Salvando rascunho no Core…','skill_dry_run':'Simulando skill no Core…','skill_approve':'Aprovando skill no Core…','skill_enable':'Habilitando skill no Core…','skill_disable':'Desabilitando skill no Core…','skill_rollback':'Revertendo versão no Core…','skill_remove':'Removendo skill no Core…','skill_run':'Iniciando skill no Core…','skill_decide':'Enviando decisão do passo ao Core…','skill_cancel':'Cancelando skill no Core…','skill_export':'Exportando pacote pelo Core…','skill_import':'Lendo pacote pelo Core…','skill_import_confirm':'Importando como rascunho pelo Core…'}
 # S5 connection ops: the Core's ack code is the result; refusals of accounts and consent arrive as codes from CONN_MESSAGES.
-CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_remove','connection_call','connection_set_token','connection_trust_tools'})
+CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_revoke_scope','connection_remove','connection_call','connection_set_token','connection_trust_tools'})
 OPS.update({
     'connection_add':('connections','Conta criada (desconectada)'),'connection_connect':('connections','Conexão iniciada: confirme o código no servidor e consinta os escopos'),
     'connection_consent':('connections','Escopos concedidos pelo usuário'),'connection_refresh':('connections','Atualização da conta solicitada'),
@@ -1176,12 +1179,16 @@ OPS.update({
     'connection_remove':('connections','Conta removida'),'connection_call':('connections','Chamada enviada ao Core; resultado em Última chamada'),
     'connection_set_token':('connections','Token enviado ao Core para validação; o campo foi limpo'),
     'connection_trust_tools':('connections','Ferramentas confiadas pelo usuário; cada chamada ainda pede aprovação'),
+    'connection_revoke_scope':('connections','Escopo revogado; chamadas que precisam dele pedem concessão de novo'),
+    # C-wire: restart is answered by the Core, then the socket drops (see _restart_ack); the plugin clear answers on the plugin channel.
+    'core_restart':('core','Reinício pedido ao Core'),'plugin_settings_clear':('plugin','Dados do plugin apagados'),
     'registry_plan':('registry','Rota planejada; nada foi executado'),'registry_allow_visual':('registry','Fallback visual atualizado pelo Core'),
 })
 PENDING.update({
     'connection_add':'Criando conta no Core…','connection_connect':'Iniciando conexão no Core…','connection_consent':'Enviando consentimento ao Core…','connection_refresh':'Atualizando conta no Core…',
     'connection_disconnect':'Desconectando conta no Core…','connection_revoke':'Revogando acesso no Core…','connection_remove':'Removendo conta no Core…','connection_call':'Chamando operação pelo Core…',
-    'connection_set_token':'Validando token no Core…','connection_trust_tools':'Confiando nas ferramentas no Core…',
+    'connection_set_token':'Validando token no Core…','connection_trust_tools':'Confiando nas ferramentas no Core…','connection_revoke_scope':'Revogando escopo no Core…',
+    'core_restart':'Pedindo reinício ao Core…','plugin_settings_clear':'Apagando dados do plugin…',
     'registry_plan':'Planejando rota no Core…','registry_allow_visual':'Atualizando fallback visual no Core…',
 })
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
@@ -1196,7 +1203,7 @@ class Bridge(QObject):
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':''};self.hub_target='';self.capability_pending=False;self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
@@ -1209,6 +1216,8 @@ class Bridge(QObject):
         self.perception_req=None;self.perception_inflight=None;self.perception_before=None;self.perception_indicators={'mic':None,'camera':None}
         # S4 skills: skill_req awaits the Core ack of the LLM draft; skill_inflight awaits the plugin result; skill_before is the capability_result seen at ack (same rule as perception).
         self.skill_req=None;self.skill_inflight=None;self.skill_before=None;self.skill_draft={}
+        # Core restart: waiting from the ack until the first snapshot of the new Core; the timer turns a silent Core into a message.
+        self.restart_state=None;self.restart_dropped=False;self.restart_timer=QTimer(self);self.restart_timer.setSingleShot(True);self.restart_timer.setInterval(RESTART_TIMEOUT_MS);self.restart_timer.timeout.connect(self._restart_timeout)
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
         self.poll=QTimer(self);self.poll.setInterval(1000);self.poll.timeout.connect(self.refresh)
         self.retry=QTimer(self);self.retry.setSingleShot(True);self.retry.timeout.connect(self.connect_core)
@@ -1228,6 +1237,7 @@ class Bridge(QObject):
         self.retry.stop();self.error='';self._backoff=500;self.refresh()
     def _offline(self,*args):
         old=self.snapshot
+        if self.restart_state is not None:self.restart_dropped=True
         self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=dict.fromkeys(self.results,'');self.hub_target='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         # After abort(): it re-enters _offline synchronously, which clears results; the chat message must survive that.
@@ -1256,6 +1266,7 @@ class Bridge(QObject):
     def _settle(self,op,data):
         """Map the Core answer of a finished request to one UI message through the OPS table."""
         code=data.get('code','invalid_message')
+        if op=='core_restart':return self._restart_ack(code)
         if self.models_req is not None and self.models_req[1]==op:
             kind=self.models_req[0];self.models_req=None;self._models_ack(kind,code);return
         if op=='capability_invoke' and self.pending_chat:
@@ -1311,6 +1322,8 @@ class Bridge(QObject):
             # The invocation result arrives later in the snapshot; the Core clears it on every new invoke.
             if self.capability_pending and data.get('capability_result'):self.capability_pending=False;self.results['plugin']=''
             self._apply(data,settled=pending_op in OPS)
+            # The ack itself is a snapshot of the old Core; only a snapshot after the socket dropped comes from the restarted one.
+            if self.restart_dropped and self.restart_state is not None:self._restart_done()
             self._chat_observe();self._models_observe();self._perception_observe();self._skill_observe()
             self.poll.setInterval(150 if sid is not None else 1000)
             if self.cancel_id is not None:
@@ -1489,7 +1502,13 @@ class Bridge(QObject):
     @Property(str,notify=agentChanged)
     def agentAnswer(self):return (self._agent_run() or {}).get('answer') or ''
     @Property('QVariantMap',notify=agentChanged)
-    def agentBudget(self):return dict((self._agent_run() or {}).get('budget') or {})
+    def agentBudget(self):
+        """Budget line of Assistente > Agente: steps, clocks (ms) and tokens of the live run; {} without a run. Clocks fall back to started_ms_ago when the Core is older."""
+        run=self._agent_run()
+        if run is None:return {}
+        tokens=run.get('budget') or {}
+        return {'steps':run['step'],'max_steps':run['max_steps'],'elapsed_ms':run.get('elapsed_ms',run['started_ms_ago']),'max_run_ms':run.get('max_run_ms'),
+                'tokens_used':tokens.get('tokens_used',0),'tokens_max':tokens.get('tokens_max')}
     @Property(str,notify=changed)
     def agentResult(self):return self.results['agent']
     @Property('QVariantMap',notify=llmChanged)
@@ -1514,6 +1533,28 @@ class Bridge(QObject):
         if not self.llmConfigAvailable:return self._refuse('llm','Motor LLM indisponível agora')
         if provider not in LLM_PROVIDERS:return self._refuse('llm',CODE_MESSAGES['invalid_provider'])
         self._send('llm','secret_clear',provider=provider)
+    # Modelo atual actions: a manual selftest of the configured model (capability answer, 30 s) and the rollback or mark-good of the last good config (Core ops, live revision).
+    @Slot()
+    def llmSelftest(self):
+        if self._models_blocked():return
+        if not (self.snapshot.get('llm') or {}).get('config'):return self._models_say('Configure um modelo antes de testar.')
+        self._models_capability('manual_selftest',{'action':'selftest'},SELFTEST_DEADLINE_MS)
+    def _llm_revision_op(self,kind,op,message):
+        if self._models_busy_now():return self._models_say('Aguarde a operação anterior do gerenciador')
+        if self.chat_inflight is not None or self.chat_request is not None or self.pending_chat:return self._models_say('Aguarde a conversa terminar')
+        if self._models_send(kind,op,revision=self._revision()):self.models_message=message;self._models_touch()
+    @Slot()
+    def llmRollback(self):
+        if not self.llmRollbackAvailable:return self._models_say(CODE_MESSAGES['no_lkg'])
+        self._llm_revision_op('rollback_manual','llm_rollback','Restaurando a configuração anterior no Core…')
+    @Slot()
+    def llmMarkGood(self):
+        if not self.llmConfigAvailable:return self._models_say('Motor LLM indisponível agora')
+        self._llm_revision_op('mark_manual','llm_mark_good','Marcando a configuração atual como boa…')
+    @Property(bool,notify=changed)
+    def llmTestAvailable(self):return self.modelsAvailable and bool((self.snapshot.get('llm') or {}).get('config')) and not self._models_busy_now()
+    @Property(bool,notify=changed)
+    def llmRollbackAvailable(self):return self.llmConfigAvailable and bool(((self.snapshot.get('llm') or {}).get('config') or {}).get('lkg')) and not self._models_busy_now()
     # The dialog passes the revision it captured when it opened; a changed snapshot revision is refused, not resent.
     @Slot(str,str,str,bool,str)
     def configureLlm(self,provider,model,custom_url,cloud_consent,revision):
@@ -1585,6 +1626,11 @@ class Bridge(QObject):
         elif kind=='rollback' and flow is not None:
             self.models_flow=None;reason=flow.get('reason_text') or 'falha no teste'
             self.models_message=f'Teste falhou ({reason}); configuração anterior restaurada' if code=='ok' else f'Teste falhou ({reason}); reversão não aplicada: {code_message(code)}'
+        elif kind=='manual_selftest':
+            if code=='ok':self.models_wait=kind;self.models_marker=self._responses;self.models_message='Testando o modelo no Core…'
+            else:self.models_message=code_message(code)
+        elif kind=='rollback_manual':self.models_message='Configuração anterior restaurada' if code=='ok' else code_message(code)
+        elif kind=='mark_manual':self.models_message='Configuração marcada como boa' if code=='ok' else code_message(code)
         elif kind=='fallback':self.models_message='Fallback salvo pelo Core' if code=='ok' else code_message(code)
         elif kind=='clear':self.models_message='Dados do plugin apagados' if code=='ok' else code_message(code)
         elif kind in ('list','save_custom','delete_custom'):
@@ -1607,6 +1653,9 @@ class Bridge(QObject):
         elif kind in ('save_custom','delete_custom'):
             if ok:self.models_want_list='custom';self.models_message='Modelo personalizado salvo' if kind=='save_custom' else 'Modelo personalizado removido'
             else:self.models_message=self._result_text(result)
+        elif kind=='manual_selftest':
+            if ok and valid_selftest(output):self.models_message=f"Teste ok: resposta em {output['latency_ms']} ms"
+            else:self.models_message=self._result_text(result) if not ok else 'Resposta do teste recusada pelo esquema'
         elif kind=='selftest' and self.models_flow is not None:
             flow=self.models_flow
             if ok and valid_selftest(output):flow.update(next='mark',latency=output['latency_ms']);self.models_message='Teste ok; marcando como bom…'
@@ -1707,6 +1756,13 @@ class Bridge(QObject):
         """Erases the plugin's own settings ledger (C2). The Core config and keys are not touched. The QML asks first."""
         if self._models_busy_now():return self._models_say('Aguarde a operação anterior do gerenciador')
         self._models_capability_plain('clear','plugin_settings_clear',plugin_id=MODEL_PLUGIN)
+    @Slot(str)
+    def clearPluginSettingsOf(self,pluginId):
+        """Erases one plugin's own settings ledger: plugin_settings_clear {plugin_id}, no revision. Only that plugin's file changes; the QML asks first. Answers on the plugin channel."""
+        if not (isinstance(pluginId,str) and len(pluginId)<=64 and PLUGIN_ID.fullmatch(pluginId)):return self._refuse('plugin','Id de plugin inválido')
+        if not self.pluginsAvailable:return self._refuse('plugin','Plugins indisponíveis agora')
+        if self._models_busy_now():return self._refuse('plugin','Aguarde a operação anterior do gerenciador')
+        self._send('plugin','plugin_settings_clear',plugin_id=pluginId)
     def _models_capability_plain(self,kind,op,**kw):
         if self._models_send(kind,op,**kw):self.models_message='Apagando dados do plugin…';self._models_touch()
     @Slot('QVariantMap',result=str)
@@ -1766,6 +1822,33 @@ class Bridge(QObject):
     @Slot()
     def recoverConfiguration(self):
         if self.recoveryAvailable:self._preferences('recover_configuration',revision=int(self.preferencesRevision))
+    # ---- Core restart (docs/ui-spec/40-configuracoes.md §8.5). The Core refuses with busy while a session, an agent run, a skill run or a plugin call is active.
+    @Slot()
+    def coreRestart(self):
+        if not self.online:return self._refuse('core','Core desconectado: nada a reiniciar')
+        if self.restart_state=='waiting':return
+        if self.sessionId:return self._refuse('core','Indisponível durante a sessão de voz')
+        self._send('core','core_restart')
+    def _restart_ack(self,code):
+        """core_restart answered. 'ok' means the Core exits next: the socket drop and the first snapshot after it finish the wait; the timer turns a silent Core into a message."""
+        if code!='ok':self.results['core']=code_message(code);self.changed.emit();return
+        self.restart_state='waiting';self.restart_dropped=False;self.results['core']=PENDING['core_restart']
+        self.restart_timer.start();self.changed.emit()
+    def _restart_done(self):
+        self.restart_state=None;self.restart_dropped=False;self.restart_timer.stop();self.results['core']=RESTART_BACK_TEXT;self.changed.emit()
+    def _restart_timeout(self):
+        if self.restart_state=='waiting':self.restart_state='failed';self.results['core']='';self.changed.emit()
+    @Property(bool,notify=changed)
+    def coreRestartAvailable(self):return self.online and self.restart_state!='waiting' and not self.sessionId
+    @Property(bool,notify=changed)
+    def coreRestartBusy(self):return self.restart_state=='waiting' or self.pending_op=='core_restart'
+    @Property(str,notify=changed)
+    def coreRestartResult(self):
+        if self.restart_state=='waiting':return RESTART_WAIT_TEXT
+        if self.restart_state=='failed':return RESTART_TIMEOUT_TEXT
+        return self.results['core']
+    @Property('QVariantMap',notify=llmChanged)
+    def llmLastChat(self):return dict((self.snapshot.get('llm') or {}).get('last_chat') or {})
     @Property(str,notify=changed)
     def configurationStatus(self):return self.snapshot.get('configuration_status','ready' if self.online else 'offline')
     @Property(bool,notify=changed)
@@ -2101,7 +2184,9 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def skillsResult(self):return self.results['skills']
     @Property('QVariantList',notify=skillsChanged)
-    def skillsItems(self):return [dict(i) for i in self._skill_block().get('items',[])]
+    def skillsItems(self):return [{**i,'permissionsRequired':list(i.get('permissions_required') or [])} for i in self._skill_block().get('items',[])]
+    @Property('QVariantMap',notify=skillsChanged)
+    def skillPaths(self):return dict(self._skill_block().get('paths') or {})
     # Named skillCurrentRun, not skillRun: the Qt property and the skillRun slot would share one name in QML.
     @Property('QVariantMap',notify=skillsChanged)
     def skillCurrentRun(self):return dict(self._skill_run() or {})
@@ -2154,6 +2239,12 @@ class Bridge(QObject):
     def connectionDisconnect(self,ident):self._conn_lifecycle('connection_disconnect',ident)
     @Slot(str)
     def connectionRevoke(self,ident):self._conn_lifecycle('connection_revoke',ident)
+    @Slot(str,str)
+    def connectionRevokeScope(self,ident,scope):
+        """One granted scope (connection_revoke_scope {id, scope, revision}). Refused here when the live item does not grant it; the Core checks the revision."""
+        if self._conn_unknown(ident):return
+        if not isinstance(scope,str) or scope not in (self._conn_item(ident).get('granted_scopes') or []):return self._refuse('connections',CONN_MESSAGES['scope_not_granted'])
+        self._conn_op('connection_revoke_scope',id=ident,scope=scope,revision=self._conn_revision())
     @Slot(str)
     def connectionRemove(self,ident):self._conn_lifecycle('connection_remove',ident)
     @Slot(str,str,str)
@@ -2199,7 +2290,7 @@ class Bridge(QObject):
     @Property(str,notify=connectionsChanged)
     def connectionsRevision(self):return str(self._conn_block().get('revision',0))
     @Property('QVariantList',notify=connectionsChanged)
-    def connectionsItems(self):return [dict(i) for i in self._conn_block().get('items',[])]
+    def connectionsItems(self):return [{**i,'grantedAtMs':i.get('granted_at_ms')} for i in self._conn_block().get('items',[])]
     @Property('QVariantList',notify=connectionsChanged)
     def connectionsProviders(self):return [dict(p) for p in self._conn_block().get('providers',[])]
     @Property('QVariantMap',notify=connectionsChanged)

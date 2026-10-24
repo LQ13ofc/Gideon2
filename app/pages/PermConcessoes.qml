@@ -17,14 +17,15 @@ PageFrame {
 
     // Table columns in px. The table is at least minTable wide and scrolls sideways inside its own box (30 §10).
     readonly property int wNum: 44
-    readonly property int wOrig: 112
-    readonly property int wItem: 240
+    readonly property int wOrig: 100
+    readonly property int wItem: 208
     readonly property int wAcc: 100
-    readonly property int wState: 184
-    readonly property int wAct: 168
-    readonly property int minTable: 1060
+    readonly property int wState: 150
+    readonly property int wAct: 150
+    readonly property int wDate: 104
+    readonly property int minTable: 1080
     readonly property int tableWidth: Math.max(tableScroll.width, minTable)
-    readonly property int wPerm: tableWidth - 24 - wNum - wOrig - wItem - wAcc - wState - wAct
+    readonly property int wPerm: tableWidth - 24 - wNum - wOrig - wItem - wAcc - wDate - wState - wAct
 
     readonly property var filterNames: ({todas: "Concessões", plugins: "Plugins", skills: "Skills", conexoes: "Conexões"})
 
@@ -55,6 +56,7 @@ PageFrame {
         case "skill": Window.window.goPage("skills"); break
         case "consent": dialogs.consent(row.ref); break
         case "revokeAccount": dialogs.revokeAccount(row.ref); break
+        case "revokeScope": dialogs.revokeScope(row.ref, row.scope); break
         case "trust": dialogs.trustTool(row.ref, row.tool); break
         }
     }
@@ -65,6 +67,7 @@ PageFrame {
         case "skill": return "Ver em Skills: " + row.item
         case "consent": return "Consentir escopos de " + row.ref.label
         case "revokeAccount": return "Revogar acesso da conta " + row.ref.label
+        case "revokeScope": return "Revogar escopo " + row.perm + " da conta " + row.ref.label
         case "trust": return "Confiar na ferramenta " + row.tool
         }
         return row.action.text
@@ -138,7 +141,7 @@ PageFrame {
                 spacing: 0
                 Repeater {
                     model: [{t: "Nº", w: page.wNum}, {t: "Origem", w: page.wOrig}, {t: "Item", w: page.wItem}, {t: "Permissão ou escopo", w: page.wPerm},
-                            {t: "Acesso", w: page.wAcc}, {t: "Estado", w: page.wState}, {t: "Ação", w: page.wAct}]
+                            {t: "Acesso", w: page.wAcc}, {t: "Concedido em", w: page.wDate}, {t: "Estado", w: page.wState}, {t: "Ação", w: page.wAct}]
                     delegate: Text {
                         required property var modelData
                         text: modelData.t
@@ -291,6 +294,16 @@ PageFrame {
                             font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
                             font.weight: line.modelData.risk ? 700 : 400
                             Layout.preferredWidth: page.wAcc; Layout.minimumWidth: page.wAcc
+                            Layout.alignment: Qt.AlignTop
+                        }
+                        // Date of the grant (Core Unix ms, shown as dd/mm/aaaa); "—" when the Core has no date for the row.
+                        Text {
+                            objectName: "grantDate_" + String(line.modelData.key || "").replace(/:/g, "_")
+                            text: line.modelData.granted || "—"
+                            textFormat: Text.PlainText
+                            color: Theme.textMuted
+                            font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
+                            Layout.preferredWidth: page.wDate; Layout.minimumWidth: page.wDate
                             Layout.alignment: Qt.AlignTop
                         }
                         Item {

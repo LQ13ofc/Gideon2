@@ -32,6 +32,7 @@ ColumnLayout {
     signal reviewRequested(var plugin)
     signal revokeRequested(var plugin)
     signal removeRequested(var plugin)
+    signal clearDataRequested(var plugin)
 
     Layout.fillWidth: true
     spacing: 0
@@ -246,6 +247,15 @@ ColumnLayout {
                 enabled: row.removeS.enabled
                 Accessible.name: "Remover " + row.pid
                 onClicked: row.removeRequested({plugin_id: row.pid, semver: row.semver})
+            }
+            // The plugin's own settings file only (plugin_settings_clear). The page confirms before the Core is asked.
+            GButton {
+                objectName: "clearData_" + row.pid
+                text: "Apagar dados do plugin"
+                variant: "danger"
+                enabled: core.pluginsAvailable
+                Accessible.name: "Apagar dados do plugin " + row.pid
+                onClicked: row.clearDataRequested({plugin_id: row.pid, semver: row.semver})
             }
         }
         Text {

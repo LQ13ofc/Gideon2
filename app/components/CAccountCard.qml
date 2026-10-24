@@ -33,6 +33,7 @@ Card {
     signal revokeRequested()
     signal removeRequested()
     signal trustRequested(string tool)
+    signal scopeRevokeRequested(string scope)
 
     // Reading AppState.connDraftRevision makes the consent bindings re-evaluate after a checkbox toggle.
     function consentList() {
@@ -162,8 +163,21 @@ Card {
             delegate: CScopeChip {
                 required property string modelData
                 text: L.connScopeLabel(core.connectionsProviders, card.account.provider, modelData) + " (" + modelData + ")"
+                revocable: L.connCan(core.connectionsBusy, "revoke", card.account)
+                onRevokeRequested: card.scopeRevokeRequested(modelData)
             }
         }
+    }
+    // When the Core granted the scopes (granted_at_ms, Unix ms); absent for older ledgers.
+    Text {
+        objectName: "connGrantedAt_" + card.cid
+        visible: card.granted.length > 0 && L.grantedDate(card.account.grantedAtMs) !== ""
+        text: "Concedido em " + L.grantedDate(card.account.grantedAtMs)
+        textFormat: Text.PlainText
+        color: Theme.textMuted
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontCaption
+        Layout.fillWidth: true
     }
     Text {
         visible: card.granted.length === 0

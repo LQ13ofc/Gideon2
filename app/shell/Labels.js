@@ -62,6 +62,13 @@ function connCan(busy, action, item) {
     }
     return false
 }
+// Date of a grant (Unix ms from the Core) as dd/mm/aaaa in local time; '' when the Core has no date for it.
+function grantedDate(ms) {
+    if (typeof ms !== "number" || !(ms > 0)) return ""
+    var d = new Date(ms)
+    var pad = function (n) { return (n < 10 ? "0" : "") + n }
+    return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear()
+}
 function connCanTest(busy, item, op) { return !busy && item.status === "connected" && op.risk === "read" && connGranted(item, op.scope) }
 function connOutcomeText(call, codeMessage) { if (call.code) return codeMessage(call.code); return call.outcome === "ok" ? "concluída" : call.outcome }
 

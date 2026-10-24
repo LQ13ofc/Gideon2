@@ -17,6 +17,7 @@ Item {
     property var plugin: null        // hub entry (D-P1, D-P2)
     property var account: null       // connection item (D-P3, D-P4, D-P5)
     property string toolName: ""     // D-P5
+    property string scopeId: ""      // one granted scope of the account (revoke scope)
     property string revision: ""     // captured when the dialog opened (plugins or hub)
     property int picked: 0           // D-P3: scopes ticked
 
@@ -25,6 +26,7 @@ Item {
     function consent(item) { account = item; consentDlg.open() }
     function revokeAccount(item) { account = item; revokeAccountDlg.open() }
     function trustTool(item, name) { account = item; toolName = name; trustDlg.open() }
+    function revokeScope(item, scope) { account = item; scopeId = scope; revokeScopeDlg.open() }
 
     function liveAccount() { return account ? L.connProvider(core.connectionsItems, account.id) : null }
     function liveEntry() { return plugin ? P.pluginEntry(core.hubEntries, plugin.plugin_id) : null }
@@ -329,6 +331,43 @@ Item {
                 onClicked: {
                     core.connectionRevoke(host.account.id)
                     revokeAccountDlg.close()
+                }
+            }
+        }
+    }
+
+    // Revogar um escopo concedido: o token fica; chamadas que precisam dele são recusadas até nova concessão.
+    Modal {
+        id: revokeScopeDlg
+        objectName: "permRevokeScopeDialog"
+        title: "Revogar escopo"
+        standardButtons: Dialog.NoButton
+        onOpened: revokeScopeCancel.forceActiveFocus()
+        Text {
+            text: host.account ? "Revogar o escopo " + L.connScopeLabel(core.connectionsProviders, host.account.provider, host.scopeId) + " da conta " + host.account.label + "? Chamadas que precisam dele ficam recusadas até você conceder de novo." : ""
+            textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(10)
+            Item { Layout.fillWidth: true }
+            GButton {
+                id: revokeScopeCancel
+                objectName: "permRevokeScopeCancel"
+                text: "Cancelar"
+                variant: "secondary"
+                onClicked: revokeScopeDlg.close()
+            }
+            GButton {
+                objectName: "permRevokeScopeConfirm"
+                variant: "danger"
+                text: "Revogar escopo"
+                enabled: !!host.liveAccount() && L.connCan(core.connectionsBusy, "revoke", host.liveAccount()) && host.scopeId.length > 0
+                Accessible.name: "Revogar este escopo"
+                onClicked: {
+                    core.connectionRevokeScope(host.account.id, host.scopeId)
+                    revokeScopeDlg.close()
                 }
             }
         }

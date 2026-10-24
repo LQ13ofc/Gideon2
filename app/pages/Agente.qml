@@ -155,12 +155,24 @@ PageFrame {
         }
     }
 
-    // Budget and steps. Tokens are real; the step count is the number of steps the run reports.
+    // Budget line: steps, clocks and tokens of the live run (the Core's budget; the clock is the run's own deadline).
+    function clock(ms) {
+        if (ms === undefined || ms === null || ms < 0) return "--:--"
+        var s = Math.floor(ms / 1000), m = Math.floor(s / 60)
+        s = s % 60
+        return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s
+    }
+    function budgetLine() {
+        var b = core.agentBudget
+        return "Passos " + (b.steps || 0) + "/" + (b.max_steps || 6)
+            + " · Tempo " + page.clock(b.elapsed_ms !== undefined ? b.elapsed_ms : 0) + "/" + page.clock(b.max_run_ms)
+            + " · Tokens " + (b.tokens_used || 0) + "/" + (b.tokens_max || 4096)
+    }
     Section {
         title: "Passos e orçamento"
         Text {
             objectName: "agentBudget"
-            text: "Tokens: " + (core.agentBudget.tokens_used || 0) + " de " + (core.agentBudget.tokens_max || 4096) + " · Passos: " + core.agentSteps.length
+            text: page.budgetLine()
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

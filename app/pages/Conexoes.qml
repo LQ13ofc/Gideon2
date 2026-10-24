@@ -27,6 +27,7 @@ PageFrame {
     function visualOn(id) { return core.registryVisualAllowed.indexOf(id) >= 0 }
     function countText(n, one, many) { return n + (n === 1 ? " " + one : " " + many) }
     function askRevoke(account) { revokeConfirm.account = account; revokeConfirm.open() }
+    function askScopeRevoke(account, scope) { scopeRevokeConfirm.account = account; scopeRevokeConfirm.scope = scope; scopeRevokeConfirm.open() }
     function askRemove(account) { removeConfirm.account = account; removeConfirm.open() }
     function askTrust(account, tool) { trustConfirm.account = account; trustConfirm.tool = tool; trustConfirm.open() }
     function askVisual(purpose) { visualConfirm.purpose = purpose; visualConfirm.open() }
@@ -112,6 +113,7 @@ PageFrame {
                     account: modelData
                     showFake: page.mixedFake
                     onRevokeRequested: page.askRevoke(modelData)
+                    onScopeRevokeRequested: function (scope) { page.askScopeRevoke(modelData, scope) }
                     onRemoveRequested: page.askRemove(modelData)
                     onTrustRequested: function (tool) { page.askTrust(modelData, tool) }
                 }
@@ -432,6 +434,27 @@ PageFrame {
             onClicked: revokeConfirm.accept()
         }
         onAccepted: { if (account) core.connectionRevoke(account.id) }
+    }
+    // One granted scope of an account. The token stays; the calls that need this scope are refused until it is granted again.
+    Modal {
+        id: scopeRevokeConfirm
+        objectName: "connScopeRevokeConfirm"
+        property var account: null
+        property string scope: ""
+        title: "Revogar este escopo?"
+        Text {
+            text: scopeRevokeConfirm.account ? "Revogar o escopo " + L.connScopeLabel(core.connectionsProviders, scopeRevokeConfirm.account.provider, scopeRevokeConfirm.scope) + " da conta " + scopeRevokeConfirm.account.label + "? As chamadas que precisam dele ficam recusadas até você conceder de novo. Os outros escopos não mudam." : ""
+            textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "connScopeRevokeConfirmButton"
+            variant: "danger"
+            text: "Revogar escopo"
+            Layout.alignment: Qt.AlignRight
+            Accessible.name: "Revogar este escopo"
+            onClicked: scopeRevokeConfirm.accept()
+        }
+        onAccepted: { if (account && scope) core.connectionRevokeScope(account.id, scope) }
     }
     Modal {
         id: removeConfirm

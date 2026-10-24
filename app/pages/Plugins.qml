@@ -65,6 +65,7 @@ PageFrame {
     function openReview(plugin) { AppState.reviewPlugin = plugin; reviewAck.checked = false; reviewDialog.open() }
     function askRemove(plugin) { removeConfirm.plugin = plugin; removeConfirm.revision = core.hubInstallRevision; removeConfirm.open() }
     function askRevoke(plugin) { revokeConfirm.plugin = plugin; revokeConfirm.revision = core.pluginsRevision; revokeConfirm.open() }
+    function askClearData(plugin) { clearDataConfirm.plugin = plugin; clearDataConfirm.open() }
 
     PageHeader {
         title: "Plugins"
@@ -223,6 +224,7 @@ PageFrame {
                     onReviewRequested: function (plugin) { page.openReview(plugin) }
                     onRevokeRequested: function (plugin) { page.askRevoke(plugin) }
                     onRemoveRequested: function (plugin) { page.askRemove(plugin) }
+                    onClearDataRequested: function (plugin) { page.askClearData(plugin) }
                 }
             }
         }
@@ -327,6 +329,24 @@ PageFrame {
             Layout.alignment: Qt.AlignRight
             Accessible.name: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id : "Revogar"
             onClicked: revokeConfirm.accept()
+        }
+    }
+    // Apagar os dados do plugin: only that plugin's own settings file. Cancelar is the default focus.
+    Modal {
+        id: clearDataConfirm
+        objectName: "pluginClearDataConfirm"
+        property var plugin: null
+        title: "Apagar dados do plugin?"
+        onAccepted: { if (plugin) core.clearPluginSettingsOf(plugin.plugin_id) }
+        Text {
+            text: clearDataConfirm.plugin ? "Apagar as configurações guardadas por " + clearDataConfirm.plugin.plugin_id + "? O plugin, as permissões aprovadas e a configuração do Core não são alterados. Não há volta." : ""
+            textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "confirmClearDataButton"; variant: "danger"; text: "Apagar dados"
+            Layout.alignment: Qt.AlignRight
+            Accessible.name: clearDataConfirm.plugin ? "Apagar dados de " + clearDataConfirm.plugin.plugin_id : "Apagar dados"
+            onClicked: clearDataConfirm.accept()
         }
     }
 }
