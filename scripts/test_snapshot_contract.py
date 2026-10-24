@@ -223,6 +223,9 @@ class SnapshotContract(unittest.TestCase):
                             manifest_sha256=entry['manifest_sha256'], permissions=entry['permissions'],
                             publisher_unverified_ack=True)
         self.assertEqual(ack['code'], 'ok')
+        # The grant date comes from the Core (Unix ms) and is shown only for an approved entry.
+        granted = next(e for e in self.core.req()['hub']['entries'] if e['plugin_id'] == PLUGIN)
+        self.assertTrue(granted['permissions_approved'] and granted['approved_at_ms'] > 1600000000000)
         stage_upload(str(self.root), PLUGIN, str(PLUGIN_SRC))
         return entry
 
@@ -277,6 +280,9 @@ class SnapshotContract(unittest.TestCase):
                                  'pending proposal')
         self.core.snap('tool proposal pending')
         proposal = next(p for p in pending['tool_proposals'] if p['state'] == 'pending')
+        # Registry tool: the fixed risk class is always there; the effect only for a valid call.
+        self.assertEqual(proposal['risk'], 'state_changing')
+        self.assertTrue(all(e['at_ms'] > 1600000000000 and e['origin'] for e in pending['events']))
         self.assertEqual(self.core.req('tool_decide', proposal_id=proposal['proposal_id'], decision='deny')['code'], 'ok')
         self.core.snap('tool proposal denied')
         self.invoke('e503:x')

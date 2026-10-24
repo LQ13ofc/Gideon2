@@ -11,10 +11,15 @@ from bridge import CAPABILITY_ERRORS,PERCEPTION_CAPABILITIES,PERCEPTION_DEADLINE
 from bridge import PENDING_SKILL_DRAFT,SKILL_CODES,SKILL_DRAFT_CAPABILITY,SKILL_DRAFT_DEADLINE_MS,SKILL_HISTORY_LIMIT,SKILL_ITEMS_LIMIT,SKILL_JSON_LIMIT,SKILL_OP_CODES,SKILL_OP_MESSAGES,SKILL_REASON_MESSAGES,SKILL_REASONS,SKILL_SOURCES,SKILL_STATES,SKILL_STEPS_LIMIT,code_message,skill_code_ok,skill_json,valid_skill_draft,valid_skills
 from bridge import CONN_ACCESS,CONN_ARGS_LIMIT,CONN_CODES,CONN_MESSAGES,CONN_STATUSES,conn_label_problem
 from bridge import REG_MESSAGES,REG_PURPOSES,REG_STATUSES,REG_VISUAL_WARNING,valid_agent_step
+from bridge import display_effect,display_risk,grant_rows,pending_count
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
 QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child'];QML_CONNECTIONS_CHILD=sys.argv[1:2]==['--qml-connections-child']
+def offered(window,page_id):
+    # The window lists the pages the Core offers now (Main.qml offeredPages); the sub-bar shows only the active tab's pages.
+    ids=window.property('offeredPages');ids=ids.toVariant() if hasattr(ids,'toVariant') else ids
+    return page_id in [str(x) for x in ids]
 APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
 EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
@@ -613,10 +618,10 @@ class LlmBridge(unittest.TestCase):
     def test_motor_llm_dialog_reads_consent_from_core_and_never_auto_enables(self):
         # Source contract for the QML dialog (no Qt needed): open-time state comes from llm.config, the box is only changed by its own click.
         qml=(Path(__file__).resolve().parents[1]/'app'/'Main.qml').read_text(encoding='utf-8')
-        start=qml.index('id: llmDialog');section=qml[start:qml.index('id: reviewDialog',start)]
+        start=qml.index('id: llmDialog');section=qml[start:]
         self.assertIn('consentBox.checked = core.llmConfig.cloud_consent === true',section)
-        self.assertIn('window.llmRevisionCaptured = core.llmRevision',section)
-        self.assertIn('core.configureLlm(providerBox.currentValue, modelField.text, providerBox.currentValue === "custom" ? urlField.text : "", consentBox.checked, window.llmRevisionCaptured)',section)
+        self.assertIn('AppState.llmRevisionCaptured = core.llmRevision',section)
+        self.assertIn('core.configureLlm(providerBox.currentValue, modelField.text, providerBox.currentValue === "custom" ? urlField.text : "", consentBox.checked, AppState.llmRevisionCaptured)',section)
         self.assertIn('Mensagens serão enviadas ao provedor escolhido na nuvem',section)
         self.assertIn('keyField.text = ""',section)
         self.assertNotIn('consentBox.checked = true',qml);self.assertNotIn('consentBox.checked = false',qml)
@@ -684,14 +689,14 @@ def _qml_chat_checks(bridge,window,check,checks):
         if item is None:raise AssertionError('missing '+name)
         return item
     def push(snap):bridge._apply(validate_snapshot(copy.deepcopy(snap),'r',0));QTest.qWait(30)
-    window.setProperty('page',7);QTest.qWait(50)
+    window.setProperty('pageId','conversa');QTest.qWait(50)
     check('no plugin: chat panel hidden',not find('chatPanel').property('visible'))
     check('no plugin: unavailable explanation shown',find('chatUnavailable').property('visible'))
-    check('no plugin: nav item Conversa hidden',not find('nav7').property('visible'))
+    check('no plugin: nav item Conversa hidden',not offered(window,'conversa'))
     tools=[tool_item('tool_1_1'),tool_item('tool_1_2',tool='mute',args={},state='executed',result='Silenciado')]
     push(chat_snapshot(tools=tools,llm=llm_state(config=LLM_CONFIG)))
     check('running chat plugin: panel visible',find('chatPanel').property('visible'))
-    check('running chat plugin: nav item Conversa visible',find('nav7').property('visible'))
+    check('running chat plugin: nav item Conversa visible',offered(window,'conversa'))
     check('running chat plugin: unavailable explanation hidden',not find('chatUnavailable').property('visible'))
     check('pending proposal offers Negar',find('deny_tool_1_1').property('visible') and find('authorize_tool_1_1').property('visible'))
     check('executed proposal offers no decision buttons',not find('deny_tool_1_2').property('visible') and not find('authorize_tool_1_2').property('visible'))
@@ -724,6 +729,7 @@ def _qml_chat_checks(bridge,window,check,checks):
     check('blank text cannot be sent',not find('chatSend').property('enabled'))
     # C3 agent section: driven only by injected Core snapshots (no Core, no LLM).
     tool=tool_item('tool_1_9',tool='synth_counter_inc',args={'epoch':1});tool.update(run_id='run_1_7',step=1)
+    window.setProperty('pageId','agente');QTest.qWait(30)
     push(agent_snap(agent_run('awaiting_approval',steps=[agent_chat_step(1,1),agent_tool_step(1,2)]),tools=[tool]))
     check('agent section visible while the engine runs',find('agentPanel').property('visible'))
     check('agent banner names the approval state',find('agentBanner').property('visible') and find('agentBanner').property('text')=='Aguardando sua aprovação')
@@ -782,7 +788,7 @@ def _qml_checks(bridge,window,check,checks):
     check('QML minimum is 480x520',window.property('minimumWidth')==480 and window.property('minimumHeight')==520)
     def push(snap):bridge._apply(validate_snapshot(copy.deepcopy(snap),'r',0))
     first=dual_snapshot();push(first);QTest.qWait(50)
-    QMetaObject.invokeMethod(window.findChild(QObject,'hubDialog'),'open');QTest.qWait(50)
+    window.setProperty('pageId','plugins');QTest.qWait(50)
     field=find('capabilityInput_dummy_echo');check('running plugin input enabled',field.property('enabled'))
     field.setProperty('gideonMarker',7)
     counts.clear();session={**copy.deepcopy(first),'sequence':2,'state':'capturing'};push(session);QTest.qWait(30)
@@ -1312,13 +1318,13 @@ def _qml_models_checks(bridge,window,check,checks):
     def texts():return [i.property('text') for i in items() if isinstance(i.property('text'),str)]
     def apply(snap):bridge._apply(validate_snapshot(copy.deepcopy(snap),'r',0));QTest.qWait(30)
     def catalog(output):bridge.models_data=output;bridge._models_touch(catalog=True);QTest.qWait(50)
-    window.setProperty('page',8);QTest.qWait(50)
-    check('no models plugin: Modelos LLM cannot be the page',window.property('page')==0)
-    check('no models plugin: nav item hidden',not find('nav8').property('visible'))
+    window.setProperty('pageId','modelos');QTest.qWait(50)
+    check('no models plugin: Modelos LLM panel stays hidden on its page',not find('modelsPanel').property('visible'))
+    check('no models plugin: nav item hidden',not offered(window,'modelos'))
     check('no models plugin: models panel hidden',not find('modelsPanel').property('visible'))
     apply(models_snapshot(revision=1,config=LLM_CONFIG));QTest.qWait(50)
-    check('models plugin running: nav item visible',find('nav8').property('visible'))
-    window.setProperty('page',8);QTest.qWait(50)
+    check('models plugin running: nav item visible',offered(window,'modelos'))
+    window.setProperty('pageId','modelos');QTest.qWait(50)
     check('models plugin running: models panel visible on page 8',find('modelsPanel').property('visible'))
     check('recommended tab accessible name',acc('modelsTabRecommended')=='Aba Recomendados')
     check('custom tab accessible name',acc('modelsTabCustom')=='Aba Personalizados')
@@ -1334,7 +1340,13 @@ def _qml_models_checks(bridge,window,check,checks):
     find('modelsFilter').setProperty('currentIndex',1);QTest.qWait(50)
     check('Local filter hides cloud models',not present('model_gemini-lite') and present('model_llama-7b'))
     find('modelsFilter').setProperty('currentIndex',0);QTest.qWait(50)
-    QMetaObject.invokeMethod(find('model_gemini-lite'),'click');QTest.qWait(50)
+    from PySide6.QtCore import QCoreApplication,QEvent,QPointF,Qt as _Qt
+    from PySide6.QtGui import QMouseEvent
+    find('modelsPanel').setProperty('part','catalogo');QTest.qWait(30)
+    row=find('model_gemini-lite');centre=row.mapToScene(QPointF(row.width()/2,row.height()/2)).toPoint()
+    for kind,buttons in ((QEvent.Type.MouseButtonPress,_Qt.MouseButton.LeftButton),(QEvent.Type.MouseButtonRelease,_Qt.MouseButton.NoButton)):
+        QCoreApplication.sendEvent(window,QMouseEvent(kind,QPointF(centre),QPointF(centre),_Qt.MouseButton.LeftButton,buttons,_Qt.KeyboardModifier.NoModifier))
+    QTest.qWait(50)
     check('details open for the selected model',find('modelDetails').property('visible'))
     check('details show the title',find('modelDetailTitle').property('text')=='Gemini 3.5 Flash-Lite')
     check('feature matrix uses the exact words',"Recurso tool_use: Suportado" in texts() and "Recurso vision: Desconhecido" in texts())
@@ -1349,6 +1361,7 @@ def _qml_models_checks(bridge,window,check,checks):
     check('confirm button is not focused',not find('confirmClearPluginButton').property('activeFocus'))
     clear.close();QTest.qWait(30)
     find('modelsTabs').setProperty('currentIndex',1);QTest.qWait(50)
+    find('modelsPanel').setProperty('part','personalizados');QTest.qWait(20)
     find('customProvider').setProperty('currentIndex',2);find('customModelId').setProperty('text','gemini-x');find('customUrl').setProperty('text','');QTest.qWait(20)
     check('custom URL required for Personalizado',find('customFormProblem').property('visible') and not find('saveCustomButton').property('enabled'))
     find('customUrl').setProperty('text','http://example.test');QTest.qWait(20)
@@ -1358,6 +1371,7 @@ def _qml_models_checks(bridge,window,check,checks):
     find('customModelId').setProperty('text','modelo-á');QTest.qWait(20)
     check('accented model identifier is refused',not find('saveCustomButton').property('enabled'))
     find('customModelId').setProperty('text','gemini-x');find('modelsTabs').setProperty('currentIndex',0);QTest.qWait(20)
+    find('modelsPanel').setProperty('part','fallback');QTest.qWait(20)
     apply(models_snapshot(revision=1,config={**LLM_CONFIG,'fallback':{'provider':'google','model':'gemini-3.5-flash-lite'}}));QTest.qWait(30)
     check('cloud fallback shows the exact warning',find('fallbackCloudWarning').property('visible') and find('fallbackCloudWarning').property('text')=='Mensagens poderão ir para a nuvem se o modelo principal falhar')
     apply(models_snapshot(revision=1,config={**LLM_CONFIG,'fallback':{'provider':'local','model':'llama-7b-q4','local_port':8080}}));QTest.qWait(30)
@@ -1366,8 +1380,8 @@ def _qml_models_checks(bridge,window,check,checks):
     find('fallbackModel').setProperty('currentIndex',1);QTest.qWait(20)
     check('local pick and local current fallback show no cloud warning',not find('fallbackCloudWarning').property('visible'))
     apply(chat_snapshot(state='disabled',enabled=False,capabilities=('llm_engine.models',)));QTest.qWait(50)
-    check('plugin stopped: page returns to Início',window.property('page')==0)
-    check('plugin stopped: nav item hidden',not find('nav8').property('visible'))
+    check('plugin stopped: page returns to Início',window.property('pageId')=='hoje')
+    check('plugin stopped: nav item hidden',not offered(window,'modelos'))
     print(f'qml models checks ok: {len(checks)}');return 0
 # ---- C3 agent runtime (docs/C3.md): snapshot block, proposal run/step fields, agentStart/agentAbort frames and messages.
 def agent_chat_step(n,inv,state='done',**extra):return {'n':n,'invocation_id':inv,'kind':'chat','state':state,**extra}
@@ -1696,8 +1710,8 @@ def qml_perception_child():
                 if item is None:raise AssertionError('missing '+name)
                 return item
             bridge._apply(validate_snapshot(perception_snapshot((('screen_observe','running'),('mic_advanced','running'),('display_manipulate','disabled'))),'r',0))
-            check('nav9 offered while a C4 plugin runs',find('nav9').property('visible'))
-            window.setProperty('page',9);QTest.qWait(50)
+            check('nav9 offered while a C4 plugin runs',offered(window,'percepcao'))
+            window.setProperty('pageId','percepcao');QTest.qWait(50)
             check('perception panel visible on its page',find('perceptionPanel').property('visible'))
             check('synthetic label on screen_observe card',find('perceptionBadge_screen_observe').property('text')=='SINTÉTICO — sem hardware real')
             check('display card shows UNSUPPORTED badge',find('perceptionBadge_display_manipulate').property('text')=='UNSUPPORTED')
@@ -1706,7 +1720,7 @@ def qml_perception_child():
             check('display status button stays disabled while its plugin is not running',find('perception_display_manipulate.status').property('enabled') is False)
             check('result label starts empty',find('perceptionResult').property('text')=='')
             bridge._apply(validate_snapshot(perception_snapshot((('screen_observe','disabled'),)),'r',0))
-            QTest.qWait(50);check('page falls back when no C4 plugin runs',window.property('page')==0)
+            QTest.qWait(50);check('page falls back when no C4 plugin runs',window.property('pageId')=='hoje')
         finally:
             for w in engine.rootObjects():w.close();w.deleteLater()
             QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
@@ -1938,8 +1952,9 @@ def qml_skills_child():
                 return value is True and not expression.hasError()
             weak=skill_item('draft_note',state='draft',source='llm_draft',deps_ok=False,missing=['dummy_echo.echo'])
             bridge._apply(validate_snapshot(skills_snap(skills_block(items=[skill_item(),weak],run=awaiting_run(),history=[HISTORY_ITEM]),llm=True),'r',0))
-            check('nav10 offered while the skill engine answers',find('nav10').property('visible'))
-            window.setProperty('page',10);QTest.qWait(50)
+            check('nav10 offered while the skill engine answers',offered(window,'skills'))
+            window.setProperty('pageId','skills');QTest.qWait(50)
+            find('skillsPanel').setProperty('part','execucoes');QTest.qWait(20)
             check('skills panel visible on its page',find('skillsPanel').property('visible'))
             check('enabled skill row names id and version',find('skillTitle_weather_note_1.0.0').property('text').endswith('weather_note v1.0.0'))
             check('state line shows the Portuguese state',find('skillState_weather_note_1.0.0').property('text').startswith('Estado: habilitada'))
@@ -1956,7 +1971,7 @@ def qml_skills_child():
             find('skillDescription').setProperty('text','ler uma nota');QTest.qWait(20)
             check('Gerar com LLM enabled with a description',find('skillDraftWithLlm').property('enabled'))
             bridge._apply(validate_snapshot(skills_snap(None),'r',0))
-            QTest.qWait(50);check('page falls back when the skill engine is absent',window.property('page')==0)
+            QTest.qWait(50);check('page falls back when the skill engine is absent',window.property('pageId')=='hoje')
         finally:
             for w in engine.rootObjects():w.close();w.deleteLater()
             QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
@@ -2325,8 +2340,8 @@ def qml_connections_child():
             parado=conn_item('gh_2',label='Parado',status='disconnected',granted=(),pending=(),fake=False)
             last={'operation':'repos.list','outcome':'denied','code':'rate_limited'}
             bridge._apply(validate_snapshot(conns_snap(conns_block(items=[gh,ha,parado],last_call=last)),'r',0))
-            check('nav11 offered while connections answer',find('nav11').property('visible'))
-            window.setProperty('page',11);QTest.qWait(50)
+            check('nav11 offered while connections answer',offered(window,'conexoes'))
+            window.setProperty('pageId','conexoes');QTest.qWait(50)
             check('connections panel visible on its page',find('connectionsPanel').property('visible'))
             check('account title names label and provider',find('connTitle_gh_1').property('text')=='Trabalho · GitHub')
             check('fake label shown for a fake account',find('connFake_gh_1').property('visible'))
@@ -2349,19 +2364,81 @@ def qml_connections_child():
             check('write operation has no test button',find('connTest_gh_1_issues.create').property('visible') is False)
             check('last call names the operation and code text',find('connLastCall').property('text').startswith('Última chamada: repos.list · Limite de chamadas'))
             check('last call is PlainText',plain(find('connLastCall')))
-            summary=QQmlExpression(QQmlEngine.contextForObject(window),window,"connProposalText({connection_id:'gh_1',operation:'issues.create',risk:'write'})");text=summary.evaluate();text=text[0] if isinstance(text,tuple) else text
+            summary=QQmlExpression(QQmlEngine.contextForObject(find('chatPage')),find('chatPage'),"connProposalText({connection_id:'gh_1',operation:'issues.create',risk:'write'})");text=summary.evaluate();text=text[0] if isinstance(text,tuple) else text
             check('connection proposal names provider, account, operation and risk',text=='Conexão: GitHub · conta Trabalho (octo-user) · operação issues.create (criar issue) · risco escrita (pede aprovação)' and not summary.hasError())
             check('account name field refuses a blank name',find('connectionAdd').property('enabled') is False)
             find('connectionLabel').setProperty('text','Casa');QTest.qWait(20)
             check('account add enabled with a valid name',find('connectionAdd').property('enabled') is True)
             bridge._apply(validate_snapshot({**BASE,'connections':None},'r',0))
-            QTest.qWait(50);check('page falls back when connections are absent',window.property('page')==0)
+            QTest.qWait(50);check('page falls back when connections are absent',window.property('pageId')=='hoje')
         finally:
             for w in engine.rootObjects():w.close();w.deleteLater()
             QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
             del engine;del bridge
     print(f'qml connections checks ok: {len(checks)}',flush=True)
     return 0
+class EventsGrantsEffects(unittest.TestCase):
+    """Core-side wire additions: event at_ms/origin/outcome, registry risk and effect on tool proposals, approval dates, and the read-only grants view."""
+    EVENT={'sequence':1,'at_ms':1700000000000,'request_id':'','session_id':None,'kind':'tool_proposed','origin':'tool','outcome':'pending'}
+    def test_events_need_unix_ms_closed_origin_and_outcome_in_order(self):
+        validate_snapshot({**BASE,'events':[self.EVENT]},'r',0)
+        bad=[{k:v for k,v in self.EVENT.items() if k!='at_ms'},dict(self.EVENT,at_ms=-1),dict(self.EVENT,at_ms='1700'),dict(self.EVENT,origin='gideon'),dict(self.EVENT,outcome='ok2'),dict(self.EVENT,extra=1)]
+        for event in bad:
+            with self.subTest(event=event),self.assertRaises(ValueError):validate_snapshot({**BASE,'events':[event]},'r',0)
+    def test_events_timestamps_never_decrease(self):
+        first=dict(self.EVENT,sequence=1,at_ms=1700000000500)
+        second=dict(self.EVENT,sequence=2,at_ms=1700000000100)
+        with self.assertRaises(ValueError):validate_snapshot({**BASE,'sequence':2,'events':[first,second]},'r',0)
+        validate_snapshot({**BASE,'sequence':2,'events':[first,dict(second,at_ms=1700000000500)]},'r',0)
+    def test_events_property_exposes_only_the_documented_fields(self):
+        bridge=Bridge('/nonexistent-gideon-root')
+        bridge.snapshot={**BASE,'sequence':1,'events':[dict(self.EVENT,request_id='x')]}
+        self.assertEqual(bridge.events,[{'sequence':1,'at_ms':1700000000000,'kind':'tool_proposed','origin':'tool','outcome':'pending'}])
+    def test_tool_proposals_accept_registry_risk_and_closed_effect_only(self):
+        open_app=dict(tool_item('tool_1_1'),risk='state_changing',effect={'id':'open_app','app':'com.brave.Browser'})
+        self.assertTrue(valid_tools([open_app]))
+        self.assertTrue(valid_tools([dict(tool_item('tool_1_2',tool='get_status',args={}),risk='read',effect={'id':'get_status'})]))
+        self.assertTrue(valid_tools([dict(tool_item('tool_1_3',tool='set_volume',args={'level':40}),risk='state_changing',effect={'id':'set_volume','level':40})]))
+        self.assertTrue(valid_tools([tool_item('tool_1_4')]))
+        bad=[dict(open_app,effect={'id':'shell','cmd':'rm -rf /'}),dict(open_app,effect={'id':'open_app','app':'x y'}),dict(open_app,effect={'id':'open_app','app':'a','level':3}),
+             dict(open_app,effect={'id':'set_volume','level':101}),dict(open_app,effect='abrir o navegador'),dict(open_app,risk='write'),dict(open_app,risk='high'),
+             dict(open_app,connection_id='gh_1'),dict(open_app,operation='repo.read'),
+             dict(open_app,kind='connection',connection_id='gh_1',operation='repo.read',risk='read',effect={'id':'mute'})]
+        for item in bad:
+            with self.subTest(item=item):self.assertFalse(valid_tools([item]))
+        conn=dict(tool_item('tool_1_9',tool='conn:github.repo.read'),kind='connection',connection_id='gh_1',operation='repo.read',risk='read')
+        self.assertTrue(valid_tools([conn]))
+    def test_effect_and_risk_display_text_is_portuguese_and_empty_when_absent(self):
+        self.assertEqual(display_effect({'id':'open_app','app':'com.brave.Browser'}),'Abrir o aplicativo com.brave.Browser')
+        self.assertEqual(display_effect({'id':'set_volume','level':40}),'Definir o volume em 40%')
+        self.assertEqual(display_effect({'id':'mute'}),'Silenciar o áudio')
+        self.assertEqual(display_effect(None),'');self.assertEqual(display_effect({'id':'unknown'}),'')
+        self.assertEqual([display_risk(r) for r in ('read','state_changing','destructive')],['baixo','médio','alto'])
+        self.assertEqual(display_risk(None),'')
+    def test_grants_view_and_pending_count_come_from_the_snapshot(self):
+        snapshot={'hub':{'entries':[
+                    {'plugin_id':'gideon.cal','status':'installed','permissions':['network_llm'],'permissions_approved':True,'approved_at_ms':1700000000000},
+                    {'plugin_id':'gideon.cam','status':'update_available','permissions':['camera_capture'],'permissions_approved':False},
+                    {'plugin_id':'gideon.old','status':'not_installed','permissions':['audio_route'],'permissions_approved':False},
+                    {'plugin_id':'gideon.bad','status':'incompatible','permissions':[],'permissions_approved':False,'reason':'api_version'}]},
+                  'skills':{'items':[{'id':'resumo','name':'Resumo','permissions_ok':False}]},
+                  'connections':{'providers':[{'id':'github','scopes':[{'id':'repo.read','label':'Ler repositórios','access':'read'},{'id':'repo.write','label':'Escrever repositórios','access':'write'}]}],
+                                 'items':[{'id':'gh_1','provider':'github','label':'GitHub','status':'connected','granted_scopes':['repo.read'],'pending_scopes':['repo.write']}]}}
+        self.assertEqual(grant_rows(snapshot),[
+            {'origin':'plugin','owner_id':'gideon.cal','label':'rede do motor LLM','state':'approved','approved_at_ms':1700000000000},
+            {'origin':'plugin','owner_id':'gideon.cam','label':'captura da câmera','state':'pending'},
+            {'origin':'plugin','owner_id':'gideon.old','label':'rota de áudio','state':'not_approved'},
+            {'origin':'skill','owner_id':'resumo','label':'Resumo','state':'pending'},
+            {'origin':'connection','owner_id':'gh_1','label':'Ler repositórios','state':'approved'},
+            {'origin':'connection','owner_id':'gh_1','label':'Escrever repositórios','state':'pending'}])
+        # Plugins installed or updated without approval, plus accounts awaiting consent; skills and not-installed plugins are not counted.
+        self.assertEqual(pending_count(snapshot),2)
+        self.assertEqual(pending_count({}),0)
+    def test_bridge_grants_and_pending_properties_follow_the_snapshot(self):
+        bridge=Bridge('/nonexistent-gideon-root')
+        bridge.snapshot={'hub':{'entries':[{'plugin_id':'gideon.cam','status':'installed','permissions':['camera_capture'],'permissions_approved':False}]}}
+        self.assertEqual(bridge.pendingCount,1);self.assertEqual(bridge.grants[0]['state'],'pending')
+        self.assertEqual(bridge.effectText({'id':'mute'}),'Silenciar o áudio');self.assertEqual(bridge.riskText('destructive'),'alto')
 class DisplayMapping(unittest.TestCase):
     """Round 2 display table (app/bridge.py): raw Core values and English labels become the text the user reads.
     The Core wire values are never changed by these functions."""

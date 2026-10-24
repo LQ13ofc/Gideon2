@@ -8,11 +8,12 @@ from PySide6.QtCore import QCoreApplication,QEvent
 from PySide6.QtQml import QQmlApplicationEngine,qmlRegisterType
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from bridge import Bridge
+from uisettings import UiSettings
 from visual import RoundedImage
 qmlRegisterType(RoundedImage,"Gideon.Visual",1,0,"RoundedImage")
 
 def create(app,root):
-    bridge=Bridge(root);engine=QQmlApplicationEngine();engine.rootContext().setContextProperty('core',bridge);engine.load(str(Path(__file__).with_name('Main.qml')))
+    bridge=Bridge(root);ui=UiSettings(bridge,root,parent=bridge);engine=QQmlApplicationEngine();engine.rootContext().setContextProperty('core',bridge);engine.rootContext().setContextProperty('ui',ui);engine.load(str(Path(__file__).with_name('Main.qml')))
     if not engine.rootObjects():raise RuntimeError('QML load failed')
     if not isinstance(engine.rootObjects()[0],QQuickWindow):raise RuntimeError('Quick window required')
     return bridge,engine

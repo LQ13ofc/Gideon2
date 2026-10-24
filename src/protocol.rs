@@ -301,9 +301,79 @@ pub enum State {
 #[derive(Debug, Clone, Serialize)]
 pub struct Event {
     pub sequence: u64,
+    /// Unix epoch milliseconds, never earlier than the previous event in the ring.
+    pub at_ms: u64,
     pub request_id: String,
     pub session_id: Option<u64>,
     pub kind: &'static str,
+    /// Closed vocabulary derived from `kind` (see `origin_of`).
+    pub origin: &'static str,
+    /// Closed vocabulary (see `outcome_of` and `code_outcome`).
+    pub outcome: &'static str,
+}
+
+/// Unix epoch milliseconds from the wall clock; 0 when the clock is before 1970.
+pub fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// Origin of an event kind. Closed set: core, plugin, hub, skill, connection, tool, agent, llm,
+/// speech, config, registry.
+pub fn origin_of(kind: &str) -> &'static str {
+    const PREFIXES: [(&str, &str); 14] = [
+        ("connection_", "connection"),
+        ("tool_", "tool"),
+        ("agent_", "agent"),
+        ("skill_", "skill"),
+        ("hub_", "hub"),
+        ("plugin_", "plugin"),
+        ("llm_", "llm"),
+        ("transcript_", "speech"),
+        ("speech_", "speech"),
+        ("wake_", "speech"),
+        ("secret_", "config"),
+        ("preferences_", "config"),
+        ("configuration_", "config"),
+        ("registry_", "registry"),
+    ];
+    PREFIXES
+        .iter()
+        .find(|(prefix, _)| kind.starts_with(prefix))
+        .map_or("core", |(_, origin)| origin)
+}
+
+/// Outcome of an event kind. Closed set: ok, pending, denied, failed, expired, cancelled.
+pub fn outcome_of(kind: &str) -> &'static str {
+    if kind.ends_with("_proposed") || kind.ends_with("_previewed") || kind.ends_with("_staged") {
+        "pending"
+    } else if kind.ends_with("_denied") {
+        "denied"
+    } else if kind.ends_with("_failed") || kind.ends_with("_timeout") || kind.ends_with("_error") {
+        "failed"
+    } else if kind.ends_with("_expired") {
+        "expired"
+    } else if kind.ends_with("_cancelled") {
+        "cancelled"
+    } else {
+        "ok"
+    }
+}
+
+/// Outcome of a connection audit code (`ok` or a failure code such as `reauth_required`).
+pub fn code_outcome(code: &str) -> &'static str {
+    if code == "ok" {
+        "ok"
+    } else if code.contains("expired") {
+        "expired"
+    } else if code.contains("denied") {
+        "denied"
+    } else if code.contains("cancel") {
+        "cancelled"
+    } else {
+        "failed"
+    }
 }
 
 #[derive(Debug, Serialize)]

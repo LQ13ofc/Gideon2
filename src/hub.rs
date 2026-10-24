@@ -58,6 +58,9 @@ pub struct Dependency {
 pub struct Entry {
     pub manifest_sha256: String,
     pub permissions_approved: bool,
+    /// Grant date of the current approval (Unix epoch ms); absent when not approved or unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approved_at_ms: Option<u64>,
     pub payload_staged: bool,
     /// Why a staged payload is unusable; only this entry is affected, never the whole Hub.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,15 +196,20 @@ impl Snapshot {
             }
         }
         for entry in &mut self.entries {
-            entry.permissions_approved = matches!(
-                entry.status,
-                "not_installed" | "update_available" | "installed"
-            ) && state.records.iter().any(|r| {
+            let record = state.records.iter().find(|r| {
                 Some(&r.catalog_sha256) == self.catalog_sha256.as_ref()
                     && r.plugin_id == entry.plugin_id
                     && r.manifest_sha256 == entry.manifest_sha256
                     && r.permissions == entry.permissions
             });
+            entry.permissions_approved = matches!(
+                entry.status,
+                "not_installed" | "update_available" | "installed"
+            ) && record.is_some();
+            entry.approved_at_ms = record
+                .filter(|_| entry.permissions_approved)
+                .map(|r| r.approved_at_ms)
+                .filter(|ms| *ms > 0);
         }
         for entry in &mut self.entries {
             match staged(storage, entry) {
@@ -251,6 +259,9 @@ pub(crate) struct Approval {
     manifest_sha256: String,
     permissions: Vec<String>,
     publisher_unverified_ack: bool,
+    /// Unix epoch ms of the grant. 0 for records written before this field existed (date unknown).
+    #[serde(default)]
+    approved_at_ms: u64,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -347,6 +358,7 @@ pub fn approve(
         manifest_sha256: manifest_sha256.to_owned(),
         permissions: permissions.to_vec(),
         publisher_unverified_ack: acknowledged,
+        approved_at_ms: crate::protocol::unix_ms(),
     });
     state.revision = revision.checked_add(1).ok_or("hub_revision_exhausted")?;
     storage
@@ -500,6 +512,7 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                     Sha256::digest(serde_json::to_vec(m).expect("serializable manifest"))
                 ),
                 permissions_approved: false,
+                approved_at_ms: None,
                 payload_staged: false,
                 staged_error: None,
                 payload_sha256: m
@@ -1386,4 +1399,23 @@ fn publish_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
 fn publish_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     std::fs::hard_link(source, destination)?;
     std::fs::remove_file(source)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approval_ledger_without_grant_date_still_loads_with_unknown_date() {
+        // A ledger written before `approved_at_ms` existed: the date defaults to 0 (unknown).
+        let legacy = r#"{"version":1,"revision":1,"records":[{"plugin_id":"gideon.x","catalog_sha256":"a","manifest_sha256":"b","permissions":["network_llm"],"publisher_unverified_ack":true}]}"#;
+        let approvals: Approvals = serde_json::from_str(legacy).unwrap();
+        assert_eq!(approvals.records[0].approved_at_ms, 0);
+        let dated = legacy.replace(
+            r#""publisher_unverified_ack":true"#,
+            r#""publisher_unverified_ack":true,"approved_at_ms":1700000000000"#,
+        );
+        let approvals: Approvals = serde_json::from_str(&dated).unwrap();
+        assert_eq!(approvals.records[0].approved_at_ms, 1_700_000_000_000);
+    }
 }

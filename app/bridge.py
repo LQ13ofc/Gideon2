@@ -32,8 +32,8 @@ TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
-ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
-ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities'}
+ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','approved_at_ms','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
+ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities','approved_at_ms'}
 PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences'})
 PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output'})
 TRANSCRIPT_KEYS=frozenset({'source','session_id','revision','audio_end_us','raw','normalized','is_final','confidence'})
@@ -42,7 +42,14 @@ SPEECH_KEYS=frozenset({'output_volume_percent','session_id','sample_rate','sampl
 COMMAND_KEYS=frozenset({'session_id','code','receipt'})
 RECEIPT_KEYS=frozenset({'job','verified','scope','result'})
 JOB_KEYS=frozenset({'session_id','command'})
-EVENT_KEYS=frozenset({'sequence','request_id','session_id','kind'})
+# Snapshot events (src/core.rs emit_with, src/protocol.rs origin_of/outcome_of/code_outcome). Closed vocabularies; at_ms is Unix ms and never decreases.
+EVENT_KEYS=frozenset({'sequence','at_ms','request_id','session_id','kind','origin','outcome'})
+EVENT_ORIGINS=('core','plugin','hub','skill','connection','tool','agent','llm','speech','config','registry')
+EVENT_OUTCOMES=('ok','pending','denied','failed','expired','cancelled')
+# Registry tool proposals (src/tools.rs): risk class names, and the effect templates with their exact parameters.
+TOOL_RISKS=('read','state_changing','destructive','public')
+EFFECT_PARAMS={'open_app':('app',),'set_volume':('level',),'mute':(),'get_status':(),'get_time':(),'get_date':()}
+APP_ID=re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,119}')
 def utf8_len(text):return len(text.encode('utf-8'))
 def digest(value):return isinstance(value,str) and len(value)==64 and all(c in HEX for c in value)
 def text_problem(text):
@@ -329,7 +336,7 @@ def valid_tools(items):
     if not (isinstance(items,list) and len(items)<=TOOL_ITEMS):return False
     ids=set()
     for item in items:
-        if not (isinstance(item,dict) and TOOL_KEYS<=set(item)<=TOOL_KEYS|AGENT_PROPOSAL_KEYS|CONN_PROPOSAL_KEYS):return False
+        if not (isinstance(item,dict) and TOOL_KEYS<=set(item)<=TOOL_KEYS|AGENT_PROPOSAL_KEYS|CONN_PROPOSAL_KEYS|{'effect'}):return False
         pid=item['proposal_id']
         if not (isinstance(pid,str) and PROPOSAL_ID.fullmatch(pid) and pid not in ids):return False
         ids.add(pid)
@@ -346,10 +353,18 @@ def valid_tools(items):
         if not valid_conn_proposal(item):return False
     return True
 def valid_conn_proposal(item):
-    """S5 (docs/S5.md E1): kind 'connection' carries connection_id, operation and risk, never an agent run; any other proposal carries none of them."""
+    """S5 (docs/S5.md E1): kind 'connection' carries connection_id, operation and risk, never an agent run or effect. Other proposals carry no connection fields; a registry tool may carry risk (TOOL_RISKS) and effect (closed template)."""
     if 'kind' in item and item['kind'] not in ('tool','connection'):return False
-    if item.get('kind')!='connection':return not set(item)&(CONN_PROPOSAL_KEYS-{'kind'})
-    return {'connection_id','operation','risk'}<=set(item) and conn_id_ok(item['connection_id']) and isinstance(item['operation'],str) and CONN_NAME.fullmatch(item['operation']) is not None and item['risk'] in CONN_ACCESS
+    if item.get('kind')!='connection':
+        if set(item)&{'connection_id','operation'}:return False
+        if 'risk' in item and item['risk'] not in TOOL_RISKS:return False
+        return 'effect' not in item or valid_effect(item['effect'])
+    return {'connection_id','operation','risk'}<=set(item) and 'effect' not in item and conn_id_ok(item['connection_id']) and isinstance(item['operation'],str) and CONN_NAME.fullmatch(item['operation']) is not None and item['risk'] in CONN_ACCESS
+def valid_effect(effect):
+    """Registry effect (src/tools.rs Effect): a known template id, exactly its own parameters, bounded values. Never free text."""
+    if not (isinstance(effect,dict) and effect.get('id') in EFFECT_PARAMS and set(effect)=={'id',*EFFECT_PARAMS[effect['id']]}):return False
+    if 'app' in effect and not (isinstance(effect['app'],str) and APP_ID.fullmatch(effect['app'])):return False
+    return 'level' not in effect or is_int(effect['level'],0,100)
 def agent_goal_problem(goal):
     """Rule for agentStart (docs/C3.md): trimmed, 1..=1024 UTF-8 bytes, no control characters. None means the goal may be sent (the trimmed text)."""
     try:
@@ -534,6 +549,8 @@ def validate_snapshot(data,request_id,min_sequence):
         if hub.get('import') is not None:
             transfer=hub['import'];require(isinstance(transfer,dict) and set(transfer)=={'import_id','plugin_id','received','expected'} and short(transfer.get('import_id')) and short(transfer.get('plugin_id')) and integer(transfer.get('expected'),1,67108864) and integer(transfer.get('received'),0,transfer['expected']))
         entries=hub.get('entries');require(isinstance(entries,list) and len(entries)<=8 and all(isinstance(e,dict) and set(e)<=ENTRY_KEYS and ENTRY_REQUIRED<=set(e) for e in entries))
+        # Grant date only on an approved entry; a record from before the date existed has none (the Core omits it).
+        require(all('approved_at_ms' not in e or (e['permissions_approved'] is True and integer(e['approved_at_ms'],1)) for e in entries))
         installed=hub.get('installed');require(integer(hub.get('install_revision')) and isinstance(installed,list) and len(installed)<=8 and (hub['status']=='verified' or not installed))
         records={}
         for record in installed:
@@ -656,13 +673,15 @@ def validate_snapshot(data,request_id,min_sequence):
             kind=job['command'].get('kind');require(kind in COMMAND_KINDS and set(job['command'])=={'kind',*COMMAND_KINDS[kind]})
     if 'events' in data:
         require(isinstance(data['events'],list) and len(data['events'])<=64)
-        previous=-1
+        previous=-1;previous_ms=0
         for event in data['events']:
             require(isinstance(event,dict) and set(event)==EVENT_KEYS)
             require(integer(event.get('sequence')) and previous<event['sequence']<=data['sequence'])
             require(short(event.get('kind')) and short(event.get('request_id')))
             require('session_id' in event and (event['session_id'] is None or sid(event['session_id'])))
-            previous=event['sequence']
+            require(integer(event.get('at_ms')) and event['at_ms']>=previous_ms)
+            require(event.get('origin') in EVENT_ORIGINS and event.get('outcome') in EVENT_OUTCOMES)
+            previous=event['sequence'];previous_ms=event['at_ms']
     return data
 
 PREFS_DONE='Preferências salvas pelo Core'
@@ -685,6 +704,11 @@ CODE_MESSAGES={
     'cancelled':'Cancelado',
     'capture_completed':'Captura concluída',
     'replaying':'Reprodução em andamento',
+    # Preferências do app e do Core (app/uisettings.py e preferências da ponte).
+    'stale_preferences':'Configurações mudaram no Core; atualize e tente de novo',
+    'invalid_preferences':'Preferências recusadas pelo Core: valor inválido; nada foi salvo',
+    'preferences_storage_error':'Preferências indisponíveis: o arquivo de configuração não pôde ser lido ou gravado',
+    'preferences_unavailable':'Preferências indisponíveis agora; tente quando o Gideon estiver em espera',
     # C1: LLM engine, secrets and tool proposals (Core codes from src/llmcfg.rs, src/core.rs, src/tools.rs).
     'key_missing':'Chave ausente para este provedor',
     'provider_not_configured':'Provedor não configurado',
@@ -776,8 +800,53 @@ PERMISSION_LABELS={'network_llm':'rede do motor LLM','storage_settings':'armazen
 def display_permission(permission):
     """Permission id as the user reads it. Unknown ids are shown as the Core sent them (they are never translated by guess)."""
     return PERMISSION_LABELS.get(permission,permission or '')
+# Registry effect templates (src/tools.rs effect) and risk classes as Portuguese text. Unknown ids show no text (QML shows the absence text).
+EFFECT_TEXT={'open_app':'Abrir o aplicativo {app}','set_volume':'Definir o volume em {level}%','mute':'Silenciar o áudio',
+             'get_status':'Consultar o estado do sistema','get_time':'Consultar a hora','get_date':'Consultar a data'}
+RISK_TEXT={'read':'baixo','state_changing':'médio','destructive':'alto','public':'alto'}
+def display_effect(effect):
+    """Portuguese sentence for a registry effect, or '' when the proposal has no effect (the card then says 'não informado pelo plugin')."""
+    if not (isinstance(effect,dict) and effect.get('id') in EFFECT_TEXT):return ''
+    return EFFECT_TEXT[effect['id']].format(app=effect.get('app',''),level=effect.get('level',''))
+def display_risk(risk):
+    """'baixo', 'médio' or 'alto'; '' when the proposal declares no risk (the card then says 'não declarado')."""
+    return RISK_TEXT.get(risk,'')
+def grant_rows(snapshot):
+    """Read-only Concessões rows (docs/ui-spec/30-permissoes.md §6), built only from the snapshot. Plugins: hub entries except incompatible ones. Skills: one row per skill item. Accounts: one approved row for granted scopes and one pending row for scopes awaiting consent."""
+    rows=[]
+    for entry in (snapshot.get('hub') or {}).get('entries') or []:
+        if entry.get('status')=='incompatible':continue
+        approved=entry.get('permissions_approved') is True
+        if approved:state='approved'
+        elif entry.get('status') in ('installed','update_available') and entry.get('permissions'):state='pending'
+        else:state='not_approved'
+        row={'origin':'plugin','owner_id':entry['plugin_id'],'label':', '.join(display_permission(p) for p in entry.get('permissions') or []) or 'sem permissões','state':state}
+        if approved and 'approved_at_ms' in entry:row['approved_at_ms']=entry['approved_at_ms']
+        rows.append(row)
+    for item in (snapshot.get('skills') or {}).get('items') or []:
+        rows.append({'origin':'skill','owner_id':item['id'],'label':item['name'],'state':'approved' if item['permissions_ok'] else 'pending'})
+    conn=snapshot.get('connections') or {}
+    labels={(p['id'],s['id']):s['label'] for p in conn.get('providers') or [] for s in p['scopes']}
+    for item in conn.get('items') or []:
+        for scopes,state in ((item.get('granted_scopes') or [],'approved'),(item.get('pending_scopes') or [],'pending')):
+            if scopes:rows.append({'origin':'connection','owner_id':item['id'],'label':', '.join(labels.get((item['provider'],s),s) for s in scopes),'state':state})
+    return rows
+def pending_count(snapshot):
+    """P of docs/ui-spec/30-permissoes.md §8: installed or updated plugins with permissions and no approval, plus accounts with scopes awaiting consent, plus MCP accounts with a tool that needs re-approval. Skills and action proposals are not counted."""
+    count=sum(1 for e in (snapshot.get('hub') or {}).get('entries') or [] if e.get('permissions') and not e.get('permissions_approved') and e.get('status') in ('installed','update_available'))
+    items=(snapshot.get('connections') or {}).get('items') or []
+    count+=sum(1 for i in items if i.get('pending_scopes'))
+    return count+sum(1 for i in items if any(t.get('state')=='needs_reapproval' for t in i.get('tools') or []))
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
-def code_message(code):return CODE_MESSAGES.get(code,f'Core recusou a ação: {code}')
+# Raw Core codes never reach the screen. Unknown codes get one generic sentence; the code is appended only when the advanced setting (behavior.advanced) is on.
+GENERIC_FAILURE='Não foi possível concluir a operação.'
+CODE_DETAIL={'on':False}
+def set_code_detail(on):CODE_DETAIL['on']=bool(on)
+def code_message(code):
+    text=CODE_MESSAGES.get(code) if isinstance(code,str) else None
+    if text is not None:return text
+    if CODE_DETAIL['on'] and isinstance(code,str) and SNAKE_CODE.fullmatch(code):return f'{GENERIC_FAILURE} Código: {code}'
+    return GENERIC_FAILURE
 # S4 skills (docs/S4.md D1-D4). The Core owns manifests, the ledger, dependencies and every transition; this layer checks the shape and size of what it shows and sends.
 SKILL_STATES=('draft','validated','tested','approved','enabled','disabled','revised');SKILL_SOURCES=('created','imported','llm_draft')
 SKILL_RUN_STATES=('running','awaiting_approval','done','failed','cancelled','rolled_back');SKILL_STEP_STATES=('pending','running','awaiting_approval','done','failed','denied','undone','cancelled')
@@ -1097,13 +1166,13 @@ PENDING.update({
 })
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
-    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal()
+    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
     def __init__(self,root):
@@ -1156,7 +1225,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -1279,6 +1348,16 @@ class Bridge(QObject):
     def providerLabel(self,provider):return display_provider(provider)
     @Slot(str,result=str)
     def permissionLabel(self,permission):return display_permission(permission)
+    @Slot('QVariantMap',result=str)
+    def effectText(self,effect):return display_effect(effect)
+    @Slot(str,result=str)
+    def riskText(self,risk):return display_risk(risk)
+    @Property('QVariantList',notify=eventsChanged)
+    def events(self):return [{k:e.get(k) for k in ('sequence','at_ms','kind','origin','outcome')} for e in self.snapshot.get('events') or []]
+    @Property('QVariantList',notify=changed)
+    def grants(self):return grant_rows(self.snapshot)
+    @Property(int,notify=changed)
+    def pendingCount(self):return pending_count(self.snapshot)
     @Property(str,notify=chatChanged)
     def chatState(self):
         if self.chat_inflight is not None:return 'streaming' if self.snapshot.get('partial') else 'waiting'

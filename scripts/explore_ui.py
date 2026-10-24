@@ -3,21 +3,21 @@
 
 Run: target/ui-venv/bin/python -I -B scripts/explore_ui.py --root ABS_CORE_ROOT [--out DIR] [--pages "Conversa,Plugins"]
 Round 2: start the populated private Core first with scripts/explore_setup.py (it prints ROOT=...). The root must be
-that private Core (a path containing GideonTeste is refused). --pages takes page labels (accent-insensitive) and
-the token "Plugins" (Gideon Hub dialog) or "Preferências"; without it every page is visited plus dialogs, Tab focus
-and the resize pass.
+that private Core (a path containing GideonTeste is refused). --pages takes page labels (accent-insensitive); without
+it every page is visited (through its tab and sub-tab), plus the Motor LLM form, Tab focus and the resize pass.
 
 The app is loaded in-process exactly like app/main.py (same create(), same QT_QUICK_CONTROLS_STYLE=Basic).
+Navigation is the window's own shell: a level-1 tab (objectName tab_<tab>), then a level-2 sub-tab (subtab_<page>).
 Every interaction is an event delivered to our own QQuickWindow (QMouseEvent / QKeyEvent sent with
 QCoreApplication.sendEvent, the same events QTest.mouseClick / keyClick build). QTest's own helpers deadlock
 with the Qt render thread here (RoundedImage.paint needs the GIL), so they are not used. Nothing is injected
 system-wide and nothing is clicked outside the window.
 
-Safety: only navigation, tab switches, dialog openers, read-only probes (Simular/Validar dry runs, Testar leitura,
-Planejar, Capturar, Árvore, Estado, Atualizar) and Escape are clicked. Destructive, consenting, connecting, installing,
-approving, exporting, saving, starting-agent and key buttons are recorded as skipped (whitelist, not blacklist).
-Typed text: an invalid model id into the Motor LLM field (validator check, nothing saved) and ONE chat message
-on the Conversa page to the scripted fake LLM (the page's own send button). Nothing is saved or sent elsewhere.
+Safety: only navigation, tab switches, read-only probes (Simular/Validar dry runs, Testar leitura, Planejar,
+Capturar, Árvore, Estado, Atualizar, model selection in the list) and Escape are clicked. Destructive, consenting,
+connecting, installing, approving, exporting, saving, starting-agent, key and appearance buttons are recorded as
+skipped (whitelist, not blacklist). Typed text: an invalid model id into the Motor LLM field (validator check, nothing
+saved) and ONE chat message on the Conversa page to the scripted fake LLM (the page's own send button).
 """
 import argparse, json, os, re, sys, time, traceback
 from pathlib import Path
@@ -30,7 +30,7 @@ DEFAULT_OUT = '/tmp/claude-1000/ui-shots2'
 parser = argparse.ArgumentParser()
 parser.add_argument('--root', required=True, help='absolute root of the private test Core (scripts/explore_setup.py)')
 parser.add_argument('--out', default=DEFAULT_OUT)
-parser.add_argument('--pages', default='', help='comma list of page labels or "Plugins" / "Preferências"; default all')
+parser.add_argument('--pages', default='', help='comma list of page labels (for example "Conversa,Plugins"); default all')
 args = parser.parse_args()
 
 if 'offscreen' in os.environ.get('QT_QPA_PLATFORM', ''):
@@ -53,13 +53,12 @@ from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPointF, QRect, QR
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtGui import QKeyEvent, QMouseEvent
-from PySide6.QtCore import QEvent
 from main import create  # app/main.py: registers Gideon.Visual and defines create(app, root)
 
 
 def pump_events(seconds):
-    """Process Qt events while sleeping. time.sleep releases the GIL: the Qt render thread calls
-    RoundedImage.paint (Python) and blocks on the GIL if the main thread blocks inside C++ waits."""
+    """Process Qt events while sleeping. time.sleep releases the GIL: the Qt render thread may call into Python
+    and blocks on the GIL if the main thread blocks inside C++ waits."""
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         QCoreApplication.processEvents()
@@ -95,9 +94,8 @@ class Input:
         for ch in text:
             Input.keyClicks_raw(target, 0, Qt.KeyboardModifier.NoModifier, ch)
 
-# Qt messages: a Python qInstallMessageHandler deadlocks here (Qt render thread waits for the GIL while the
-# main thread sits in Input.qWait), so Qt's own C++ handler writes to stderr and fd 2 is redirected to a private log.
-# collect_messages() reads what Qt wrote since the last call. Same information, no GIL in the Qt callback path.
+# Qt messages: a Python qInstallMessageHandler deadlocks here, so Qt's own C++ handler writes to stderr and fd 2 is
+# redirected to a private log. collect_messages() reads what Qt wrote since the last call.
 MESSAGES = []
 MSG_LOG = out / 'qt-stderr.log'
 _msg_fd = os.open(MSG_LOG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -137,17 +135,18 @@ REPORT = {'platform': app.platformName(), 'root': str(root), 'out': str(out), 's
           'pages': [], 'resize': [], 'tab_focus': [], 'dialogs': [], 'exceptions': [], 'notes': []}
 EXC = REPORT['exceptions']
 
-DIALOGS = ['preferencesDialog', 'hubDialog', 'llmDialog', 'hubReviewDialog', 'removeConfirm', 'revokeConfirm',
-           'removeCustomConfirm', 'clearPluginConfirm', 'removeSkillConfirm']
+# Overlays: the modal dialogs (Motor LLM, confirmations) and the command palette.
+DIALOGS = ['llmDialog', 'hubReviewDialog', 'removeConfirm', 'revokeConfirm', 'removeCustomConfirm', 'clearPluginConfirm',
+           'removeSkillConfirm', 'restoreConfirm', 'devModeConfirm', 'recoverConfirm']
 # Buttons whose click only reads, navigates or opens a dialog. Anything else is skipped (see module docstring).
-# 'Abrir' (round 1) launched an app through the command sandbox on Início: no longer clicked.
-SAFE_TEXT = {'Abrir ajustes da Base', 'Explorar catálogo', 'Motor LLM', 'Planejar', 'Estado', 'Árvore', 'Capturar',
-             'Revisar permissões', 'Fechar', 'Close', 'Recomendados', 'Personalizados', 'Carregar mais',
-             'Atualizar lista', 'Simular', 'Validar', 'Atualizar', 'Testar leitura'}
-SAFE_OBJECTS = {'hubButton', 'settingsButton'}
+SAFE_TEXT = {'Abrir Motor LLM', 'Configurar provedor e chaves', 'Planejar', 'Estado', 'Árvore', 'Capturar',
+             'Revisar', 'Revisar permissões', 'Fechar', 'Close', 'Recomendados', 'Personalizados', 'Carregar mais',
+             'Atualizar lista', 'Simular', 'Validar', 'Atualizar', 'Testar leitura', 'Ver em Extensões › Percepção e ação',
+             'Ver em Extensões › Plugins'}
+SAFE_OBJECTS = {'llmOpenButtonModels', 'llmOpenButton', 'paletteButton'}
 # Per-row read-only buttons: skill detail selection, model/connection list refresh and tabs, route planning, dry runs.
 SAFE_PREFIXES = ('skillPermissions_', 'skillDryRun_', 'skillValidate', 'modelsTab', 'modelsLoadMore', 'modelsRefresh',
-                 'connRefresh_', 'connTest_', 'routePlan_')
+                 'connRefresh_', 'connTest_', 'routePlan_', 'perception_', 'model_')
 # Raw or English strings that must not reach the user, plus the labels the spec requires (SINTÉTICO/UNSUPPORTED).
 FLAG_RE = re.compile(r'\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b|\b[a-z]+_[a-z_]+\b|\bDEV\b|\bPOC\b|\bUNSUPPORTED\b|\b(?:Ready|Error|Failed|'
                      r'Loading|Pending|Connected|Disconnected|Revoked|Unavailable|Enable|Disable|Save|Cancel|Remove|Install|'
@@ -160,7 +159,7 @@ def msg_count():
 
 
 def all_items():
-    """Visual tree from the content item and the overlay (dialogs). Delegates are not reachable with findChild."""
+    """Visual tree from the content item and the overlay (dialogs, palette). Delegates are not reachable with findChild."""
     out, stack = [], [window.contentItem(), window.property('overlay')]
     while stack:
         cur = stack.pop()
@@ -296,13 +295,13 @@ def disabled_buttons():
     return out
 
 
-def safe_candidates(page_index):
+def safe_candidates(page_id):
     out = []
     for item in all_items():
         if not (is_button(item) or is_tab(item)) or not eff_visible(item) or item.property('enabled') is False:
             continue
         name = item.objectName()
-        if name.startswith('nav') or name in DIALOGS:
+        if name.startswith(('tab_', 'subtab_')) or name in DIALOGS:
             continue
         text = str(item.property('text') or '')
         if not (is_tab(item) or text in SAFE_TEXT or name in SAFE_OBJECTS or name.startswith(SAFE_PREFIXES)):
@@ -317,7 +316,7 @@ def safe_candidates(page_index):
 def skipped_buttons():
     out = []
     for item in all_items():
-        if not is_button(item) or not eff_visible(item) or item.objectName().startswith('nav'):
+        if not is_button(item) or not eff_visible(item):
             continue
         text = str(item.property('text') or '')
         if text in SAFE_TEXT or item.objectName() in SAFE_OBJECTS or item.objectName().startswith(SAFE_PREFIXES):
@@ -328,28 +327,21 @@ def skipped_buttons():
     return out[:80]
 
 
-def reveal(item):
-    """Scroll the sidebar list (navFlick) so the item's centre is inside its viewport before a mouse click."""
-    flick = find('navFlick')
-    if flick is None or item is None:
-        return
-    top = flick.mapToScene(QPointF(0, 0)).y()
-    rel = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).y() - top
-    if 0 <= rel <= flick.height():
-        return
-    target = flick.property('contentY') + rel - flick.height() / 2
-    flick.setProperty('contentY', max(0.0, min(float(target), float(flick.property('contentHeight')) - flick.height())))
-    settle(150)
-
-
-def go(index):
-    nav = find(f'nav{index}')
-    if nav is None or not eff_visible(nav):
+def go_page(page_id):
+    """Open a page the way a user does: its tab (tab_<tab>) when its sub-tab is not in the bar, then the sub-tab (subtab_<page>)."""
+    sub = find(f'subtab_{page_id}')
+    if sub is None or not eff_visible(sub):
+        tab = find(f'tab_{TAB_OF.get(page_id, "")}')
+        if tab is None:
+            return False
+        click(tab)
+        settle(450)
+        sub = find(f'subtab_{page_id}')
+    if sub is None or not eff_visible(sub):
         return False
-    reveal(nav)
-    click(nav)
+    click(sub)
     settle(700)
-    return window.property('page') == index
+    return window.property('pageId') == page_id
 
 
 def slug(text):
@@ -380,7 +372,7 @@ def chat_once():
     settle(2500)
     collect_messages()
     return {'sent': True, 'via': how, 'messages': MESSAGES[before:][:10],
-            'state': str(window.property('page')), 'chat_state_text': [t for t in visible_texts() if 'Estado' in t or 'Resposta' in t or 'Pensando' in t][:6]}
+            'state': str(window.property('pageId')), 'chat_state_text': [t for t in visible_texts() if 'Estado' in t or 'Resposta' in t or 'Pensando' in t][:6]}
 
 
 def shot(name):
@@ -400,31 +392,40 @@ def bridge_state():
 REPORT['bridge_at_start'] = {'connected': wait_until(lambda: bridge.connected, 12)}
 settle(800)
 REPORT['window'] = {'width': window.width(), 'height': window.height(), 'minimum': [window.property('minimumWidth'), window.property('minimumHeight')]}
-_nav = window.property('navigation')
-NAVIGATION = [str(x) for x in (_nav.toVariant() if hasattr(_nav, 'toVariant') else _nav)]
-REPORT['navigation'] = NAVIGATION
+_defs = window.property('pageDefs')
+_defs = _defs.toVariant() if hasattr(_defs, 'toVariant') else _defs
+PAGE_DEFS = [dict(d) for d in _defs]
+TAB_OF = {d['id']: d['tab'] for d in PAGE_DEFS}
+PAGES = [(d['id'], d['label']) for d in PAGE_DEFS]
+# The pages the Core offers now (the sub-bar lists only the active tab's pages, so the window's list decides).
+_offered = window.property('offeredPages')
+_offered = _offered.toVariant() if hasattr(_offered, 'toVariant') else _offered
+OFFERED = {str(x) for x in _offered}
+REPORT['pages_declared'] = [p for _, p in PAGES]
 window.requestActivate()
 settle(300)
 
-# ---- 2. page sweep -----------------------------------------------------------------------------------------------
-for index, label in enumerate(NAVIGATION):
+# ---- 2. page sweep (each page through its tab and sub-tab) --------------------------------------------------------
+for index, (page_id, label) in enumerate(PAGES):
     if not want(label):
         continue
-    page = {'index': index, 'name': label, 'visible_in_nav': False, 'reached': False, 'exceptions': [], 'clicks': [], 'skipped': [],
-            'disabled': [], 'texts': [], 'geometry': [], 'messages_from': msg_count()}
+    page = {'index': index, 'name': label, 'id': page_id, 'visible_in_nav': False, 'reached': False, 'exceptions': [], 'clicks': [],
+            'skipped': [], 'disabled': [], 'texts': [], 'geometry': [], 'messages_from': msg_count()}
     REPORT['pages'].append(page)
-    nav = find(f'nav{index}')
-    page['visible_in_nav'] = bool(nav is not None and eff_visible(nav))
+    page['visible_in_nav'] = page_id in OFFERED
     if not page['visible_in_nav']:
-        page['note'] = 'not offered by this Core (nav hidden)'
+        page['note'] = 'not offered by this Core (sub-tab hidden)'
         continue
     try:
-        page['reached'] = go(index)
+        page['reached'] = go_page(page_id)
         if not page['reached']:
-            page['note'] = f"page did not switch (page={window.property('page')})"
+            page['note'] = f"page did not open (pageId={window.property('pageId')}; sub-tab offered: {page['visible_in_nav']})"
+            page['messages_to'] = msg_count()
+            page['messages'] = MESSAGES[page['messages_from']:page['messages_to']][:60]
+            continue
         settle(900)
         page['bridge'] = bridge_state()
-        name = f'{index:02d}-{slug(label)}'
+        name = f'{index:02d}-{page_id}'
         page['screenshot'] = shot(name)
         page['geometry'] = geometry_issues()
         page['texts'] = visible_texts()
@@ -433,7 +434,7 @@ for index, label in enumerate(NAVIGATION):
         # Safe clicks, one at a time, re-discovering buttons after each click (layouts change).
         done = set()
         for _ in range(40):
-            cands = [c for c in safe_candidates(index) if c[0] not in done]
+            cands = [c for c in safe_candidates(page_id) if c[0] not in done]
             if not cands:
                 break
             key, item, text = cands[0]
@@ -443,15 +444,15 @@ for index, label in enumerate(NAVIGATION):
             settle(800)
             closed = close_open_dialogs()
             collect_messages()
-            entry = {'text': text, 'objectName': item.objectName(), 'via': how, 'page_after': window.property('page'),
+            entry = {'text': text, 'objectName': item.objectName(), 'via': how, 'pageId_after': window.property('pageId'),
                      'closed_dialogs': closed, 'messages': MESSAGES[before_msgs:][:10], 'bridge': bridge_state()}
             page['clicks'].append(entry)
-            if window.property('page') != index:
-                go(index)
+            if window.property('pageId') != page_id:
+                go_page(page_id)
                 settle(500)
         if page['clicks']:
             page['screenshot_after_clicks'] = shot(f'{name}-after-clicks')
-        if index == 7 and window.property('page') == index:
+        if page_id == 'conversa' and window.property('pageId') == page_id:
             page['chat'] = chat_once()
             page['screenshot_after_chat'] = shot(f'{name}-after-chat')
         page['geometry_after_clicks'] = geometry_issues()
@@ -465,49 +466,37 @@ for index, label in enumerate(NAVIGATION):
     page['messages_to'] = msg_count()
     page['messages'] = MESSAGES[page['messages_from']:page['messages_to']][:60]
 
-# ---- 3. dialogs: open, look, close (Escape only; Motor LLM gets one invalid-character probe, nothing saved) ----
-go(0)
-settle(500)
-DIALOG_OPENERS = [('preferences', 'settingsButton', 'Preferências'), ('hub', 'hubButton', 'Plugins')]
+# ---- 3. Motor LLM form (Configurações > Privacidade opens it): open, look, close (Escape only; one invalid-character probe, nothing saved)
 try:
-    for label, opener, token in DIALOG_OPENERS:
-        if WANT is not None and not want(token):
-            continue
-        btn = find(opener)
-        reveal(btn)
-        click(btn)
-        dialog = window.findChild(QObject, 'preferencesDialog' if label == 'preferences' else 'hubDialog')
-        ok = wait_until(lambda: dialog.property('visible'), 3)
-        settle(700)
-        entry = {'dialog': label, 'opened': ok, 'screenshot': shot(f'dialog-{label}'), 'geometry': geometry_issues(), 'texts': visible_texts()[:80]}
-        if label == 'preferences':
+    if WANT is None or want('Configurações') or want('Privacidade') or want('Motor LLM'):
+        if go_page('cfg_privacidade'):
+            settle(400)
             llm_open = find('llmOpenButton')
             if llm_open is not None and eff_visible(llm_open):
                 click(llm_open)
                 llm = window.findChild(QObject, 'llmDialog')
-                entry['llm_opened'] = wait_until(lambda: llm.property('visible'), 3)
+                entry = {'dialog': 'llm', 'opened': wait_until(lambda: llm.property('visible'), 3)}
                 settle(600)
-                entry['llm_screenshot'] = shot('dialog-llm')
-                entry['llm_geometry'] = geometry_issues()
+                entry['screenshot'] = shot('dialog-llm')
+                entry['geometry'] = geometry_issues()
                 field = find('llmModel')
-                if field is not None and entry['llm_opened']:
+                if field is not None and entry['opened']:
                     field.forceActiveFocus()
                     Input.keyClicks(window, '!!')
                     Input.qWait(200)
                     entry['llm_invalid_char_text'] = str(field.property('text'))
                     field.setProperty('text', '')
                     settle(200)
-                entry['llm_closed'] = close_open_dialogs()
-        entry['closed'] = close_open_dialogs()
-        REPORT['dialogs'].append(entry)
-except Exception as exc:
+                entry['closed'] = close_open_dialogs()
+                REPORT['dialogs'].append(entry)
+except Exception:
     tb = traceback.format_exc()
     EXC.append({'where': 'dialogs', 'trace': tb})
     REPORT['dialogs'].append({'error': tb})
 
-# ---- 4. keyboard Tab focus on the Início page ------------------------------------------------------------------
+# ---- 4. keyboard Tab focus on Hoje ------------------------------------------------------------------------------
 try:
-    go(0)
+    go_page('hoje')
     settle(500)
     window.requestActivate()
     for i in range(8 if WANT is None else 0):
@@ -519,22 +508,21 @@ try:
                                     'text': str(focus.property('text') or '')[:60] if focus else None})
         if i == 3:
             REPORT['tab_focus_screenshot'] = shot('tab-focus-press4')
-except Exception as exc:
+except Exception:
     EXC.append({'where': 'tab', 'trace': traceback.format_exc()})
 
-# ---- 5. resize: 1000x700 and 600x500 on every visible page -----------------------------------------------------
-for size in ([(1000, 700), (600, 500)] if WANT is None else []):
-    for index, label in enumerate(NAVIGATION):
-        nav = find(f'nav{index}')
-        if nav is None or not eff_visible(nav):
+# ---- 5. resize: 1000x700 and 600x500 on every offered page (narrow mode below 900 px: icon-only tabs) ------------
+for size in ([(900, 700), (600, 500)] if WANT is None else []):
+    for index, (page_id, label) in enumerate(PAGES):
+        if page_id not in OFFERED:
             continue
         try:
             window.setProperty('width', size[0])
             window.setProperty('height', size[1])
             settle(250)
-            go(index)
+            go_page(page_id)
             settle(700)
-            name = f'{index:02d}-{slug(label)}-{size[0]}x{size[1]}'
+            name = f'{index:02d}-{page_id}-{size[0]}x{size[1]}'
             rec = {'page': label, 'requested': list(size), 'actual': [window.width(), window.height()], 'screenshot': shot(name),
                    'geometry': geometry_issues()}
             REPORT['resize'].append(rec)
@@ -571,7 +559,7 @@ REPORT['finished'] = time.strftime('%Y-%m-%d %H:%M:%S')
 (out / 'report.json').write_text(json.dumps(REPORT, ensure_ascii=False, indent=2), encoding='utf-8')
 
 visited = [p['name'] for p in REPORT['pages'] if p.get('reached')]
-print(f"platform={REPORT['platform']} pages_visited={len(visited)} of {len(NAVIGATION)}")
+print(f"platform={REPORT['platform']} pages_visited={len(visited)} of {len(PAGES)}")
 print('visited:', ', '.join(visited))
 print(f"messages(warning/critical/fatal)={len(MESSAGES)} exceptions={len(EXC)}")
 geo = [(p['name'], g) for p in REPORT['pages'] for g in (p.get('geometry') or [])]

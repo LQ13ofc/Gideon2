@@ -371,8 +371,9 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     for app_file in ("main.py", "bridge.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
         copy_file(app_src / app_file, pkg / "app" / app_file)
     shutil.copytree(app_src / "assets", pkg / "app/assets", ignore=ignore_pycache)
-    # Sidebar icons (Main.qml loads "icons/<name>.svg" relative to the QML file, in the repo and in the package).
-    shutil.copytree(app_src / "icons", pkg / "app/icons", ignore=ignore_pycache)
+    # Shell and pages: theme singleton, components, page files, window shell, icons (QML loads them relative to each file).
+    for app_dir in ("theme", "components", "pages", "shell", "icons"):
+        shutil.copytree(app_src / app_dir, pkg / "app" / app_dir, ignore=ignore_pycache)
     copy_file(packaged_binary, pkg / "bin/gideon-base")
     if not supports_home(pkg / "bin/gideon-base"):
         die("packaged gideon-base does not parse --home; gideon-core cannot start S1 (rebuild the binary)")

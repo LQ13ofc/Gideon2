@@ -2135,7 +2135,8 @@ pub struct Manager {
     settled: Vec<Settled>,
     /// Seconds to wait when the budget refused the last call (for `retry_after`).
     last_wait: u64,
-    events: VecDeque<&'static str>,
+    /// Ring events for the snapshot: (kind, closed outcome).
+    events: VecDeque<(&'static str, &'static str)>,
     audit: VecDeque<Audit>,
 }
 
@@ -2392,7 +2393,8 @@ impl Manager {
         if self.events.len() == AUDIT_MAX {
             self.events.pop_front();
         }
-        self.events.push_back(kind);
+        self.events
+            .push_back((kind, crate::protocol::code_outcome(outcome)));
         if self.audit.len() == AUDIT_MAX {
             self.audit.pop_front();
         }
@@ -2404,7 +2406,7 @@ impl Manager {
         });
     }
 
-    pub fn take_events(&mut self) -> Vec<&'static str> {
+    pub fn take_events(&mut self) -> Vec<(&'static str, &'static str)> {
         self.events.drain(..).collect()
     }
 

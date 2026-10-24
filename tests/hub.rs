@@ -148,6 +148,10 @@ fn approval_persists_exact_manifest_and_never_inherits_changed_catalog() {
     let current = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
     assert_eq!(current.approval_revision, 1);
     assert!(current.entries[0].permissions_approved);
+    // The grant date survives a restart and is a real Unix time (ms), never a guess.
+    assert!(current.entries[0]
+        .approved_at_ms
+        .is_some_and(|ms| ms > 1_600_000_000_000));
     assert_eq!(current.entries[0].status, "not_installed");
     assert!(!current.publisher_verified);
     let mut changed: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
@@ -160,6 +164,7 @@ fn approval_persists_exact_manifest_and_never_inherits_changed_catalog() {
         changed.entries[0].manifest_sha256
     );
     assert!(!changed.entries[0].permissions_approved);
+    assert_eq!(changed.entries[0].approved_at_ms, None);
     assert_eq!(changed.approval_revision, 1);
     assert!(!root.join("plugins").exists());
 }

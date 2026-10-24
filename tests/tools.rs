@@ -484,6 +484,71 @@ fn zero_argument_tools_reject_every_extra_key() {
 }
 
 #[test]
+fn registry_proposals_carry_risk_names_and_closed_effects() {
+    use std::time::Instant;
+    let mut ledger = tools::Ledger::default();
+    ledger.set_epoch(1);
+    let now = Instant::now();
+    let open = ledger.propose(
+        "p",
+        "c1".into(),
+        "open_app".into(),
+        json!({"desktop_id": BRAVE}),
+        now,
+    );
+    let view = ledger.view(&open).unwrap();
+    assert_eq!(view.risk, Some("state_changing"));
+    assert_eq!(
+        serde_json::to_value(view.effect.as_ref().unwrap()).unwrap(),
+        json!({"id": "open_app", "app": "com.brave.Browser"})
+    );
+    let status = ledger.propose("p", "c2".into(), "get_status".into(), json!({}), now);
+    let view = ledger.view(&status).unwrap();
+    assert_eq!(view.risk, Some("read"));
+    assert_eq!(
+        serde_json::to_value(view.effect.as_ref().unwrap()).unwrap(),
+        json!({"id": "get_status"})
+    );
+    let volume = ledger.propose(
+        "p",
+        "c3".into(),
+        "set_volume".into(),
+        json!({"level": 40}),
+        now,
+    );
+    assert_eq!(
+        serde_json::to_value(ledger.view(&volume).unwrap().effect.as_ref().unwrap()).unwrap(),
+        json!({"id": "set_volume", "level": 40})
+    );
+    // Invalid registry arguments keep the fixed risk class but get no effect (never free text).
+    let bad = ledger.propose(
+        "p",
+        "c4".into(),
+        "set_volume".into(),
+        json!({"level": 101}),
+        now,
+    );
+    let view = ledger.view(&bad).unwrap();
+    assert_eq!(
+        (view.risk, view.effect.is_none()),
+        (Some("state_changing"), true)
+    );
+    // Names outside the registry get neither field.
+    let other = ledger.propose("p", "c5".into(), "shell".into(), json!({}), now);
+    let view = ledger.view(&other).unwrap();
+    assert_eq!((view.risk, view.effect.is_none()), (None, true));
+    let wire = serde_json::to_value(ledger.view(&other).unwrap()).unwrap();
+    assert!(wire.get("effect").is_none() && wire.get("risk").is_none());
+}
+
+#[test]
+fn risk_names_are_the_wire_vocabulary() {
+    assert_eq!(Risk::ReadOnly.name(), "read");
+    assert_eq!(Risk::StateChanging.name(), "state_changing");
+    assert_eq!(Risk::Destructive.name(), "destructive");
+}
+
+#[test]
 fn risk_classes_match_the_contract() {
     for name in ["get_status", "get_time", "get_date"] {
         assert_eq!(

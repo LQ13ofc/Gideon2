@@ -33,6 +33,17 @@ pub enum Risk {
     Destructive,
 }
 
+impl Risk {
+    /// Wire name of the risk class (`read`, `state_changing`, `destructive`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Risk::ReadOnly => "read",
+            Risk::StateChanging => "state_changing",
+            Risk::Destructive => "destructive",
+        }
+    }
+}
+
 /// The only tools a model or plugin can ever reach. Adding a row is a Core change.
 pub const REGISTRY: [(&str, Risk); 6] = [
     ("open_app", Risk::StateChanging),
@@ -193,6 +204,49 @@ pub fn command(name: &str, args: &Value) -> Result<(Command, Risk), &'static str
     Ok((command, risk))
 }
 
+/// Closed effect of a registry tool: a template id and its typed parameters. Display text is
+/// built by the bridge from the id; model text never reaches this struct.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Effect {
+    pub id: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<u8>,
+}
+
+/// Effect of a validated registry call; `None` when the call is not a valid registry call.
+pub fn effect(name: &str, args: &Value) -> Option<Effect> {
+    let (command, _) = command(name, args).ok()?;
+    let plain = |id| Effect {
+        id,
+        app: None,
+        level: None,
+    };
+    Some(match command {
+        Command::OpenApp { desktop_id } => Effect {
+            id: "open_app",
+            app: Some(
+                desktop_id
+                    .strip_suffix(DESKTOP_SUFFIX)
+                    .unwrap_or(&desktop_id)
+                    .to_owned(),
+            ),
+            level: None,
+        },
+        Command::Volume { level } => Effect {
+            id: "set_volume",
+            app: None,
+            level: Some(level),
+        },
+        Command::Mute => plain("mute"),
+        Command::Status => plain("get_status"),
+        Command::Time => plain("get_time"),
+        Command::Date => plain("get_date"),
+        _ => return None,
+    })
+}
+
 /// Strict JSON for a raw argument string: a duplicate key anywhere is an error.
 /// serde_json's `Value` keeps the last duplicate, so raw text must be checked first.
 pub fn parse_strict_args(raw: &str) -> Result<Value, &'static str> {
@@ -298,8 +352,13 @@ pub struct View {
     pub connection_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation: Option<&'static str>,
+    /// Risk class: `read`, `state_changing`, `destructive` for registry tools; connection proposals
+    /// carry their access class (`read`, `write`, `destructive`, `public`) instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk: Option<&'static str>,
+    /// Registry tools only: the closed effect template of the validated call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect: Option<Effect>,
 }
 
 struct Entry {
@@ -395,6 +454,9 @@ impl Ledger {
         }
         self.sequence += 1;
         let proposal_id = format!("tool_{:x}_{}", self.epoch, self.sequence);
+        // Registry tools get their fixed risk class and effect template; other names get neither.
+        let registry_risk = risk(&tool).map(Risk::name);
+        let effect = registry_risk.and_then(|_| effect(&tool, &args));
         self.entries.push_back(Entry {
             view: View {
                 proposal_id: proposal_id.clone(),
@@ -410,7 +472,8 @@ impl Ledger {
                 kind: None,
                 connection_id: None,
                 operation: None,
-                risk: None,
+                risk: registry_risk,
+                effect,
             },
             created: now,
             seq: self.sequence,

@@ -781,15 +781,31 @@ impl Core {
         }
     }
     pub(crate) fn emit(&mut self, request_id: String, session_id: Option<u64>, kind: &'static str) {
+        let outcome = crate::protocol::outcome_of(kind);
+        self.emit_with(request_id, session_id, kind, outcome);
+    }
+    /// Event with an explicit outcome (closed vocabulary, see `protocol::outcome_of`).
+    pub(crate) fn emit_with(
+        &mut self,
+        request_id: String,
+        session_id: Option<u64>,
+        kind: &'static str,
+        outcome: &'static str,
+    ) {
         self.sequence += 1;
         if self.events.len() == 64 {
             self.events.pop_front();
         }
+        // Wall clock may step back; the ring keeps timestamps non-decreasing.
+        let previous = self.events.back().map_or(0, |e| e.at_ms);
         self.events.push_back(Event {
             sequence: self.sequence,
+            at_ms: crate::protocol::unix_ms().max(previous),
             request_id,
             session_id,
             kind,
+            origin: crate::protocol::origin_of(kind),
+            outcome,
         });
     }
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
@@ -943,8 +959,8 @@ impl Core {
         self.connections.take_audit()
     }
     fn connection_flush(&mut self, settled: Vec<crate::connections::Settled>) {
-        for kind in self.connections.take_events() {
-            self.emit(String::new(), None, kind);
+        for (kind, outcome) in self.connections.take_events() {
+            self.emit_with(String::new(), None, kind, outcome);
         }
         for outcome in settled {
             let kind = if outcome.state == crate::tools::State::Executed {
@@ -2276,6 +2292,44 @@ mod tests {
         );
         c.shutdown();
         assert!(c.completed_audio.is_none());
+    }
+    #[test]
+    fn events_carry_unix_ms_that_never_decreases_and_closed_origin_outcome() {
+        let mut c = Core::new(Duration::from_secs(1), false);
+        c.emit(String::new(), None, "tool_proposed");
+        c.emit(String::new(), None, "tool_denied");
+        c.emit_with(
+            String::new(),
+            None,
+            "connection_call",
+            crate::protocol::code_outcome("reauth_required"),
+        );
+        c.emit(String::new(), None, "hub_import_timeout");
+        let shape: Vec<_> = c.events.iter().map(|e| (e.origin, e.outcome)).collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("tool", "pending"),
+                ("tool", "denied"),
+                ("connection", "failed"),
+                ("hub", "failed"),
+            ]
+        );
+        assert!(c.events.iter().all(|e| e.at_ms > 1_600_000_000_000));
+        // A clock that steps back cannot make the ring go backwards.
+        let last = c.events.back().unwrap().at_ms;
+        c.events.back_mut().unwrap().at_ms = last + 60_000;
+        c.emit(String::new(), None, "session_started");
+        assert!(c.events.back().unwrap().at_ms >= last + 60_000);
+        for _ in 0..70 {
+            c.emit(String::new(), None, "transcript_partial");
+        }
+        assert_eq!(c.events.len(), 64);
+        assert!(c
+            .events
+            .iter()
+            .zip(c.events.iter().skip(1))
+            .all(|(a, b)| a.at_ms <= b.at_ms && a.sequence < b.sequence));
     }
     #[test]
     fn native_wake_reuses_session_authority_and_failure_cancels() {
