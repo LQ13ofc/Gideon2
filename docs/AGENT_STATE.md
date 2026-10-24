@@ -62,3 +62,6 @@
 - New app shell/pages (docs/ui-spec/*, docs/UI_IA.md, docs/APP_DESCRICAO.md), UI settings store (app/uisettings.py), Core additions: events with at_ms, risk/effect on proposals, grants, core_restart (exit 75 + launcher supervisor), agent budget, llm last_chat, skills paths/permissions, connection revoke_scope/granted_at.
 - UI gates green (design, b2feedback, c1, c2, c3, c4, s4final, e1, e24, e3, s2final); package gates s2final/b4package/e4 green on clean tree. Published to https://github.com/LQ13ofc/Gideon2 (public).
 - Open: onboarding (not built), plugin grant dates in UI (approved_at_ms not sent), Core-side restore of preferences, live microphone path, real backends. See docs/HUMAN_VALIDATION.md.
+
+## 2026-10-24 — pendências implementadas (docs/PENDENCIAS_IMPLEMENTACAO.md)
+- Onboarding, autostart, modo econômico, perfis de config, atalhos, diagnóstico completo, efeitos com argumentos, banners de erro, limites em bytes; Core: sensibilidade do wake, restaurar padrões, preferências e listagem de dispositivos, áudio ao vivo opt-in. 16 gates verdes (design, b2feedback, a1, a4, a5, c1, c2, c3, c4, s4final, e1, e24, e3, s2final, b4package, e4).

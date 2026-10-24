@@ -40,3 +40,11 @@ até onde se prova no ambiente virtual e continua rotulado "pendente de validaç
 - Idioma da interface em inglês/outros: exigiria traduzir todo o app; hoje só português (fica como decisão do dono).
 - Backends reais de tela/entrada/áudio avançado/microfone avançado/câmera/manipulação de display: dependem de portais, PipeWire, libei, webcam e compositor; o C4.6 é UNSUPPORTED.
 - Validação com hardware físico (áudio, Wayland, Flatpak, contas reais): checklist em `docs/HUMAN_VALIDATION.md`.
+
+## Estado em 2026-10-24 (tudo abaixo AUTO_VERIFIED no ambiente virtual; hardware real = pendente de validação humana)
+- A1 sensibilidade do wake: preferência + limiar do worker (padrão 1.0 inalterado). Efeito acústico NÃO validado.
+- A2 restaurar padrões do Core com backup: feito. A3 preferências de dispositivo: feito.
+- A4 `audio_devices` (pactl/pw-dump, só leitura): feito, testado com ferramentas falsas.
+- A5 entrada/saída ao vivo opt-in (`--live-audio`, gravador/reprodutor em sandbox): feito, testado com gravador/reprodutor falsos; docs/A6-live-audio.md.
+- B1–B16: feitos e cobertos por testes da ponte (221), contrato com Core real (14), configurações (24) e gates (16 rodados uma vez, verdes).
+- Continuam desativados com motivo: escolha de voz/velocidade, idioma da interface, backends reais de tela/entrada/câmera/display.

@@ -210,3 +210,11 @@ depois que o adaptador real for implementado. O dono valida B1 só quando o adap
 Status: E4 AUTO_VERIFIED no ambiente virtual (288/0, 3 skips documentados). Itens B1–B9 AWAITING_HUMAN_VALIDATION.
 
 READY_FOR_HUMAN_VALIDATION
+
+
+## Adendo 2026-10-24 — novos itens para a rodada humana
+- [ ] **Áudio ao vivo** (`gideon-launch ... -- --live-audio`, só depois de ler docs/A6-live-audio.md): dizer "Hey Gideon" ao microfone real; conferir o indicador "Microfone ativo", troca de dispositivo em Configurações › Dispositivos, TTS no alto-falante escolhido. Reportar acertos, falsos disparos e latência.
+- [ ] **Sensibilidade do wake** (0,5 / 1,0 / 1,5): comparar acertos e falsos disparos em sala silenciosa e com ruído.
+- [ ] **Iniciar no login**: ligar em Configurações › Geral, encerrar a sessão e entrar de novo; conferir `~/.config/autostart/gideon.desktop` e desligar.
+- [ ] **Primeira execução guiada**, **perfis de configurações**, **temas** (8 presets) e **atalhos** (Ctrl+K, Ctrl+1..5, Esc) no Plasma Wayland real.
+- [ ] **Reiniciar Core** pela interface (Diagnóstico › Recuperação) com o pacote instalado.
