@@ -147,6 +147,10 @@ pub struct View {
     pub step: u32,
     pub max_steps: u32,
     pub started_ms_ago: u64,
+    /// Same clock as `started_ms_ago`, named as the budget field: time spent by the run so far.
+    pub elapsed_ms: u64,
+    /// Effective run deadline in ms (`RUN_DEADLINE`, divided by the test-only clock scale).
+    pub max_run_ms: u64,
     pub steps: Vec<StepView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<String>,
@@ -239,6 +243,8 @@ impl Agent {
             step: run.step,
             max_steps: MAX_STEPS,
             started_ms_ago: u64::try_from(run.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            elapsed_ms: u64::try_from(run.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            max_run_ms: u64::try_from(self.run_deadline().as_millis()).unwrap_or(u64::MAX),
             steps: run.steps.clone(),
             answer: run.answer.clone(),
             error: match run.state {

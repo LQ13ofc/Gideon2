@@ -69,6 +69,8 @@ pub struct Core {
     pub(crate) connections: crate::connections::Manager,
     /// S5 E3 CapabilityRegistry: the user's visual permission and the last result of each route.
     pub(crate) registry: crate::registry::Registry,
+    /// Set by an accepted `core_restart`; `transport::serve` stops and the process exits 75.
+    restart_requested: bool,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -113,6 +115,7 @@ impl Core {
             skills: Default::default(),
             connections: Default::default(),
             registry: Default::default(),
+            restart_requested: false,
         }
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -124,6 +127,18 @@ impl Core {
     /// True while a voice session holds the Core (agent actions and wake sessions exclude each other).
     pub(crate) fn voice_active(&self) -> bool {
         self.session.is_some()
+    }
+    /// True once an accepted `core_restart` asked the serve loop to stop with `RESTART_EXIT_CODE`.
+    pub(crate) fn restart_requested(&self) -> bool {
+        self.restart_requested
+    }
+    /// `core_restart` is refused while any of these owns the Core: a voice session, an agent run,
+    /// a skill run, or a plugin capability invocation. Each would be cut off by the exit.
+    fn restart_busy(&self) -> bool {
+        self.session.is_some()
+            || self.agent.is_active()
+            || self.skills.is_active()
+            || self.plugins.invoking()
     }
     /// Enables the tool executor (same sandbox as Base commands) and sets the proposal TTL.
     pub fn configure_tools(&mut self, ttl: Duration, executor: bool) {
@@ -898,6 +913,11 @@ impl Core {
             _ => None,
         };
         self.plugins.event(ev, now);
+        // A `*.chat` result that reports `used_fallback` is noted (a bool and a time, never content).
+        if let Some(used_fallback) = self.plugins.take_chat_note() {
+            self.llm
+                .note_chat(used_fallback, crate::protocol::unix_ms());
+        }
         if let Some(plugin_id) = result_of {
             self.ingest_result(&plugin_id, now);
             self.agent_on_result();
@@ -1239,6 +1259,13 @@ impl Core {
                 } else {
                     "hub_unavailable"
                 }
+            }
+            Operation::CoreRestart if self.restart_busy() => "busy",
+            Operation::CoreRestart => {
+                // Accepted: the reply is `ok`; the serve loop flushes and exits with 75 right after it.
+                self.restart_requested = true;
+                self.emit(req.request_id.clone(), None, "core_restart_requested");
+                "ok"
             }
             _ if self.configuration_status != crate::storage::ConfigurationStatus::Ready => {
                 "configuration_not_ready"
@@ -1885,6 +1912,13 @@ impl Core {
                 .connection_op(storage.as_deref(), |c, l, st| {
                     c.revoke(st, l, &id, revision)
                 }),
+            Operation::ConnectionRevokeScope {
+                id,
+                scope,
+                revision,
+            } => self.connection_op(storage.as_deref(), |c, _, st| {
+                c.revoke_scope(st, &id, &scope, revision)
+            }),
             Operation::ConnectionRemove { id, revision } => self
                 .connection_op(storage.as_deref(), |c, l, st| {
                     c.remove(st, l, &id, revision)
@@ -2670,5 +2704,32 @@ mod tests {
         c.session.as_mut().unwrap().deadline = now + Duration::from_millis(1);
         c.dispatch_command(now);
         assert_eq!(c.deadline(), Some(now + Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn core_restart_is_busy_during_a_voice_session_and_accepted_when_idle() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(1), true);
+        assert_eq!(
+            c.handle(request("w", Operation::VirtualWake), now)
+                .session_id,
+            Some(1)
+        );
+        let busy = c.handle(request("r1", Operation::CoreRestart), now);
+        assert_eq!(busy.code, "busy");
+        assert!(!c.restart_requested());
+        c.handle(request("c", Operation::Cancel { session_id: 1 }), now);
+        let accepted = c.handle(request("r2", Operation::CoreRestart), now);
+        assert_eq!(accepted.code, "ok");
+        assert!(c.restart_requested());
+        assert!(accepted
+            .events
+            .iter()
+            .any(|e| e.kind == "core_restart_requested" && e.outcome == "ok"));
+        // The same request id is never replayed as a second restart.
+        assert_eq!(
+            c.handle(request("r2", Operation::CoreRestart), now).code,
+            "duplicate"
+        );
     }
 }

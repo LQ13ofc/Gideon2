@@ -581,6 +581,9 @@ fn seventh_model_turn_is_refused_as_max_steps() {
     assert_eq!(agent["error"], "max_steps");
     assert_eq!(agent["step"], 6);
     assert_eq!(agent["max_steps"], 6);
+    // Budget (C3): elapsed time of the run and its effective deadline, next to the step and token caps.
+    assert!(agent["elapsed_ms"].as_u64().is_some(), "{agent}");
+    assert_eq!(agent["max_run_ms"], 120_000, "{agent}");
 }
 
 #[test]

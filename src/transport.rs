@@ -109,6 +109,10 @@ const MAX_SKILL_MESSAGE: usize = 24576;
 /// Largest object line read in full. Past MAX_SKILL_MESSAGE the line is only read and discarded,
 /// so `peer` can answer a skill manifest with `skill_invalid:oversize`; anything else closes.
 const MAX_DISCARD_MESSAGE: usize = 65536;
+/// Exit status of a Core that accepted `core_restart`. `gideon-launch` restarts the Core on it.
+pub const RESTART_EXIT_CODE: i32 = 75;
+/// Time the restarting Core gives the peer task to write the `ok` line before it shuts down.
+const RESTART_REPLY_GRACE: Duration = Duration::from_millis(200);
 /// Client request line: bounded by MAX_MESSAGE unless it looks like a JSON object (`{"`), in which
 /// case it may reach MAX_INVOKE_MESSAGE; the parsed operation is checked afterwards, and only
 /// capability_invoke may actually exceed MAX_MESSAGE. Garbage without a newline closes at 4 KiB.
@@ -451,7 +455,7 @@ pub async fn serve(
     hub_catalog: Option<(std::path::PathBuf, String)>,
     plugin_python: Option<std::path::PathBuf>,
     net_allow_loopback: bool,
-) -> io::Result<()> {
+) -> io::Result<bool> {
     let mut base_pack =
         if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
             if let Some(path) = base_pack_path.as_ref() {
@@ -638,6 +642,7 @@ pub async fn serve(
     let (tx, mut rx) = mpsc::channel::<Call>(16);
     let slots = Arc::new(Semaphore::new(8));
     let mut peers = JoinSet::new();
+    let mut restart = false;
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
         let deadline = core.deadline();
@@ -693,6 +698,13 @@ pub async fn serve(
             Some(call) = rx.recv() => {
                 let response = core.handle_with_storage(call.request, std::time::Instant::now(), Some(&mut storage)); storage.audit(response.sequence)?;
                 let _ = call.reply.send(serde_json::to_vec(&response)?);
+                if core.restart_requested() {
+                    // The peer task writes the `ok` line after this turn; give it time before the
+                    // shutdown below aborts the peers. Bounded and local: the socket is a Unix pipe.
+                    tokio::time::sleep(RESTART_REPLY_GRACE).await;
+                    restart = true;
+                    break;
+                }
             },
             reply=stt_rx.recv(), if stt_task.is_some() => {
                 match reply {
@@ -844,7 +856,7 @@ pub async fn serve(
     peers.abort_all();
     while peers.join_next().await.is_some() {}
     fs::remove_file(path)?;
-    Ok(())
+    Ok(restart)
 }
 
 #[cfg(test)]

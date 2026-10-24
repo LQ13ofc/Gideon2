@@ -1205,6 +1205,9 @@ pub struct Account {
     pub created: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ok: Option<u64>,
+    /// When the account's current `granted_scopes` were granted (Unix ms). Absent in older ledgers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted_at_ms: Option<u64>,
     /// MCP: tools of the last accepted `tools/list`, with their trust state.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<crate::mcp::ToolRec>,
@@ -2075,6 +2078,9 @@ pub struct ItemView {
     pub account_ref: Option<String>,
     pub status: Status,
     pub granted_scopes: Vec<String>,
+    /// When `granted_scopes` were granted (Unix ms); absent when nothing is granted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub granted_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_scopes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2280,6 +2286,7 @@ impl Manager {
                     account_ref: account.account_ref.clone(),
                     status: account.status,
                     granted_scopes: account.granted_scopes.clone(),
+                    granted_at_ms: account.granted_at_ms,
                     pending_scopes: token_pending.or_else(|| device.map(|d| d.requested.clone())),
                     user_code: device.map(|d| d.user_code.clone()),
                     fake: has_fake(&account.provider),
@@ -2374,6 +2381,7 @@ impl Manager {
         // other state that is not connected forgets them.
         if !matches!(status, Status::Connected | Status::ReauthRequired) {
             next.accounts[index].granted_scopes.clear();
+            next.accounts[index].granted_at_ms = None;
         }
         self.commit(storage, next)?;
         match error {
@@ -2565,6 +2573,7 @@ impl Manager {
             last_ok: None,
             tools: Vec::new(),
             catalog: false,
+            granted_at_ms: None,
         });
         match self.commit(storage, next) {
             Ok(()) => {
@@ -2685,6 +2694,7 @@ impl Manager {
             account.status = Status::Connected;
             account.account_ref = Some(name);
             account.granted_scopes = granted;
+            account.granted_at_ms = Some(crate::protocol::unix_ms());
             account.last_ok = Some(unix_now());
         }
         if let Err(code) = self.commit(storage, next) {
@@ -2999,6 +3009,49 @@ impl Manager {
             }
         }
         self.log("connection_revoked", "none", "none", "ok");
+        "ok"
+    }
+
+    /// Revokes one granted scope of an account. The token stays in the vault; calls that need the
+    /// scope answer `scope_not_granted` from then on. The audit event carries no content.
+    pub fn revoke_scope(
+        &mut self,
+        storage: &Storage,
+        id: &str,
+        scope: &str,
+        revision: Option<u64>,
+    ) -> &'static str {
+        if let Err(code) = self.check_revision(revision) {
+            return code;
+        }
+        let Some(index) = self.index(id) else {
+            return "unknown_connection";
+        };
+        let Some(provider) = provider_by_id(&self.ledger.accounts[index].provider) else {
+            return "invalid_state";
+        };
+        if !provider.scopes.iter().any(|s| s.id == scope) {
+            return "scope_not_requested";
+        }
+        if !self.ledger.accounts[index]
+            .granted_scopes
+            .iter()
+            .any(|s| s == scope)
+        {
+            return "scope_not_granted";
+        }
+        let mut next = self.ledger.clone();
+        {
+            let account = &mut next.accounts[index];
+            account.granted_scopes.retain(|s| s != scope);
+            if account.granted_scopes.is_empty() {
+                account.granted_at_ms = None;
+            }
+        }
+        if let Err(code) = self.commit(storage, next) {
+            return code;
+        }
+        self.log("connection_scope_revoked", "none", "none", "ok");
         "ok"
     }
 
@@ -3823,6 +3876,7 @@ impl Manager {
                     account.status = Status::Connected;
                     account.account_ref = Some(name);
                     account.granted_scopes = granted;
+                    account.granted_at_ms = Some(crate::protocol::unix_ms());
                     account.last_ok = Some(unix_now());
                 }
                 if self.commit(storage, next).is_ok() {
@@ -3899,6 +3953,7 @@ impl Manager {
             account.status = Status::Connected;
             account.account_ref = Some(account_ref);
             account.granted_scopes = granted;
+            account.granted_at_ms = Some(crate::protocol::unix_ms());
             account.last_ok = Some(unix_now());
         }
         if self.commit(storage, next).is_ok() {
@@ -4498,6 +4553,7 @@ mod tests {
             last_ok: None,
             tools,
             catalog: true,
+            granted_at_ms: None,
         });
         // The helper stands for a process that already discovered the tools (the normal path).
         manager.discovered.insert("conn_m".into());
@@ -4557,6 +4613,68 @@ mod tests {
     }
 
     #[test]
+    fn revoke_scope_drops_one_scope_keeps_the_rest_and_gates_its_calls() {
+        let root = std::env::temp_dir().join(format!("gideon-conn-scope-{}", random_hex(6)));
+        let storage = Storage::open(&root).unwrap();
+        let mut manager = Manager::default();
+        manager.ledger.accounts.push(Account {
+            id: "conn_s".into(),
+            provider: "github".into(),
+            label: "s".into(),
+            account_ref: None,
+            status: Status::Connected,
+            granted_scopes: vec!["repo:read".into(), "issues:write".into()],
+            created: 0,
+            last_ok: None,
+            tools: Vec::new(),
+            catalog: false,
+            granted_at_ms: Some(42),
+        });
+        storage.save_connections_ledger(&manager.ledger).unwrap();
+        assert_eq!(
+            manager.revoke_scope(&storage, "conn_s", "not_a_scope", None),
+            "scope_not_requested"
+        );
+        assert_eq!(
+            manager.revoke_scope(&storage, "conn_s", "repo:read", Some(7)),
+            "stale_connection_revision"
+        );
+        assert_eq!(
+            manager.revoke_scope(&storage, "missing", "repo:read", None),
+            "unknown_connection"
+        );
+        assert_eq!(
+            manager.revoke_scope(&storage, "conn_s", "repo:read", None),
+            "ok"
+        );
+        let account = manager.ledger.accounts[0].clone();
+        assert_eq!(account.granted_scopes, vec!["issues:write".to_owned()]);
+        assert_eq!(account.granted_at_ms, Some(42));
+        assert_eq!(account.status, Status::Connected);
+        assert_eq!(
+            account_gate(&account, "repo:read"),
+            Err("scope_not_granted")
+        );
+        assert_eq!(account_gate(&account, "issues:write"), Ok(()));
+        assert_eq!(
+            manager.revoke_scope(&storage, "conn_s", "repo:read", None),
+            "scope_not_granted"
+        );
+        assert!(manager
+            .events
+            .iter()
+            .any(|e| e.0 == "connection_scope_revoked"));
+        assert_eq!(manager.view().items[0].granted_at_ms, Some(42));
+        // Ledgers written before granted_at_ms existed load with no date.
+        let mut json = serde_json::to_value(&account).unwrap();
+        assert_eq!(json["granted_at_ms"], 42);
+        json.as_object_mut().unwrap().remove("granted_at_ms");
+        let older: Account = serde_json::from_value(json).unwrap();
+        assert_eq!(older.granted_at_ms, None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn refresh_reads_its_token_at_start_and_skips_when_the_tokens_rotated() {
         let root = std::env::temp_dir().join(format!("gideon-conn-refresh-{}", random_hex(6)));
         let storage = Storage::open(&root).unwrap();
@@ -4572,6 +4690,7 @@ mod tests {
             last_ok: None,
             tools: Vec::new(),
             catalog: false,
+            granted_at_ms: None,
         });
         storage.save_connections_ledger(&manager.ledger).unwrap();
         let mut vault = LlmState::load(&storage, false);
@@ -4641,6 +4760,7 @@ mod tests {
                 last_ok: None,
                 tools: Vec::new(),
                 catalog: false,
+                granted_at_ms: None,
             });
             storage.save_connections_ledger(&manager.ledger).unwrap();
             let mut vault = LlmState::load(&storage, false);

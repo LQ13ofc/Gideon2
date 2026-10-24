@@ -97,7 +97,7 @@ TOOL_REASONS=TOOL_REASONS|AGENT_CODES|{'run_ended','denied','destructive_disable
 CONN_PROVIDERS=('github','google','homeassistant','mcp');CONN_STATUSES=('disconnected','connecting','connected','expired','offline','error','reauth_required');CONN_ACCESS=('read','write','destructive','public')
 CONN_ITEMS_LIMIT=8;CONN_SCOPES_LIMIT=8;CONN_OPERATIONS_LIMIT=16;CONN_ARGS_LIMIT=4096;CONN_LABEL_LIMIT=64;CONN_ACCOUNT_LIMIT=128;CONN_USER_CODE_LIMIT=32
 CONN_ID=re.compile(r'[A-Za-z0-9_-]{1,64}');CONN_NAME=re.compile(r'[a-z][a-z0-9_.:]{0,63}')
-CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call','storage_error'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake','tools'});CONN_TOOLS_LIMIT=16;CONN_TOOL_STATES=('trusted','needs_reapproval','rejected');CONN_TOOL_RISKS=('write','destructive');CONN_TOOL_DESCRIPTION_LIMIT=1024;CONN_TOOL_KEYS=frozenset({'name','risk','state','description'});CONN_TRUST_LIMIT=16
+CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call','storage_error'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake','tools','granted_at_ms'});CONN_TOOLS_LIMIT=16;CONN_TOOL_STATES=('trusted','needs_reapproval','rejected');CONN_TOOL_RISKS=('write','destructive');CONN_TOOL_DESCRIPTION_LIMIT=1024;CONN_TOOL_KEYS=frozenset({'name','risk','state','description'});CONN_TRUST_LIMIT=16
 CONN_PROPOSAL_KEYS=frozenset({'kind','connection_id','operation','risk'})
 # Core codes for connection ops and for connection proposals (kind 'connection'). Each one has a Portuguese text in CONN_MESSAGES.
 CONN_MESSAGES={
@@ -192,7 +192,10 @@ def target_problem(target,keys,required):
     if not (isinstance(target,dict) and required<=set(target)<=keys):return True
     return llm_config_problem(target['provider'],target['model'],target.get('custom_url'),target.get('cloud_consent',False),target.get('local_port'))
 def valid_llm(llm):
-    if not (isinstance(llm,dict) and set(llm)=={'revision','config','secrets'} and is_int(llm['revision'])):return False
+    if not (isinstance(llm,dict) and {'revision','config','secrets'}<=set(llm)<={'revision','config','secrets','last_chat'} and is_int(llm['revision'])):return False
+    # NF-10: last_chat is absent until a chat answered; then only the fallback flag and its time (no content).
+    last=llm.get('last_chat')
+    if last is not None and not (isinstance(last,dict) and set(last)=={'used_fallback','at_ms'} and type(last['used_fallback']) is bool and is_int(last['at_ms'],1)):return False
     secrets=llm['secrets']
     if not (isinstance(secrets,dict) and set(secrets)==LLM_SECRET_KEYS and all(type(v) is bool for v in secrets.values())):return False
     config=llm['config']
@@ -393,9 +396,12 @@ def valid_agent_step(step):
 def valid_agent(agent):
     """Snapshot block agent (docs/C3.md): null, or the run view with exact keys, bounded steps, answer only when done, error from AGENT_CODES, budget within the Core total."""
     if agent is None:return True
-    if not (isinstance(agent,dict) and AGENT_RUN_KEYS<=set(agent)<=AGENT_RUN_KEYS|{'answer','error'}):return False
+    if not (isinstance(agent,dict) and AGENT_RUN_KEYS<=set(agent)<=AGENT_RUN_KEYS|{'answer','error','elapsed_ms','max_run_ms'}):return False
     if not (run_id_ok(agent['run_id']) and agent['state'] in AGENT_STATES and is_int(agent['goal_len'],1,AGENT_GOAL_LIMIT)):return False
     if not (is_int(agent['step'],0,AGENT_MAX_STEPS) and agent['max_steps']==AGENT_MAX_STEPS and is_int(agent['started_ms_ago'])):return False
+    # Budget clocks (C3): optional so older snapshots still validate; typed when present.
+    if 'elapsed_ms' in agent and not is_int(agent['elapsed_ms']):return False
+    if 'max_run_ms' in agent and not is_int(agent['max_run_ms'],1):return False
     steps=agent['steps']
     if not (isinstance(steps,list) and len(steps)<=AGENT_CHAT_STEPS+AGENT_TOOL_STEPS):return False
     kinds=[step.get('kind') if isinstance(step,dict) else None for step in steps]
@@ -919,8 +925,8 @@ SKILL_JSON_LIMIT=16384;SKILL_DESCRIPTION_LIMIT=1024;SKILL_ITEMS_LIMIT=48;SKILL_S
 SKILL_DRAFT_CAPABILITY='llm_engine.skill_draft';SKILL_DRAFT_PLUGIN='llm_engine';SKILL_DRAFT_DEADLINE_MS=30000
 PENDING_SKILL_DRAFT='Gerando skill com o LLM…';SKILL_ARM=object()
 SKILL_OPS=frozenset({'skill_validate','skill_save_draft','skill_dry_run','skill_approve','skill_enable','skill_disable','skill_rollback','skill_remove','skill_run','skill_decide','skill_cancel','skill_export','skill_import','skill_import_confirm'})
-SKILL_ITEM_KEYS=frozenset({'id','name','version','state','source','active','deps_ok','permissions_ok','missing'})
-SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code'})
+SKILL_ITEM_KEYS=frozenset({'id','name','version','state','source','active','deps_ok','permissions_ok','missing'});SKILL_ITEM_OPTIONAL=frozenset({'permissions_required'})
+SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code','risk','effect_id'});SKILL_RISKS=('read','state_changing','destructive');SKILL_EFFECT=re.compile(r'[a-z_]{1,32}')
 SKILL_HISTORY_KEYS=frozenset({'run_id','skill','version','state','step','codes'})
 SKILL_IMPORT_KEYS=frozenset({'name','id','version','publisher','unverified','permissions_required','missing_deps','permission_delta','permissions_escalated','duplicate','findings'})
 SKILL_FINDING_KEYS=frozenset({'code','field'})
@@ -949,11 +955,14 @@ def skill_description_problem(text):
 def skill_code_ok(code):return isinstance(code,str) and code in SKILL_CODES
 def valid_skill_item(item):
     """One ledger view row (docs/S4.md): exact keys, enums, semver, missing dependencies only as short plain names; deps_ok means nothing is missing; enabled is always active."""
-    if not (isinstance(item,dict) and set(item)==SKILL_ITEM_KEYS):return False
+    if not (isinstance(item,dict) and SKILL_ITEM_KEYS<=set(item)<=SKILL_ITEM_KEYS|SKILL_ITEM_OPTIONAL):return False
     if not (isinstance(item['id'],str) and SKILL_ID.fullmatch(item['id']) and text_ok(item['name'],64) and isinstance(item['version'],str) and SKILL_SEMVER.fullmatch(item['version'])):return False
     if item['state'] not in SKILL_STATES or item['source'] not in SKILL_SOURCES:return False
     if not all(type(item[k]) is bool for k in ('active','deps_ok','permissions_ok')):return False
     if item['state']=='enabled' and not item['active']:return False
+    # permissions_required (manifest, at most 8): optional so older snapshots still validate.
+    perms=item.get('permissions_required',[])
+    if not (isinstance(perms,list) and len(perms)<=SKILL_CODES_LIMIT and all(isinstance(p,str) and text_ok(p,64) for p in perms)):return False
     missing=item['missing']
     if not (isinstance(missing,list) and len(missing)<=SKILL_DEPS_LIMIT and all(isinstance(m,str) and text_ok(m,128) for m in missing)):return False
     return item['deps_ok']==(not missing)
@@ -969,6 +978,9 @@ def valid_skill_run(run):
         if not (isinstance(step,dict) and {'id','state'}<=set(step)<=SKILL_STEP_KEYS):return False
         if not (isinstance(step['id'],str) and SKILL_STEP_ID.fullmatch(step['id']) and step['id'] not in ids and step['state'] in SKILL_STEP_STATES):return False
         if 'code' in step and not skill_code_ok(step['code']):return False
+        # Decision steps only: the call's risk class (tool-proposal vocabulary) and the registry effect id.
+        if 'risk' in step and step['risk'] not in SKILL_RISKS:return False
+        if 'effect_id' in step and not (isinstance(step['effect_id'],str) and SKILL_EFFECT.fullmatch(step['effect_id'])):return False
         ids.add(step['id'])
         if step['state']=='awaiting_approval':awaiting.append(step['id'])
     current=run['step']
@@ -998,11 +1010,15 @@ def valid_skill_import(preview):
     findings=preview['findings']
     if not (isinstance(findings,list) and len(findings)<=SKILL_FINDINGS_LIMIT):return False
     return all(isinstance(f,dict) and set(f)<=SKILL_FINDING_KEYS and 'code' in f and skill_code_ok(f['code']) and ('field' not in f or text_ok(f['field'],64)) for f in findings)
+def valid_skill_paths(paths):
+    """skills.paths: exactly the import and export folders, absolute display paths (never read by the UI)."""
+    return isinstance(paths,dict) and set(paths)=={'imports','exports'} and all(isinstance(paths[k],str) and paths[k].startswith('/') and len(paths[k])<=1024 and '\n' not in paths[k] for k in ('imports','exports'))
 def valid_skills(block):
-    """Snapshot block skills: null, or revision, items (unique id+version), run and history (docs/S4.md D2); import preview optional."""
+    """Snapshot block skills: null, or revision, items (unique id+version), run, history and paths (docs/S4.md D2); import preview optional."""
     if block is None:return True
-    if not (isinstance(block,dict) and {'revision','items','run','history'}<=set(block)<=frozenset({'revision','items','run','history','import'})):return False
+    if not (isinstance(block,dict) and {'revision','items','run','history'}<=set(block)<=frozenset({'revision','items','run','history','import','paths'})):return False
     if not is_int(block['revision']):return False
+    if 'paths' in block and not valid_skill_paths(block['paths']):return False
     items=block['items']
     if not (isinstance(items,list) and len(items)<=SKILL_ITEMS_LIMIT and all(valid_skill_item(i) for i in items)):return False
     keys=[(i['id'],i['version']) for i in items]
@@ -1068,6 +1084,7 @@ def valid_conn_item(item,catalog):
     if 'account_ref' in item and not conn_text_ok(item['account_ref'],CONN_ACCOUNT_LIMIT):return False
     if 'user_code' in item and not conn_text_ok(item['user_code'],CONN_USER_CODE_LIMIT):return False
     if 'fake' in item and type(item['fake']) is not bool:return False
+    if 'granted_at_ms' in item and not is_int(item['granted_at_ms']):return False
     return 'tools' not in item or (item['provider']=='mcp' and valid_conn_tools(item['tools']))
 def valid_conn_tools(tools):
     """S5 E2.4: discovered MCP tools. Name, risk and trust state are fixed vocabularies; the description is server text and is shown only as PlainText, never used as an instruction."""

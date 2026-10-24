@@ -836,6 +836,30 @@ fn happy_run_reads_processes_and_writes_the_synthetic_world() {
         !text.contains("headphones") && !text.contains("\"args\""),
         "{text}"
     );
+    // A decision step carries its call's risk class (tool-proposal vocabulary); no registry effect here.
+    let decision_step = waiting_write["steps"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(decision_step["risk"], "state_changing", "{text}");
+    assert!(decision_step.get("effect_id").is_none(), "{text}");
+    // skills.paths: absolute display folders; items list the manifest's permissions_required.
+    let block = core.skill_block();
+    assert!(block["paths"]["imports"]
+        .as_str()
+        .unwrap()
+        .ends_with("skill-imports"));
+    assert!(block["paths"]["exports"]
+        .as_str()
+        .unwrap()
+        .ends_with("skill-exports"));
+    assert!(block["paths"]["imports"].as_str().unwrap().starts_with('/'));
+    assert!(
+        block["items"][0]["permissions_required"].is_array(),
+        "{block}"
+    );
     let run_id = waiting_write["run_id"].as_str().unwrap().to_owned();
     assert_eq!(core.decide(&run_id, "write", "authorize"), "ok");
     core.authorize_until("the run ends", |r| r.is_null());

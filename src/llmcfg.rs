@@ -450,6 +450,16 @@ pub struct Snapshot {
     pub revision: u64,
     pub config: Option<ConfigView>,
     pub secrets: Flags,
+    /// Absent until a `*.chat` result reported whether the fallback model answered. No content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_chat: Option<ChatNote>,
+}
+
+/// Last chat answer: whether the fallback model produced it, and when (Unix ms, Core clock).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ChatNote {
+    pub used_fallback: bool,
+    pub at_ms: u64,
 }
 
 /// Core-owned LLM state: loaded once at boot, updated only through CAS-checked operations.
@@ -461,6 +471,7 @@ pub struct LlmState {
     secrets: Secrets,
     allow_loopback: bool,
     quarantined: bool,
+    last_chat: Option<ChatNote>,
 }
 
 impl LlmState {
@@ -497,7 +508,15 @@ impl LlmState {
                 lkg: self.lkg.clone(),
             }),
             secrets: self.secrets.flags(),
+            last_chat: self.last_chat,
         }
+    }
+    /// Records the fallback flag of the last chat answer (in memory only; never persisted).
+    pub(crate) fn note_chat(&mut self, used_fallback: bool, at_ms: u64) {
+        self.last_chat = Some(ChatNote {
+            used_fallback,
+            at_ms,
+        });
     }
     /// Persists `next` and only then makes it the in-memory state.
     fn commit(&mut self, storage: &Storage, next: LlmLedger) -> Result<(), &'static str> {

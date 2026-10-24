@@ -57,6 +57,9 @@ pub enum Operation {
         plugin_id: String,
     },
     Snapshot,
+    /// Replies `ok`, then the Core exits with `transport::RESTART_EXIT_CODE` after flushing. Refused
+    /// with `busy` while a voice session, agent run, skill run or plugin invocation is active.
+    CoreRestart,
     FeedbackPreferences {
         revision: u64,
         visual_feedback: bool,
@@ -132,6 +135,8 @@ pub enum Operation {
     LlmRollback {
         revision: u64,
     },
+    /// Wire: `{"op":"plugin_settings_clear","version":1,"request_id":ID,"plugin_id":PLUGIN}`.
+    /// No revision: removes only that plugin's settings file; unknown fields are refused.
     PluginSettingsClear {
         plugin_id: String,
     },
@@ -232,6 +237,13 @@ pub enum Operation {
     },
     ConnectionRevoke {
         id: String,
+        revision: Option<u64>,
+    },
+    /// Revokes one granted scope of an account. The token stays; calls needing the scope then
+    /// answer `scope_not_granted`. Wire: `connection_revoke_scope {id, scope, revision?}`.
+    ConnectionRevokeScope {
+        id: String,
+        scope: String,
         revision: Option<u64>,
     },
     ConnectionRemove {
@@ -518,6 +530,10 @@ enum WireRequest {
         version: u16,
         request_id: String,
     },
+    CoreRestart {
+        version: u16,
+        request_id: String,
+    },
     Text {
         version: u16,
         request_id: String,
@@ -759,6 +775,14 @@ enum WireRequest {
         #[serde(default)]
         revision: Option<u64>,
     },
+    ConnectionRevokeScope {
+        version: u16,
+        request_id: String,
+        id: String,
+        scope: String,
+        #[serde(default)]
+        revision: Option<u64>,
+    },
     ConnectionRemove {
         version: u16,
         request_id: String,
@@ -986,6 +1010,10 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
             } => (version, request_id, Operation::Snapshot),
+            WireRequest::CoreRestart {
+                version,
+                request_id,
+            } => (version, request_id, Operation::CoreRestart),
             WireRequest::Text {
                 version,
                 request_id,
@@ -1359,6 +1387,21 @@ impl<'de> Deserialize<'de> for Request {
                 request_id,
                 Operation::ConnectionRevoke { id, revision },
             ),
+            WireRequest::ConnectionRevokeScope {
+                version,
+                request_id,
+                id,
+                scope,
+                revision,
+            } => (
+                version,
+                request_id,
+                Operation::ConnectionRevokeScope {
+                    id,
+                    scope,
+                    revision,
+                },
+            ),
             WireRequest::ConnectionRemove {
                 version,
                 request_id,
@@ -1457,5 +1500,53 @@ mod tests {
             serde_json::from_str::<Request>(r#"{"version":1,"request_id":"a","op":"shell"}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn core_restart_is_a_bare_strict_operation() {
+        let ok = r#"{"version":1,"request_id":"r1","op":"core_restart"}"#;
+        let req = serde_json::from_str::<Request>(ok).expect("core_restart parses");
+        assert!(matches!(req.operation, Operation::CoreRestart));
+        for extra in [r#","force":true"#, r#","revision":1"#] {
+            let json = format!(r#"{{"version":1,"request_id":"r1","op":"core_restart"{extra}}}"#);
+            assert!(serde_json::from_str::<Request>(&json).is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn plugin_settings_clear_wire_format_is_plugin_id_only() {
+        let json = r#"{"version":1,"request_id":"p1","op":"plugin_settings_clear","plugin_id":"gideon.calendar"}"#;
+        let req = serde_json::from_str::<Request>(json).expect("parses");
+        assert!(matches!(
+            req.operation,
+            Operation::PluginSettingsClear { ref plugin_id } if plugin_id == "gideon.calendar"
+        ));
+        let with_revision = r#"{"version":1,"request_id":"p1","op":"plugin_settings_clear","plugin_id":"x","revision":1}"#;
+        assert!(serde_json::from_str::<Request>(with_revision).is_err());
+    }
+
+    #[test]
+    fn connection_revoke_scope_wire_format_is_strict() {
+        let json = r#"{"version":1,"request_id":"c1","op":"connection_revoke_scope","id":"acc1","scope":"repo:read"}"#;
+        let req = serde_json::from_str::<Request>(json).expect("parses without revision");
+        assert!(matches!(
+            req.operation,
+            Operation::ConnectionRevokeScope { ref id, ref scope, revision: None }
+                if id == "acc1" && scope == "repo:read"
+        ));
+        let with_rev = r#"{"version":1,"request_id":"c2","op":"connection_revoke_scope","id":"acc1","scope":"repo:read","revision":3}"#;
+        let req = serde_json::from_str::<Request>(with_rev).expect("parses with revision");
+        assert!(matches!(
+            req.operation,
+            Operation::ConnectionRevokeScope {
+                revision: Some(3),
+                ..
+            }
+        ));
+        let missing_scope =
+            r#"{"version":1,"request_id":"c3","op":"connection_revoke_scope","id":"acc1"}"#;
+        assert!(serde_json::from_str::<Request>(missing_scope).is_err());
+        let extra = r#"{"version":1,"request_id":"c4","op":"connection_revoke_scope","id":"a","scope":"s","token":"x"}"#;
+        assert!(serde_json::from_str::<Request>(extra).is_err());
     }
 }

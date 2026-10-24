@@ -212,7 +212,7 @@ async fn main() -> io::Result<()> {
     if tts.is_some() && !commands_sandbox {
         return Err(io::Error::other("TTS requires command profile"));
     }
-    transport::serve(
+    let restart = transport::serve(
         Storage::open_for_runtime(&root)?,
         virtual_input,
         replay,
@@ -223,5 +223,10 @@ async fn main() -> io::Result<()> {
         plugin_python,
         net_allow_loopback,
     )
-    .await
+    .await?;
+    // A `core_restart` accepted by the Core: ledgers are flushed; the launcher starts it again.
+    if restart {
+        std::process::exit(transport::RESTART_EXIT_CODE);
+    }
+    Ok(())
 }

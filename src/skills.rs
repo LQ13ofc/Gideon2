@@ -1156,12 +1156,19 @@ fn retriable(code: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Public step entry: id (`child/step` when nested), state, code and risk. No args, no content.
+/// `risk` and `effect_id` are set on steps that asked for a decision: the step call's risk class
+/// (`read`, `state_changing`, `destructive`, as in tool proposals) and, for a registry tool, the
+/// closed effect template id (`open_app`, `set_volume`, `mute`, ...).
 #[derive(Debug, Clone, Serialize)]
 pub struct StepView {
     pub id: String,
     pub state: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_id: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1235,6 +1242,15 @@ pub struct Item {
     pub deps_ok: bool,
     pub permissions_ok: bool,
     pub missing: Vec<String>,
+    /// Permissions the manifest declares (`permissions_required`); empty when the manifest is unreadable.
+    pub permissions_required: Vec<String>,
+}
+
+/// Display paths of the user's skill folders (absolute, under the data dir). Shown, never read by the UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Paths {
+    pub imports: String,
+    pub exports: String,
 }
 
 /// Snapshot `skills`: items, the active run (or null) and the outcome history.
@@ -1246,6 +1262,7 @@ pub struct View {
     pub history: Vec<RunRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub import: Option<ImportView>,
+    pub paths: Paths,
 }
 
 /// One scan finding: a validator reason (`skill_invalid:<reason>`) and the part it refers to.
@@ -2104,8 +2121,28 @@ impl Core {
             id,
             state,
             code: None,
+            risk: None,
+            effect_id: None,
         });
         run.steps.len() - 1
+    }
+
+    /// Records the risk class and effect id of a step that waits for a decision (public fields only).
+    fn set_decision_meta(
+        &mut self,
+        view: usize,
+        risk: &'static str,
+        effect_id: Option<&'static str>,
+    ) {
+        if let Some(step) = self
+            .skills
+            .run
+            .as_mut()
+            .and_then(|run| run.steps.get_mut(view))
+        {
+            step.risk = Some(risk);
+            step.effect_id = effect_id;
+        }
     }
 
     fn set_view(&mut self, view: usize, state: &'static str, code: Option<&'static str>) {
@@ -2217,6 +2254,14 @@ impl Core {
                 view
             } else {
                 let view = self.view_for(root, &step.id, "awaiting_decision");
+                // Same vocabulary as tool proposals: the call's risk class and, for a registry tool, its effect.
+                let effect_id = match parse_target(&step.call) {
+                    Ok(Target::Tool(name)) => {
+                        crate::tools::effect(&name, &args).map(|effect| effect.id)
+                    }
+                    _ => None,
+                };
+                self.set_decision_meta(view, risk.name(), effect_id);
                 self.set_awaiting(Await::Decision { view });
                 return;
             };
@@ -2852,6 +2897,10 @@ impl Core {
                             _ => true,
                         })
                 });
+                let permissions_required = manifest
+                    .as_ref()
+                    .map(|m| m.permissions_required.clone())
+                    .unwrap_or_default();
                 Some(Item {
                     id: entry.id.clone(),
                     name: manifest.map(|m| m.name).unwrap_or_default(),
@@ -2862,6 +2911,7 @@ impl Core {
                     deps_ok: missing.is_empty(),
                     permissions_ok,
                     missing,
+                    permissions_required,
                 })
             })
             .collect();
@@ -2900,6 +2950,8 @@ impl Core {
                         id: s.id.clone(),
                         state: wire_step(s.state, s.code),
                         code: s.code.map(wire_code),
+                        risk: s.risk,
+                        effect_id: s.effect_id,
                     })
                     .collect(),
                 outputs: run
@@ -2914,6 +2966,16 @@ impl Core {
             run,
             history: self.skills.runs.runs.clone(),
             import: self.skills.import.as_ref().map(|p| p.view.clone()),
+            paths: Paths {
+                imports: crate::transport::data_dir()
+                    .join(IMPORT_DIR)
+                    .to_string_lossy()
+                    .into_owned(),
+                exports: crate::transport::data_dir()
+                    .join(EXPORT_DIR)
+                    .to_string_lossy()
+                    .into_owned(),
+            },
         })
     }
 

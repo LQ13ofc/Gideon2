@@ -260,6 +260,8 @@ pub(crate) struct PluginView {
     next_invocation: u64,
     logs: VecDeque<Instant>,
     partial_events: VecDeque<Instant>,
+    /// `used_fallback` of the last accepted LLM result (any capability whose output has it), taken once by the Core.
+    chat_note: Option<bool>,
 }
 
 fn spec_for(storage: &Storage, hub: &Snapshot, plugin_id: &str) -> Result<Spec, &'static str> {
@@ -684,6 +686,15 @@ impl PluginView {
                 if !self.ledger.enabled.iter().any(|id| *id == plugin_id) {
                     return;
                 }
+                // The LLM broker's output carries `used_fallback`; only that bool is kept, never content.
+                if let Some(used) = outcome
+                    .as_ref()
+                    .ok()
+                    .and_then(|output| output.get("used_fallback"))
+                    .and_then(Value::as_bool)
+                {
+                    self.chat_note = Some(used);
+                }
                 self.last = Some(match outcome {
                     Ok(output) => CapabilityResult {
                         capability,
@@ -783,6 +794,14 @@ impl PluginView {
     /// output never reaches the client snapshot.
     pub(crate) fn clear_last(&mut self) {
         self.last = None;
+    }
+    /// A capability invocation is running (the Core refuses a restart meanwhile).
+    pub(crate) fn invoking(&self) -> bool {
+        self.active.is_some()
+    }
+    /// Takes the fallback flag of the last accepted `*.chat` result, if any.
+    pub(crate) fn take_chat_note(&mut self) -> Option<bool> {
+        self.chat_note.take()
     }
     /// Live text of the running invocation, present only while it has produced partials.
     pub(crate) fn partial(&self) -> Option<String> {

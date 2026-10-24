@@ -951,6 +951,10 @@ fn local_fallback_runs_only_after_a_recoverable_error_and_is_announced() {
     assert_eq!(seen[1]["model"], "mode-sse");
     assert!(seen.iter().all(|r| r["auth"].is_null()));
     let snap = lab.core.snap();
+    // NF-10: the snapshot says the fallback answered the last chat, with a time and no content.
+    assert_eq!(snap["llm"]["last_chat"]["used_fallback"], true, "{snap}");
+    assert!(snap["llm"]["last_chat"]["at_ms"].as_u64().unwrap_or(0) > 0);
+    assert!(!snap["llm"]["last_chat"].to_string().contains("Hello"));
     let events = snap["events"].as_array().unwrap();
     assert!(
         events.iter().any(|e| e["kind"] == "llm_fallback_used"),
