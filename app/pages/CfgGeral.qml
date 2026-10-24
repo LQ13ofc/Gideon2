@@ -409,6 +409,53 @@ PageFrame {
         }
     }
 
+    // B16: the Core's preferences back to their defaults. Separate from the app-settings reset below (that one is only app values).
+    Section {
+        title: "Padrões do Core"
+        Text {
+            text: "Volta as preferências do Core ao padrão: frase de despertar, volume da resposta, prazo, sensibilidade e dispositivos. Antes, config.json é copiado para config.json.bak."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "restoreCoreDefaultsButton"
+            variant: "danger"
+            text: "Restaurar padrões do Core…"
+            Accessible.name: "Restaurar os padrões do Core"
+            enabled: core.preferencesAvailable
+            onClicked: coreDefaultsConfirm.open()
+        }
+        Text {
+            objectName: "restoreCoreDefaultsReason"
+            visible: !core.preferencesAvailable
+            text: !core.connected ? "Indisponível: Core desconectado."
+                : core.configurationStatus === "safe_mode" ? "Indisponível: o Core está em modo seguro."
+                : core.sessionId.length > 0 ? "Indisponível: sessão de voz em andamento."
+                : "Indisponível agora: o Core está ocupado com outra alteração."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontCaption
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            objectName: "restoreCoreDefaultsResult"
+            visible: text.length > 0
+            text: core.preferencesResult
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+    }
+
     Section {
         title: "Zona de perigo"
         Rectangle {
@@ -640,6 +687,40 @@ PageFrame {
             onClicked: {
                 AppState.setSetting("behavior.devMode", true)
                 devModeConfirm.close()
+            }
+        }
+    }
+
+    Modal {
+        id: coreDefaultsConfirm
+        objectName: "coreDefaultsConfirm"
+        title: "Restaurar os padrões do Core?"
+        Text {
+            text: "Antes de trocar, o config.json atual é copiado para config.json.bak. Depois, a frase de despertar, o volume, o prazo, a sensibilidade e os dispositivos voltam ao padrão."
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            text: "Restaurar anterior desfaz esta troca, uma etapa. A frase de despertar só muda depois que o Core for reiniciado."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "confirmCoreDefaultsButton"
+            variant: "danger"
+            text: "Restaurar padrões do Core"
+            Layout.alignment: Qt.AlignRight
+            onClicked: {
+                core.restoreCoreDefaults()
+                coreDefaultsConfirm.close()
             }
         }
     }

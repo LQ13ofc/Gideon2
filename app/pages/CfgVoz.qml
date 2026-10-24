@@ -27,6 +27,13 @@ PageFrame {
         return null
     }
 
+    // B16 sensitivity: the saved value, or the value on its way to the Core while "Aplicando…" shows.
+    readonly property real sensStored: Number(AppState.uiGet("core.wakeSensitivity", 1.0))
+    readonly property real sensShown: AppState.isApplying("core.wakeSensitivity") ? Number(AppState.corePending["core.wakeSensitivity"]) : sensStored
+    function sensText(v) { return Number(v).toFixed(2).replace(".", ",") }
+    // Saved on release (or on a key press), in steps of 0.05; the Core answers through the ui settings.
+    function saveSensitivity(v) { AppState.setSetting("core.wakeSensitivity", Number(Number(v).toFixed(2))) }
+
     PageHeader {
         title: "Voz e Wake"
         subtitle: "Frase de despertar certificada, prazo da sessão e estado do wake."
@@ -233,14 +240,59 @@ PageFrame {
     Section {
         title: "Ajustes de detecção"
         SettingRow {
-            label: "Sensibilidade"
-            help: "Quão parecida a fala precisa ser com a frase para ser aceita."
-            disabledReason: "limiar fixo no pacote; o Core não tem ajuste de sensibilidade"
-            GSlider {
-                enabled: false
-                value: 0.5
-                implicitWidth: 220
-                Accessible.name: "Sensibilidade (indisponível)"
+            settingKey: "core.wakeSensitivity"
+            RowLayout {
+                spacing: Theme.space(12)
+                ColumnLayout {
+                    spacing: 2
+                    Layout.preferredWidth: 240
+                    GSlider {
+                        id: wakeSens
+                        objectName: "wakeSensitivitySlider"
+                        from: 0.5
+                        to: 1.5
+                        stepSize: 0.05
+                        Layout.fillWidth: true
+                        value: page.sensShown
+                        Accessible.name: "Sensibilidade do wake: menos sensível a mais sensível"
+                        onPressedChanged: if (!pressed) page.saveSensitivity(value)
+                        onMoved: if (!pressed) page.saveSensitivity(value)
+                    }
+                    Binding {
+                        target: wakeSens
+                        property: "value"
+                        value: page.sensShown
+                        when: !wakeSens.pressed
+                    }
+                    Text {
+                        objectName: "wakeSensitivityScale"
+                        text: "Menos sensível ↔ Mais sensível"
+                        textFormat: Text.PlainText
+                        color: Theme.textMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                        Layout.fillWidth: true
+                    }
+                }
+                Text {
+                    objectName: "wakeSensitivityValue"
+                    text: page.sensText(wakeSens.pressed ? wakeSens.value : page.sensShown) + " · padrão 1,0"
+                    textFormat: Text.PlainText
+                    color: Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontBody
+                    font.weight: 600
+                    Layout.preferredWidth: 150
+                    Accessible.name: "Sensibilidade atual " + page.sensText(page.sensShown) + ", padrão 1,0"
+                }
+                GButton {
+                    objectName: "restoreWakeSensitivity"
+                    variant: "ghost"
+                    text: "Restaurar padrão"
+                    Accessible.name: "Restaurar a sensibilidade do wake para o padrão 1,0"
+                    enabled: AppState.blockReason("core.wakeSensitivity") === "" && Math.abs(page.sensShown - 1.0) > 0.001
+                    onClicked: page.saveSensitivity(1.0)
+                }
             }
         }
         SettingRow {
@@ -259,7 +311,7 @@ PageFrame {
         title: "Como funciona"
         summary: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core."
         Text {
-            text: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core. O prazo da sessão vale na próxima sessão de voz."
+            text: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core. O prazo da sessão vale na próxima sessão de voz. A sensibilidade ajusta o limiar do detector: na escuta ao vivo (--live-audio) vale na próxima sessão de voz; no modo de replay, só no próximo início do Core. Ainda não foi validada com microfone real."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

@@ -101,6 +101,17 @@ PageFrame {
                     Accessible.name: "Indicador da câmera: " + core.perceptionCameraIndicator
                 }
             }
+            // B16: the live recorder of the Core (--live-audio); "Microfone ativo" only while it captures.
+            Text {
+                objectName: "liveInputState"
+                text: core.micActive ? "Microfone ativo · " + core.audioLiveText : core.audioLiveText
+                textFormat: Text.PlainText
+                color: core.micActive ? Theme.warning : Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
             Text {
                 text: "Os indicadores mostram o último estado lido. Só a leitura de estado atualiza esta tela."
                 textFormat: Text.PlainText

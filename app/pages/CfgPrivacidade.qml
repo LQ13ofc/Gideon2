@@ -56,6 +56,51 @@ PageFrame {
         }
     }
 
+    // B16: the microphone as the Core reports it. The indicator is the recorder's state, not a physical reading of the device.
+    Section {
+        title: "Microfone"
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(12)
+            Badge {
+                objectName: "privacyMicBadge"
+                visible: core.micActive
+                text: "Microfone ativo"
+                tone: "warning"
+            }
+            Text {
+                objectName: "privacyMicState"
+                text: core.micActive ? "Captura ao vivo em andamento." : "Microfone inativo."
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                font.weight: 600
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+        Text {
+            objectName: "privacyLiveInput"
+            text: core.audioLiveText
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            text: "O indicador mostra o estado que o Core informa sobre o gravador ao vivo. Não é uma leitura física do microfone."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+    }
+
     Section {
         title: "Envio à nuvem"
         Text {

@@ -119,7 +119,7 @@ Item {
                         IntroText { text: "•  Nada do que você fala é guardado em disco pela interface."; indent: true }
                         IntroText { text: "•  O áudio fica só em memória durante a captura. Nenhum arquivo de voz é gravado."; indent: true }
                         IntroText { text: "•  Não há histórico de conversas salvo. A nuvem só recebe conversas com consentimento."; indent: true }
-                        IntroText { text: "•  Nesta versão a entrada é virtual: o microfone físico ainda não é usado."; indent: true }
+                        IntroText { text: "•  A entrada é virtual, salvo com o Core iniciado com --live-audio."; indent: true }
                     }
 
                     // ---- 2. Frase de despertar (só certificadas)
@@ -170,17 +170,17 @@ Item {
                         objectName: "onboarding_step3"
                         Layout.fillWidth: true
                         spacing: Theme.space(10)
-                        IntroText { text: "Nesta versão, entrada e saída são virtuais. O volume abaixo é o da resposta por voz, não o do sistema." }
+                        IntroText { text: "Sem --live-audio, entrada e saída são virtuais. O volume abaixo é o da resposta por voz, não o do sistema." }
                         IntroText { objectName: "onboarding_input_virtual"; text: "Entrada: PCM virtual (em uso)"; strong: true }
                         IntroText { objectName: "onboarding_output_virtual"; text: "Saída: virtual (em uso)"; strong: true }
                         IntroText {
                             objectName: "onboarding_physical_mic"
-                            text: "Microfone físico: indisponível. O Core ainda não lista dispositivos físicos de áudio."
+                            text: "Microfone: escolha em Configurações › Dispositivos. A lista vem do sistema e a captura ao vivo só existe com --live-audio."
                             small: true
                         }
                         IntroText {
                             objectName: "onboarding_physical_out"
-                            text: "Alto-falante físico: indisponível. Mesmo motivo do microfone."
+                            text: "Alto-falante: escolha em Configurações › Dispositivos. A troca vale na próxima sessão de voz."
                             small: true
                         }
                         IntroText { text: "Volume da resposta por voz"; strong: true }

@@ -16,6 +16,7 @@ Rectangle {
     property string stateTone: "idle"   // idle | working | error | offline
     property bool orbOn: false
     property string orbState: "idle"
+    property bool micActive: false  // B16: true only while the Core's live recorder captures (audio.live.mic_active)
     property bool cancellable: false
     signal tabPicked(string id)
     signal paletteRequested()
@@ -204,6 +205,26 @@ Rectangle {
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Estado do Gideon"
                     Accessible.description: text
+                }
+                // B16: the microphone indicator. Shown only while the Core reports the live recorder capturing.
+                Rectangle {
+                    objectName: "micDot"
+                    visible: bar.micActive
+                    Layout.preferredWidth: 8; Layout.preferredHeight: 8
+                    radius: 4
+                    color: Theme.warning
+                }
+                Text {
+                    objectName: "micActiveLabel"
+                    visible: bar.micActive
+                    text: "Microfone ativo"
+                    textFormat: Text.PlainText
+                    color: Theme.warning
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontHelp
+                    font.weight: 600
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: "Microfone ativo"
                 }
             }
         }

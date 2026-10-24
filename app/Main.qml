@@ -140,6 +140,7 @@ ApplicationWindow {
     function settingPage(key) {
         if (key.indexOf("theme.") === 0) return "cfg_aparencia"
         if (key.indexOf("voice.") === 0 || key.indexOf("wake") >= 0) return "cfg_voz"
+        if (key === "core.audioInput" || key === "core.audioOutput") return "cfg_dispositivos"
         if (key.indexOf("audio.") === 0) return "cfg_audio"
         if (key.indexOf("privacy") === 0) return "cfg_privacidade"
         if (key === "behavior.devMode") return "diag_estado"
@@ -223,6 +224,7 @@ ApplicationWindow {
             stateTone: window.pillTone
             orbOn: Theme.orbVisible && core.visualFeedback
             orbState: L.orbStateOf(core.connected ? core.state : "offline")
+            micActive: core.micActive
             cancellable: window.sessionCancellable
             onTabPicked: function (id) { window.pickTab(id) }
             onPaletteRequested: palette.open()

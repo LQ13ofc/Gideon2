@@ -901,5 +901,34 @@ class SnapshotContract(unittest.TestCase):
         self.assertTrue(any('proposal' in label for label in c.validated), c.validated)
         c.stop()
 
+    def test_audio_devices_and_b16_preferences_validate_against_real_core(self):
+        """B16 (A4/A6): audio_devices with the fake pactl first on PATH, then the sensitivity, device and defaults-restore requests."""
+        fakes = BASE / 'tests/fixtures/fake_audio_tools'
+        home = str(self.td)
+        self.core.env = lambda: {'PATH': f'{fakes}:/usr/bin:/bin', 'HOME': home, 'XDG_CONFIG_HOME': home,
+                                 'XDG_DATA_HOME': home, 'XDG_CACHE_HOME': home, 'XDG_RUNTIME_DIR': home}
+        c = self.core.start()
+        before = c.snap('before audio_devices')
+        self.assertNotIn('devices', before['audio'], 'devices exist only after the first audio_devices')
+        self.assertEqual(before['audio']['live'], {'enabled': False, 'input_state': 'idle', 'output_state': 'idle', 'mic_active': False})
+        self.assertEqual(c.req('audio_devices')['code'], 'ok')
+        devices = c.snap('audio_devices answered')['audio']['devices']
+        self.assertEqual(devices['source'], 'pactl')
+        self.assertTrue(any(d['default'] for d in devices['inputs']), devices)
+        self.assertNotIn('monitor', ' '.join(d['id'] for d in devices['inputs'] + devices['outputs']))
+        revision = before['preferences']['revision']
+        base = {'audible_feedback': True, 'session_timeout_ms': 30000}
+        ack = c.req('preferences', revision=revision, **base, wake_sensitivity=0.8, audio_input_device='usb-mic.1')
+        self.assertEqual(ack['code'], 'ok')
+        saved = c.snap('sensitivity and input saved')['preferences']
+        self.assertEqual((saved['wake_sensitivity'], saved['audio_input_device'], saved['audio_output_device']), (0.8, 'usb-mic.1', 'default'))
+        self.assertEqual(saved['revision'], revision + 1)
+        restored = c.req('preferences_restore_defaults', revision=saved['revision'])
+        self.assertEqual(restored['code'], 'ok')
+        defaults = c.snap('defaults restored')['preferences']
+        self.assertEqual((defaults['wake_sensitivity'], defaults['audio_input_device']), (1.0, 'default'))
+        self.assertTrue((self.root / 'config.json.bak').exists(), 'the previous config is kept as config.json.bak')
+        c.stop()
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

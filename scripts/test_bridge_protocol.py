@@ -17,18 +17,18 @@ from bridge import CAP_DEADLINE_MS,CAP_RESULT_LIMIT,CAPABILITY_MESSAGES,capabili
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
 # The QML child process needs QGuiApplication, which cannot coexist with a QCoreApplication.
-QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child'];QML_CONNECTIONS_CHILD=sys.argv[1:2]==['--qml-connections-child'];QML_SHELL_CHILD=sys.argv[1:2]==['--qml-shell-child'];QML_INTRO_CHILD=sys.argv[1:2]==['--qml-intro-child']
+QML_CHILD=sys.argv[1:2]==['--qml-child'];QML_CHAT_CHILD=sys.argv[1:2]==['--qml-chat-child'];QML_MODELS_CHILD=sys.argv[1:2]==['--qml-models-child'];QML_PERCEPTION_CHILD=sys.argv[1:2]==['--qml-perception-child'];QML_SKILLS_CHILD=sys.argv[1:2]==['--qml-skills-child'];QML_CONNECTIONS_CHILD=sys.argv[1:2]==['--qml-connections-child'];QML_SHELL_CHILD=sys.argv[1:2]==['--qml-shell-child'];QML_INTRO_CHILD=sys.argv[1:2]==['--qml-intro-child'];QML_AUDIO_CHILD=sys.argv[1:2]==['--qml-audio-child']
 # Every QML child gets a private configuration home (uisettings.py writes there, never to the real ~/.config). Only the
 # children that drive pages set GIDEON_UI_NO_ONBOARDING; the intro child is the one that shows the first-run guide.
-if QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_INTRO_CHILD:
+if QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_INTRO_CHILD or QML_AUDIO_CHILD:
     os.environ['XDG_CONFIG_HOME']=tempfile.mkdtemp(prefix='gideon-xdg-')
-if QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD:
+if QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_AUDIO_CHILD:
     os.environ['GIDEON_UI_NO_ONBOARDING']='1'
 def offered(window,page_id):
     # The window lists the pages the Core offers now (Main.qml offeredPages); the sub-bar shows only the active tab's pages.
     ids=window.property('offeredPages');ids=ids.toVariant() if hasattr(ids,'toVariant') else ids
     return page_id in [str(x) for x in ids]
-APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_INTRO_CHILD) else QCoreApplication([])
+APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_INTRO_CHILD or QML_AUDIO_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
 EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
 BASE={'version':1,'request_id':'r','code':'ok','state':'idle','sequence':1,'session_id':None,'transcript':None,'command':None,'events':[],'text_input_available':True,'speech_samples':0,'speech_status':'idle','wake_status':'unavailable','stt_status':'unavailable','plugins':{'revision':0,'status':'ok','items':[]},'llm':EMPTY_LLM,'tool_proposals':[]}
@@ -1465,7 +1465,7 @@ def _intro_checks(bridge,engine,window,check,checks):
     check('the guide covers the shell: Ctrl+2 does not change the page',window.property('pageId')=='hoje')
     click('onboarding_next');click('onboarding_next')
     check('Próximo moves two steps',step()=='Passo 3 de 4')
-    check('step 3: physical devices are shown unavailable with a reason',find('onboarding_physical_mic').property('text').startswith('Microfone físico: indisponível'))
+    check('step 3: the microphone points to Dispositivos, where the list comes from the Core',find('onboarding_physical_mic').property('text').startswith('Microfone: escolha em Configurações › Dispositivos'))
     click('onboarding_next')
     check('last step offers Concluir',step()=='Passo 4 de 4' and find('onboarding_next').property('text')=='Concluir')
     click('onboarding_back');check('Voltar goes back one step',step()=='Passo 3 de 4')
@@ -2961,6 +2961,179 @@ class DeveloperDiagnostics(unittest.TestCase):
         for bad in ({'approved_at_ms':0},{'approved_at_ms':-1}):
             with self.subTest(bad=bad),self.assertRaises(ValueError):validate_snapshot({**snap,'hub':{**snap['hub'],'entries':[{**entry,**bad}]}},'r',0)
         with self.subTest(case='date without approval'),self.assertRaises(ValueError):validate_snapshot({**snap,'hub':{**snap['hub'],'entries':[{**entry,'permissions_approved':False}]}},'r',0)
+# ---- B16 (docs/A6-live-audio.md): sensitivity, devices, live status and the Core defaults restore. Fake Core frames only.
+from bridge import DEVICE_INVALID_TEXT,LIVE_ERROR_MESSAGES,RESTORE_BUSY_TEXT,SENSITIVITY_RANGE_TEXT,UNAVAILABLE_DEVICE_LABEL,AUDIO_REASON_MESSAGES,device_choices,devices_status,live_input_text,live_output_text
+AUDIO_DEVICES={'source':'pactl','inputs':[{'id':'usb-mic.1','label':'USB Mic','default':True}],'outputs':[{'id':'alsa_out.hdmi','label':'HDMI','default':False}]}
+AUDIO_LIVE_OFF={'enabled':False,'input_state':'idle','output_state':'idle','mic_active':False}
+AUDIO_CAPTURING={'enabled':True,'input_state':'capturing','output_state':'idle','mic_active':True}
+def audio_snapshot(devices=None,live=None,prefs=None):
+    """A ready Core snapshot with the audio block (live always; devices only after audio_devices) and optional preference fields."""
+    snap=ready(copy.deepcopy(BASE));snap['audio']={'live':dict(AUDIO_LIVE_OFF if live is None else live)}
+    if devices is not None:snap['audio']['devices']=devices
+    if prefs:snap['preferences'].update(prefs)
+    return snap
+class AudioBridge(unittest.TestCase):
+    def test_sensitivity_slot_sends_one_preferences_request_and_keeps_other_fields(self):
+        bridge,peer=connect_bridge(self,audio_snapshot())
+        bridge.setWakeSensitivity(0.8);request=next_request(peer)
+        self.assertEqual({k:request[k] for k in ('op','revision','audible_feedback','session_timeout_ms','wake_sensitivity')},{'op':'preferences','revision':0,'audible_feedback':True,'session_timeout_ms':30000,'wake_sensitivity':0.8})
+        self.assertNotIn('audio_input_device',request,'absent optional fields keep the stored value in the Core')
+        answer(peer,request,audio_snapshot(prefs={'wake_sensitivity':0.8}));settle(bridge)
+        self.assertEqual(bridge.wakeSensitivity,0.8);self.assertEqual(bridge.preferencesResult,PREFS_DONE)
+    def test_sensitivity_refusals_send_nothing(self):
+        bridge,_=connect_bridge(self,audio_snapshot())
+        for bad in (0.4,1.6,float('nan'),True):
+            with self.subTest(value=bad):
+                bridge.setWakeSensitivity(bad)
+                self.assertIsNone(bridge.pending);self.assertEqual(bridge.results['prefs'],SENSITIVITY_RANGE_TEXT)
+    def test_device_slot_sends_both_names_and_refuses_unsafe_ones(self):
+        bridge,peer=connect_bridge(self,audio_snapshot())
+        bridge.setAudioDevices('usb-mic.1','default');request=next_request(peer)
+        self.assertEqual((request['op'],request['audio_input_device'],request['audio_output_device']),('preferences','usb-mic.1','default'))
+        answer(peer,request,audio_snapshot());settle(bridge)
+        bridge.setAudioDevices('bad;name','default')
+        self.assertIsNone(bridge.pending);self.assertEqual(bridge.results['prefs'],DEVICE_INVALID_TEXT)
+    def test_refresh_asks_for_the_device_list_and_shows_the_core_answer(self):
+        bridge,peer=connect_bridge(self,audio_snapshot())
+        self.assertFalse(bridge.audioDevices['known']);self.assertIn('Atualizar lista',bridge.audioDevices['status'])
+        bridge.refreshAudioDevices();request=next_request(peer)
+        self.assertEqual(set(request)-{'version','request_id','op'},set(),'audio_devices carries no other field')
+        self.assertEqual(request['op'],'audio_devices')
+        answer(peer,request,audio_snapshot(devices=AUDIO_DEVICES));settle(bridge)
+        self.assertEqual(bridge.audioResult,'Lista de dispositivos atualizada')
+        self.assertEqual((bridge.audioDevices['known'],bridge.audioDevices['source'],bridge.audioDevices['status']),(True,'pactl',''))
+        self.assertEqual([c['value'] for c in bridge.audioInputChoices],['default','usb-mic.1'])
+        self.assertEqual([c['text'] for c in bridge.audioInputChoices],['Padrão do sistema','USB Mic · padrão do sistema'])
+        self.assertEqual([c['value'] for c in bridge.audioOutputChoices],['default','alsa_out.hdmi'])
+        self.assertEqual(bridge.audioInputLabel,'Padrão do sistema')
+    def test_restore_defaults_is_refused_during_a_session_and_busy_is_portuguese(self):
+        bridge,peer=connect_bridge(self,audio_snapshot())
+        session=audio_snapshot();session.update(session_id=7,state='capturing')
+        bridge._apply(validate_snapshot(session,'r',1));bridge.restoreCoreDefaults()
+        self.assertIsNone(bridge.pending);self.assertEqual(bridge.preferencesResult,RESTORE_BUSY_TEXT)
+        bridge._apply(validate_snapshot(audio_snapshot(),'r',1))
+        bridge.restoreCoreDefaults();request=next_request(peer)
+        self.assertEqual(set(request)-{'version','request_id','op'},{'revision'});self.assertEqual((request['op'],request['revision']),('preferences_restore_defaults',0))
+        answer(peer,request,audio_snapshot(),'busy');settle(bridge)
+        self.assertEqual(bridge.preferencesResult,RESTORE_BUSY_TEXT)
+        bridge.restoreCoreDefaults();request=next_request(peer)
+        answer(peer,request,audio_snapshot(),'ok');settle(bridge)
+        self.assertEqual(bridge.preferencesResult,'Padrões do Core restaurados; cópia anterior em config.json.bak')
+    def test_live_status_and_mic_indicator_follow_the_core_only(self):
+        bridge,_=connect_bridge(self,audio_snapshot(devices=AUDIO_DEVICES))
+        self.assertFalse(bridge.micActive);self.assertEqual(bridge.audioLiveText,'Entrada ao vivo: desligada — inicie o Core com --live-audio')
+        bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=AUDIO_CAPTURING),'r',1))
+        self.assertTrue(bridge.micActive);self.assertEqual(bridge.audioLiveText,'Entrada ao vivo: capturando')
+        failed={'enabled':True,'input_state':'error','output_state':'error','mic_active':False,'last_error':'recorder_unavailable'}
+        bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=failed),'r',1))
+        self.assertFalse(bridge.micActive)
+        self.assertEqual(bridge.audioLiveText,'Entrada ao vivo: erro: gravador de áudio indisponível (instale pipewire-pulse)')
+        playing_error={'enabled':True,'input_state':'idle','output_state':'error','mic_active':False,'last_error':'player_timeout'}
+        bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=playing_error),'r',0))
+        self.assertEqual(bridge.audioOutputText,'Saída ao vivo: erro: o reprodutor de áudio não respondeu')
+    def test_sensitivity_and_audio_values_come_from_the_snapshot(self):
+        bridge,_=connect_bridge(self,audio_snapshot())
+        self.assertEqual(bridge.wakeSensitivity,1.0)
+        bridge._apply(validate_snapshot(audio_snapshot(prefs={'wake_sensitivity':1.5,'audio_input_device':'gone-mic'}),'r',1))
+        self.assertEqual(bridge.wakeSensitivity,1.5)
+        self.assertEqual(bridge.audioInputChoices[-1],{'value':'gone-mic','text':UNAVAILABLE_DEVICE_LABEL})
+        self.assertEqual(bridge.audioInputSaved,'gone-mic')
+    def test_audio_changes_notify_only_the_audio_consumers(self):
+        bridge=Bridge('/nonexistent-gideon-root');counts=Counter()
+        for signal in ('audioChanged','preferencesChanged'):getattr(bridge,signal).connect(lambda n=signal:counts.update([n]))
+        old=validate_snapshot(audio_snapshot(),'r',0)
+        new=validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES),'r',0)
+        bridge._publish(old,new);self.assertEqual(dict(counts),{'audioChanged':1})
+class AudioContract(unittest.TestCase):
+    def test_preference_bounds_match_the_core(self):
+        validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,prefs={'wake_sensitivity':1.5,'audio_input_device':'usb-mic.1','audio_output_device':'default'}),'r',0)
+        for bad in ({'wake_sensitivity':1.6},{'wake_sensitivity':0.49},{'audio_output_device':'x'*129},{'audio_input_device':'mic;rm'}):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):validate_snapshot(audio_snapshot(prefs=bad),'r',0)
+    def test_every_new_text_is_portuguese_and_never_a_raw_code(self):
+        for text in list(LIVE_ERROR_MESSAGES.values())+list(AUDIO_REASON_MESSAGES.values())+[RESTORE_BUSY_TEXT,SENSITIVITY_RANGE_TEXT,DEVICE_INVALID_TEXT,UNAVAILABLE_DEVICE_LABEL]:
+            with self.subTest(text=text):
+                self.assertNotIn('_',text);self.assertTrue(text.strip())
+        for code in LIVE_ERROR_MESSAGES:self.assertNotEqual(LIVE_ERROR_MESSAGES[code],code)
+        self.assertIn('pipewire-pulse/pactl',AUDIO_REASON_MESSAGES['no_audio_tool'])
+    def test_status_and_choice_helpers(self):
+        self.assertEqual(devices_status({'source':'none','reason':'no_audio_tool','inputs':[],'outputs':[]}),AUDIO_REASON_MESSAGES['no_audio_tool'])
+        self.assertEqual(devices_status(None),'Dispositivos ainda não consultados: use Atualizar lista')
+        self.assertEqual(devices_status({'source':'pw-dump','inputs':[],'outputs':[]}),'Nenhum dispositivo de áudio listado por PipeWire (pw-dump)')
+        self.assertEqual(device_choices(None,'inputs','default'),[{'value':'default','text':'Padrão do sistema'}])
+        self.assertEqual(live_input_text(None),'Entrada ao vivo: sem informação do Core')
+        self.assertEqual(live_output_text({'enabled':True,'input_state':'idle','output_state':'playing','mic_active':False}),'Saída ao vivo: reproduzindo')
+class AudioQml(unittest.TestCase):
+    def test_voice_devices_general_and_indicators_follow_qml_rules(self):
+        env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}
+        proc=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--qml-audio-child'],env=env,capture_output=True,text=True,timeout=240)
+        self.assertEqual(proc.returncode,0,(proc.stdout+proc.stderr)[-4000:])
+def qml_audio_child():
+    from PySide6.QtGui import QAccessible,QGuiApplication
+    from PySide6.QtCore import QCoreApplication,QEvent
+    from PySide6.QtTest import QTest
+    from main import create
+    app=QGuiApplication(sys.argv[:1]);QAccessible.setActive(True);checks=[]
+    def check(name,value):
+        if not value:raise AssertionError(name)
+        checks.append(name)
+    with tempfile.TemporaryDirectory(prefix='gideon-qml-audio-') as td:
+        bridge,engine=create(app,td);window=engine.rootObjects()[0]
+        bridge.retry.stop();bridge.online=True
+        try:
+            def items():
+                stack=[window.contentItem()];found=[]
+                while stack:
+                    current=stack.pop();found.append(current);stack.extend(current.childItems())
+                return found
+            def find(name):
+                item=next((i for i in items() if i.objectName()==name),None)
+                if item is None:raise AssertionError('missing '+name)
+                return item
+            bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,prefs={'audio_input_device':'usb-mic.1'}),'r',0))
+            window.setProperty('pageId','cfg_voz');QTest.qWait(50)
+            slider=find('wakeSensitivitySlider')
+            check('sensitivity slider spans 0.5 to 1.5',slider.property('from')==0.5 and slider.property('to')==1.5)
+            check('sensitivity slider starts at the Core value 1.0',abs(slider.property('value')-1.0)<1e-9)
+            check('sensitivity value reads with the default mark',find('wakeSensitivityValue').property('text')=='1,00 · padrão 1,0')
+            check('sensitivity scale is worded',find('wakeSensitivityScale').property('text')=='Menos sensível ↔ Mais sensível')
+            check('restore of sensitivity is off at the default',find('restoreWakeSensitivity').property('enabled') is False)
+            window.setProperty('pageId','cfg_dispositivos');QTest.qWait(50)
+            inputs=find('audioInputSelect');outputs=find('audioOutputSelect')
+            check('input select offers the default and the listed microphone',inputs.property('count')==2)
+            check('input select shows the saved listed microphone (row follows the list)',inputs.property('displayText')=='USB Mic · padrão do sistema')
+            check('output select shows the saved system default',outputs.property('displayText')=='Padrão do sistema')
+            check('restore of the microfone is on when a listed device is saved',find('restoreAudioInput').property('enabled'))
+            check('restore of the speaker is off at the system default',find('restoreAudioOutput').property('enabled') is False)
+            check('output select offers the default and the listed speaker',outputs.property('count')==2 and outputs.property('enabled'))
+            check('no unavailable note remains on devices',find('audioDevicesStatus').property('visible') is False and find('audioInputEmpty').property('visible') is False)
+            check('live status says the recorder is off',find('liveInputStatus').property('text')=='Entrada ao vivo: desligada — inicie o Core com --live-audio')
+            check('refresh list button is enabled while connected',find('refreshAudioDevicesButton').property('enabled'))
+            bridge._apply(validate_snapshot(audio_snapshot(devices={'source':'none','reason':'no_audio_tool','inputs':[],'outputs':[]}),'r',0))
+            QTest.qWait(50)
+            check('unsupported state names the tool to install',find('audioDevicesStatus').property('text')==AUDIO_REASON_MESSAGES['no_audio_tool'] and find('audioDevicesStatus').property('visible'))
+            bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=AUDIO_CAPTURING),'r',0))
+            QTest.qWait(50)
+            check('devices page reads the capturing state',find('liveInputStatus').property('text')=='Entrada ao vivo: capturando')
+            check('top bar shows Microfone ativo while captured',find('micActiveLabel').property('visible') and find('micDot').property('visible'))
+            window.setProperty('pageId','hoje');QTest.qWait(50)
+            check('hoje badge shows Microfone ativo while captured',find('hojeMicBadge').property('visible') and find('hojeMicBadge').property('text')=='Microfone ativo')
+            window.setProperty('pageId','cfg_privacidade');QTest.qWait(50)
+            check('privacy page names the microphone as active',find('privacyMicState').property('text')=='Captura ao vivo em andamento.' and find('privacyMicBadge').property('visible'))
+            bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=AUDIO_LIVE_OFF),'r',0))
+            QTest.qWait(50)
+            check('top bar hides Microfone ativo when the recorder is off',find('micActiveLabel').property('visible') is False)
+            check('hoje badge is hidden when the recorder is off',find('hojeMicBadge').property('visible') is False)
+            check('privacy page says the microphone is inactive',find('privacyMicState').property('text')=='Microfone inativo.')
+            window.setProperty('pageId','cfg_geral');QTest.qWait(50)
+            check('core defaults restore is offered while preferences are available',find('restoreCoreDefaultsButton').property('enabled'))
+            check('core defaults reason is hidden while available',find('restoreCoreDefaultsReason').property('visible') is False)
+            check('app settings reset stays a separate control',find('restoreAppSettings').property('enabled'))
+        finally:
+            for w in engine.rootObjects():w.close();w.deleteLater()
+            QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
+            del engine;del bridge
+    print(f'qml audio checks ok: {len(checks)}',flush=True)
+    return 0
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_SHELL_CHILD:sys.exit(qml_shell_child())
@@ -2970,4 +3143,5 @@ if __name__=='__main__':
     if QML_CHAT_CHILD:sys.exit(qml_chat_child())
     if QML_MODELS_CHILD:sys.exit(qml_models_child())
     if QML_PERCEPTION_CHILD:sys.exit(qml_perception_child())
+    if QML_AUDIO_CHILD:sys.exit(qml_audio_child())
     unittest.main()

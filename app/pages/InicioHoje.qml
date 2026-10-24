@@ -38,7 +38,7 @@ PageFrame {
         var s = core.state
         if (s === "safe_mode") return {phrase: "Modo seguro", sub: "Abra Diagnóstico › Recuperação para reparar.", mode: "error", tone: "warning", dim: false, badge: ""}
         if (s === "restart_required") return {phrase: "Reinício necessário", sub: "Reinicie o Core para aplicar a alteração.", mode: "error", tone: "warning", dim: false, badge: ""}
-        if (s === "capturing") return {phrase: "Ouvindo…", sub: "Fale agora. Cancelar encerra a sessão.", mode: "listening", tone: "info", dim: false, badge: "Microfone ativo"}
+        if (s === "capturing") return {phrase: "Ouvindo…", sub: "Fale agora. Cancelar encerra a sessão.", mode: "listening", tone: "info", dim: false, badge: ""}
         if (s === "transcribing") return {phrase: "Transcrevendo…", sub: core.subtitle.length > 0 ? core.subtitle : "Processando o que você disse.", mode: "listening", tone: "info", dim: false, badge: ""}
         if (s === "executing") return {phrase: "Executando…", sub: core.agentState === "waiting_tool" ? "Ferramenta do agente em execução." : "Executando o comando.", mode: "thinking", tone: "info", dim: false, badge: ""}
         if (s === "speaking") return {phrase: "Falando…", sub: "Resposta em voz alta. Cancelar interrompe.", mode: "speaking", tone: "info", dim: false, badge: ""}
@@ -95,7 +95,9 @@ PageFrame {
         }
         Chip {
             objectName: "chipEntrada"
-            text: core.wakeChoices.length > 0 ? "Entrada: PCM virtual" : "Entrada: indisponível"
+            // B16: the real device name only while the live recorder is on (--live-audio); otherwise the virtual PCM the wake uses.
+            text: core.wakeChoices.length === 0 ? "Entrada: indisponível"
+                : (core.audioLive.enabled === true ? "Entrada: " + core.audioInputLabel : "Entrada: PCM virtual")
             onClicked: Window.window.goPage("cfg_dispositivos")
         }
         Chip {
@@ -125,6 +127,7 @@ PageFrame {
             mode: page.hud.mode
             size: 72
             opacity: page.hud.dim ? 0.4 : 1
+            Accessible.description: core.micActive ? "Microfone ativo" : ""
             Layout.alignment: Qt.AlignTop
             Layout.preferredWidth: 72
             Layout.preferredHeight: 72
@@ -156,10 +159,12 @@ PageFrame {
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
+            // B16: the microphone badge follows the Core's live recorder (micActive), never the state name alone.
             Badge {
-                visible: page.hud.badge.length > 0
-                text: page.hud.badge
-                tone: "info"
+                objectName: "hojeMicBadge"
+                visible: core.micActive || page.hud.badge.length > 0
+                text: core.micActive ? "Microfone ativo" : page.hud.badge
+                tone: core.micActive ? "warning" : "info"
             }
         }
     }

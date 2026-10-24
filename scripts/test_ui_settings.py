@@ -10,18 +10,24 @@ from uisettings import APP_KEYS,CORE_KEYS,PRESETS,SCHEMA,SPECS,UiSettings,_legac
 
 # docs/ui-spec/01-ajustes-minimalismo.md 3.1 (minimum set) plus the Core-backed entries of docs/ui-spec/40-configuracoes.md.
 MINIMUM_KEYS={'theme.mode','theme.preset','theme.accent','theme.density','theme.radius','theme.fontSize','theme.fontFamily','theme.contrast','theme.animation','theme.translucency','theme.shadow','theme.titleWeight','theme.lineHeight','theme.colors','theme.orb','theme.orbSize','behavior.startTab','behavior.rememberWindow','behavior.tips','behavior.shortcuts','behavior.advanced','behavior.devMode','behavior.toastSeconds','behavior.confirmWrites','behavior.reduceMotionFollowSystem','voice.partials','voice.showConfidence','audio.cues'}
-CORE_EXPECTED={'core.wakePhrase','core.sessionTimeoutMs','core.responseGain','core.audibleFeedback','core.visualFeedback'}
+CORE_EXPECTED={'core.wakePhrase','core.sessionTimeoutMs','core.responseGain','core.audibleFeedback','core.visualFeedback','core.wakeSensitivity','core.audioInput','core.audioOutput'}
 
 
 class FakeBridge:
     """Stands in for app/bridge.py: the same attribute and slot names, no socket."""
     def __init__(self):
         self.preferencesAvailable=True;self.outputVolume=100;self.visualFeedback=True;self.audibleFeedback=True;self.sessionTimeout=30000
+        self.wakeSensitivity=1.0
         self.wakeChoices=[{'id':'hey_gideon','text':'Hey Gideon','qualification_label':'em desenvolvimento'},{'id':'okay_gideon','text':'Okay Gideon','qualification_label':'requer prova de conceito'}]
+        # Same rows as bridge.device_choices: the system default first, then the devices the Core listed.
+        self.audioInputChoices=[{'value':'default','text':'Padrão do sistema'},{'value':'usb-mic.1','text':'USB Mic · padrão do sistema'}]
+        self.audioOutputChoices=[{'value':'default','text':'Padrão do sistema'}]
         self.snapshot={'preferences':{'wake_phrase':None},'base_pack':{'default_phrase':'hey_gideon'}};self.calls=[]
     def selectWake(self,ident):self.calls.append(('selectWake',ident))
     def saveFeedback(self,visual,volume):self.calls.append(('saveFeedback',visual,volume))
     def savePreferences(self,audible,timeout):self.calls.append(('savePreferences',audible,timeout))
+    def setWakeSensitivity(self,value):self.calls.append(('setWakeSensitivity',value))
+    def setAudioDevices(self,inputs,outputs):self.calls.append(('setAudioDevices',inputs,outputs))
 
 
 class UiSettingsTests(unittest.TestCase):
@@ -215,6 +221,33 @@ class UiSettingsTests(unittest.TestCase):
         self.assertEqual((refused['ok'],refused['code']),(False,'preferences_unavailable'))
         detached=UiSettings(None,'/srv/gideon-core',config_home=self.home)
         self.assertEqual(detached.set('core.visualFeedback',True)['code'],'preferences_unavailable')
+
+    def test_voice_and_device_settings_go_through_bridge(self):
+        self.assertEqual(self.ui.values['core.wakeSensitivity'],1.0)
+        self.assertEqual(self.ui.values['core.audioInput'],'default')
+        self.assertEqual(self.ui.set('core.wakeSensitivity',1.2),{'ok':True,'value':1.2,'pending':True})
+        self.assertEqual(self.ui.set('core.wakeSensitivity',1.0)['pending'],False,'the fake Core still holds 1.0, so nothing is sent')
+        self.bridge.wakeSensitivity=1.2
+        self.assertEqual(self.ui.set('core.wakeSensitivity',1.0)['pending'],True)
+        for bad in (0.4,1.6,True,'alto',float('nan')):
+            with self.subTest(value=bad):
+                refused=self.ui.set('core.wakeSensitivity',bad)
+                self.assertEqual((refused['ok'],refused['code']),(False,'invalid_value'))
+        self.assertEqual(self.ui.set('core.audioInput','usb-mic.1')['pending'],True)
+        self.assertEqual(self.ui.set('core.audioOutput','default')['pending'],False,'an unchanged device is not sent')
+        self.assertEqual(self.ui.set('core.audioInput','fora-da-lista')['code'],'invalid_value')
+        self.assertEqual(self.bridge.calls,[('setWakeSensitivity',1.2),('setWakeSensitivity',1.0),('setAudioDevices','usb-mic.1','default')])
+        self.assertEqual(self.ui.reset('core.wakeSensitivity')['code'],'core_readonly')
+        entry=next(e for e in self.ui.schema if e['key']=='core.audioInput')
+        self.assertEqual([o['value'] for o in entry['options']],['default','usb-mic.1'])
+        self.assertEqual(entry['subtab'],'Dispositivos');self.assertEqual(entry['source'],'core')
+        self.bridge.snapshot['preferences']['audio_input_device']='usb-mic.1'
+        self.assertEqual(self.ui.values['core.audioInput'],'usb-mic.1')
+        self.bridge.preferencesAvailable=False
+        self.assertEqual(self.ui.set('core.wakeSensitivity',0.8)['code'],'preferences_unavailable')
+        self.assertEqual(self.ui.search('sensibilidade')[0]['key'],'core.wakeSensitivity')
+        self.assertEqual(self.ui.search('microfone')[0]['key'],'core.audioInput')
+        self.assertEqual(self.ui.search('alto-falante')[0]['key'],'core.audioOutput')
 
     def test_core_change_notifies_listeners(self):
         notified=[]

@@ -65,6 +65,47 @@ def audio_live_ok(live):
     if live['mic_active']!=(live['input_state']=='capturing'):return False
     return live['enabled'] or (live['input_state']=='idle' and not live['mic_active'])
 def audio_ok(audio):return isinstance(audio,dict) and set(audio)<={'devices','live'} and 'live' in audio and audio_live_ok(audio['live']) and ('devices' not in audio or audio_devices_ok(audio['devices']))
+# B16 texts (Portuguese only; no Core code reaches the screen). The default choice is the Core's 'default' preference.
+DEFAULT_DEVICE='default'
+DEFAULT_DEVICE_LABEL='Padrão do sistema'
+DEFAULT_MARK=' · padrão do sistema'
+UNAVAILABLE_DEVICE_LABEL='Dispositivo salvo · indisponível agora'
+AUDIO_REASON_MESSAGES={'no_audio_tool':'Nenhuma ferramenta de áudio encontrada: instale pipewire-pulse/pactl','audio_tool_failed':'A ferramenta de áudio falhou ao listar dispositivos; tente Atualizar lista'}
+AUDIO_SOURCE_LABELS={'pactl':'PipeWire/Pulse (pactl)','pw-dump':'PipeWire (pw-dump)'}
+LIVE_ERROR_MESSAGES={'recorder_unavailable':'gravador de áudio indisponível (instale pipewire-pulse)','recorder_exited':'o gravador de áudio parou','sandbox_unavailable':'isolamento do gravador indisponível (bwrap ausente)','wake_worker_unavailable':'worker de wake indisponível','wake_worker_failed':'worker de wake falhou','restart_limit':'limite de reinícios atingido','invalid_device':'dispositivo de entrada inválido','player_unavailable':'reprodutor de áudio indisponível','player_write_failed':'falha ao enviar áudio ao reprodutor','player_failed':'o reprodutor de áudio falhou','player_timeout':'o reprodutor de áudio não respondeu'}
+RESTORE_BUSY_TEXT='Indisponível durante a sessão de voz; tente quando o Gideon estiver em espera'
+SENSITIVITY_RANGE_TEXT='Sensibilidade fora de 0,5 a 1,5; nada foi enviado'
+DEVICE_INVALID_TEXT='Dispositivo inválido; nada foi enviado'
+# Choices for one Select: "Padrão do sistema", the listed devices (default one marked), and the saved name when the Core no longer lists it.
+def device_choices(devices,direction,saved):
+    rows=[{'value':DEFAULT_DEVICE,'text':DEFAULT_DEVICE_LABEL}]
+    listed=(devices or {}).get(direction) or []
+    for item in listed:rows.append({'value':item['id'],'text':item['label']+(DEFAULT_MARK if item['default'] else '')})
+    known={item['id'] for item in listed}
+    if saved!=DEFAULT_DEVICE and saved not in known:rows.append({'value':saved,'text':UNAVAILABLE_DEVICE_LABEL})
+    return rows
+def live_input_text(live):
+    if not live:return 'Entrada ao vivo: sem informação do Core'
+    if not live.get('enabled'):return 'Entrada ao vivo: desligada — inicie o Core com --live-audio'
+    if live.get('input_state')=='capturing':return 'Entrada ao vivo: capturando'
+    if live.get('input_state')=='error':
+        error=live.get('last_error') or ''
+        return 'Entrada ao vivo: erro: '+(LIVE_ERROR_MESSAGES.get(error,'falha na captura') if not error.startswith('player_') else 'falha na captura')
+    return 'Entrada ao vivo: em espera'
+def live_output_text(live):
+    if not live:return 'Saída ao vivo: sem informação do Core'
+    if not live.get('enabled'):return 'Saída ao vivo: desligada — inicie o Core com --live-audio'
+    if live.get('output_state')=='playing':return 'Saída ao vivo: reproduzindo'
+    if live.get('output_state')=='error':
+        error=live.get('last_error') or ''
+        return 'Saída ao vivo: erro: '+(LIVE_ERROR_MESSAGES.get(error,'falha na reprodução') if error.startswith('player_') else 'falha na reprodução')
+    return 'Saída ao vivo: em espera'
+def devices_status(devices):
+    """Why the device lists are empty or missing, in words; '' when the Core listed devices."""
+    if devices is None:return 'Dispositivos ainda não consultados: use Atualizar lista'
+    if devices['source']=='none':return AUDIO_REASON_MESSAGES.get(devices.get('reason'),AUDIO_REASON_MESSAGES['audio_tool_failed'])
+    if not devices['inputs'] and not devices['outputs']:return 'Nenhum dispositivo de áudio listado por '+AUDIO_SOURCE_LABELS.get(devices['source'],devices['source'])
+    return ''
 PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output'})
 TRANSCRIPT_KEYS=frozenset({'source','session_id','revision','audio_end_us','raw','normalized','is_final','confidence'})
 CAPTURE_KEYS=frozenset({'session_id','start_us','end_us','samples','pcm_sha256','reason'})
@@ -1288,19 +1329,25 @@ PENDING.update({
     'core_restart':'Pedindo reinício ao Core…','plugin_settings_clear':'Apagando dados do plugin…','virtual_wake':'Enviando wake de teste…',
     'registry_plan':'Planejando rota no Core…','registry_allow_visual':'Atualizando fallback visual no Core…',
 })
+# B16 (docs/A6-live-audio.md): device list, and the Core defaults restore (the Core keeps config.json.bak).
+OPS.update({
+    'audio_devices':('audio','Lista de dispositivos atualizada'),
+    'preferences_restore_defaults':('prefs','Padrões do Core restaurados; cópia anterior em config.json.bak'),
+})
+PENDING.update({'audio_devices':'Consultando dispositivos no Core…','preferences_restore_defaults':'Restaurando padrões do Core…'})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
-    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal()
+    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':'','wake':''};self.hub_target='';self.capability_pending=False;self.plugin_capability='';self._package=package_info(Path(__file__).resolve().parent);self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':'','wake':'','audio':''};self.hub_target='';self.capability_pending=False;self.plugin_capability='';self._package=package_info(Path(__file__).resolve().parent);self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # B12: the Core code of the last failed chat turn (refusal of the invoke, or the plugin's error). '' when the last turn did not fail with a known code.
@@ -1356,7 +1403,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),'audio':s.get('audio'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -1366,6 +1413,9 @@ class Bridge(QObject):
         """Map the Core answer of a finished request to one UI message through the OPS table."""
         code=data.get('code','invalid_message')
         if op=='core_restart':return self._restart_ack(code)
+        # B16: the Core refuses the defaults restore with busy during a voice session; the message says so and the toast follows.
+        if op=='preferences_restore_defaults' and code=='busy':
+            self.results['prefs']=RESTORE_BUSY_TEXT;self.prefsSettled.emit(RESTORE_BUSY_TEXT);return
         if self.models_req is not None and self.models_req[1]==op:
             kind=self.models_req[0];self.models_req=None;self._models_ack(kind,code);return
         if op=='capability_invoke' and self.pending_chat:
@@ -1997,6 +2047,67 @@ class Bridge(QObject):
     def preferencesRevision(self):return str(self.snapshot.get('preferences',{}).get('revision',0))
     @Property(str,notify=changed)
     def preferencesResult(self):return self.results['prefs']
+    # ---- B16 Voz e Wake, Dispositivos and Geral (docs/A6-live-audio.md). The Core owns every value: these slots send one bounded
+    # request through the preferences op (absent optional fields keep the stored value) and the properties read the snapshot.
+    def _devices(self):return (self.snapshot.get('audio') or {}).get('devices')
+    def _live(self):return (self.snapshot.get('audio') or {}).get('live') or {}
+    def _saved_device(self,key):return (self.snapshot.get('preferences') or {}).get(key) or DEFAULT_DEVICE
+    def _prefs_unavailable_text(self):
+        if not self.online:return 'Core desconectado: nada foi alterado'
+        if self.sessionId:return RESTORE_BUSY_TEXT
+        if self.configurationStatus!='ready':return CODE_MESSAGES['preferences_unavailable']
+        return 'O Core está ocupado com outra alteração; tente de novo em instantes'
+    def _pref_request(self,**changes):
+        prefs=self.snapshot.get('preferences') or {}
+        return {'revision':int(self.preferencesRevision),'audible_feedback':bool(prefs.get('audible_feedback',True)),'session_timeout_ms':int(prefs.get('session_timeout_ms',30000)),**changes}
+    @Property(float,notify=preferencesChanged)
+    def wakeSensitivity(self):return float((self.snapshot.get('preferences') or {}).get('wake_sensitivity',1.0))
+    @Property(str,notify=preferencesChanged)
+    def audioInputSaved(self):return self._saved_device('audio_input_device')
+    @Property(str,notify=preferencesChanged)
+    def audioOutputSaved(self):return self._saved_device('audio_output_device')
+    @Property('QVariantMap',notify=audioChanged)
+    def audioDevices(self):
+        devices=self._devices()
+        return {'known':devices is not None,'source':(devices or {}).get('source',''),'status':devices_status(devices),'inputs':list((devices or {}).get('inputs',[])),'outputs':list((devices or {}).get('outputs',[]))}
+    @Property('QVariantList',notify=changed)
+    def audioInputChoices(self):return device_choices(self._devices(),'inputs',self._saved_device('audio_input_device'))
+    @Property('QVariantList',notify=changed)
+    def audioOutputChoices(self):return device_choices(self._devices(),'outputs',self._saved_device('audio_output_device'))
+    @Property(str,notify=changed)
+    def audioInputLabel(self):
+        saved=self._saved_device('audio_input_device')
+        choice=next((c for c in device_choices(self._devices(),'inputs',saved) if c['value']==saved),None)
+        return choice['text'].replace(DEFAULT_MARK,'') if choice else DEFAULT_DEVICE_LABEL
+    @Property('QVariantMap',notify=audioChanged)
+    def audioLive(self):return dict(self._live())
+    @Property(bool,notify=audioChanged)
+    def micActive(self):return self._live().get('mic_active') is True
+    @Property(str,notify=audioChanged)
+    def audioLiveText(self):return live_input_text(self._live())
+    @Property(str,notify=audioChanged)
+    def audioOutputText(self):return live_output_text(self._live())
+    @Property(str,notify=changed)
+    def audioResult(self):return self.results['audio']
+    @Slot(float)
+    def setWakeSensitivity(self,value):
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if not wake_sensitivity_ok(value):return self._refuse('prefs',SENSITIVITY_RANGE_TEXT)
+        self._preferences('preferences',**self._pref_request(wake_sensitivity=round(float(value),2)))
+    @Slot(str,str)
+    def setAudioDevices(self,input_device,output_device):
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if not audio_device_ok(input_device) or not audio_device_ok(output_device):return self._refuse('prefs',DEVICE_INVALID_TEXT)
+        self._preferences('preferences',**self._pref_request(audio_input_device=input_device,audio_output_device=output_device))
+    @Slot()
+    def refreshAudioDevices(self):
+        if not self.online:return self._refuse('audio','Core desconectado: nada a consultar')
+        self._send('audio','audio_devices')
+    @Slot()
+    def restoreCoreDefaults(self):
+        if self.sessionId:return self._refuse('prefs',RESTORE_BUSY_TEXT)
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        self._preferences('preferences_restore_defaults',revision=int(self.preferencesRevision))
     @Property(bool,notify=changed)
     def textAvailable(self):return self._text_ready() and self.text_request is None
     @Property(str,notify=changed)

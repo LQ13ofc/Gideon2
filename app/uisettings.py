@@ -79,7 +79,7 @@ def _opts(*pairs):
     return [{'value':value,'label':label} for value,label in pairs]
 
 
-_APARENCIA='Aparência';_GERAL='Geral';_VOZ='Voz e Wake';_AUDIO='Áudio'
+_APARENCIA='Aparência';_GERAL='Geral';_VOZ='Voz e Wake';_AUDIO='Áudio';_DISPOSITIVOS='Dispositivos'
 SCHEMA=(
     _entry('theme.mode','Modo','Aparência','enum','system','Modo de cor','Escuro, claro, ou seguir o esquema do sistema.',options=_opts(('system','Seguir o sistema'),('dark','Escuro'),('light','Claro')),keywords=('tema','claro','escuro','dark','light','sistema','modo','cor')),
     _entry('theme.preset','Modo','Aparência','enum','gideon-escuro','Tema','Conjunto de cores pronto. Os ajustes de cor partem dele.',options=PRESET_OPTIONS,keywords=('tema','paleta','preset','cores')),
@@ -110,10 +110,14 @@ SCHEMA=(
     _entry('perf.lowPower','Desempenho','Geral','bool',False,'Modo econômico','Desliga animações e translucidez e reduz sombras. Vale na hora.',keywords=('economico','bateria','desempenho','energia','animacao','sombra','lento')),
     _entry('core.wakePhrase','Frase de despertar',_VOZ,'enum','','Frase de despertar','Só frases certificadas do pacote. A troca vale depois de reiniciar o Core.',restart=True,keywords=('wake','frase','despertar','hey gideon','ativacao'),source='core'),
     _entry('core.sessionTimeoutMs','Sessão',_VOZ,'int',30000,'Prazo da sessão (ms)','Tempo máximo de uma sessão de voz, em milissegundos. Vale na próxima sessão.',level='advanced',mn=50,mx=60000,keywords=('prazo','timeout','sessao','tempo','segundos'),source='core'),
+    _entry('core.wakeSensitivity','Detecção',_VOZ,'float',1.0,'Sensibilidade do wake','Ajusta o limiar do detector. Efeito acústico ainda não validado com microfone real.',mn=0.5,mx=1.5,keywords=('sensibilidade','sensivel','limiar','wake','detector','intensidade','despertar'),source='core'),
     _entry('voice.partials','Transcrição',_VOZ,'bool',True,'Mostrar transcrição parcial','Mostra o texto enquanto você fala.',keywords=('parcial','transcricao','ao vivo','legenda')),
     _entry('voice.showConfidence','Transcrição',_VOZ,'bool',False,'Mostrar confiança da transcrição','Exibe a confiança numérica de cada transcrição.',level='advanced',keywords=('confianca','transcricao','numero')),
     _entry('core.responseGain','Volume',_AUDIO,'int',100,'Ganho da resposta por voz','Volume da resposta na saída virtual. 0 por cento é mudo; não altera o volume do sistema.',mn=0,mx=100,keywords=('volume','ganho','resposta','mudo','saida'),source='core'),
     _entry('core.audibleFeedback','Resposta',_AUDIO,'bool',True,'Resposta por voz','Gideon responde em voz alta. Vale a partir da próxima sessão.',keywords=('resposta','voz','audio','falar','som'),source='core'),
+    # Device choices come from the Core's audio_devices list (build_schema); the static option is the system default.
+    _entry('core.audioInput','Entrada',_DISPOSITIVOS,'enum','default','Microfone (entrada)','Dispositivo de captura da escuta ao vivo. Vale na próxima sessão de voz.',options=_opts(('default','Padrão do sistema')),keywords=('microfone','mic','entrada','captura','dispositivo','input'),source='core'),
+    _entry('core.audioOutput','Saída',_DISPOSITIVOS,'enum','default','Alto-falante (saída)','Dispositivo de reprodução da resposta por voz. Vale na próxima sessão de voz.',options=_opts(('default','Padrão do sistema')),keywords=('alto-falante','saida','reproducao','dispositivo','output','speaker','som'),source='core'),
     _entry('audio.cues','Sinais',_AUDIO,'bool',True,'Sons de início e fim','Toca um sinal ao começar e terminar a escuta.',keywords=('som','sinal','bip','cues','escuta')),
     _entry('core.visualFeedback','Indicadores',_APARENCIA,'bool',True,'Indicador visual de atividade','Mostra o estado do Gideon na tela. Vale a partir da próxima sessão.',keywords=('indicador','visual','atividade','estado'),source='core'),
 )
@@ -276,13 +280,25 @@ def coerce(spec,value,options=None):
     return None,'tipo desconhecido'
 
 
+DEVICE_CHOICES={'core.audioInput':'audioInputChoices','core.audioOutput':'audioOutputChoices'}
+DEVICE_PREF={'core.audioInput':'audio_input_device','core.audioOutput':'audio_output_device'}
+
+
+def device_options(bridge,key):
+    """Options of a device key: the bridge's choices (system default first, then the devices the Core listed)."""
+    rows=getattr(bridge,DEVICE_CHOICES[key],None) or []
+    return [{'value':row.get('value',''),'label':row.get('text','')} for row in rows if row.get('value')]
+
+
 def build_schema(bridge=None):
-    """Schema as list of dicts. The wake phrase options come from the pack the bridge exposes (wakeChoices)."""
+    """Schema as list of dicts. The wake phrase options come from the pack the bridge exposes (wakeChoices); the device options from the Core's device list."""
     entries=copy.deepcopy(list(SCHEMA))
     for entry in entries:
         if entry['key']=='core.wakePhrase' and bridge is not None:
             choices=getattr(bridge,'wakeChoices',None) or []
             entry['options']=[{'value':c.get('id',''),'label':c.get('text','')+(f" ({c['qualification_label']})" if c.get('qualification_label') else '')} for c in choices if c.get('id')]
+        if entry['key'] in DEVICE_CHOICES and bridge is not None:
+            entry['options']=device_options(bridge,entry['key']) or entry['options']
     return entries
 
 
@@ -435,7 +451,7 @@ class UiSettings(QObject):
         self._values=self._load_values(self.path)
         set_code_detail(bool(self._values.get('behavior.advanced',False)))
         if bridge is not None:
-            for name in ('preferencesChanged','packChanged'):
+            for name in ('preferencesChanged','packChanged','audioChanged'):
                 signal=getattr(bridge,name,None)
                 if signal is not None:signal.connect(self._core_changed)
         self._core_cache=self._core_snapshot()
@@ -541,7 +557,8 @@ class UiSettings(QObject):
         if key=='core.wakePhrase':
             pack=getattr(bridge,'snapshot',{}).get('base_pack') or {}
             return prefs.get('wake_phrase') or pack.get('default_phrase') or ''
-        readers={'core.responseGain':'outputVolume','core.audibleFeedback':'audibleFeedback','core.visualFeedback':'visualFeedback','core.sessionTimeoutMs':'sessionTimeout'}
+        if key in DEVICE_PREF:return prefs.get(DEVICE_PREF[key]) or default
+        readers={'core.responseGain':'outputVolume','core.audibleFeedback':'audibleFeedback','core.visualFeedback':'visualFeedback','core.sessionTimeoutMs':'sessionTimeout','core.wakeSensitivity':'wakeSensitivity'}
         return getattr(bridge,readers[key],default)
 
     def _core_snapshot(self):
@@ -552,7 +569,7 @@ class UiSettings(QObject):
         self.valuesChanged.emit()
 
     def _options(self,spec):
-        if spec['key']=='core.wakePhrase':
+        if spec['key']=='core.wakePhrase' or spec['key'] in DEVICE_CHOICES:
             return next(entry for entry in build_schema(self._bridge) if entry['key']==spec['key'])['options']
         return spec['options']
 
@@ -574,6 +591,12 @@ class UiSettings(QObject):
         elif key=='core.visualFeedback':bridge.saveFeedback(bool(coerced),int(bridge.outputVolume))
         elif key=='core.audibleFeedback':bridge.savePreferences(bool(coerced),int(bridge.sessionTimeout))
         elif key=='core.sessionTimeoutMs':bridge.savePreferences(bool(bridge.audibleFeedback),int(coerced))
+        elif key=='core.wakeSensitivity':bridge.setWakeSensitivity(float(coerced))
+        elif key in DEVICE_PREF:
+            # The Core takes both device names in one request; the other one keeps its current value.
+            other='core.audioOutput' if key=='core.audioInput' else 'core.audioInput'
+            inputs,outputs=(coerced,self._current(other)) if key=='core.audioInput' else (self._current(other),coerced)
+            bridge.setAudioDevices(inputs,outputs)
         result={'ok':True,'value':coerced,'pending':True}
         if spec['restart']:result['restart']=True
         return result
