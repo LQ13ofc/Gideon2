@@ -196,9 +196,14 @@ class UiSettingsTests(unittest.TestCase):
         self.assertEqual(self.ui.set('core.visualFeedback',False)['pending'],True)
         self.assertEqual(self.ui.set('core.audibleFeedback',False)['pending'],True)
         self.assertEqual(self.ui.set('core.sessionTimeoutMs',45000)['pending'],True)
-        self.assertEqual(self.ui.set('core.wakePhrase','hey_gideon')['pending'],False)
+        # No phrase saved yet: the pack default hey_gideon is in effect, but choosing it is still a Core write.
+        self.assertEqual(self.ui.set('core.wakePhrase','hey_gideon')['pending'],True)
         self.assertEqual(self.ui.set('core.wakePhrase','okay_gideon')['pending'],True)
-        self.assertEqual(self.bridge.calls,[('saveFeedback',True,40),('saveFeedback',False,100),('savePreferences',False,30000),('savePreferences',True,45000),('selectWake','okay_gideon')])
+        self.assertEqual(self.bridge.calls,[('saveFeedback',True,40),('saveFeedback',False,100),('savePreferences',False,30000),('savePreferences',True,45000),('selectWake','hey_gideon'),('selectWake','okay_gideon')])
+        self.bridge.snapshot['preferences']['wake_phrase']='okay_gideon'
+        self.assertEqual(self.ui.set('core.wakePhrase','okay_gideon'),{'ok':True,'value':'okay_gideon','pending':False})  # saved phrase unchanged: nothing is sent
+        self.assertEqual(len(self.bridge.calls),6)
+        self.bridge.snapshot['preferences']['wake_phrase']=None
         self.assertFalse(self.ui.set('core.sessionTimeoutMs',10)['ok'])
         self.assertFalse(self.ui.set('core.wakePhrase','frase_livre')['ok'])
         self.assertEqual(self.ui.reset('core.responseGain')['code'],'core_readonly')

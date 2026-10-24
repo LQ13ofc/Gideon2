@@ -4,6 +4,7 @@ import "../theme"
 
 // One 56 px list row: optional leading icon, title, one line of detail, and actions on the right.
 // Clicking the text area emits clicked; the trailing actions keep their own clicks.
+// The row is also reachable by Tab; Enter and Space activate it the same way a click does, and it shows a focus ring.
 Rectangle {
     id: row
     property string title: ""
@@ -18,14 +19,26 @@ Rectangle {
     radius: Theme.radius
     color: selected ? Theme.tint : (mouse.containsMouse ? Theme.hover : "transparent")
     opacity: dim ? 0.6 : 1
+    activeFocusOnTab: true
     Accessible.role: Accessible.ListItem
     Accessible.name: row.title
+    Keys.onReturnPressed: function (event) { row.clicked(); event.accepted = true }
+    Keys.onEnterPressed: function (event) { row.clicked(); event.accepted = true }
+    Keys.onSpacePressed: function (event) { row.clicked(); event.accepted = true }
 
     MouseArea {
         id: mouse
         anchors.fill: parent
         hoverEnabled: true
         onClicked: row.clicked()
+    }
+    Rectangle {
+        anchors.fill: parent
+        radius: row.radius
+        color: "transparent"
+        border.width: 2
+        border.color: Theme.focusRing
+        visible: row.activeFocus
     }
     RowLayout {
         id: contentRow

@@ -544,6 +544,13 @@ class LlmBridge(unittest.TestCase):
         bridge.refresh();respond(bridge,peer,chat_snapshot(result=chat_result(ok=False,error='key_missing')))
         self.assertEqual((bridge.chatState,bridge.chatResult),('error',CODE_MESSAGES['key_missing']))
         self.assertEqual([m['role'] for m in bridge.chatMessages],['user','user'])
+    def test_invoke_cancelled_is_a_cancelled_chat_and_keeps_the_partial(self):
+        # The Core reports a cancelled invoke as invoke_cancelled (src/plugins.rs), not 'cancelled'.
+        bridge,peer=connect_bridge(self,chat_snapshot())
+        start_chat(self,bridge,peer,'slow:demora')
+        bridge.refresh();respond(bridge,peer,chat_snapshot(result=chat_result(ok=False,error='invoke_cancelled',partial='parc')))
+        self.assertEqual(bridge.chatState,'cancelled');self.assertEqual(bridge.chatMessages[-1],{'role':'assistant','text':'parc','state':'cancelled'})
+        self.assertEqual(bridge.chatResult,'')
     def test_chat_double_send_is_refused_without_second_request(self):
         bridge,peer=connect_bridge(self,chat_snapshot())
         bridge.sendChat('primeiro');bridge.sendChat('segundo')
@@ -1087,6 +1094,16 @@ class ModelsBridge(unittest.TestCase):
         self.assertEqual((bridge.modelsRecommended,bridge.models_wait),([],'list'))
         deliver(bridge,peer,snap,page_of(models_output(recommended=[cloud_model(id='fresh')]),'recommended'))
         self.assertEqual([m['id'] for m in bridge.modelsRecommended],['fresh'])
+    def test_identical_answer_to_a_pending_list_still_finishes_it(self):
+        # The answer equals the one already in the snapshot: it must not be mistaken for a stale result.
+        page=page_of(models_output(custom=custom_models(2)),'custom',0)
+        snap=models_snapshot(revision=3,config=LLM_CONFIG,result=models_result(page));bridge,peer=connect_bridge(self,snap)
+        bridge.listModels('custom');ack(bridge,peer,next_request(peer),snap)
+        self.assertEqual(bridge.models_wait,'list')
+        deliver(bridge,peer,snap,page)
+        self.assertIsNone(bridge.models_wait);self.assertEqual(bridge.modelsResult,'Catálogo atualizado')
+        self.assertEqual([m['id'] for m in bridge.modelsCustom],['c0','c1'])
+        self.assertFalse(bridge.modelsBusy)
     def test_paging_merges_pages_in_order_and_requests_exact_fields(self):
         snap=models_snapshot(revision=3,config=LLM_CONFIG);bridge,peer=connect_bridge(self,snap)
         out=models_output(custom=custom_models(8))
@@ -1353,6 +1370,10 @@ def _qml_models_checks(bridge,window,check,checks):
     check('feature matrix uses the exact words',"Recurso tool_use: Suportado" in texts() and "Recurso vision: Desconhecido" in texts())
     check('certification details name the evidence',"Certificação: Certificado · evidência: docs/evidence/c1-llm.json · data 2026-10-16" in texts())
     check('use button names the model',acc('useModelButton')=='Usar este modelo: Gemini 3.5 Flash-Lite')
+    find('model_llama-7b').forceActiveFocus();QTest.keyClick(window,_Qt.Key.Key_Return);QTest.qWait(30)  # ListRow: Enter activates a focused row like a click
+    check('a focused list row is activated by Enter',acc('useModelButton')=='Usar este modelo: Llama 7B Q4')
+    find('model_gemini-lite').forceActiveFocus();QTest.keyClick(window,_Qt.Key.Key_Space);QTest.qWait(30)
+    check('Space activates a focused list row too',acc('useModelButton')=='Usar este modelo: Gemini 3.5 Flash-Lite')
     names=[acc(i.objectName()) for i in items() if i.objectName().startswith('model_')]
     check('model row accessible names are unique and non-empty',len(names)==3 and len(set(names))==3 and all(names))
     check('hardware panel shows cores, RAM and unknown GPU',"CPU: 8 núcleos · RAM: 16 GB · GPU: desconhecido" in texts())
@@ -1956,6 +1977,7 @@ def qml_skills_child():
             bridge._apply(validate_snapshot(skills_snap(skills_block(items=[skill_item(),weak],run=awaiting_run(),history=[HISTORY_ITEM]),llm=True),'r',0))
             check('nav10 offered while the skill engine answers',offered(window,'skills'))
             window.setProperty('pageId','skills');QTest.qWait(50)
+            check('awaiting step buttons show while the page stays on Minhas',find('skillAuthorize_write').property('visible') and find('skillDeny_write').property('visible'))
             find('skillsPanel').setProperty('part','execucoes');QTest.qWait(20)
             check('skills panel visible on its page',find('skillsPanel').property('visible'))
             check('enabled skill row names id and version',find('skillTitle_weather_note_1.0.0').property('text').endswith('weather_note v1.0.0'))
@@ -2371,6 +2393,14 @@ def qml_connections_child():
             check('account name field refuses a blank name',find('connectionAdd').property('enabled') is False)
             find('connectionLabel').setProperty('text','Casa');QTest.qWait(20)
             check('account add enabled with a valid name',find('connectionAdd').property('enabled') is True)
+            # MCP tools discovered after the account is shown: the section must follow the live item, not the first snapshot.
+            mcp_plain=conn_item('mcp_9','mcp','Servidor',granted=('mcp.discover','mcp.call'),pending=(),fake=True)
+            providers=[CONN_GITHUB,CONN_HA,CONN_MCP]
+            bridge._apply(validate_snapshot(conns_snap(conns_block(items=[gh,ha,parado,mcp_plain],providers=providers,last_call=last)),'r',0));QTest.qWait(20)
+            check('MCP tools section hidden while the server has listed no tools',find('connToolsTitle_mcp_9').property('visible') is False)
+            bridge._apply(validate_snapshot(conns_snap(conns_block(items=[gh,ha,parado,{**mcp_plain,'tools':[mcp_tool()]}],providers=providers,last_call=last)),'r',0));QTest.qWait(20)
+            check('MCP tools section shown once the Core holds tools',find('connToolsTitle_mcp_9').property('visible') is True)
+            check('discovered MCP tool row is shown',find('connTool_mcp_9_echo_note').property('visible') is True)
             bridge._apply(validate_snapshot({**BASE,'connections':None},'r',0))
             QTest.qWait(50);check('page falls back when connections are absent',window.property('pageId')=='hoje')
         finally:

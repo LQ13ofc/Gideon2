@@ -502,6 +502,9 @@ elif args.phase=='connections':
         description=visual_item('connToolDesc_'+mcp['id']+'_'+tool['name']);check('the server description is shown as PlainText with its own label',plain_of(description) and description.property('text').startswith('Descrição do servidor: '))
         trust=visual_item('connTrust_'+mcp['id']+'_'+tool['name']);check('Confiar is offered for the tool awaiting re-approval',trust.property('visible') and trust.property('enabled'))
         trust.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        # Confiar asks first (connTrustConfirm, a Modal); only its confirmation button sends the trust to the Core.
+        dialog=window.findChild(QObject,'connTrustConfirm');wait(lambda:dialog.property('visible'),3)
+        visual_item('connTrustConfirmButton').forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
         wait(lambda:not bridge.connectionsBusy and next(t for t in next(c for c in bridge.connectionsItems if c['id']==mcp['id'])['tools'] if t['name']==tool['name'])['state']=='trusted',60)
         check('the Core trusted the tool after the click',next(t for t in next(c for c in bridge.connectionsItems if c['id']==mcp['id'])['tools'] if t['name']==tool['name'])['state']=='trusted')
         QTest.qWait(50)

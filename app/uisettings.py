@@ -404,7 +404,11 @@ class UiSettings(QObject):
         coerced,reason=coerce(spec,value,self._options(spec))
         if reason is not None:
             return _fail('invalid_value',f'Valor recusado: {reason}; nada foi alterado',current)
-        if coerced==current:
+        # The wake phrase compares with the saved preference, not the effective phrase: with none saved the pack default
+        # is in effect, and choosing that default must still be saved (otherwise the Core never gets the choice).
+        if key=='core.wakePhrase':unchanged=coerced==((getattr(bridge,'snapshot',None) or {}).get('preferences') or {}).get('wake_phrase')
+        else:unchanged=coerced==current
+        if unchanged:
             return {'ok':True,'value':coerced,'pending':False}
         if key=='core.wakePhrase':bridge.selectWake(coerced)
         elif key=='core.responseGain':bridge.saveFeedback(bool(bridge.visualFeedback),int(coerced))

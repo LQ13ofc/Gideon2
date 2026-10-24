@@ -464,8 +464,9 @@ PageFrame {
     }
 
     // Execuções: the current run; each step that changes state waits for the user's decision here.
+    // A run that waits for a decision is shown on any part: the user starts runs from Minhas and must see the step's buttons.
     ColumnLayout {
-        visible: page.part === "execucoes"
+        visible: page.part === "execucoes" || core.skillCurrentRun.state === "awaiting_approval"
         Layout.fillWidth: true
         spacing: Theme.space(16)
 

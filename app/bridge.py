@@ -20,6 +20,7 @@ RUNTIME_STATES=('disabled','starting','running','failed','stopped')
 # Codes Core writes to plugin last_error (src/plugins.rs runtime start, violation and crash paths).
 PLUGIN_LAST_ERRORS=frozenset({'plugin_crashed','plugin_cpu_exceeded','plugin_output_invalid','plugin_start_failed','plugin_not_runnable','plugin_quarantined','handshake_timeout','handshake_mismatch'})
 # Codes a capability_result can carry (src/plugins.rs PASS_THROUGH_ERRORS plus Core-owned results).
+CANCEL_CODES=frozenset({'cancelled','invoke_cancelled'})  # a cancelled capability is reported as invoke_cancelled by the Core (src/plugins.rs); 'cancelled' is the older name
 CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable','opt_in_required','stale_screen','unsupported','unknown_service','unknown_element','no_focus','unknown_route','unknown_app','indicator_off','already_recording','not_recording','world_unavailable','skill_invalid','model_output_invalid'})  # C4/S4 codes: plugin answers that the Core passes through unchanged (src/plugins.rs PASS_THROUGH_ERRORS)
 # Tool proposal reasons (src/tools.rs and src/core.rs tool_denied/tool_failed).
 TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_failed','executor_unavailable','user_denied','invalid_args','unknown_tool','busy'})
@@ -703,6 +704,7 @@ CODE_MESSAGES={
     'timed_out':'Tempo esgotado',
     'timeout':'Tempo do provedor esgotado',
     'cancelled':'Cancelado',
+    'invoke_cancelled':'Cancelado',
     'capture_completed':'Captura concluída',
     'replaying':'Reprodução em andamento',
     # Preferências do app e do Core (app/uisettings.py e preferências da ponte).
@@ -1181,7 +1183,9 @@ class Bridge(QObject):
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
-        self.models_req=None;self.models_wait=None;self.models_before=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_message=''
+        # models_marker is the response count when the awaited capability invoke was acknowledged; only a later response can carry its answer.
+        self.models_req=None;self.models_wait=None;self.models_marker=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_message=''
+        self._responses=0
         # Paging (list is paginated per tab): models_page_req=(tab,offset) awaits the page answer; models_page[tab]={'total','next'} is where the next page starts.
         self.models_page_req=None;self.models_page=fresh_model_pages()
         # C4 perception: one allowlisted capability at a time. perception_req awaits the Core ack; perception_inflight awaits the plugin result; perception_before is the capability_result seen at ack, so a stale answer is never taken for the new one.
@@ -1282,7 +1286,7 @@ class Bridge(QObject):
                 data=json.loads(bytes(line))
                 validate_snapshot(data,self.pending,self._sequence)
             except Exception:self._offline();return
-            sid=data['session_id'];self._sequence=data['sequence']
+            sid=data['session_id'];self._sequence=data['sequence'];self._responses+=1
             pending_op=self.pending_op
             self.timeout.stop();self.pending=None;self.pending_op=None;self.online=True;self.poll.start()
             data.pop('request_id',None)
@@ -1409,7 +1413,7 @@ class Bridge(QObject):
             text=result['output'].get('text');self.chat_messages.append({'role':'assistant','text':text if isinstance(text,str) else '','state':'done'})
             self.chat_state='done';self.results['chat']=''
         else:
-            state='cancelled' if result['error']=='cancelled' else 'error';self.chat_state=state
+            state='cancelled' if result['error'] in CANCEL_CODES else 'error';self.chat_state=state
             if partial:self.chat_messages.append({'role':'assistant','text':partial,'state':state})
             self.results['chat']='' if state=='cancelled' else (f"Erro HTTP {result[HTTP_STATUS_KEY]}" if result['error']=='http_error' and HTTP_STATUS_KEY in result else code_message(result['error']))
         del self.chat_messages[:-CHAT_MESSAGES_KEPT];self.chatChanged.emit()
@@ -1541,7 +1545,7 @@ class Bridge(QObject):
         testing=self.models_wait=='selftest' or (self.models_req is not None and self.models_req[0]=='selftest')
         active=self._models_busy_now()
         self.models_recover=self.models_recover or testing
-        self.models_req=None;self.models_wait=None;self.models_before=None;self.models_flow=None;self.models_want_list=False
+        self.models_req=None;self.models_wait=None;self.models_marker=None;self.models_flow=None;self.models_want_list=False
         self.models_page_req=None;self.models_page=fresh_model_pages()
         if testing:self.models_message='Conexão caiu durante o teste; a configuração anterior será restaurada ao reconectar'
         elif active:self.models_message='Conexão caiu durante a operação; confira o modelo atual'
@@ -1553,7 +1557,7 @@ class Bridge(QObject):
         flow=self.models_flow
         if kind=='selftest' and flow is not None:
             # A refused selftest is a failed test: the candidate must not stay active untested.
-            if code=='ok':self.models_wait='selftest';self.models_before=self.snapshot.get('capability_result');self.models_message='Testando o modelo no Core…'
+            if code=='ok':self.models_wait='selftest';self.models_marker=self._responses;self.models_message='Testando o modelo no Core…'
             else:flow.update(next='rollback',reason_text=code_message(code))
         elif kind=='configure' and flow is not None:
             if code=='ok':flow['next']='selftest';self.models_message='Modelo salvo; testando…'
@@ -1567,16 +1571,16 @@ class Bridge(QObject):
         elif kind=='fallback':self.models_message='Fallback salvo pelo Core' if code=='ok' else code_message(code)
         elif kind=='clear':self.models_message='Dados do plugin apagados' if code=='ok' else code_message(code)
         elif kind in ('list','save_custom','delete_custom'):
-            if code=='ok':self.models_wait=kind;self.models_before=self.snapshot.get('capability_result')
+            if code=='ok':self.models_wait=kind;self.models_marker=self._responses
             else:self.models_message=code_message(code);self.models_page_req=None
         self._models_touch()
     def _models_observe(self):
-        """Finishes the one awaited capability answer. The Core clears capability_result on each invoke; a result equal to the one before the invoke is stale."""
+        """Finishes the one awaited capability answer. The Core clears capability_result on each invoke, so only a response received after the invoke's ack can carry the answer. Equal values are not a staleness test: an identical answer is still the answer."""
         kind=self.models_wait
         if kind is None:return
         result=self.snapshot.get('capability_result')
-        if not result or result.get('capability')!=MODEL_CAPABILITY or result.get('plugin_id')!=self._models_target() or result==self.models_before:return
-        self.models_wait=None;self.models_before=None;ok=result['ok'];output=result.get('output')
+        if self._responses<=self.models_marker or not result or result.get('capability')!=MODEL_CAPABILITY or result.get('plugin_id')!=self._models_target():return
+        self.models_wait=None;self.models_marker=None;ok=result['ok'];output=result.get('output')
         if kind=='list':
             req,self.models_page_req=self.models_page_req,None
             if not ok:self.models_message=self._result_text(result)

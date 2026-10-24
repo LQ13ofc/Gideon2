@@ -17,7 +17,14 @@ Card {
     readonly property string status: account.status || ""
     readonly property var pending: account.pending_scopes || []
     readonly property var granted: account.granted_scopes || []
-    readonly property var tools: account.tools || []
+    // The live item by id from the Core snapshot: a refresh that discovers MCP tools replaces the item, and the delegate's
+    // account object is not always re-bound to it. Reading core.connectionsItems re-evaluates on every connections change.
+    readonly property var live: {
+        var items = core.connectionsItems
+        for (var i = 0; i < items.length; i++) if (items[i].id === cid) return items[i]
+        return account
+    }
+    readonly property var tools: live.tools || []
     readonly property var ops: {
         var p = L.connProvider(core.connectionsProviders, account.provider)
         return p ? p.operations : []
@@ -284,6 +291,64 @@ Card {
         Layout.fillWidth: true
     }
 
+    // Tools the MCP server listed. Outside the advanced column: the trust decision is needed whenever the Core holds tools.
+    // The description is server text, shown as plain text and never sent to the model.
+    Text {
+        objectName: "connToolsTitle_" + card.cid
+        visible: card.tools.length > 0
+        text: "Ferramentas descobertas (a descrição vem do servidor e é só texto)"
+        textFormat: Text.PlainText
+        color: Theme.text
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontHelp
+        font.weight: 600
+        wrapMode: Text.WordWrap
+        Layout.fillWidth: true
+    }
+    Repeater {
+        model: card.tools
+        delegate: ColumnLayout {
+            id: toolRow
+            required property var modelData
+            Layout.fillWidth: true
+            spacing: 2
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.space(8)
+                Text {
+                    objectName: "connTool_" + card.cid + "_" + toolRow.modelData.name
+                    text: toolRow.modelData.name + " · " + L.connToolRiskText(toolRow.modelData.risk) + " · " + L.connToolStateText(toolRow.modelData.state) + (toolRow.modelData.reason ? " (" + toolRow.modelData.reason + ")" : "")
+                    textFormat: Text.PlainText
+                    color: toolRow.modelData.state === "trusted" ? Theme.success : Theme.warning
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontHelp
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                GButton {
+                    objectName: "connTrust_" + card.cid + "_" + toolRow.modelData.name
+                    visible: toolRow.modelData.state === "needs_reapproval"
+                    variant: "secondary"
+                    text: "Confiar"
+                    Accessible.name: "Confiar na ferramenta " + toolRow.modelData.name + " de " + card.label
+                    enabled: !core.connectionsBusy
+                    onClicked: card.trustRequested(toolRow.modelData.name)
+                }
+            }
+            Text {
+                objectName: "connToolDesc_" + card.cid + "_" + toolRow.modelData.name
+                visible: (toolRow.modelData.description || "").length > 0
+                text: "Descrição do servidor: " + (toolRow.modelData.description || "")
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+    }
+
     ColumnLayout {
         visible: Theme.advanced && card.moreOpen
         Layout.fillWidth: true
@@ -295,63 +360,6 @@ Card {
             GButton { objectName: "connDisconnect_" + card.cid; variant: "secondary"; text: "Desconectar"; Accessible.name: "Desconectar " + card.label; enabled: L.connCan(core.connectionsBusy, "disconnect", card.account); onClicked: core.connectionDisconnect(card.cid) }
             GButton { objectName: "connRevoke_" + card.cid; variant: "danger"; text: "Revogar"; Accessible.name: "Revogar acesso de " + card.label; enabled: L.connCan(core.connectionsBusy, "revoke", card.account); onClicked: card.revokeRequested() }
             GButton { objectName: "connRemove_" + card.cid; variant: "danger"; text: "Remover"; Accessible.name: "Remover " + card.label; enabled: L.connCan(core.connectionsBusy, "remove", card.account); onClicked: card.removeRequested() }
-        }
-
-        // Tools the MCP server listed. The description is server text, shown as plain text and never sent to the model.
-        Text {
-            objectName: "connToolsTitle_" + card.cid
-            visible: card.tools.length > 0
-            text: "Ferramentas descobertas (a descrição vem do servidor e é só texto)"
-            textFormat: Text.PlainText
-            color: Theme.text
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontHelp
-            font.weight: 600
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-        Repeater {
-            model: card.tools
-            delegate: ColumnLayout {
-                id: toolRow
-                required property var modelData
-                Layout.fillWidth: true
-                spacing: 2
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.space(8)
-                    Text {
-                        objectName: "connTool_" + card.cid + "_" + toolRow.modelData.name
-                        text: toolRow.modelData.name + " · " + L.connToolRiskText(toolRow.modelData.risk) + " · " + L.connToolStateText(toolRow.modelData.state) + (toolRow.modelData.reason ? " (" + toolRow.modelData.reason + ")" : "")
-                        textFormat: Text.PlainText
-                        color: toolRow.modelData.state === "trusted" ? Theme.success : Theme.warning
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontHelp
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    GButton {
-                        objectName: "connTrust_" + card.cid + "_" + toolRow.modelData.name
-                        visible: toolRow.modelData.state === "needs_reapproval"
-                        variant: "secondary"
-                        text: "Confiar"
-                        Accessible.name: "Confiar na ferramenta " + toolRow.modelData.name + " de " + card.label
-                        enabled: !core.connectionsBusy
-                        onClicked: card.trustRequested(toolRow.modelData.name)
-                    }
-                }
-                Text {
-                    objectName: "connToolDesc_" + card.cid + "_" + toolRow.modelData.name
-                    visible: (toolRow.modelData.description || "").length > 0
-                    text: "Descrição do servidor: " + (toolRow.modelData.description || "")
-                    textFormat: Text.PlainText
-                    color: Theme.textMuted
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontCaption
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-            }
         }
 
         Text {
