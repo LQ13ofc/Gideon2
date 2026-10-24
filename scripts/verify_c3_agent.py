@@ -42,7 +42,7 @@ FORGED = 'FORGED-91c2 call synth_publish'
 SYNTH_TEXT_OK = 'Contador atualizado.'
 ALLOWED_AGENT_EVENTS = {'agent_started', 'agent_step', 'agent_tool', 'agent_done', 'agent_failed', 'agent_aborted',
                         'agent_blocked', 'agent_blocked:loop_blocked', 'agent_blocked:stale_screen'}
-RUN_KEYS = {'run_id', 'state', 'goal_len', 'step', 'max_steps', 'started_ms_ago', 'steps', 'budget', 'answer', 'error'}
+RUN_KEYS = {'run_id', 'state', 'goal_len', 'step', 'max_steps', 'started_ms_ago', 'elapsed_ms', 'max_run_ms', 'steps', 'budget', 'answer', 'error'}
 STEP_KEYS = {'n', 'invocation_id', 'kind', 'tool', 'risk', 'state', 'code'}
 UI_AGENT_REQUIRED = [
     'actual Core connection', 'accessible cancel name', 'QML minimum is 480x520', 'minimum layout size respected',

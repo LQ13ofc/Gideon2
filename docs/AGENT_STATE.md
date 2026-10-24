@@ -57,3 +57,8 @@
 
 ## 2026-10-23 — S5 + E4 CLOSED, READY_FOR_HUMAN_VALIDATION
 - Final full matrix (target/run-matrix-final.sh) green except e3 gate expectation updated afterwards (130/0); verify_e4_integration 288/0 on a clean tree. Security review of connectors: 9 findings fixed (docs/S5.md). Next: owner runs docs/HUMAN_VALIDATION.md. Open decisions: Flatpak scope, package signing/update channel/autostart, worker python path.
+
+## 2026-10-24 — UI v3 integrated (tabs + sub-tabs, themes, UI settings, Core-connected)
+- New app shell/pages (docs/ui-spec/*, docs/UI_IA.md, docs/APP_DESCRICAO.md), UI settings store (app/uisettings.py), Core additions: events with at_ms, risk/effect on proposals, grants, core_restart (exit 75 + launcher supervisor), agent budget, llm last_chat, skills paths/permissions, connection revoke_scope/granted_at.
+- UI gates green (design, b2feedback, c1, c2, c3, c4, s4final, e1, e24, e3, s2final); package gates s2final/b4package/e4 green on clean tree. Published to https://github.com/LQ13ofc/Gideon2 (public).
+- Open: onboarding (not built), plugin grant dates in UI (approved_at_ms not sent), Core-side restore of preferences, live microphone path, real backends. See docs/HUMAN_VALIDATION.md.
