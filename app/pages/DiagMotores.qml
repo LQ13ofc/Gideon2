@@ -95,7 +95,7 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 FNote { small: true; text: "Reprodução de teste; sem microfone ao vivo." }
-                FNote { visible: core.wakeStatus === "replay_finished"; tone: "warn"; small: true; text: "Replay encerrado: o wake não está armado para ouvir." }
+                FNote { visible: core.wakeStatus === "replay_finished"; tone: "warn"; small: true; text: "Reprodução de teste encerrada: o wake não está armado para ouvir." }
                 FNote { visible: core.wakeStatus === "failed"; tone: "error"; small: true; text: "Falhou. Reinicie o Core em Recuperação." }
                 GButton {
                     visible: core.wakeStatus === "failed"
@@ -293,7 +293,7 @@ PageFrame {
         summary: "O que cada motor está fazendo. O resumo curto fica no Assistente."
         FNote {
             tone: "text"
-            text: "Replay encerrado e reproduzindo são testes de reprodução: não indicam microfone armado. Trocar frase, voz ou dispositivo exige reinício do Core."
+            text: "Reprodução de teste encerrada e em andamento não indicam microfone armado. Trocar frase, voz ou dispositivo exige reinício do Core."
         }
     }
 }

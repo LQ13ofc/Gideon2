@@ -833,11 +833,11 @@ def grant_rows(snapshot):
             if scopes:rows.append({'origin':'connection','owner_id':item['id'],'label':', '.join(labels.get((item['provider'],s),s) for s in scopes),'state':state})
     return rows
 def pending_count(snapshot):
-    """P of docs/ui-spec/30-permissoes.md §8: installed or updated plugins with permissions and no approval, plus accounts with scopes awaiting consent, plus MCP accounts with a tool that needs re-approval. Skills and action proposals are not counted."""
+    """P of docs/ui-spec/30-permissoes.md §8: installed or updated plugins with permissions and no approval, plus accounts with scopes awaiting consent, plus one per MCP tool that needs re-approval (the queue of Visão geral lists each tool). Skills and action proposals are not counted."""
     count=sum(1 for e in (snapshot.get('hub') or {}).get('entries') or [] if e.get('permissions') and not e.get('permissions_approved') and e.get('status') in ('installed','update_available'))
     items=(snapshot.get('connections') or {}).get('items') or []
     count+=sum(1 for i in items if i.get('pending_scopes'))
-    return count+sum(1 for i in items if any(t.get('state')=='needs_reapproval' for t in i.get('tools') or []))
+    return count+sum(1 for i in items for t in i.get('tools') or [] if t.get('state')=='needs_reapproval')
 CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
 # Raw Core codes never reach the screen. Unknown codes get one generic sentence; the code is appended only when the advanced setting (behavior.advanced) is on.
 GENERIC_FAILURE='Não foi possível concluir a operação.'
@@ -1843,7 +1843,7 @@ class Bridge(QObject):
         if not result:return ''
         if not result['ok']:return result['error']
         output=result['output'];text=output.get('text')
-        return (text if isinstance(text,str) else json.dumps(output,ensure_ascii=False,sort_keys=True))[:512]
+        return (text if isinstance(text,str) else 'Resultado recebido; sem texto para mostrar.')[:512]
     @Slot(str)
     def enablePlugin(self,plugin):
         if self.pluginsAvailable:self._preferences('plugin_enable',revision=int(self.pluginsRevision),plugin_id=plugin)

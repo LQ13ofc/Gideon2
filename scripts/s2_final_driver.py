@@ -99,18 +99,34 @@ def entry(plugin_id):
     return next((e for e in bridge.hubEntries if e.get("plugin_id") == plugin_id), None)
 
 
+def visual_items():
+    stack = [window.contentItem()]
+    found = []
+    while stack:
+        current = stack.pop()
+        found.append(current)
+        stack.extend(current.childItems())
+    return found
+
+
+def open_page(page_id, tab):
+    """Opens a page the way a user does: its tab when its sub-tab is not in the bar, then the sub-tab.
+    The redesign has no Hub or settings dialogs: Plugins (Extensões) is the Hub, Configurações holds the settings."""
+    sub = next((i for i in visual_items() if i.objectName() == "subtab_" + page_id), None)
+    if sub is None or not sub.isVisible():
+        activate(visual_item("tab_" + tab))
+        QTest.qWait(60)
+        sub = visual_item("subtab_" + page_id)
+    activate(sub)
+    wait(lambda: window.property("pageId") == page_id, 3, f"page {page_id} open")
+
+
 def open_hub():
-    activate(find("hubButton"))
-    dialog = find("hubDialog")
-    wait(lambda: dialog.property("visible"), 3, "Hub dialog open")
-    return dialog
+    open_page("plugins", "extensoes")
 
 
-def open_settings():
-    activate(find("settingsButton"))
-    dialog = find("preferencesDialog")
-    wait(lambda: dialog.property("visible"), 3, "preferences dialog open")
-    return dialog
+def open_settings(page_id):
+    open_page(page_id, "configuracoes")
 
 
 def assert_s1(expect):
@@ -170,21 +186,27 @@ def configure():
     wait(lambda: bridge.preferencesAvailable, 20, "preferences available")
     check("configuration ready before changes", bridge.configurationStatus == "ready", bridge.configurationStatus)
 
-    # 1. Feedback through real Qt controls: volume 50, visual off.
-    dialog = open_settings()
-    find("visualPreference").setProperty("checked", False)
-    find("volumePreference").setProperty("value", 50)
-    activate(find("saveFeedbackButton"))
-    wait(lambda: bridge.outputVolume == 50 and not bridge.visualFeedback, 10, "feedback saved by Core")
-    check("Qt feedback save acknowledged by Core", bridge.preferencesResult == "Preferências salvas pelo Core",
+    # 1. Feedback through real Qt controls: the visual indicator is a switch that saves on change (Aparência);
+    #    the volume is a draft on the slider, applied with Aplicar (Áudio).
+    open_settings("cfg_aparencia")
+    activate(find("visualPagePreference"))
+    wait(lambda: not bridge.visualFeedback, 10, "visual indicator switch saved by Core")
+    check("Qt switch save acknowledged by Core", bridge.preferencesResult == "Preferências salvas pelo Core",
           bridge.preferencesResult)
+    open_settings("cfg_audio")
+    slider = find("gainSlider")
+    slider.forceActiveFocus()
+    for _ in range(10):
+        QTest.keyClick(window, Qt.Key.Key_Left)
+    check("volume draft reaches 50 on the slider", round(slider.property("value")) == 50)
+    activate(find("applyGainButton"))
+    wait(lambda: bridge.outputVolume == 50 and bridge.preferencesRevision == "2", 10, "volume saved by Core")
     check("Core persisted volume 50 and visual off", prefs().get("output_volume_percent") == 50
           and prefs().get("visual_feedback") is False, prefs())
-    dialog.close()
     QTest.qWait(50)
 
     # 2. Hub: review permissions, explicit acknowledgement, approve exactly the benign fixture.
-    hub_dialog = open_hub()
+    open_hub()
     activate(visual_item(f"review_{PLUGIN}"))
     review = find("hubReviewDialog")
     wait(lambda: review.property("visible"), 3, "permission review dialog open")
@@ -202,7 +224,6 @@ def configure():
     check("approval is not installation nor publisher identity", entry(PLUGIN)["status"] == "not_installed"
           and not bridge.snapshot["hub"]["publisher_verified"])
     review.close()
-    hub_dialog.close()
     QTest.qWait(50)
     touch("approved")
 
@@ -212,7 +233,7 @@ def configure():
     check("staged payload is not installed", entry(PLUGIN)["status"] == "not_installed", entry(PLUGIN))
 
     # 4. Real Qt install control, keyboard activation.
-    hub_dialog = open_hub()
+    open_hub()
     install = visual_item(f"install_{PLUGIN}")
     wait(lambda: install.property("enabled") is True, 10, "install control enabled after staging")
     activate(install)
@@ -220,17 +241,20 @@ def configure():
          "Core ledger shows fixture installed")
     rec = record(PLUGIN)
     check("fixture installed with runtime disabled", rec["runtime"] == "disabled", rec)
-    check("status label shows installed and disabled",
-          visual_item(f"status_{PLUGIN}").property("text").startswith("Instalado · desativado (sem execução)"))
-    check("install control unavailable once installed", not visual_item(f"install_{PLUGIN}").property("enabled"))
+    # The state line of an installed plugin that is not running reads "Desativado" (docs/ui-spec/20-extensoes.md §11).
+    status_text = visual_item(f"status_{PLUGIN}").property("text")
+    check("state label shows desativado after install", str(status_text).endswith("Desativado"), status_text)
+    # The install button is shown only while installing is the next action; once installed it is hidden (unavailable).
+    install_now = visual_item(f"install_{PLUGIN}")
+    check("install control unavailable once installed", install_now.property("visible") is False
+          or install_now.property("enabled") is False)
     QTest.qWait(100)
     window.grabWindow().save(str(ART / "ui.png"))
-    hub_dialog.close()
     QTest.qWait(50)
 
     # 5. Wake: only the qualified phrase is selectable; selection needs a real Core restart.
     # Done after Hub install on purpose: Core reports restart_required, which disables Hub approve/install.
-    dialog = open_settings()
+    open_settings("cfg_voz")
     combo, select = find("wakeChoice"), find("selectWakeButton")
     check("explicit phrase text presented", combo.property("currentText") == HEY, combo.property("currentText"))
     combo.setProperty("currentIndex", 1)
@@ -239,11 +263,16 @@ def configure():
     combo.setProperty("currentIndex", 0)
     QTest.qWait(50)
     activate(select)
-    wait(lambda: bridge.configurationStatus == "restart_required", 10, "restart_required after wake selection")
+    # Changing the wake phrase asks first (wakeConfirm); the user's confirmation is the only way to save it.
+    confirm = find("wakeConfirm")
+    wait(lambda: confirm.property("visible"), 3, "wake change confirmation shown")
+    activate(visual_item("confirmWakeButton"))
+    wait(lambda: bridge.configurationStatus == "restart_required", 10,
+         f"restart_required after wake selection (preferences result {bridge.preferencesResult!r}, "
+         f"wake choice {combo.property('currentText')!r}, revision {bridge.preferencesRevision})")
     check("wake hey_gideon persisted by Core", prefs().get("wake_phrase") == "hey_gideon", prefs())
     check("selection requires real restart", not bridge.preferencesAvailable and not bridge.textAvailable)
     window.grabWindow().save(str(ART / "pack.png"))
-    dialog.close()
     QTest.qWait(50)
     touch("installed")
     OBSERVED["installed"] = {k: rec.get(k) for k in ("plugin_id", "state", "runtime")}
@@ -273,9 +302,10 @@ def observe_persisted():
 def remove_plugin():
     wait(lambda: bridge.connected, 30, "actual Core connection")
     wait(lambda: record(PLUGIN) is not None, 30, "installed plugin present before removal")
-    hub_dialog = open_hub()
+    open_hub()
     remove = visual_item(f"remove_{PLUGIN}")
-    wait(lambda: remove.property("enabled") is True, 10, "remove control enabled")
+    # The Core may still be speaking its boot replay when this step starts; removal is offered once it is idle again.
+    wait(lambda: remove.property("enabled") is True, 60, "remove control enabled")
     activate(remove)
     confirm = find("removeConfirm")
     wait(lambda: confirm.property("visible"), 3, "removal confirmation shown")
@@ -287,7 +317,6 @@ def remove_plugin():
     check("hub result shows Plugin removido", visual_item("hubLifecycleResult").property("text") == "Plugin removido")
     QTest.qWait(100)
     window.grabWindow().save(str(ART / "removed.png"))
-    hub_dialog.close()
     touch("removed")
 
 

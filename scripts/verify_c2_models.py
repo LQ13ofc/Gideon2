@@ -790,8 +790,10 @@ def scen_qt(td):
             until = time.monotonic() + 150
             while not (artifacts / name).exists():
                 if ui.poll() is not None:
-                    raise RuntimeError(f'Qt models phase exited before {name}: '
-                                       + ui.stderr.read().decode('utf-8', 'replace')[-800:])
+                    full = ui.stderr.read().decode('utf-8', 'replace')
+                    (EVIDENCE / 'c2-qt-models.stderr.txt').write_text(full, encoding='utf-8')
+                    raise RuntimeError(f'Qt models phase exited before {name} (full stderr in '
+                                       f'target/evidence/c2-qt-models.stderr.txt): ' + full[-400:])
                 if time.monotonic() > until:
                     raise TimeoutError(f'Qt marker {name}')
                 time.sleep(0.02)

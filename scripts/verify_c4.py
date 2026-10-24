@@ -462,8 +462,9 @@ def check_screen(root):
           out.get('backend') == 'synthetic' and not any(k in out for k in ('pixels', 'image', 'png')), out)
     s = req(root)
     audit = events_of(s, 'screen_capture')
+    # at_ms, origin and outcome are the Core's event metadata (closed vocabularies, no content); the allowlist stays exact.
     check('C4.1 audit has screen_capture with no content', audit and all(
-        set(e) <= {'sequence', 'request_id', 'session_id', 'kind'} for e in audit), audit[-2:] if audit else s.get('events'))
+        set(e) <= {'sequence', 'request_id', 'session_id', 'kind', 'at_ms', 'origin', 'outcome'} for e in audit), audit[-2:] if audit else s.get('events'))
     check('C4.1 capture left world.json unchanged', world() == w0)
     R['details']['screen_observe'] = {'regions': len(out.get('regions') or []), 'epoch': out.get('epoch')}
 

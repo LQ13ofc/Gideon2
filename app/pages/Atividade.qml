@@ -77,6 +77,7 @@ PageFrame {
         spacing: Theme.space(12)
         Text {
             objectName: "activityCount"
+            topPadding: 9  // centred on the 36 px filter next to it
             text: page.rows.length === 0 ? "Nada ainda nesta sessão" : page.rows.length === 1 ? "1 evento nesta sessão" : page.rows.length + " eventos nesta sessão"
             textFormat: Text.PlainText
             color: Theme.text

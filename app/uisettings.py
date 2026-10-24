@@ -19,7 +19,7 @@ ROLES=('bg','surface','surfaceVariant','outline','text','textMuted','accent','on
 COLOR_ROLES=tuple(role for role in ROLES if role!='accent')
 DERIVED=('hover','pressed','focus','tint')
 TEXT_FOREGROUNDS=('text','textMuted','success','warning','error','info')
-TEXT_BACKGROUNDS=('bg','surface')
+TEXT_BACKGROUNDS=('bg','surface','surfaceVariant')
 THEME_KEYS=frozenset({'theme.preset','theme.accent','theme.colors','theme.contrast'})
 HEX=re.compile(r'#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})')
 CONTROL=re.compile(r'[\x00-\x1f\x7f]')
@@ -28,11 +28,11 @@ PRESET_ROWS=(
     ('gideon-escuro','Gideon escuro',('#121417','#1b1f24','#262c33','#7d8794','#e6e9ee','#a7b0bc','#7aa2f7','#0b1020','#6bcb8b','#e8b04b','#f07178','#6cb6ff')),
     ('gideon-claro','Gideon claro',('#fbfbfd','#ffffff','#eef1f5','#7a8491','#1a1d21','#4b5563','#2f5fd0','#ffffff','#1e7a3f','#8a5a00','#b42318','#1d5fa8')),
     ('alto-contraste','Alto contraste',('#000000','#0a0a0a','#1a1a1a','#ffffff','#ffffff','#d0d0d0','#ffd400','#000000','#00e676','#ffb300','#ff5252','#40c4ff')),
-    ('escuro-neutro','Escuro neutro',('#232629','#31363b','#3b4045','#7f8c8d','#fcfcfc','#bdc3c7','#3daee9','#0b0f13','#33b369','#f67b0c','#f37686','#3daee9')),
-    ('claro-neutro','Claro neutro',('#eff0f1','#fcfcfc','#e3e5e7','#7f8c8d','#232629','#4d5358','#1d6fa8','#ffffff','#1e7a45','#8a4500','#b3261e','#1d6fa8')),
-    ('escuro-suave','Escuro suave',('#1e1e2e','#313244','#45475a','#7f849c','#cdd6f4','#a6adc8','#89b4fa','#1e1e2e','#a6e3a1','#f9e2af','#f38ba8','#89dceb')),
-    ('escuro-frio','Escuro frio',('#2e3440','#3b4252','#434c5e','#939eb2','#eceff4','#d8dee9','#88c0d0','#2e3440','#a3be8c','#ebcb8b','#e699a0','#96b1cb')),
-    ('daltonismo-seguro','Daltonismo seguro',('#15171c','#1e2228','#2a2f37','#8a93a0','#edeff2','#b5bcc6','#56b4e9','#000000','#2bb594','#e69f00','#e8743b','#56b4e9')),
+    ('escuro-neutro','Escuro neutro',('#232629','#31363b','#3b4045','#7f8c8d','#fcfcfc','#bdc3c7','#3daee9','#0b0f13','#52be80','#f79134','#f58b98','#4bb4eb')),
+    ('claro-neutro','Claro neutro',('#eff0f1','#fcfcfc','#e3e5e7','#7f8c8d','#232629','#4d5358','#1d6fa8','#ffffff','#1d7542','#8a4500','#b3261e','#1c6ba3')),
+    ('escuro-suave','Escuro suave',('#1e1e2e','#313244','#45475a','#7f849c','#cdd6f4','#afb6ce','#89b4fa','#1e1e2e','#a6e3a1','#f9e2af','#f59db5','#89dceb')),
+    ('escuro-frio','Escuro frio',('#2e3440','#3b4252','#434c5e','#939eb2','#eceff4','#d8dee9','#88c0d0','#2e3440','#abc395','#ebcb8b','#eaabb1','#a7bed4')),
+    ('daltonismo-seguro','Daltonismo seguro',('#15171c','#1e2228','#2a2f37','#8a93a0','#edeff2','#b5bcc6','#56b4e9','#000000','#2bb594','#e69f00','#e8753c','#56b4e9')),
 )
 PRESETS={ident:{'label':label,'tokens':dict(zip(ROLES,values))} for ident,label,values in PRESET_ROWS}
 PRESET_OPTIONS=[{'value':ident,'label':label} for ident,label,_values in PRESET_ROWS]

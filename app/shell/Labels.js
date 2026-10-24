@@ -3,7 +3,7 @@
 // The Core codes themselves go through core.codeMessage in the pages, never through this file.
 
 var stateLabels = {idle: "Em espera", capturing: "Ouvindo", transcribing: "Transcrevendo", executing: "Executando", speaking: "Respondendo", offline: "Core indisponível", safe_mode: "Modo seguro", restart_required: "Reinício necessário"}
-var statusLabels = {unavailable: "Indisponível", idle: "Em espera", ready: "Pronto", starting: "Iniciando", replaying: "Reproduzindo", replay_finished: "Replay encerrado", failed: "Falhou", completed: "Concluído", speaking: "Respondendo", muted: "Mudo", disabled: "Desligado", cancelled: "Cancelado", timed_out: "Tempo esgotado", audio_error: "Erro de áudio", stt_failed: "Falha na transcrição", stt_unavailable: "Transcrição indisponível", transcript_final: "Transcrição final", capture_completed: "Captura concluída", no_speech: "Sem fala detectada", capture_too_long: "Captura longa demais"}
+var statusLabels = {unavailable: "Indisponível", idle: "Em espera", ready: "Pronto", starting: "Iniciando", replaying: "Reproduzindo", replay_finished: "Reprodução de teste encerrada", failed: "Falhou", completed: "Concluído", speaking: "Respondendo", muted: "Mudo", disabled: "Desligado", cancelled: "Cancelado", timed_out: "Tempo esgotado", audio_error: "Erro de áudio", stt_failed: "Falha na transcrição", stt_unavailable: "Transcrição indisponível", transcript_final: "Transcrição final", capture_completed: "Captura concluída", no_speech: "Sem fala detectada", capture_too_long: "Captura longa demais"}
 
 // Orb and pill state: idle, listening (ripple), thinking, speaking, error.
 var orbStateOf = function (state) {

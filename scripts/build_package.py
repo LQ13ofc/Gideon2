@@ -368,7 +368,7 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
                    "net_broker.py"):
         copy_file(REPO / "scripts" / worker, pkg / "scripts" / worker)
     app_src = REPO / "app"
-    for app_file in ("main.py", "bridge.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
+    for app_file in ("main.py", "bridge.py", "uisettings.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
         copy_file(app_src / app_file, pkg / "app" / app_file)
     shutil.copytree(app_src / "assets", pkg / "app/assets", ignore=ignore_pycache)
     # Shell and pages: theme singleton, components, page files, window shell, icons (QML loads them relative to each file).

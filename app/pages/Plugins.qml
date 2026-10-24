@@ -73,7 +73,7 @@ PageFrame {
     // The one notice of the page: the catalog state (publishers are not authenticated; quarantine when it applies).
     Banner {
         objectName: "hubBanner"
-        kind: core.hubDescription.indexOf("quarentena") >= 0 ? "error" : "warn"
+        kind: core.hubDescription.indexOf("quarentena") >= 0 ? "error" : "info"
         text: core.hubDescription
     }
     Collapsible {

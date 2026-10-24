@@ -2440,6 +2440,9 @@ class EventsGrantsEffects(unittest.TestCase):
         bridge=Bridge('/nonexistent-gideon-root')
         bridge.snapshot={'hub':{'entries':[{'plugin_id':'gideon.cam','status':'installed','permissions':['camera_capture'],'permissions_approved':False}]}}
         self.assertEqual(bridge.pendingCount,1);self.assertEqual(bridge.grants[0]['state'],'pending')
+        # Each MCP tool that needs re-approval is one pending item, the same rows the Visão geral queue lists.
+        bridge.snapshot={'connections':{'items':[{'id':'mcp_1','provider':'mcp','label':'Servidor','tools':[{'name':'a','state':'needs_reapproval'},{'name':'b','state':'needs_reapproval'},{'name':'c','state':'trusted'}]}]}}
+        self.assertEqual(bridge.pendingCount,2)
         self.assertEqual(bridge.effectText({'id':'mute'}),'Silenciar o áudio');self.assertEqual(bridge.riskText('destructive'),'alto')
 class DisplayMapping(unittest.TestCase):
     """Round 2 display table (app/bridge.py): raw Core values and English labels become the text the user reads.

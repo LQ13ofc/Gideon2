@@ -16,6 +16,7 @@ under target/ ignored). Pre-existing dirty paths modified by other tools are tol
 import hashlib, http.client, itertools, json, os, secrets, socket, stat, subprocess, sys, tempfile, threading, time, traceback
 from pathlib import Path
 from hub_import import upload as stage_upload
+from ui_fixture import offscreen_command
 
 BASE = Path(__file__).resolve().parents[1]
 BIN = BASE / 'target/release/gideon-base'
@@ -710,13 +711,75 @@ def scen_sensitive_fake_stream_remove(td, fake):
     check('removal restart: vault and config still present, no re-entry', s['llm']['secrets']['custom'] is True and s['llm']['config'] is not None)
 
 
-def scen_qt():
-    text = UI_TEST.read_text(encoding='utf-8') if UI_TEST.exists() else ''
-    has_chat = "'chat'" in text
-    if has_chat:
-        R['skipped'].append({'name': 'C1 Qt phase chat', 'reason': 'phase exists in test_ui_offscreen.py but marker protocol not verified by this gate; not run'})
-    else:
-        R['skipped'].append({'name': 'C1 Qt end to end (phase chat)', 'reason': 'scripts/test_ui_offscreen.py has no chat phase yet (not run, not counted as passed)'})
+# Qt chat phase (test_ui_offscreen.py --phase chat): markers in order, then its JSON row.
+UI_MARKERS = ['chat-ready', 'tool-pending', 'tool-done', 'cancelled', 'config-saved']
+UI_REQUIRED = [
+    'actual Core connection', 'accessible cancel name', 'QML minimum is 480x520', 'minimum layout size respected',
+    'Conversa offered only because llm_engine chat runs', 'Conversa page shows the chat panel',
+    'chat input and send present while idle', 'partials grew before the final text',
+    'streaming state was observed', 'final assistant text is shown once', 'live bubble hidden once the final reply is shown',
+    'tool proposal card offers Autorizar and Negar only while pending', 'authorized tool reaches executed with a sandbox receipt',
+    'decision buttons disappear after the decision', 'cancel enabled during slow reply',
+    'cancel reaches the Core and ends the reply as cancelled', 'key field is empty and masked when Motor LLM opens',
+    'cloud consent checkbox reflects the saved Core consent when Motor LLM opens',
+    'cloud consent warning stays visible next to the checkbox', 'key status shows only configured or not configured',
+    'save configuration offered once the form is loaded', 'Core saved configuration and moved its revision',
+    'saving without touching the checkbox keeps the saved consent', 'reopened dialog reflects the Core consent again',
+    'user click flips the consent checkbox', 'saving the flipped checkbox sends exactly that consent value',
+    'original consent value restored after the round trip',
+]
+
+
+def accept_chat_row(row):
+    """Strict like the models gate: zero failures, passed equals the listed checks, every required check present."""
+    names = (row or {}).get('checks') or []
+    missing = sorted(set(UI_REQUIRED) - set(names))
+    ok = (bool(row) and row.get('phase') == 'chat' and row.get('failed') == 0 and row.get('ignored') == 0
+          and row.get('passed') == len(names) and bool(names) and not missing)
+    check('Qt chat phase self-report accepted (zero failures, passed equals listed, every required check present; '
+          'missing ' + str(missing) + ')', ok, row)
+
+
+def scen_qt(td, fake):
+    # The Qt chat phase needs llm_engine chat running and the loopback fake provider configured with a gate-written key
+    # (the phase never sees a key). The scenarios above removed llm_engine, so this phase runs on its own boot.
+    stop_core('before Qt chat phase')
+    root = Path(td) / 'core'
+    start_core(td, 'boot-qt')
+    # The boot wake replay opens a voice session; the Core refuses capability_cancel (busy) while one is open, so the
+    # phase waits until the replay has finished and the Core is idle.
+    wait_snap(root, lambda s: s.get('wake_status') == 'replay_finished' and s['state'] == 'idle', 30, 'boot replay finished')
+    stage_upload(str(root), PLUGIN, str(PLUGIN_SRC))
+    check('Qt boot: llm_engine reinstalled and enabled', install(root)['code'] == 'ok' and plugin_op(root, 'plugin_enable')['code'] == 'ok')
+    wait_running(root)
+    fake.reset()
+    check('Qt boot: loopback custom provider configured with consent', configure(root, 'custom', 'fake/model-1', fake.url(), True)['code'] == 'ok')
+    set_secret(root, 'custom')
+    artifacts = Path(td) / 'artifacts-qt'
+    artifacts.mkdir(exist_ok=True)
+    ui = subprocess.Popen(offscreen_command(root, artifacts, 'chat'), env=CLEAN_ENV,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        for name in UI_MARKERS:
+            until = time.monotonic() + 150
+            while not (artifacts / name).exists():
+                if ui.poll() is not None:
+                    full = ui.stderr.read().decode('utf-8', 'replace')
+                    (EVIDENCE / 'c1-qt-chat.stderr.txt').write_text(full, encoding='utf-8')
+                    raise RuntimeError(f'Qt chat phase exited before {name} (full stderr in '
+                                       f'target/evidence/c1-qt-chat.stderr.txt): ' + full[-400:])
+                if time.monotonic() > until:
+                    raise TimeoutError(f'Qt marker {name}')
+                time.sleep(0.02)
+        out, err = ui.communicate(timeout=120)
+    finally:
+        if ui.poll() is None:
+            ui.kill()
+            ui.wait(timeout=3)
+    check('Qt chat phase exit 0', ui.returncode == 0, err.decode('utf-8', 'replace')[-400:])
+    row = json.loads(out.decode('utf-8').strip().splitlines()[-1])
+    accept_chat_row(row)
+    R['details']['qt_chat'] = {'passed': row.get('passed'), 'state_trace': row.get('state_trace')}
 
 
 def main():
@@ -749,7 +812,11 @@ def main():
             except Exception as exc:
                 check(f'scenario {name} completed without exception', False,
                       f'{type(exc).__name__}: {exc} | ' + ' / '.join(traceback.format_exc().strip().splitlines()[-4:])[-500:])
-        scen_qt()
+        try:
+            scen_qt(td, fake)
+        except Exception as exc:
+            check('Qt chat phase completed without exception', False,
+                  f'{type(exc).__name__}: {exc}')
     finally:
         if CORE is not None:
             try:

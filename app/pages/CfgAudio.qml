@@ -30,7 +30,6 @@ PageFrame {
         AppState.setSetting("core.responseGain", draft)
     }
 
-    ECfgSearch {}
     PageHeader {
         title: "Áudio"
         subtitle: "Volume e feedback da resposta do Gideon. Vale a partir da próxima sessão."
@@ -43,6 +42,7 @@ PageFrame {
             onClicked: page.apply()
         }
     }
+    ECfgSearch {}
     ECfgNotice {}
 
     Section {

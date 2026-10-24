@@ -47,11 +47,11 @@ PageFrame {
         for (var i = 0; i < keys.length; i++) if (String(keys[i]).indexOf("theme.") === 0) AppState.resetSetting(keys[i])
     }
 
-    ECfgSearch {}
     PageHeader {
         title: "Aparência"
         subtitle: "Tema e cor de destaque, com prévia ao vivo."
     }
+    ECfgSearch {}
     ECfgNotice {}
 
     GridLayout {

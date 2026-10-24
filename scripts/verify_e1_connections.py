@@ -363,7 +363,13 @@ def stop_core(label):
     rc = proc.wait(timeout=20)
     CORE = None
     check(f'{label}: Core clean shutdown rc 0', rc == 0, f'rc={rc}')
-    left = [p for p in found if os.path.exists(f'/proc/{p}') and proc_table().get(p, (0, 'Z', b''))[1] != 'Z']
+    # Children of the Core may still be exiting when it has been reaped: they must be gone within a 5 s grace.
+    until = time.monotonic() + 5
+    while True:
+        left = [p for p in found if os.path.exists(f'/proc/{p}') and proc_table().get(p, (0, 'Z', b''))[1] != 'Z']
+        if not left or time.monotonic() > until:
+            break
+        time.sleep(0.05)
     check(f'{label}: no plugin or broker process left after shutdown', not left, left)
 
 

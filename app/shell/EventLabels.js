@@ -237,7 +237,7 @@ function codePhrase(code) {
 }
 
 // Estados de motor, sessão, configuração e plugin (50 §3.1–3.3).
-var wakeLabels = {unavailable: "Indisponível", starting: "Iniciando", replaying: "Reproduzindo", replay_finished: "Replay encerrado", failed: "Falhou"}
+var wakeLabels = {unavailable: "Indisponível", starting: "Iniciando", replaying: "Reproduzindo", replay_finished: "Reprodução de teste encerrada", failed: "Falhou"}
 var sttLabels = {unavailable: "Indisponível", starting: "Iniciando", ready: "Pronto", failed: "Falhou"}
 var speechLabels = {unavailable: "Indisponível", idle: "Em espera", speaking: "Respondendo", completed: "Concluído", failed: "Falhou", muted: "Mudo", disabled: "Desligado", cancelled: "Cancelado", timed_out: "Tempo esgotado", audio_error: "Erro de áudio", stt_failed: "Falha na transcrição", stt_unavailable: "Transcrição indisponível", transcript_final: "Transcrição final", capture_completed: "Captura concluída", no_speech: "Sem fala detectada", capture_too_long: "Captura longa demais"}
 var sessionLabels = {idle: "Em espera", capturing: "Ouvindo", transcribing: "Transcrevendo", executing: "Executando", speaking: "Respondendo", safe_mode: "Modo seguro", restart_required: "Reinício necessário"}

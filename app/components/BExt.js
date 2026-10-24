@@ -38,7 +38,7 @@ function stateLine(entry, item, codeMessage) {
     if (item) {
         switch (item.state) {
         case "quarantined": return "Em quarentena: não pode ser ativado."
-        case "running": return "Ativo (sandbox, sem rede)"
+        case "running": return "Sandbox, sem rede"
         case "starting": return "Iniciando…"
         case "failed": return "Falhou: " + (codeMessage(item.last_error) || "erro")
         case "stopped": return "Parado"

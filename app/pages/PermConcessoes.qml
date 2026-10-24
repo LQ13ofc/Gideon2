@@ -83,7 +83,8 @@ PageFrame {
             : core.sessionId.length > 0 ? "Sessão de voz ativa: mudanças em plugins bloqueadas." : ""
     }
 
-    RowLayout {
+    // A wrapping row: at 600 px the count and the grouping select go to a second line instead of leaving the window.
+    Flow {
         Layout.fillWidth: true
         spacing: Theme.space(12)
         Segmented {
@@ -92,9 +93,9 @@ PageFrame {
             currentId: AppState.permFilter
             onActivated: function (id) { AppState.permFilter = id; AppState.permFocusKey = "" }
         }
-        Item { Layout.fillWidth: true }
         Text {
             objectName: "grantCount"
+            topPadding: 9  // centred on the 36 px controls of the row
             text: page.filtered.length + (page.filtered.length === 1 ? " item" : " itens") + " · " + page.pendingShown + (page.pendingShown === 1 ? " pendente" : " pendentes")
             textFormat: Text.PlainText
             color: Theme.textMuted
@@ -103,7 +104,7 @@ PageFrame {
         Select {
             id: groupBox
             objectName: "grantGroup"
-            Layout.preferredWidth: 216
+            width: 216
             textRole: "text"; valueRole: "id"
             model: [{id: "origem", text: "Agrupar por: Origem"}, {id: "item", text: "Agrupar por: Item"}]
             currentIndex: Math.max(0, indexOfValue(AppState.permGroup))
@@ -227,6 +228,7 @@ PageFrame {
                         Item {
                             Layout.preferredWidth: page.wOrig; Layout.minimumWidth: page.wOrig
                             Layout.preferredHeight: badgeOrig.implicitHeight
+                            Layout.alignment: Qt.AlignTop
                             Badge { id: badgeOrig; text: line.modelData.originText || ""; tone: line.modelData.originTone || "neutral" }
                         }
                         ColumnLayout {

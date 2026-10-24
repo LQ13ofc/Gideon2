@@ -15,11 +15,11 @@ PageFrame {
     anchors.fill: parent
     visible: Window.window && Window.window.pageId === "cfg_dispositivos"
 
-    ECfgSearch {}
     PageHeader {
         title: "Dispositivos"
         subtitle: "Entrada e saída virtuais. Dispositivos físicos ainda não estão disponíveis."
     }
+    ECfgSearch {}
     ECfgNotice {}
 
     Section {

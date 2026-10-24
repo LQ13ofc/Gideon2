@@ -26,11 +26,11 @@ PageFrame {
         profileConfirm.text = ""
     }
 
-    ECfgSearch {}
     PageHeader {
         title: "Geral"
         subtitle: "Idioma, inicialização, opções avançadas e restauração da configuração."
     }
+    ECfgSearch {}
     ECfgNotice {}
 
     Section {
@@ -69,20 +69,6 @@ PageFrame {
         SettingRow {
             settingKey: "behavior.tips"
             EToggleSetting { settingKey: "behavior.tips" }
-        }
-        SettingRow {
-            label: "Somente modificados"
-            help: "Mostra nas telas de Configurações só as opções diferentes do padrão."
-            Toggle {
-                id: onlyToggle
-                objectName: "onlyModifiedToggle"
-                checked: AppState.onlyModified
-                Accessible.name: "Somente modificados"
-                onToggled: {
-                    AppState.onlyModified = onlyToggle.checked
-                    onlyToggle.checked = Qt.binding(function () { return AppState.onlyModified })
-                }
-            }
         }
     }
 

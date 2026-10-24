@@ -27,11 +27,11 @@ PageFrame {
         return null
     }
 
-    ECfgSearch {}
     PageHeader {
         title: "Voz e Wake"
         subtitle: "Frase de despertar certificada, prazo da sessão e estado do wake."
     }
+    ECfgSearch {}
     ECfgNotice {}
 
     Section {

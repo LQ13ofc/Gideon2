@@ -64,7 +64,7 @@ Rectangle {
                 readonly property bool on: modelData.id === bar.currentTab
                 objectName: "tab_" + modelData.id
                 Layout.preferredHeight: 40
-                Layout.preferredWidth: row.implicitWidth + (bar.narrow ? 24 : 28)
+                Layout.preferredWidth: row.implicitWidth + (bar.narrow ? 24 : bar.compact ? 18 : 28)
                 radius: Theme.radius
                 color: on ? Theme.tint : (tabMouse.containsMouse ? Theme.hover : "transparent")
                 activeFocusOnTab: true
@@ -129,7 +129,7 @@ Rectangle {
             id: paletteButton
             objectName: "paletteButton"
             Layout.preferredWidth: bar.narrow || bar.compact ? 36 : 128
-            Layout.preferredHeight: 30
+            Layout.preferredHeight: 36
             radius: Theme.radius
             color: palMouse.containsMouse ? Theme.hover : Theme.bg
             border.width: 1
@@ -215,7 +215,7 @@ Rectangle {
             enabled: bar.cancellable
             text: "Cancelar"
             variant: "secondary"
-            implicitHeight: 30
+            implicitHeight: 36
             Layout.leftMargin: Theme.space(4)
             Accessible.name: "Cancelar sessão"
             onClicked: bar.cancelRequested()

@@ -18,11 +18,11 @@ PageFrame {
     readonly property bool clearAvailable: core.modelsAvailable && String(core.sessionId || "").length === 0
     readonly property bool advancedOn: AppState.uiGet("behavior.advanced", false) === true
 
-    ECfgSearch {}
     PageHeader {
         title: "Privacidade"
         subtitle: "O que o Gideon guarda, onde fica e quem pode receber dados."
     }
+    ECfgSearch {}
     ECfgNotice {}
 
     Section {

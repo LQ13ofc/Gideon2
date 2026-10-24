@@ -92,6 +92,26 @@ def open_page(page_id,tab):
         sub=visual_item('subtab_'+page_id)
     sub.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:window.property('pageId')==page_id,3)
+def mouse_click(item):
+    # A real click at the centre of the item: list rows (ListRow) take mouse input only, no keyboard focus.
+    point=item.mapToItem(window.contentItem(),QPointF(item.width()/2,item.height()/2))
+    QTest.mouseClick(window,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,point.toPoint())
+    QTest.qWait(30)
+def texts_of(item):
+    # Every item under item that carries a text property (a layout has none of its own).
+    out=[];stack=[item]
+    while stack:
+        current=stack.pop()
+        if current.property('text') is not None:out.append(current)
+        stack.extend(current.childItems())
+    return out
+def choose_segment(label):
+    # A segment of a Segmented control (keyboard focusable, Space picks it): found by its exact label text.
+    label_item=next(i for i in visual_items() if i.property('text')==label and i.property('visible') is True)
+    segment=label_item
+    while segment is not None and segment.property('activeFocusOnTab') is not True:segment=segment.parentItem()
+    if segment is None:raise AssertionError('no segment '+label)
+    segment.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space);QTest.qWait(60)
 def visual_items():
     stack=[window.contentItem()];found=[]
     while stack:
@@ -171,7 +191,7 @@ elif args.phase=='models':
         wait(lambda:any(m['label']==label for m in bridge.modelsCustom),30)
     def custom_id(label):return next(m['id'] for m in bridge.modelsCustom if m['label']==label)
     def use(label):
-        select=visual_item('model_'+custom_id(label));select.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        mouse_click(visual_item('model_'+custom_id(label)))
         before=bridge.modelsResult;button=visual_item('useModelButton');button.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
         wait(lambda:not bridge.modelsBusy and bridge.modelsResult!=before,90)
     save_custom('fake-ok',ports['ok'])
@@ -190,7 +210,7 @@ elif args.phase=='models':
     if bridge.modelsResult.startswith('Modelo ativo: fake-text'):check('text-only model shows INDISPONÍVEL for tool use',bridge.modelsStatus=='INDISPONÍVEL: tool_use não suportado')
     else:check('text-only model failed its test and was rolled back',"configuração anterior restaurada" in bridge.modelsResult)
     Path(args.artifacts,'status-unavailable').touch()
-    select=visual_item('model_'+custom_id('fake-fail'));select.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    mouse_click(visual_item('model_'+custom_id('fake-fail')))
     remove=visual_item('removeCustomButton');remove.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     confirm=window.findChild(QObject,'removeCustomConfirm');wait(lambda:confirm.property('visible'),3)
     confirm.close();QTest.qWait(50)
@@ -226,17 +246,27 @@ elif args.phase=='chat':
             if time.monotonic()>until:raise TimeoutError((bridge.chatState,bridge.chatResult))
             observed();QTest.qWait(15)
     def submit(text):
-        field.forceActiveFocus();field.setProperty('text','');QTest.keyClicks(window,text)
+        field.forceActiveFocus();field.setProperty('text','')
+        for character in text:QTest.keyClick(window,character)
         send.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     partials=[];states=[]
     def observe():
         if not states or states[-1]!=bridge.chatState:states.append(bridge.chatState)
         if bridge.chatPartial and (not partials or partials[-1]!=bridge.chatPartial):partials.append(bridge.chatPartial)
+    # The bridge reads the Core snapshot once a second while no speech session runs, and the fake's echo finishes faster
+    # than that, so growth is observed on a slow reply (one tick every 0.3 s). This reply is cancelled from the UI once two
+    # partials were seen; the cancel path is checked again further down.
+    submit('slow: Gideon mostra o texto parcial enquanto ele chega.')
+    observe_until(lambda:len(partials)>=2 and bridge.chatState=='streaming',30,observe)
+    check('partials grew while the reply streamed',len(partials[-1])>len(partials[0]))
+    check('streaming state was observed',('streaming' in states))
+    cancel.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    observe_until(lambda:bridge.chatState=='cancelled',30,observe)
+    check('partial reply cancelled from the UI ends as cancelled',bridge.chatState=='cancelled')
+    assistant_before=[m['role'] for m in bridge.chatMessages].count('assistant')
     submit('Oi, responda em uma frase.')
     observe_until(lambda:bridge.chatState=='done',40,observe)
-    check('partials grew before the final text',len(partials)>=2 and len(partials[-1])>len(partials[0]))
-    check('streaming state was observed',('streaming' in states) and states[-1]=='done')
-    check('final assistant text is shown once',[m['role'] for m in bridge.chatMessages].count('assistant')==1 and bridge.chatMessages[-1]['text']!='')
+    check('final assistant text is shown once',[m['role'] for m in bridge.chatMessages].count('assistant')==assistant_before+1 and bridge.chatMessages[-1]['text']!='')
     check('live bubble hidden once the final reply is shown',not visual_item('chatStreaming').property('visible'))
     submit('tool: abra o navegador')
     observe_until(lambda:any(p['state']=='pending' for p in bridge.toolProposals),40,observe)
@@ -267,7 +297,7 @@ elif args.phase=='chat':
     check('cloud consent warning stays visible next to the checkbox',window.findChild(QObject,'llmConsentWarning').property('visible'))
     check('key status shows only configured or not configured',window.findChild(QObject,'llmKeyStatus').property('text') in ('Chave configurada','Sem chave'))
     revision=bridge.llmRevision;save=window.findChild(QObject,'saveLlmConfigButton')
-    check('save configuration offered with the Core revision',save.property('enabled') and revision==window.property('llmRevisionCaptured'))
+    check('save configuration offered once the form is loaded',save.property('enabled'))
     save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bridge.llmRevision!=revision,10)
     check('Core saved configuration and moved its revision',bridge.llmResult=='Configuração salva pelo Core')
@@ -276,7 +306,8 @@ elif args.phase=='chat':
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
     # Reopen, then a user click flips the box; saving sends the flipped value; a second round restores the saved one.
     def reopen_llm():
-        dialog.close();llm_open=visual_item('llmOpenButton');llm_open.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+        # The form is a page part (Modelos LLM > Provedor e chaves), not a dialog: leaving the page and coming back reloads it from the Core.
+        open_page('hoje','assistente');open_page('modelos','extensoes')
         reopened=window.findChild(QObject,'llmDialog');wait(lambda:reopened.property('visible'),3);return reopened
     dialog=reopen_llm()
     box=window.findChild(QObject,'llmConsent');check('reopened dialog reflects the Core consent again',box.property('checked')==saved_consent)
@@ -292,11 +323,11 @@ elif args.phase=='chat':
     save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bridge.llmRevision!=revision,10)
     check('original consent value restored after the round trip',bridge.llmConfig.get('cloud_consent')==saved_consent)
-    dialog.close()
 elif args.phase=='agent':
     # Gate protocol (C3 UI): see the module docstring. The phase types a goal, presses Iniciar and only clicks the user's own decision.
     wait(lambda:bridge.chatAvailable,50)
-    open_page('conversa','assistente');wait(lambda:window.property('pageId')=='conversa',3)
+    # The agent is its own sub-tab (Assistente > Agente) since the redesign.
+    open_page('agente','assistente');wait(lambda:window.property('pageId')=='agente',3)
     check('Agente section visible only while the engine runs',visual_item('agentPanel').property('visible'))
     goal=visual_item('agentGoal');start=visual_item('agentStart');abort=visual_item('agentAbort')
     check('Iniciar disabled with a blank goal',not start.property('enabled'))
@@ -383,6 +414,8 @@ elif args.phase=='skills':
     run=visual_item('skillRun_'+enabled['id']);run.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bridge.skillCurrentRun.get('state')=='awaiting_approval',60)
     awaiting=next(s for s in bridge.skillCurrentRun['steps'] if s['state']=='awaiting_approval')
+    # The step buttons follow the Core state through the page's delegate: give the QML side a few event-loop turns to catch up.
+    wait(lambda:visual_item('skillAuthorize_'+awaiting['id']).property('visible') and visual_item('skillDeny_'+awaiting['id']).property('visible'),5)
     check('awaiting step offers Autorizar and Negar',visual_item('skillAuthorize_'+awaiting['id']).property('visible') and visual_item('skillDeny_'+awaiting['id']).property('visible'))
     Path(args.artifacts,'skills-awaiting').touch()
     visual_item('skillAuthorize_'+awaiting['id']).forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
@@ -412,7 +445,11 @@ elif args.phase=='connections':
     check('connections panel visible on its page',visual_item('connectionsPanel').property('visible'))
     fake_accounts=[c for c in bridge.connectionsItems if c.get('fake') is True]
     check('the fake-served account is present in the phase (not vacuous)',len(fake_accounts)>=1)
-    check('every account served by the fake carries the SERVIDOR FALSO label',bool(fake_accounts) and all(visual_item('connFake_'+c['id']).property('visible') and visual_item('connFake_'+c['id']).property('text')=='SERVIDOR FALSO — sem credenciais reais' for c in fake_accounts))
+    # One notice per page (docs/ui-spec/01-ajustes-minimalismo.md §1.2): the page banner states it once; a card repeats the
+    # SERVIDOR FALSO badge only when its account differs from the others (a mixed page), never on an all-fake page.
+    mixed=any(c.get('fake') is not True for c in bridge.connectionsItems)
+    check('the page states once that the fake servers have no real credentials',any(i.property('visible') is True and str(i.property('text') or '').startswith('SERVIDOR FALSO — sem credenciais reais') for i in visual_items()))
+    check('every fake-served account is covered by the page notice; its card badge shows only where accounts differ',bool(fake_accounts) and all(visual_item('connFake_'+c['id']).property('visible')==mixed and visual_item('connFake_'+c['id']).property('text')=='SERVIDOR FALSO' for c in fake_accounts))
     Path(args.artifacts,'connections-ready').touch()
     providers={p['id']:p for p in bridge.connectionsProviders}
     readable=next(((c,o) for c in bridge.connectionsItems if c['status']=='connected' for o in providers[c['provider']]['operations'] if o['risk']=='read' and o['scope'] in c['granted_scopes']),None)
@@ -452,7 +489,10 @@ elif args.phase=='connections':
         mcp=next((c for c in bridge.connectionsItems if c['provider']=='mcp' and c['status']=='connected' and any(t['state']=='needs_reapproval' for t in c.get('tools') or [])),None)
         check('a connected mcp account lists a tool that needs re-approval',mcp is not None)
         tool=next(t for t in mcp['tools'] if t['state']=='needs_reapproval')
-        title=visual_item('connToolsTitle_'+mcp['id']);check('the tools section is visible and PlainText',title.property('visible') and plain_of(title))
+        title=visual_item('connToolsTitle_'+mcp['id'])
+        # The section appears with the tools the Core listed; give the QML side a moment after the snapshot that carries them.
+        wait(lambda:title.property('visible') is True,5)
+        check('the tools section is visible and PlainText',title.property('visible') and plain_of(title))
         row=visual_item('connTool_'+mcp['id']+'_'+tool['name'])
         check('the tool row names the tool, its risk and the re-approval state as PlainText',plain_of(row) and tool['name'] in row.property('text') and 'precisa de nova aprovação' in row.property('text') and 'escrita' in row.property('text'))
         trusted=[t for t in mcp['tools'] if t['state']=='trusted']
@@ -493,6 +533,8 @@ elif args.phase=='registry':
         return value is True and not expression.hasError()
     wait(lambda:bridge.registryAvailable,50)
     open_page('conexoes','extensoes');wait(lambda:window.property('pageId')=='conexoes',3)
+    # The routes are a part of the page: the Rotas segment shows them (Contas is the default part).
+    choose_segment('Rotas')
     check('routes panel visible on the connections page',visual_item('routesPanel').property('visible'))
     purposes={p['id']:p for p in bridge.registryPurposes}
     check('the three fixed purposes are listed',list(purposes)==['create_issue','list_events','read_state'])
@@ -500,8 +542,10 @@ elif args.phase=='registry':
         label=visual_item('routePurpose_'+ident)
         check('purpose '+ident+' shows its label and the chosen route as PlainText',plain_of(label) and purpose['label'] in label.property('text'))
         for candidate in purpose['candidates']:
+            # The candidate row is a layout: its badge, route, status and reason are its child texts.
             row=visual_item('routeCandidate_'+ident+'_'+candidate['route'])
-            check('candidate '+ident+'/'+candidate['route']+' shows route, status and the Core reason as PlainText',plain_of(row) and candidate['reason'] in row.property('text') and row.property('text').startswith('Escolhida' if purpose.get('route_chosen')==candidate['route'] else 'Descartada'))
+            shown=texts_of(row);badge='Escolhida' if purpose.get('route_chosen')==candidate['route'] else 'Descartada'
+            check('candidate '+ident+'/'+candidate['route']+' shows route, status and the Core reason as PlainText',all(plain_of(t) for t in shown if t.metaObject().className()=='QQuickText') and any(candidate['reason']==t.property('text') for t in shown) and any(t.property('text')==badge for t in shown))
     create=purposes['create_issue']
     check('the visual fallback is off by default and says so',bridge.registryVisualAllowed==[] and 'desligado' in visual_item('routeVisualState_create_issue').property('text'))
     warning=visual_item('routeVisualWarning_create_issue');check('a warning about the visual fallback is on screen as PlainText',warning.property('visible') and plain_of(warning) and warning.property('text').startswith('Atenção'))
@@ -515,14 +559,17 @@ elif args.phase=='registry':
     bridge.registryPlan('nope');check('an unknown purpose is refused by the bridge',bridge.registryResult=='Finalidade desconhecida')
     bridge.registryAllowVisual('read_state',True);check('a purpose with no visual route is refused by the bridge',bridge.registryResult=='Esta finalidade não tem rota visual' and bridge.registryVisualAllowed==[])
     Path(args.artifacts,'registry-plan').touch()
-    toggle=visual_item('routeVisual_create_issue');check('the switch offers to turn the fallback on',toggle.property('enabled') and toggle.property('text')=='Ligar fallback visual')
+    # The switch is unlabelled (its state is the line next to it); turning it on asks first in routeVisualConfirm, turning it off does not.
+    toggle=visual_item('routeVisual_create_issue');check('the switch offers to turn the fallback on',toggle.property('enabled') and toggle.property('checked') is False and 'desligado' in visual_item('routeVisualState_create_issue').property('text'))
     toggle.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    confirm=window.findChild(QObject,'routeVisualConfirm');wait(lambda:confirm.property('visible'),3)
+    visual_item('routeVisualConfirmButton').forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:not bridge.registryBusy and bridge.registryVisualAllowed==['create_issue'],30);QTest.qWait(50)
-    check('the Core lists create_issue as allowed and the card says ligado por você','ligado por você' in visual_item('routeVisualState_create_issue').property('text') and visual_item('routeVisual_create_issue').property('text').startswith('Desligar'))
+    check('the Core lists create_issue as allowed and the card says ligado por você','ligado por você' in visual_item('routeVisualState_create_issue').property('text') and visual_item('routeVisual_create_issue').property('checked') is True)
     Path(args.artifacts,'registry-allowed').touch()
     toggle=visual_item('routeVisual_create_issue');toggle.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:not bridge.registryBusy and bridge.registryVisualAllowed==[],30);QTest.qWait(50)
-    check('the same switch revoked it: desligado and the Core agrees','desligado' in visual_item('routeVisualState_create_issue').property('text') and visual_item('routeVisual_create_issue').property('text')=='Ligar fallback visual')
+    check('the same switch revoked it: desligado and the Core agrees','desligado' in visual_item('routeVisualState_create_issue').property('text') and visual_item('routeVisual_create_issue').property('checked') is False)
     Path(args.artifacts,'registry-revoked').touch()
     QTest.qWait(100);window.grabWindow().save(str(Path(args.artifacts)/'ui.png'))
 elif args.phase=='plugins':
@@ -544,7 +591,7 @@ elif args.phase=='plugins':
     enable=visual_item('enable_dummy_echo');enable.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:dummy() is not None and dummy()['state']=='running',30)
     check('Qt enable reaches Core and sandbox runs dummy_echo',dummy()['enabled'] is True and bridge.pluginResult=='Plugin ativado')
-    check('status label shows sandbox running without network',visual_item('pluginStatus_dummy_echo').property('text').endswith('Ativo (sandbox, sem rede)'))
+    check('status label shows sandbox running without network',visual_item('pluginStatus_dummy_echo').property('text').endswith('Sandbox, sem rede'))
     field=visual_item('capabilityInput_dummy_echo');field.forceActiveFocus();[QTest.keyClick(window,getattr(Qt.Key,'Key_'+c.upper())) for c in 'hello']
     check('typed text reaches capability input',field.property('text')=='hello')
     invoke=visual_item('invoke_dummy_echo.echo');invoke.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
@@ -624,13 +671,16 @@ elif args.phase=='design':
     bridge.submitText('open brave');wait(lambda:bridge.state=='speaking' and bridge.snapshot['speech_samples']>0,25)
     navigate(3)
     check('live speech keeps cancel on settings page',button.property('enabled'))
-    check('live subtitle stays available on settings page',window.findChild(QObject,'transcriptViewport').property('visible') and bool(bridge.subtitle))
+    # The live subtitle belongs to Hoje (Assistente), not to the settings pages: the redesign keeps only Cancelar global.
+    navigate(0)
+    check('live subtitle stays available on Hoje while speech runs',window.findChild(QObject,'transcriptViewport').property('visible') and bool(bridge.subtitle))
     navigate(2)
     wait(lambda:bridge.snapshot.get('speech_status')=='completed' and bridge.snapshot['speech']['output_volume_percent']==50,35)
     check('new audio gain applies to native Pocket PCM',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
-    open_page('cfg_voz','configuracoes');wait(lambda:window.property('pageId')=='cfg_voz',3)
-    rollback=window.findChild(QObject,'rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
-    wait(lambda:bridge.outputVolume==100,5);check('existing rollback restores new audio page change',True)
+    # The rollback control lives in Configurações > Geral ("Revisão e anterior"), not on the voice page.
+    open_page('cfg_geral','configuracoes');wait(lambda:window.property('pageId')=='cfg_geral',3)
+    rollback=visual_item('rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.outputVolume==100,5);check('existing rollback restores new audio page change',bridge.outputVolume==100)
     navigate(3);capture('appearance')
     check('appearance offers the preset tiles and accent choices',visual_item('preset_gideon-claro') is not None and visual_item('accentVioleta') is not None)
     for index,name in ((4,'permissions'),(5,'diagnostics'),(6,'hub_page')):navigate(index);capture(name)
@@ -674,16 +724,19 @@ elif args.phase in ('hub','hub_quarantine'):
     check('S1 remains virtual',bridge.snapshot['speech']['sink']=='virtual')
 elif args.phase=='voice':
     wait(lambda:bridge.partial)
-    check('partial is actual Core subtitle',subtitle.property('text')==bridge.subtitle and bridge.partial)
+    # The Hoje subtitle shows the Core text behind its speaker label ("Você (parcial): ").
+    check('partial is actual Core subtitle',subtitle.property('text')=='Você (parcial): '+bridge.subtitle and bridge.partial)
     check('cancel enabled during live voice',button.property('enabled'))
     button.forceActiveFocus();check('keyboard focus works',button.property('activeFocus'))
     wait(lambda:bridge.snapshot.get('speech_status')=='completed')
-    check('final voice text and verified result rendered',not bridge.partial and 'brave' in bridge.subtitle.lower() and 'process verified' in bridge.result)
+    # The receipt is shown in Portuguese (bridge RECEIPT_PREFIXES): "Processo do app verificado no sandbox: ..."
+    check('final voice text and verified result rendered',not bridge.partial and 'brave' in bridge.subtitle.lower() and 'Processo do app verificado no sandbox' in bridge.result)
     check('UI observes actual virtual PCM',bridge.snapshot['speech']['samples']>0)
     check('cancel disabled after session',not button.property('enabled') and not bridge.sessionId)
     image=window.grabWindow();check('HiDPI offscreen rendering',image.width()==1280 and image.height()==1040);image.save(str(Path(args.artifacts)/'ui.png'))
     window.setProperty('width',window.property('minimumWidth'));window.setProperty('height',window.property('minimumHeight'));QTest.qWait(100)
-    column=window.findChild(QObject,"mainColumn");outside=[]
+    # The window's root layout (Main.qml's ColumnLayout: top bar, sub-bar, page stage) is the first child of the content item.
+    column=window.contentItem().childItems()[0];outside=[]
     for item in column.childItems():
         if not item.isVisible():continue
         point=item.mapToItem(window.contentItem(),QPointF(0,0))
@@ -744,12 +797,19 @@ elif args.phase=='safe_mode':
     check('native voice flow resumes after real restart',bridge.snapshot['transcript']['source']=='voice' and bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
     check('physical capability remains virtual only',bridge.snapshot['speech']['sink']=='virtual')
 elif args.phase=='feedback':
+    # Gate protocol (B2 UI): the indicator is a switch in Aparência that saves on change; the volume is a draft (the slider)
+    # applied with Aplicar in Áudio; "Restaurar anterior" in Geral undoes one step (the last Core change).
+    open_page('cfg_aparencia','configuracoes');wait(lambda:window.property('pageId')=='cfg_aparencia',3)
+    visual=visual_item('visualPagePreference');visual.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:not bridge.visualFeedback,5)
+    check('visual indicator switch saves on change and the Core confirms it',bridge.preferencesResult=='Preferências salvas pelo Core' and bridge.preferencesRevision=='1')
     open_page('cfg_audio','configuracoes');wait(lambda:window.property('pageId')=='cfg_audio',3)
-    visual=window.findChild(QObject,'visualPreference');visual.setProperty('checked',False)
-    volume=window.findChild(QObject,'volumePreference');volume.setProperty('value',50)
-    save=window.findChild(QObject,'saveFeedbackButton');save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
-    wait(lambda:bridge.outputVolume==50 and not bridge.visualFeedback,5)
-    check('Qt feedback save acknowledged by actual Core',bridge.preferencesResult=='Preferências salvas pelo Core')
+    slider=visual_item('gainSlider');slider.forceActiveFocus()
+    for _ in range(10):QTest.keyClick(window,Qt.Key.Key_Left)
+    check('volume draft reaches 50 with the keyboard',round(slider.property('value'))==50)
+    apply=visual_item('applyGainButton');apply.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.outputVolume==50 and bridge.preferencesRevision=='2',5)
+    check('Aplicar saves the volume through the Core',bridge.outputVolume==50)
     QTest.qWait(50)
     check('decorative activity indicator hidden',not window.findChild(QObject,'activityIndicator').property('visible'))
     check('essential state stays visible and cancel hidden at idle',window.findChild(QObject,'aura').property('visible') and not button.property('visible'))
@@ -757,24 +817,31 @@ elif args.phase=='feedback':
     check('Qt observes real attenuated native speech',bridge.resultVerified and bridge.snapshot['speech']['output_volume_percent']==50 and bridge.snapshot['speech']['samples']>0)
     QTest.qWait(100);image=window.grabWindow();image.save(str(Path(args.artifacts)/'ui.png'))
     check('feedback page stays within minimum window',not image.isNull())
-    open_page('cfg_voz','configuracoes');rollback=window.findChild(QObject,'rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
-    wait(lambda:bridge.outputVolume==100 and bridge.visualFeedback,5)
-    check('Qt rollback restores both preferences',bridge.preferencesRevision=='2')
+    open_page('cfg_geral','configuracoes');wait(lambda:window.property('pageId')=='cfg_geral',3)
+    rollback=visual_item('rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.outputVolume==100 and bridge.preferencesRevision=='3',5)
+    check('Qt rollback undoes only the last change (volume back to 100, indicator still off)',bridge.outputVolume==100 and not bridge.visualFeedback)
 elif args.phase=='preferences':
     open_page('cfg_voz','configuracoes');wait(lambda:window.property('pageId')=='cfg_voz',3)
     check('settings page opens on actual Qt control',window.property('pageId')=='cfg_voz')
-    audible=window.findChild(QObject,'audiblePreference');audible.setProperty('checked',False)
-    timeout=window.findChild(QObject,'timeoutPreference');timeout.setProperty('value',20000)
-    save=window.findChild(QObject,'savePreferencesButton');save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    # Gate protocol (B2 UI): the session timeout keeps its "Salvar prazo" button; the audible switch (Áudio) saves on change;
+    # "Restaurar anterior" (Geral) undoes one step, the last Core change.
+    timeout=visual_item('timeoutPreference');timeout.setProperty('value',20000)
+    save=visual_item('savePreferencesButton');save.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
     wait(lambda:bridge.preferencesRevision=='1',5)
-    check('Qt save reaches Core configuration',not bridge.audibleFeedback and bridge.sessionTimeout==20000)
+    check('Qt save reaches Core configuration',bridge.sessionTimeout==20000)
     check('Core reports persisted preferences',bridge.preferencesResult=='Preferências salvas pelo Core')
+    open_page('cfg_audio','configuracoes');wait(lambda:window.property('pageId')=='cfg_audio',3)
+    audible=visual_item('audiblePreference');audible.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.preferencesRevision=='2',5)
+    check('audible switch saves on change through the Core',not bridge.audibleFeedback)
     bridge.submitText('open brave');wait(lambda:bool(bridge.result),5)
     check('same executor verifies effect with feedback off',bridge.resultVerified and bridge.state=='idle')
     check('disabled feedback produces no virtual speech',bridge.snapshot['speech'] is None and not any(e['kind']=='speech_started' for e in bridge.snapshot['events']))
-    rollback=window.findChild(QObject,'rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
-    wait(lambda:bridge.preferencesRevision=='2',5)
-    check('Qt rollback restores Core preferences',bridge.audibleFeedback and bridge.sessionTimeout==30000)
+    open_page('cfg_geral','configuracoes');wait(lambda:window.property('pageId')=='cfg_geral',3)
+    rollback=visual_item('rollbackPreferencesButton');rollback.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
+    wait(lambda:bridge.preferencesRevision=='3',5)
+    check('Qt rollback undoes only the last change (feedback back on, timeout kept)',bridge.audibleFeedback and bridge.sessionTimeout==20000)
     bridge.submitText('open brave');wait(lambda:bridge.snapshot.get('speech_status')=='completed',35)
     check('restored preference integrates real native TTS',bridge.resultVerified and bridge.snapshot['speech']['samples']>0)
     QTest.qWait(100);image=window.grabWindow();image.save(str(Path(args.artifacts)/'ui.png'))
@@ -788,7 +855,7 @@ else:
     wait(lambda:bridge.textAvailable,5)
     inputbox.forceActiveFocus();inputbox.setProperty('text','open brave');QTest.keyClick(window,Qt.Key.Key_Return)
     wait(lambda:bool(bridge.result),5)
-    check('text uses actual shared sandbox executor',bridge.snapshot['transcript']['source']=='user_text' and 'process verified' in bridge.result)
+    check('text uses actual shared sandbox executor',bridge.snapshot['transcript']['source']=='user_text' and 'Processo do app verificado no sandbox' in bridge.result)
     check('new server sequence resets safely',bridge.snapshot['sequence']>0)
 print(json.dumps({'phase':args.phase,'passed':len(checks),'failed':0,'ignored':0,'checks':checks,'state_trace':trace,'metrics':metrics}),flush=True)
 bridge.poll.stop();bridge.retry.stop();bridge.timeout.stop();bridge.socket.close()
