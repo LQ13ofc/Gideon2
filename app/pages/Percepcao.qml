@@ -5,10 +5,10 @@ import QtQuick.Window
 import "../theme"
 import "../components"
 import "../shell"
-import "../shell/Labels.js" as L
 
-// Extensões > Percepção e ação (needs a perception plugin). Parts: Privacidade (mic and camera indicators, always visible),
-// Plugins (one card per plugin, read-only test buttons, SINTÉTICO label) and Último resultado. Nothing here touches hardware.
+// Extensões > Percepção e ação (needs a perception plugin). Parts: Privacidade (mic and camera indicators, also in the
+// summary bar, always visible), Plugins (one card per plugin; test buttons in developer mode only) and Último resultado
+// (developer mode only). Nothing here touches hardware: every backend is synthetic in this build.
 PageFrame {
     id: page
     objectName: "perceptionPanel"
@@ -16,91 +16,172 @@ PageFrame {
     visible: Window.window && Window.window.pageId === "percepcao" && core.perceptionAvailable
 
     property string part: "privacidade"
-    function badgeTone(state) {
-        switch (state) {
-        case "running": return "success"
-        case "starting": return "info"
-        case "failed": case "quarantined": return "error"
-        default: return "neutral"
-        }
-    }
+    readonly property bool wide: width > 900
+    readonly property int runningCount: core.perceptionPlugins.filter(function (p) { return p.state === "running" }).length
+    readonly property string shownPart: (part === "resultado" && !Theme.devMode) ? "privacidade" : part
+
+    function indicatorTone(value) { return value === "ligado" ? "error" : "neutral" }
+    function indicatorColor(value) { return value === "ligado" ? Theme.error : Theme.textMuted }
 
     PageHeader {
         title: "Percepção e ação"
-        subtitle: "Testes de sensores e ações simulados; nada age no seu computador."
+        subtitle: "Sensores e ações simulados nesta build. Nenhum hardware real é acessado."
     }
+    // The one notice of the page: every backend here is synthetic, and display_manipulate is not supported.
     Banner {
-        kind: "warn"
-        text: "Backends simulados: nenhum hardware pessoal é acessado nesta build."
+        kind: "info"
+        text: "Backends simulados: nenhum hardware pessoal é acessado nesta build. Backend real: não suportado / pendente de validação humana."
+    }
+    // The privacy indicators are always in view, whatever the part.
+    CSummaryBar {
+        text: page.runningCount + (page.runningCount === 1 ? " plugin de percepção em execução" : " plugins de percepção em execução")
+        Badge {
+            objectName: "micBadge"
+            text: "Microfone: " + core.perceptionMicIndicator
+            tone: page.indicatorTone(core.perceptionMicIndicator)
+        }
+        Badge {
+            objectName: "cameraBadge"
+            text: "Câmera: " + core.perceptionCameraIndicator
+            tone: page.indicatorTone(core.perceptionCameraIndicator)
+        }
+    }
+    GProgressBar {
+        objectName: "perceptionProgress"
+        visible: core.perceptionBusy
+        indeterminate: true
+        Layout.fillWidth: true
+        Accessible.name: "Operação de percepção em andamento"
     }
     Segmented {
-        model: [{id: "privacidade", text: "Privacidade"}, {id: "plugins", text: "Plugins"}, {id: "resultado", text: "Último resultado"}]
-        currentId: page.part
+        model: Theme.devMode
+            ? [{id: "privacidade", text: "Privacidade"}, {id: "plugins", text: "Plugins"}, {id: "resultado", text: "Último resultado"}]
+            : [{id: "privacidade", text: "Privacidade"}, {id: "plugins", text: "Plugins"}]
+        currentId: page.shownPart
         onActivated: function (id) { page.part = id }
     }
 
-    Section {
-        visible: page.part === "privacidade"
-        title: "Indicadores"
-        objectName: "privacyCard"
-        Text { objectName: "micIndicator"; text: "Microfone · indicador: " + core.perceptionMicIndicator; textFormat: Text.PlainText; color: core.perceptionMicIndicator === "ligado" ? Theme.warning : Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Indicador do microfone: " + core.perceptionMicIndicator }
-        Text { objectName: "cameraIndicator"; text: "Câmera · indicador: " + core.perceptionCameraIndicator; textFormat: Text.PlainText; color: core.perceptionCameraIndicator === "ligado" ? Theme.warning : Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Indicador da câmera: " + core.perceptionCameraIndicator }
-    }
-
-    Section {
-        visible: page.part === "plugins"
-        title: "Plugins de percepção"
-        Repeater {
-            model: core.perceptionPlugins
-            delegate: Card {
-                id: perceptionCard
-                required property var modelData
-                objectName: "perceptionCard_" + modelData.plugin_id
-                RowLayout {
+    // Privacidade: the last state read, and what is never recorded.
+    ColumnLayout {
+        visible: page.shownPart === "privacidade"
+        Layout.fillWidth: true
+        spacing: Theme.space(24)
+        Section {
+            objectName: "privacyCard"
+            title: "Indicadores"
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.space(10)
+                Rectangle { Layout.alignment: Qt.AlignVCenter; implicitWidth: 8; implicitHeight: 8; radius: 4; color: page.indicatorColor(core.perceptionMicIndicator) }
+                Text {
+                    objectName: "micIndicator"
+                    text: "Microfone · indicador: " + core.perceptionMicIndicator
+                    textFormat: Text.PlainText
+                    color: page.indicatorColor(core.perceptionMicIndicator)
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontBody
+                    wrapMode: Text.WordWrap
                     Layout.fillWidth: true
-                    spacing: Theme.space(12)
-                    Text {
-                        objectName: "perceptionTitle_" + perceptionCard.modelData.plugin_id
-                        text: perceptionCard.modelData.plugin_id + " " + perceptionCard.modelData.semver
-                        textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; font.weight: 600; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
-                    }
-                    Badge {
-                        objectName: "perceptionState_" + perceptionCard.modelData.plugin_id
-                        text: L.perceptionStateText(perceptionCard.modelData.state)
-                        tone: page.badgeTone(perceptionCard.modelData.state)
-                    }
+                    Accessible.name: "Indicador do microfone: " + core.perceptionMicIndicator
                 }
-                Text { objectName: "perceptionError_" + perceptionCard.modelData.plugin_id; visible: !!perceptionCard.modelData.last_error; text: "Último erro: " + perceptionCard.modelData.last_error; textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                Badge {
-                    objectName: "perceptionBadge_" + perceptionCard.modelData.plugin_id
-                    text: perceptionCard.modelData.plugin_id === "display_manipulate" ? "UNSUPPORTED" : "SINTÉTICO — sem hardware real"
-                    tone: perceptionCard.modelData.plugin_id === "display_manipulate" ? "warning" : "success"
-                }
-                Text { text: "Permissão exigida: " + (perceptionCard.modelData.permissions.map(function (p) { return core.permissionLabel(p) }).join(", ") || "nenhuma") + (perceptionCard.modelData.approved ? " · concedida" : " · não concedida"); textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                Text { text: "Backend real: não suportado / pendente de validação humana"; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                Flow {
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.space(10)
+                Rectangle { Layout.alignment: Qt.AlignVCenter; implicitWidth: 8; implicitHeight: 8; radius: 4; color: page.indicatorColor(core.perceptionCameraIndicator) }
+                Text {
+                    objectName: "cameraIndicator"
+                    text: "Câmera · indicador: " + core.perceptionCameraIndicator
+                    textFormat: Text.PlainText
+                    color: page.indicatorColor(core.perceptionCameraIndicator)
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontBody
+                    wrapMode: Text.WordWrap
                     Layout.fillWidth: true
-                    spacing: Theme.space(8)
-                    Repeater {
-                        model: L.perceptionActions[perceptionCard.modelData.plugin_id] || []
-                        delegate: GButton {
-                            required property var modelData
-                            objectName: "perception_" + modelData.capability
-                            variant: "secondary"
-                            text: modelData.label
-                            Accessible.name: modelData.label + " " + modelData.capability
-                            enabled: core.connected && perceptionCard.modelData.state === "running" && !core.perceptionBusy
-                            onClicked: core.perceptionInvoke(modelData.capability, "{}")
-                        }
-                    }
+                    Accessible.name: "Indicador da câmera: " + core.perceptionCameraIndicator
                 }
+            }
+            Text {
+                text: "Os indicadores mostram o último estado lido. Só a leitura de estado atualiza esta tela."
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+        Section {
+            title: "O que não é gravado"
+            Text {
+                text: "Nada é gravado em disco. Áudio e legendas ficam só em memória."
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
         }
     }
 
+    // Plugins: one card per perception plugin.
+    ColumnLayout {
+        visible: page.shownPart === "plugins"
+        Layout.fillWidth: true
+        spacing: Theme.space(16)
+        Section {
+            title: "Plugins de percepção"
+            GridLayout {
+                Layout.fillWidth: true
+                columns: page.wide ? 2 : 1
+                columnSpacing: Theme.space(16)
+                rowSpacing: Theme.space(16)
+                Repeater {
+                    model: core.perceptionPlugins
+                    delegate: CPerceptionCard {
+                        required property var modelData
+                        objectName: "perceptionCard_" + modelData.plugin_id
+                        plugin: modelData
+                    }
+                }
+            }
+        }
+        Text {
+            text: "Nenhuma ação altera o computador nesta build."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            Layout.fillWidth: true
+        }
+    }
+
+    // Último resultado: developer mode only; nothing from the screen or the microphone is shown here.
     Section {
-        visible: page.part === "resultado"
+        visible: page.shownPart === "resultado"
         title: "Último resultado"
-        Text { objectName: "perceptionResult"; text: core.perceptionResult; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true; Accessible.name: "Resultado da percepção: " + text }
+        Text {
+            objectName: "perceptionResultEmpty"
+            visible: core.perceptionResult.length === 0
+            text: "Nenhuma ação executada nesta sessão."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            objectName: "perceptionResult"
+            text: core.perceptionResult
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Accessible.name: "Resultado da percepção: " + text
+        }
     }
 }

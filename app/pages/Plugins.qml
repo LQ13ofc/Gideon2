@@ -4,169 +4,96 @@ import QtQuick.Layouts
 import QtQuick.Window
 import "../theme"
 import "../components"
+import "../components/BExt.js" as X
 import "../shell"
 import "../shell/Labels.js" as L
 
-// Extensões > Plugins (was the Gideon Hub dialog and the plugin panel). Installing copies a verified package and runs
-// nothing; approving permissions does not install or run; enabling runs the plugin in its sandbox.
+// Extensões > Plugins (B01). A list of 56 px rows; a click opens the detail drawer on the right (360 px). One banner.
+// Installing copies a verified package and runs nothing; approving permissions does not install or run; enabling runs
+// the plugin in its sandbox. Destructive actions (revoke, remove) confirm in a modal with Cancelar as the default.
 PageFrame {
     id: page
     objectName: "pluginsPage"
     anchors.fill: parent
     visible: Window.window && Window.window.pageId === "plugins"
 
-    property var reviewPlugin: AppState.reviewPlugin
+    property string filter: "todos"
+    property string selectedId: ""
+
+    // Motives shown on disabled controls (8.6): Core offline, voice session, or a plain refusal.
+    readonly property var ctx: ({
+        pluginsAvailable: core.pluginsAvailable,
+        hubApprovalAvailable: core.hubApprovalAvailable,
+        hubLifecycleAvailable: core.hubLifecycleAvailable,
+        blockedText: core.connected ? (core.sessionId ? "Indisponível durante a sessão de voz." : "Indisponível: ação não permitida agora.") : "Core desconectado: nada pode ser alterado agora."
+    })
+    // One row per plugin: the catalog entry (when there is one), the Core item and the installed record.
+    readonly property var rows: {
+        var out = []
+        var entries = core.hubEntries
+        var items = core.pluginItems
+        var records = core.hubInstalled
+        var seen = {}
+        for (var i = 0; i < entries.length; i++) {
+            var e = entries[i]
+            seen[e.plugin_id] = true
+            out.push({plugin_id: e.plugin_id, entry: e, item: L.pluginFor(items, e.plugin_id), record: L.pluginFor(records, e.plugin_id)})
+        }
+        for (var j = 0; j < items.length; j++) {
+            if (seen[items[j].plugin_id]) continue
+            out.push({plugin_id: items[j].plugin_id, entry: null, item: items[j], record: L.pluginFor(records, items[j].plugin_id)})
+        }
+        return out
+    }
+    readonly property var tally: X.counts(rows)
+    readonly property int shown: filter === "instalados" ? tally.instalados : filter === "disponiveis" ? tally.disponiveis
+        : filter === "quarentena" ? tally.quarentena : tally.todos
+    readonly property var selectedRow: {
+        for (var i = 0; i < page.rows.length; i++) if (page.rows[i].plugin_id === page.selectedId) return page.rows[i]
+        return null
+    }
+
     function approvalDone() {
         if (!AppState.reviewPlugin) return false
         var e = L.hubEntry(core.hubEntries, AppState.reviewPlugin.plugin_id)
         return !!e && e.manifest_sha256 === AppState.reviewPlugin.manifest_sha256 && e.permissions_approved === true
     }
+    function permissionText(p) {
+        var label = core.permissionLabel(p)
+        return label === p ? "permissão sem rótulo: " + p : label
+    }
+    function openReview(plugin) { AppState.reviewPlugin = plugin; reviewAck.checked = false; reviewDialog.open() }
+    function askRemove(plugin) { removeConfirm.plugin = plugin; removeConfirm.revision = core.hubInstallRevision; removeConfirm.open() }
+    function askRevoke(plugin) { revokeConfirm.plugin = plugin; revokeConfirm.revision = core.pluginsRevision; revokeConfirm.open() }
 
     PageHeader {
         title: "Plugins"
         subtitle: "Instale e ative plugins verificados. Instalar não executa nada e não concede acesso."
     }
+    // The one notice of the page: the catalog state (publishers are not authenticated; quarantine when it applies).
     Banner {
         objectName: "hubBanner"
-        kind: "info"
+        kind: core.hubDescription.indexOf("quarentena") >= 0 ? "error" : "warn"
         text: core.hubDescription
     }
-
-    Section {
-        title: "Catálogo"
-        Text {
-            objectName: "hubImportDescription"
-            text: core.hubImportDescription
-            visible: core.hubImportActive
-            textFormat: Text.PlainText
-            color: Theme.textMuted
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontHelp
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-        GButton {
-            objectName: "abortHubImportButton"
-            visible: core.hubImportActive
-            enabled: core.hubImportActive
-            text: "Cancelar importação"
-            variant: "secondary"
-            onClicked: core.abortHubImport()
-        }
-        Repeater {
-            model: core.hubEntries
-            delegate: Card {
-                required property var modelData
-                Text {
-                    objectName: "hubEntry_" + modelData.plugin_id
-                    text: modelData.plugin_id + " " + modelData.semver + " · " + (modelData.status === "installed" ? "instalado" : modelData.status === "update_available" ? "atualização disponível" : modelData.status === "not_installed" ? "não instalado" : "incompatível: " + modelData.reason) + " · " + (modelData.permissions_approved ? "permissões aprovadas" : "permissões não aprovadas")
-                    textFormat: Text.PlainText
-                    color: Theme.text
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    font.weight: 600
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                Text {
-                    objectName: "status_" + modelData.plugin_id
-                    text: (modelData.status === "installed" ? (L.pluginEnabledFor(core.pluginItems, modelData.plugin_id) ? "Instalado · ativo (sandbox, sem rede)" : "Instalado · desativado (sem execução)") : modelData.status === "update_available" ? "Atualização disponível" : modelData.status === "not_installed" ? (modelData.payload_staged ? "Pacote verificado em staging; não instalado" : "Não instalado") : "Incompatível: " + modelData.reason) + " · " + modelData.license
-                    textFormat: Text.PlainText
-                    color: Theme.textMuted
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontHelp
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                Text {
-                    text: (modelData.permissions_approved ? "Permissões aprovadas para este manifesto: " : "Permissões declaradas (não aprovadas): ") + (modelData.permissions.map(function (p) { return core.permissionLabel(p) }).join(", ") || "nenhuma") + "\n" + modelData.support_policy
-                    textFormat: Text.PlainText
-                    color: Theme.textMuted
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontCaption
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.space(10)
-                    Item { Layout.fillWidth: true }
-                    GButton {
-                        objectName: "review_" + modelData.plugin_id
-                        text: modelData.permissions_approved ? "Permissões aprovadas" : "Revisar permissões"
-                        variant: "secondary"
-                        Accessible.name: (modelData.permissions_approved ? "Permissões aprovadas de " : "Revisar permissões de ") + modelData.plugin_id
-                        enabled: core.hubApprovalAvailable && (modelData.status === "not_installed" || modelData.status === "update_available" || modelData.status === "installed") && !modelData.permissions_approved
-                        onClicked: { AppState.reviewPlugin = modelData; reviewAck.checked = false; reviewDialog.open() }
-                    }
-                    GButton {
-                        objectName: "install_" + modelData.plugin_id
-                        visible: modelData.status === "not_installed" || modelData.status === "update_available"
-                        text: "Instalar pacote verificado"
-                        variant: "primary"
-                        Accessible.name: "Instalar pacote verificado de " + modelData.plugin_id
-                        enabled: core.hubLifecycleAvailable && modelData.payload_staged === true && modelData.permissions_approved === true && (modelData.status === "not_installed" || modelData.status === "update_available")
-                        onClicked: core.installHub(modelData.plugin_id, modelData.manifest_sha256)
-                    }
-                }
-            }
-        }
-        EmptyState {
-            visible: core.hubEntries.length === 0
-            iconName: "hub"
-            message: "Nenhum plugin no catálogo ainda. Conecte o Core para carregar o catálogo local."
-        }
+    Collapsible {
+        title: "Como funciona"
+        summary: "Instalar copia o pacote verificado; nada é executado. Aprovar permissões não instala."
         Text {
             text: "Instalar copia o pacote verificado para o Core; nada é executado. O catálogo não concede acesso ao computador."
-            textFormat: Text.PlainText
-            color: Theme.textMuted
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontHelp
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
+            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        Text {
+            text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."
+            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        Text {
+            text: "Plugins ativos rodam em sandbox, sem rede. Revogar permissões desativa o plugin e encerra o processo."
+            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
     }
 
-    Section {
-        title: "Instalados no Core"
-        visible: core.hubInstalled.length > 0
-        Repeater {
-            model: core.hubInstalled
-            delegate: Card {
-                required property var modelData
-                Text {
-                    text: modelData.plugin_id + " " + modelData.semver + " · " + (modelData.state === "quarantined" ? "Em quarentena" : L.pluginEnabledFor(core.pluginItems, modelData.plugin_id) ? "Instalado · ativo" : "Instalado · desativado (sem execução)")
-                    textFormat: Text.PlainText
-                    color: Theme.text
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.space(10)
-                    Item { Layout.fillWidth: true }
-                    GButton {
-                        objectName: "rollback_" + modelData.plugin_id
-                        text: "Reverter versão"
-                        variant: "secondary"
-                        Accessible.name: "Reverter versão de " + modelData.plugin_id
-                        enabled: core.hubLifecycleAvailable && !!modelData.previous && modelData.state === "installed"
-                        onClicked: core.rollbackHub(modelData.plugin_id)
-                    }
-                    GButton {
-                        objectName: "remove_" + modelData.plugin_id
-                        text: "Remover plugin"
-                        variant: "danger"
-                        Accessible.name: "Remover " + modelData.plugin_id
-                        enabled: core.hubLifecycleAvailable
-                        onClicked: { removeConfirm.plugin = modelData; removeConfirm.revision = core.hubInstallRevision; removeConfirm.open() }
-                    }
-                }
-            }
-        }
-    }
+    // Results of the last operations (the same text the toast repeats).
     Text {
         objectName: "hubLifecycleResult"
         visible: text.length > 0
@@ -177,116 +104,6 @@ PageFrame {
         font.pixelSize: Theme.fontHelp
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
-    }
-
-    // Plugins known to the Core: state, capabilities, enable and disable, and the capability test (developer use).
-    Section {
-        title: "Plugins no Core"
-        visible: core.pluginItems.length > 0
-        Repeater {
-            model: core.pluginItems
-            delegate: Card {
-                id: pluginCard
-                required property var modelData
-                readonly property string pid: modelData.plugin_id
-                Text {
-                    objectName: "pluginStatus_" + pluginCard.pid
-                    text: pluginCard.pid + " " + modelData.semver + " · " + L.pluginStateText(modelData)
-                    textFormat: Text.PlainText
-                    color: Theme.text
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    font.weight: 600
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                Text {
-                    text: "Capacidades: " + (modelData.capabilities.length ? modelData.capabilities.join(", ") : "nenhuma")
-                    textFormat: Text.PlainText
-                    color: Theme.textMuted
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontHelp
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                Text {
-                    objectName: "reapprovalHint_" + pluginCard.pid
-                    visible: L.pluginInstalled(core.hubEntries, pluginCard.pid) && !L.pluginApproved(core.hubEntries, pluginCard.pid)
-                    text: "Aprove novamente as permissões para ativar"
-                    textFormat: Text.PlainText
-                    color: Theme.warning
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontHelp
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.space(10)
-                    GButton {
-                        objectName: "enable_" + pluginCard.pid
-                        text: "Ativar"
-                        variant: "primary"
-                        Accessible.name: "Ativar " + pluginCard.pid
-                        enabled: core.pluginsAvailable && L.pluginCanEnable(core.hubEntries, modelData)
-                        onClicked: core.enablePlugin(pluginCard.pid)
-                    }
-                    GButton {
-                        objectName: "disable_" + pluginCard.pid
-                        text: "Desativar"
-                        variant: "secondary"
-                        Accessible.name: "Desativar " + pluginCard.pid
-                        enabled: core.pluginsAvailable && modelData.enabled === true
-                        onClicked: core.disablePlugin(pluginCard.pid)
-                    }
-                    Item { Layout.fillWidth: true }
-                    GButton {
-                        objectName: "revoke_" + pluginCard.pid
-                        text: "Revogar permissões"
-                        variant: "danger"
-                        Accessible.name: "Revogar permissões de " + pluginCard.pid
-                        enabled: core.pluginsAvailable && modelData.state !== "quarantined"
-                        onClicked: { revokeConfirm.plugin = modelData; revokeConfirm.revision = core.pluginsRevision; revokeConfirm.open() }
-                    }
-                }
-                GTextField {
-                    id: capabilityInput
-                    objectName: "capabilityInput_" + pluginCard.pid
-                    placeholderText: "Texto para a capability"
-                    Accessible.name: "Texto para a capability de " + pluginCard.pid
-                    maximumLength: 256
-                    enabled: core.pluginsAvailable && modelData.state === "running"
-                    Layout.fillWidth: true
-                    Component.onCompleted: text = AppState.draftValue(pluginCard.pid, "text")
-                    onTextEdited: AppState.setDraft(pluginCard.pid, "text", text)
-                }
-                Repeater {
-                    model: modelData.capabilities
-                    delegate: RowLayout {
-                        required property var modelData
-                        readonly property string capName: modelData
-                        Layout.fillWidth: true
-                        spacing: Theme.space(10)
-                        GButton {
-                            objectName: "invoke_" + capName
-                            text: "Invocar"
-                            variant: "secondary"
-                            Accessible.name: "Invocar " + capName
-                            enabled: core.pluginsAvailable && pluginCard.modelData.state === "running"
-                            onClicked: { AppState.setDraft(pluginCard.pid, "capability", capName); core.invokeCapability(capName, capabilityInput.text) }
-                        }
-                        GButton {
-                            objectName: "cancelCapability_" + pluginCard.pid
-                            text: "Cancelar"
-                            variant: "secondary"
-                            Accessible.name: "Cancelar capability " + capName
-                            enabled: core.pluginsAvailable && AppState.draftValue(pluginCard.pid, "capability") === capName
-                            onClicked: core.cancelCapability(capName)
-                        }
-                    }
-                }
-            }
-        }
     }
     Text {
         objectName: "pluginLifecycleResult"
@@ -310,8 +127,172 @@ PageFrame {
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
     }
+    RowLayout {
+        visible: core.hubImportActive
+        Layout.fillWidth: true
+        spacing: Theme.space(10)
+        Text {
+            objectName: "hubImportDescription"
+            text: core.hubImportDescription
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "abortHubImportButton"
+            enabled: core.hubImportActive
+            text: "Cancelar importação"
+            variant: "secondary"
+            onClicked: core.abortHubImport()
+        }
+    }
 
-    // Confirmations: Cancelar is the focused default; the explicit button is the only way to accept.
+    Segmented {
+        objectName: "pluginFilter"
+        model: [
+            {id: "todos", text: "Todos " + page.tally.todos},
+            {id: "instalados", text: "Instalados " + page.tally.instalados},
+            {id: "disponiveis", text: "Disponíveis " + page.tally.disponiveis},
+            {id: "quarentena", text: "Quarentena " + page.tally.quarentena}
+        ]
+        currentId: page.filter
+        onActivated: function (id) { page.filter = id }
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        Layout.alignment: Qt.AlignTop
+        spacing: Theme.space(16)
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
+            spacing: 0
+
+            Text {
+                visible: page.rows.length === 0
+                text: "Catálogo não configurado"
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSection
+                font.weight: 600
+                Layout.fillWidth: true
+            }
+            EmptyState {
+                objectName: "hubEmpty"
+                visible: page.rows.length === 0
+                iconName: "puzzle"
+                message: "Nenhum plugin no catálogo ainda. Conecte o Core para carregar o catálogo local."
+                actionText: "Atualizar catálogo"
+                onActionRequested: core.refresh()
+            }
+            RowLayout {
+                visible: page.rows.length > 0 && page.shown === 0
+                Layout.fillWidth: true
+                spacing: Theme.space(12)
+                Text {
+                    text: "Nenhum plugin neste filtro."
+                    textFormat: Text.PlainText
+                    color: Theme.textMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontBody
+                    Layout.fillWidth: true
+                }
+                GButton {
+                    text: "Ver todos"
+                    variant: "ghost"
+                    onClicked: page.filter = "todos"
+                }
+            }
+
+            Repeater {
+                model: page.rows
+                delegate: BPluginRow {
+                    required property var modelData
+                    entry: modelData.entry
+                    item: modelData.item
+                    record: modelData.record
+                    ctx: page.ctx
+                    selected: modelData.plugin_id === page.selectedId
+                    visible: X.inFilter(modelData, page.filter)
+                    onSelectRequested: page.selectedId = modelData.plugin_id
+                    onReviewRequested: function (plugin) { page.openReview(plugin) }
+                    onRevokeRequested: function (plugin) { page.askRevoke(plugin) }
+                    onRemoveRequested: function (plugin) { page.askRemove(plugin) }
+                }
+            }
+        }
+
+        BPluginDetail {
+            visible: page.selectedRow !== null
+            entry: page.selectedRow ? page.selectedRow.entry : null
+            item: page.selectedRow ? page.selectedRow.item : null
+            ctx: page.ctx
+            onReviewRequested: function (plugin) { page.openReview(plugin) }
+            onCloseRequested: page.selectedId = ""
+        }
+    }
+
+    // Review (F1): the approval target is captured when the dialog opens; the bridge refuses it if the live record changed.
+    Modal {
+        id: reviewDialog
+        objectName: "hubReviewDialog"
+        closeOnly: true
+        title: "Revisar permissões"
+        onOpened: { core.beginHubReview(); AppState.reviewRevision = core.hubApprovalRevision }
+        Text {
+            text: AppState.reviewPlugin ? AppState.reviewPlugin.plugin_id + " " + AppState.reviewPlugin.semver + " · " + AppState.reviewPlugin.publisher + " · não verificado" : ""
+            textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        Text {
+            visible: AppState.reviewPlugin !== null
+            text: "Permissões declaradas (não aprovadas):"
+            textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; font.weight: 600; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        Repeater {
+            model: AppState.reviewPlugin ? AppState.reviewPlugin.permissions : []
+            delegate: Text {
+                required property var modelData
+                text: "•  " + page.permissionText(modelData)
+                textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+        }
+        Text {
+            text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."
+            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        GCheckbox {
+            id: reviewAck
+            objectName: "publisherAcknowledgement"
+            text: "Entendo que o publisher não foi autenticado"
+            enabled: core.hubApprovalAvailable
+        }
+        Text {
+            visible: !reviewAck.checked
+            text: "Marque a confirmação para liberar a aprovação."
+            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "approveHubButton"
+            variant: "primary"
+            text: "Aprovar estas permissões"
+            Layout.fillWidth: true
+            Accessible.name: AppState.reviewPlugin ? "Aprovar permissões de " + AppState.reviewPlugin.plugin_id : "Aprovar permissões"
+            enabled: core.hubApprovalAvailable && reviewAck.checked && AppState.reviewPlugin !== null && !page.approvalDone()
+            onClicked: core.approveHub(AppState.reviewPlugin.plugin_id, AppState.reviewPlugin.manifest_sha256, AppState.reviewPlugin.permissions, reviewAck.checked, AppState.reviewRevision)
+        }
+        Text {
+            objectName: "hubApprovalResult"
+            text: core.hubApprovalResult
+            textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
+        }
+    }
+
+    // Confirmations (8.7): Cancelar is the focused default; the verb button is the only way to accept.
     Modal {
         id: removeConfirm
         objectName: "removeConfirm"
@@ -346,46 +327,6 @@ PageFrame {
             Layout.alignment: Qt.AlignRight
             Accessible.name: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id : "Revogar"
             onClicked: revokeConfirm.accept()
-        }
-    }
-    // Review: the approval target is captured when the dialog opens; the bridge refuses it if the live record changed.
-    Modal {
-        id: reviewDialog
-        objectName: "hubReviewDialog"
-        closeOnly: true
-        title: "Revisar permissões"
-        onOpened: { core.beginHubReview(); AppState.reviewRevision = core.hubApprovalRevision }
-        Text {
-            text: AppState.reviewPlugin ? AppState.reviewPlugin.plugin_id + " " + AppState.reviewPlugin.semver + " · " + AppState.reviewPlugin.publisher : ""
-            textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
-        }
-        Text {
-            text: AppState.reviewPlugin ? "Permissões: " + (AppState.reviewPlugin.permissions.join(", ") || "nenhuma") : ""
-            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
-        }
-        Text {
-            text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."
-            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
-        }
-        GCheckbox {
-            id: reviewAck
-            objectName: "publisherAcknowledgement"
-            text: "Entendo que o publisher não foi autenticado"
-            enabled: core.hubApprovalAvailable
-        }
-        GButton {
-            objectName: "approveHubButton"
-            variant: "primary"
-            text: "Aprovar estas permissões"
-            Layout.fillWidth: true
-            Accessible.name: AppState.reviewPlugin ? "Aprovar permissões de " + AppState.reviewPlugin.plugin_id : "Aprovar permissões"
-            enabled: core.hubApprovalAvailable && reviewAck.checked && AppState.reviewPlugin !== null && !page.approvalDone()
-            onClicked: core.approveHub(AppState.reviewPlugin.plugin_id, AppState.reviewPlugin.manifest_sha256, AppState.reviewPlugin.permissions, reviewAck.checked, AppState.reviewRevision)
-        }
-        Text {
-            objectName: "hubApprovalResult"
-            text: core.hubApprovalResult
-            textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
     }
 }

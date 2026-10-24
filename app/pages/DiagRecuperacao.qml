@@ -6,52 +6,212 @@ import "../theme"
 import "../components"
 import "../shell"
 
-// Diagnóstico > Recuperação: the safe-mode recovery and the last good preferences. Anything that needs a Core restart says so.
+// Diagnóstico > Recuperação (docs/ui-spec/50-diagnostico.md §7): restart, configuration restore (Básico); the last good LLM
+// configuration, the catalogue and the terminal commands (Avançado). The page never installs or repairs: it copies commands.
 PageFrame {
     id: page
     objectName: "page_diag_recuperacao"
     anchors.fill: parent
     visible: Window.window && Window.window.pageId === "diag_recuperacao"
 
+    readonly property bool restartNeeded: core.connected && core.configurationStatus === "restart_required"
+    readonly property string restartBadge: !core.connected ? "Indisponível" : restartNeeded ? "Necessário agora" : "Não necessário"
+    readonly property string restartTone: !core.connected ? "neutral" : restartNeeded ? "warning" : "neutral"
+    readonly property var commands: [
+        {label: "Instalar", command: "gideon-install --install-root <RAIZ> install <PACOTE>"},
+        {label: "Atualizar", command: "gideon-install --install-root <RAIZ> update <PACOTE>"},
+        {label: "Reverter", command: "gideon-install --install-root <RAIZ> rollback"},
+        {label: "Reparar", command: "gideon-install --install-root <RAIZ> repair"},
+        {label: "Criar perfil", command: "gideon-install --install-root <RAIZ> profile create <NOME>"},
+        {label: "Abrir perfil", command: "gideon-launch --install-root <RAIZ> <PERFIL>"}
+    ]
+
+    function copyCommand(text, label) {
+        if (core.copyText(text)) AppState.toast("Comando copiado.")
+        else AppState.toast("Não foi possível copiar o comando " + label + ".")
+    }
+
     PageHeader {
         title: "Recuperação"
-        subtitle: "Modo seguro, configuração anterior e o que fazer quando algo não vai bem."
+        subtitle: "Reinício, restauração de configuração e comandos para o terminal."
     }
-    Section {
-        title: "Configuração"
-        Text { text: core.configurationStatus === "safe_mode" ? "Modo seguro: o arquivo de configuração não pôde ser lido." : "Configuração normal."; textFormat: Text.PlainText; color: core.configurationStatus === "safe_mode" ? Theme.warning : Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        GButton {
-            objectName: "recoverConfigurationButton"
-            visible: core.configurationStatus === "safe_mode"
-            variant: "danger"
-            text: "Preservar arquivo e restaurar padrões"
-            enabled: core.recoveryAvailable
-            Accessible.name: text
-            onClicked: recoverConfirm.open()
+
+    GridLayout {
+        Layout.fillWidth: true
+        columns: page.width >= Theme.narrowWidth && Theme.advanced ? 2 : 1
+        columnSpacing: Theme.space(24)
+        rowSpacing: Theme.space(24)
+
+        // Bloco 1 (Básico): reinício e restauração de configuração.
+        Section {
+            title: "Reiniciar e restaurar"
+            Layout.alignment: Qt.AlignTop
+            Badge { text: page.restartBadge; tone: page.restartTone }
+            FNote { tone: "text"; text: "Reinício exigido ao trocar a frase de despertar, mudar o feedback ou alterar plugins." }
+            FNote { visible: page.restartNeeded; tone: "warn"; text: "A configuração salva só vale depois do reinício." }
+            // Não existe operação de reinício na ponte nem no Core (N2): fica desabilitado com o motivo.
+            GButton {
+                objectName: "restartCoreButton"
+                variant: "secondary"
+                text: "Reiniciar Core"
+                enabled: false
+                Accessible.description: "Indisponível: o Core ainda não oferece reinício pelo app"
+            }
+            FNote { small: true; text: "Indisponível: o Core ainda não oferece reinício pelo app" }
+
+            Text {
+                text: "Configuração"
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                font.weight: 600
+                Layout.topMargin: Theme.space(8)
+            }
+            FNote {
+                tone: "text"
+                text: core.configurationStatus === "safe_mode"
+                    ? "Preserva o arquivo inválido e volta aos padrões. Depois, reinicie o Core."
+                    : "Volta às preferências anteriores salvas pelo Core."
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.space(8)
+                GButton {
+                    objectName: "rollbackPreferencesButtonRecovery"
+                    visible: core.rollbackAvailable
+                    variant: "secondary"
+                    text: "Restaurar anterior"
+                    enabled: core.rollbackAvailable
+                    onClicked: core.rollbackPreferences()
+                }
+                GButton {
+                    objectName: "recoverConfigurationButton"
+                    visible: core.recoveryAvailable
+                    variant: "secondary"
+                    text: "Preservar arquivo e restaurar padrões"
+                    enabled: core.recoveryAvailable
+                    Accessible.name: text
+                    onClicked: recoverConfirm.open()
+                }
+            }
+            Text {
+                objectName: "recoveryResult"
+                visible: text.length > 0
+                text: core.preferencesResult
+                textFormat: Text.PlainText
+                color: Theme.warning
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
         }
-        GButton {
-            objectName: "rollbackPreferencesButtonRecovery"
-            variant: "secondary"
-            text: "Restaurar configuração anterior"
-            enabled: core.rollbackAvailable
-            onClicked: core.rollbackPreferences()
+
+        // Bloco 2 (Avançado): última configuração boa do motor LLM e catálogo.
+        Section {
+            visible: Theme.advanced
+            title: "Motor LLM e catálogo"
+            Layout.alignment: Qt.AlignTop
+            Text {
+                text: "Motor LLM"
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                font.weight: 600
+            }
+            // A ponte ainda não informa a configuração boa salva (N5): o texto diz isso e o botão fica desabilitado.
+            FNote { tone: "text"; text: "A última configuração boa ainda não é informada pelo app." }
+            GButton {
+                objectName: "rollbackLlmButton"
+                variant: "secondary"
+                text: "Voltar à última configuração boa"
+                enabled: false
+            }
+            FNote { small: true; text: "Indisponível: o app ainda não oferece voltar à última configuração boa." }
+            Text {
+                text: "Catálogo de plugins"
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                font.weight: 600
+                Layout.topMargin: Theme.space(8)
+            }
+            FNote { tone: "text"; text: "Situação de armazenamento: Indisponível: a ponte ainda não informa o armazenamento do catálogo." }
+            FNote { small: true; text: "O catálogo é verificado por SHA-256; o valor aparece em Desenvolvedor." }
         }
-        Text { objectName: "recoveryResult"; visible: text.length > 0; text: core.preferencesResult; textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
     }
+
+    // Bloco 3 (Avançado): comandos de terminal. Copiar escreve o texto na área de transferência; nada é executado.
     Section {
-        title: "Reinício e reparo"
-        SettingRow { label: "Reiniciar Core"; help: "Necessário ao trocar a frase de wake, o feedback ou os plugins."; disabledReason: "o app ainda não reinicia o Core; use o terminal" }
-        SettingRow { label: "Reparar instalação"; help: "Recria os arquivos do pacote."; disabledReason: "use o comando de reparo do terminal" }
+        visible: Theme.advanced
+        title: "Comandos no terminal"
+        FNote {
+            tone: "text"
+            text: "Rodam fora do aplicativo, no terminal. Troque <RAIZ> pelo caminho absoluto da instalação; <PACOTE> pelo diretório do pacote; <NOME> pelo nome do perfil; <PERFIL> pelo perfil criado."
+        }
+        Repeater {
+            model: page.commands
+            delegate: FCommandRow {
+                required property var modelData
+                label: modelData.label
+                command: modelData.command
+                onCopyRequested: page.copyCommand(modelData.command, modelData.label)
+            }
+        }
+        FNote { small: true; text: "Com o Core ativo, instalar, atualizar, reverter e reparar são recusados (código de saída 3)." }
+        FNote { small: true; text: "Se o terminal mostrar \"run: gideon-install --install-root <RAIZ> repair\", execute o comando de reparo." }
+        Collapsible {
+            title: "Códigos de saída"
+            FNote { small: true; tone: "text"; text: "0 ok · 2 uso incorreto · 3 perfil com Core ativo · 4 verificação do pacote falhou · 5 estado inválido ou reparo necessário · 6 bloqueado ou outro erro" }
+        }
+        FNote { small: true; text: "Reparo e atualização ficam no terminal: esta tela não executa instalador." }
     }
+
+    Collapsible {
+        title: "Como funciona"
+        summary: "Reinícios e restaurações não apagam dados do usuário. Instalação e pacotes só pelo terminal."
+        FNote {
+            tone: "text"
+            text: "Reiniciar o Core encerra os plugins em execução e refaz a conexão. A instalação versionada (gideon-install) não é executada por esta tela."
+        }
+    }
+
     Modal {
         id: recoverConfirm
         objectName: "recoverConfirm"
-        title: "Restaurar padrões?"
+        title: "Preservar o arquivo e restaurar os padrões?"
+        standardButtons: Dialog.NoButton
+        onOpened: recoverCancel.forceActiveFocus()
         onAccepted: core.recoverConfiguration()
         Text {
-            text: "O arquivo atual é preservado e a configuração volta aos padrões. Nada é apagado."
-            textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            text: "O arquivo inválido fica guardado e as preferências voltam aos padrões. Reinicie o Core depois."
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
-        GButton { objectName: "confirmRecoverButton"; variant: "danger"; text: "Restaurar"; Layout.alignment: Qt.AlignRight; onClicked: recoverConfirm.accept() }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(10)
+            Item { Layout.fillWidth: true }
+            GButton {
+                id: recoverCancel
+                variant: "secondary"
+                text: "Cancelar"
+                onClicked: recoverConfirm.reject()
+            }
+            GButton {
+                objectName: "confirmRecoverButton"
+                variant: "primary"
+                text: "Restaurar padrões"
+                Accessible.name: text
+                onClicked: recoverConfirm.accept()
+            }
+        }
     }
 }

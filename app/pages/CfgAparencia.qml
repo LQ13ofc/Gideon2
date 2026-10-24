@@ -5,178 +5,349 @@ import QtQuick.Window
 import "../theme"
 import "../components"
 import "../shell"
+import "../shell/CfgSettings.js" as CS
 
-// Configurações > Aparência: preset, mode, accent, density, corners, font size, and the orb. Each choice applies at once
-// to this window (the app settings object `ui` saves it). The HUD switch goes to the Core, as before.
+// Configurações > Aparência. The basic part is the preset gallery, the accent colour, the mode, shape and text, with a live
+// preview beside it. Everything else is under "Personalizar": the colour of each role with its contrast, animation and
+// surface options (advanced), and the theme file import and export. Each choice applies at once to this window.
 PageFrame {
     id: page
     objectName: "page_cfg_aparencia"
     anchors.fill: parent
     visible: Window.window && Window.window.pageId === "cfg_aparencia"
 
-    readonly property bool canSave: AppState.uiLive()
-    readonly property var presets: [
-        {id: "gideon-escuro", text: "Gideon escuro"}, {id: "gideon-claro", text: "Gideon claro"},
-        {id: "alto-contraste", text: "Alto contraste"}, {id: "breeze-escuro", text: "Breeze escuro"},
-        {id: "breeze-claro", text: "Breeze claro"}, {id: "catppuccin", text: "Catppuccin"},
-        {id: "nord", text: "Nord"}, {id: "daltonismo", text: "Daltonismo-seguro"}
+    readonly property bool wide: width >= 900
+    readonly property bool advancedOn: AppState.uiGet("behavior.advanced", false) === true
+    readonly property var presetOptions: AppState.uiSpec("theme.preset") ? AppState.uiSpec("theme.preset").options : []
+    readonly property real textMin: Theme.highContrast ? 7 : 4.5
+    readonly property var roleRows: CS.themeRoles.map(function (role) { return { role: role } })
+    readonly property var pairRows: [
+        { label: "Texto sobre fundo", fg: "text", bg: "bg", min: textMin },
+        { label: "Texto sobre superfície", fg: "text", bg: "surface", min: textMin },
+        { label: "Texto secundário / superfície", fg: "textMuted", bg: "surface", min: textMin },
+        { label: "Texto sobre destaque", fg: "onAccent", bg: "accent", min: textMin },
+        { label: "Destaque sobre fundo", fg: "accent", bg: "bg", min: 3 },
+        { label: "Contorno sobre superfície", fg: "outline", bg: "surface", min: 3 },
+        { label: "Erro como texto", fg: "error", bg: "bg", min: textMin }
     ]
-    readonly property var accents: [{name: "Azul", color: "#7693ff"}, {name: "Violeta", color: "#b386ff"}, {name: "Ciano", color: "#66dcf4"}, {name: "Rosa", color: "#f28bd7"}]
 
-    function set(key, value) { if (!AppState.uiSet(key, value)) AppState.toast("Configurações do app indisponíveis: nada foi salvo.") }
+    // Contrast ratio of a pair of roles, as the settings object measures it (ui.contrast).
+    function contrastOf(fg, bg) {
+        if (typeof ui === "undefined" || !ui) return 0
+        return ui.contrast(Theme.token(fg), Theme.token(bg))
+    }
+    // True when any theme.* setting differs from its default (enables "Restaurar padrão do tema").
+    function themeChanged() {
+        var keys = AppState.modifiedKeys()
+        for (var i = 0; i < keys.length; i++) if (String(keys[i]).indexOf("theme.") === 0) return true
+        return false
+    }
+    function resetTheme() {
+        var keys = AppState.modifiedKeys().slice()
+        for (var i = 0; i < keys.length; i++) if (String(keys[i]).indexOf("theme.") === 0) AppState.resetSetting(keys[i])
+    }
 
+    ECfgSearch {}
     PageHeader {
         title: "Aparência"
-        subtitle: "Tema e cor de destaque desta janela, com prévia imediata."
+        subtitle: "Tema e cor de destaque, com prévia ao vivo."
     }
-    Banner {
-        visible: !page.canSave
-        kind: "warn"
-        text: "Configurações do app indisponíveis nesta execução: o tema não é salvo."
-    }
+    ECfgNotice {}
 
-    Section {
-        title: "Tema"
-        Flow {
-            Layout.fillWidth: true
-            spacing: Theme.space(10)
-            Repeater {
-                model: page.presets
-                delegate: Rectangle {
-                    id: tile
-                    required property var modelData
-                    objectName: "preset_" + modelData.id
-                    width: 150; height: 64
-                    radius: Theme.radius
-                    color: AppState.uiGet("theme.preset", "gideon-escuro") === modelData.id ? Theme.tint : (tileMouse.containsMouse ? Theme.hover : Theme.bg)
-                    border.width: AppState.uiGet("theme.preset", "gideon-escuro") === modelData.id ? 2 : 1
-                    border.color: AppState.uiGet("theme.preset", "gideon-escuro") === modelData.id ? Theme.accent : Theme.strongOutline
-                    activeFocusOnTab: true
-                    Accessible.role: Accessible.RadioButton
-                    Accessible.name: modelData.text
-                    Accessible.checked: AppState.uiGet("theme.preset", "gideon-escuro") === modelData.id
-                    Keys.onSpacePressed: page.set("theme.preset", modelData.id)
-                    Text {
-                        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                        anchors.margins: Theme.space(10)
-                        text: tile.modelData.text
-                        textFormat: Text.PlainText
-                        color: Theme.text
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontHelp
-                        elide: Text.ElideRight
-                    }
-                    MouseArea { id: tileMouse; anchors.fill: parent; hoverEnabled: true; onClicked: page.set("theme.preset", tile.modelData.id) }
-                }
-            }
-        }
-        FieldLabel { text: "Modo" }
-        Segmented {
-            objectName: "modeChoice"
-            model: [{id: "system", text: "Sistema"}, {id: "dark", text: "Escuro"}, {id: "light", text: "Claro"}]
-            currentId: String(AppState.uiGet("theme.mode", "dark"))
-            onActivated: function (id) { page.set("theme.mode", id) }
-        }
-    }
+    GridLayout {
+        Layout.fillWidth: true
+        columns: page.wide ? 2 : 1
+        columnSpacing: Theme.space(32)
+        rowSpacing: Theme.space(24)
 
-    Section {
-        title: "Cor de destaque e forma"
-        FieldLabel { text: "Cor de destaque" }
-        Flow {
+        ColumnLayout {
             Layout.fillWidth: true
-            spacing: Theme.space(10)
-            Repeater {
-                model: page.accents
-                delegate: GButton {
-                    required property var modelData
-                    objectName: "accent" + modelData.name
-                    text: modelData.name
-                    variant: String(AppState.uiGet("theme.accent", "#7693ff")).toLowerCase() === modelData.color ? "primary" : "secondary"
-                    Accessible.name: "Cor de destaque " + modelData.name
-                    onClicked: page.set("theme.accent", modelData.color)
-                }
-            }
-        }
-        FieldLabel { text: "Densidade" }
-        Segmented {
-            objectName: "densityChoice"
-            model: [{id: "compact", text: "Compacta"}, {id: "normal", text: "Normal"}, {id: "spacious", text: "Espaçosa"}]
-            currentId: AppState.uiGet("theme.density", 1.0) <= 0.92 ? "compact" : AppState.uiGet("theme.density", 1.0) >= 1.1 ? "spacious" : "normal"
-            onActivated: function (id) { page.set("theme.density", id === "compact" ? 0.9 : id === "spacious" ? 1.15 : 1.0) }
-        }
-        RowLayout {
-            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
             spacing: Theme.space(24)
-            ColumnLayout {
-                Layout.fillWidth: true
-                FieldLabel { text: "Raio dos cantos: " + Math.round(radiusSlider.value) + " px" }
-                GSlider { id: radiusSlider; objectName: "radiusSlider"; from: 0; to: 16; stepSize: 1; value: Number(AppState.uiGet("theme.radius", 10)); Layout.fillWidth: true; onMoved: page.set("theme.radius", Math.round(value)); Accessible.name: "Raio dos cantos" }
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                FieldLabel { text: "Tamanho da fonte: " + Math.round(fontSlider.value) + " px" }
-                GSlider { id: fontSlider; objectName: "fontSizeSlider"; from: 12; to: 20; stepSize: 1; value: Number(AppState.uiGet("theme.fontSize", 14)); Layout.fillWidth: true; onMoved: page.set("theme.fontSize", Math.round(value)); Accessible.name: "Tamanho da fonte" }
-            }
-        }
-    }
 
-    Section {
-        title: "Prévia e esfera"
-        // Live preview: the controls below use the theme as it is now. Nothing is saved from here.
-        Card {
-            title: "Exemplo de cartão"
-            Text { text: "Texto de apoio no tamanho escolhido."; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            RowLayout {
-                spacing: Theme.space(10)
-                GButton { variant: "primary"; text: "Salvar"; enabled: false }
-                GButton { variant: "secondary"; text: "Cancelar"; enabled: false }
+            Section {
+                title: "Tema"
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.space(10)
+                    Repeater {
+                        model: page.presetOptions
+                        delegate: EPresetTile {
+                            required property var modelData
+                            objectName: "preset_" + modelData.value
+                            presetId: modelData.value
+                            presetLabel: modelData.label
+                            selected: String(AppState.uiGet("theme.preset", "gideon-escuro")) === modelData.value
+                            onChosen: function (id) { AppState.setSetting("theme.preset", id) }
+                        }
+                    }
+                }
+                FieldLabel { text: "Modo" }
+                ESegmentSetting {
+                    objectName: "modeChoice"
+                    settingKey: "theme.mode"
+                    options: [{ id: "system", text: "Sistema" }, { id: "dark", text: "Escuro" }, { id: "light", text: "Claro" }]
+                }
+            }
+
+            Section {
+                title: "Cor de destaque"
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.space(6)
+                    Repeater {
+                        model: [
+                            { value: "", label: "Padrão do tema", name: "accentPadrao" },
+                            { value: "#7693ff", label: "Azul", name: "accentAzul" },
+                            { value: "#b386ff", label: "Violeta", name: "accentVioleta" },
+                            { value: "#66dcf4", label: "Ciano", name: "accentCiano" },
+                            { value: "#f28bd7", label: "Rosa", name: "accentRosa" }
+                        ]
+                        delegate: EAccentDot {
+                            required property var modelData
+                            objectName: modelData.name
+                            colorValue: modelData.value
+                            label: modelData.label
+                            selected: String(AppState.uiGet("theme.accent", "")).toLowerCase() === modelData.value
+                            onChosen: AppState.setSetting("theme.accent", modelData.value)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                title: "Forma e texto"
+                SettingRow {
+                    settingKey: "theme.density"
+                    ESegmentSetting {
+                        objectName: "densityChoice"
+                        settingKey: "theme.density"
+                        options: [{ id: "compact", text: "Compacta", value: 0.9 }, { id: "normal", text: "Normal", value: 1.0 }, { id: "spacious", text: "Espaçosa", value: 1.15 }]
+                    }
+                }
+                SettingRow {
+                    settingKey: "theme.radius"
+                    ESliderSetting { objectName: "radiusSlider"; settingKey: "theme.radius"; from: 0; to: 16; stepSize: 1; unit: " px" }
+                }
+                SettingRow {
+                    settingKey: "theme.fontSize"
+                    ESliderSetting { objectName: "fontSizeSlider"; settingKey: "theme.fontSize"; from: 12; to: 20; stepSize: 1; unit: " px" }
+                }
+                SettingRow {
+                    settingKey: "theme.fontFamily"
+                    ESelectSetting { settingKey: "theme.fontFamily" }
+                }
+                SettingRow {
+                    settingKey: "theme.contrast"
+                    ESegmentSetting {
+                        settingKey: "theme.contrast"
+                        options: [{ id: "normal", text: "Normal" }, { id: "high", text: "Alto contraste" }]
+                    }
+                }
+            }
+
+            Section {
+                title: "Presença"
+                SettingRow {
+                    settingKey: "theme.orb"
+                    EToggleSetting { settingKey: "theme.orb" }
+                }
+                SettingRow {
+                    settingKey: "core.visualFeedback"
+                    EToggleSetting { objectName: "visualPagePreference"; settingKey: "core.visualFeedback" }
+                }
+                SettingRow {
+                    settingKey: "theme.orbSize"
+                    ESegmentSetting {
+                        settingKey: "theme.orbSize"
+                        options: [{ id: "small", text: "Pequeno" }, { id: "medium", text: "Médio" }]
+                    }
+                }
             }
         }
-        Toggle {
-            id: visualPagePreference
-            objectName: "visualPagePreference"
-            text: "Mostrar esfera e indicador de atividade"
-            checked: core.visualFeedback
-            enabled: core.preferencesAvailable
-            onToggled: core.saveFeedback(checked, core.outputVolume)
-        }
-        Text { text: "O indicador é salvo pelo Core. A esfera é só visual: estado textual, legendas e Cancelar continuam disponíveis."; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        SettingRow {
-            label: "Tamanho da esfera"
-            help: "Pequena ou média, no cabeçalho e em Hoje."
-            settingKey: "theme.orbSize"
-            disabledReason: page.canSave ? "" : "configurações do app indisponíveis"
-            Segmented {
-                model: [{id: "small", text: "Pequena"}, {id: "medium", text: "Média"}]
-                currentId: String(AppState.uiGet("theme.orbSize", "small"))
-                onActivated: function (id) { page.set("theme.orbSize", id) }
-            }
+
+        ColumnLayout {
+            Layout.alignment: Qt.AlignTop
+            Layout.fillWidth: true
+            Layout.preferredWidth: page.wide ? 340 : -1
+            EPreviewCard {}
         }
     }
 
     Collapsible {
-        title: "Mais opções de aparência"
-        summary: "Animações, contraste e fonte. Todas com restaurar padrão."
-        SettingRow {
-            label: "Animações"
-            help: "Desligadas, reduzidas ou normais. Com desligadas, a esfera fica parada."
-            settingKey: "theme.animation"
-            disabledReason: page.canSave ? "" : "configurações do app indisponíveis"
-            Segmented {
-                model: [{id: "off", text: "Desligadas"}, {id: "reduced", text: "Reduzidas"}, {id: "normal", text: "Normais"}]
-                currentId: String(AppState.uiGet("theme.animation", "normal"))
-                onActivated: function (id) { page.set("theme.animation", id) }
+        objectName: "customizeBlock"
+        title: "Personalizar"
+        summary: "Cores por papel, contraste dos pares, animação, sombra e arquivo do tema."
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(24)
+
+            ColumnLayout {
+                visible: page.advancedOn
+                Layout.fillWidth: true
+                spacing: Theme.space(24)
+
+                Section {
+                    title: "Cores por papel"
+                    Text {
+                        text: "Cada cor é conferida com o fundo onde aparece. Hex inválido é recusado; uma cor que precisa de correção mostra a correção antes de valer."
+                        textFormat: Text.PlainText
+                        color: Theme.textMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontHelp
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: page.wide ? 2 : 1
+                        columnSpacing: Theme.space(32)
+                        rowSpacing: Theme.space(12)
+                        Repeater {
+                            model: page.roleRows
+                            delegate: EColorRole {
+                                required property var modelData
+                                role: modelData.role
+                                roleLabel: CS.roleLabel(modelData.role)
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    title: "Contraste dos pares"
+                    Text {
+                        text: "Mínimo: texto " + CS.ratioText(page.textMin) + " · contornos e destaques 3:1."
+                        textFormat: Text.PlainText
+                        color: Theme.textMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontHelp
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: page.pairRows
+                        delegate: RowLayout {
+                            required property var modelData
+                            readonly property real ratio: page.contrastOf(modelData.fg, modelData.bg)
+                            Layout.fillWidth: true
+                            spacing: Theme.space(12)
+                            Text {
+                                text: modelData.label
+                                textFormat: Text.PlainText
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontBody
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                text: CS.ratioText(ratio)
+                                textFormat: Text.PlainText
+                                color: Theme.textMuted
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontBody
+                                font.weight: 600
+                                Layout.preferredWidth: 72
+                                horizontalAlignment: Text.AlignRight
+                            }
+                            Badge {
+                                text: ratio >= modelData.min ? "OK" : "Abaixo"
+                                tone: ratio >= modelData.min ? "success" : "error"
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    title: "Animação, translucidez e sombra"
+                    SettingRow {
+                        settingKey: "theme.animation"
+                        ESegmentSetting {
+                            settingKey: "theme.animation"
+                            options: [{ id: "off", text: "Desligada" }, { id: "reduced", text: "Reduzida" }, { id: "normal", text: "Normal" }]
+                        }
+                    }
+                    SettingRow {
+                        settingKey: "theme.translucency"
+                        ESliderSetting { settingKey: "theme.translucency"; from: 0; to: 24; stepSize: 1; unit: " px"; zeroText: "Desligada" }
+                    }
+                    SettingRow {
+                        settingKey: "theme.shadow"
+                        ESliderSetting { settingKey: "theme.shadow"; from: 0; to: 100; stepSize: 5; unit: "%" }
+                    }
+                    SettingRow {
+                        settingKey: "theme.titleWeight"
+                        ESliderSetting { settingKey: "theme.titleWeight"; from: 500; to: 800; stepSize: 50 }
+                    }
+                    SettingRow {
+                        settingKey: "theme.lineHeight"
+                        ESliderSetting { settingKey: "theme.lineHeight"; from: 1.2; to: 1.8; stepSize: 0.05; decimals: 2 }
+                    }
+                }
+            }
+
+            Section {
+                title: "Tema em arquivo"
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space(10)
+                    GButton {
+                        objectName: "exportThemeButton"
+                        variant: "secondary"
+                        text: "Exportar tema…"
+                        onClicked: themeExport.open()
+                    }
+                    GButton {
+                        objectName: "importThemeButton"
+                        variant: "secondary"
+                        text: "Importar tema…"
+                        onClicked: themeImport.open()
+                    }
+                    GButton {
+                        objectName: "resetThemeButton"
+                        variant: "ghost"
+                        text: "Restaurar padrão do tema"
+                        enabled: page.themeChanged()
+                        onClicked: page.resetTheme()
+                    }
+                }
+                Text {
+                    text: "Arquivo JSON versionado, validado ao importar. Exporta e importa todas as opções do app."
+                    textFormat: Text.PlainText
+                    color: Theme.textMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
             }
         }
-        SettingRow {
-            label: "Contraste alto"
-            help: "Bordas e textos mais fortes em todos os temas."
-            settingKey: "theme.contrast"
-            disabledReason: page.canSave ? "" : "configurações do app indisponíveis"
-            Toggle {
-                checked: AppState.uiGet("theme.contrast", "normal") === "high"
-                onToggled: page.set("theme.contrast", checked ? "high" : "normal")
-            }
+    }
+
+    EAdvancedNote { subtab: "Aparência" }
+
+    Collapsible {
+        title: "Como funciona"
+        summary: "Tema e cor são da janela. A esfera é a única escolha desta aba que o Core guarda hoje."
+        Text {
+            text: "Tema, cor de destaque e forma são da janela e valem na hora. Contraste é checado nos pares de texto e de contorno: um valor que não atende é corrigido e a correção é mostrada antes de valer."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
+    }
+
+    EJsonDialog {
+        id: themeExport
+        objectName: "themeExportDialog"
+        mode: "export"
+    }
+    EJsonDialog {
+        id: themeImport
+        objectName: "themeImportDialog"
+        mode: "import"
     }
 }

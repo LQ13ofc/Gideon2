@@ -617,7 +617,8 @@ class LlmBridge(unittest.TestCase):
         bridge.configureLlm('openrouter','m-1','',False,bridge.llmRevision);self.assertEqual(next_request(peer)['cloud_consent'],False)
     def test_motor_llm_dialog_reads_consent_from_core_and_never_auto_enables(self):
         # Source contract for the QML dialog (no Qt needed): open-time state comes from llm.config, the box is only changed by its own click.
-        qml=(Path(__file__).resolve().parents[1]/'app'/'Main.qml').read_text(encoding='utf-8')
+        # The Motor LLM form moved into Modelos LLM › Provedor e chaves (app/pages/ModelosLlm.qml).
+        qml=(Path(__file__).resolve().parents[1]/'app'/'pages'/'ModelosLlm.qml').read_text(encoding='utf-8')
         start=qml.index('id: llmDialog');section=qml[start:]
         self.assertIn('consentBox.checked = core.llmConfig.cloud_consent === true',section)
         self.assertIn('AppState.llmRevisionCaptured = core.llmRevision',section)
@@ -1380,8 +1381,9 @@ def _qml_models_checks(bridge,window,check,checks):
     find('fallbackModel').setProperty('currentIndex',1);QTest.qWait(20)
     check('local pick and local current fallback show no cloud warning',not find('fallbackCloudWarning').property('visible'))
     apply(chat_snapshot(state='disabled',enabled=False,capabilities=('llm_engine.models',)));QTest.qWait(50)
-    check('plugin stopped: page returns to Início',window.property('pageId')=='hoje')
-    check('plugin stopped: nav item hidden',not offered(window,'modelos'))
+    # Provedor e chaves needs the Core, not the plugin: it stays reachable, and the banner says why the rest is gone.
+    check('plugin stopped: Provedor e chaves stays reachable',offered(window,'modelos') and window.property('pageId')=='modelos' and find('modelsPanel').property('visible'))
+    check('plugin stopped: the banner says the models plugin is off',find('modelsStatusBanner').property('visible'))
     print(f'qml models checks ok: {len(checks)}');return 0
 # ---- C3 agent runtime (docs/C3.md): snapshot block, proposal run/step fields, agentStart/agentAbort frames and messages.
 def agent_chat_step(n,inv,state='done',**extra):return {'n':n,'invocation_id':inv,'kind':'chat','state':state,**extra}

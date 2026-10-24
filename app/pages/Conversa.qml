@@ -7,13 +7,17 @@ import "../components"
 import "../shell"
 import "../shell/Labels.js" as L
 
-// Assistente > Conversa (needs the LLM plugin). Messages scroll inside the page; the input row sits under them.
-// Tool proposals show their target, effect and risk, with Autorizar and Negar only while pending.
+// Assistente > Conversa (needs the LLM plugin). One list of messages that scrolls, the proposals of the conversation
+// inline, and the input row under it. Cancelar (resposta) replaces Enviar only while a reply is in flight.
 PageFrame {
     id: page
     objectName: "chatPage"
     anchors.fill: parent
     visible: Window.window && Window.window.pageId === "conversa"
+
+    readonly property bool inFlight: core.chatState === "waiting" || core.chatState === "streaming"
+    readonly property var chatProposals: core.toolProposals.filter(function (p) { return p.run_id === undefined })
+    readonly property string inputProblem: chatInput.text.length > 0 ? core.chatTextProblem(chatInput.text) : ""
 
     function sendDraft() {
         var t = chatInput.text.trim()
@@ -35,12 +39,13 @@ PageFrame {
 
     PageHeader {
         title: "Conversa"
-        subtitle: "Mensagens com o motor LLM. Propostas de ferramenta aparecem no meio da conversa."
+        subtitle: "Converse com o motor LLM. Respostas e propostas aparecem aqui."
     }
     Banner {
         objectName: "chatUnavailable"
         kind: "info"
-        text: core.chatAvailable ? "" : "Motor LLM não está ativo. O plugin llm_engine é opcional: voz, wake e comandos da Base funcionam sem ele."
+        visible: !core.chatAvailable
+        text: "Motor LLM não está ativo. O plugin llm_engine é opcional: voz, wake e comandos da Base funcionam sem ele."
         actionText: "Ver em Extensões › Plugins"
         onActionRequested: Window.window.goPage("plugins")
     }
@@ -48,33 +53,46 @@ PageFrame {
         objectName: "chatConsentHint"
         kind: "warn"
         visible: core.chatAvailable && core.llmConfig.cloud_consent !== true
-        text: "Consentimento de nuvem desativado: envios são recusados até você marcá-lo em Motor LLM."
-        actionText: "Abrir Motor LLM"
+        text: "Consentimento de nuvem desativado: envios são recusados até você marcá-lo em Extensões › Modelos LLM."
+        actionText: "Abrir Modelos LLM"
         onActionRequested: Window.window.openLlm()
     }
 
-    Section {
+    ColumnLayout {
         objectName: "chatPanel"
-        title: "Mensagens"
         visible: core.chatAvailable
+        Layout.fillWidth: true
+        spacing: Theme.space(12)
+
+        // The state of the conversation, and the model in use. Plain text: no badge unless the cloud consent is missing.
         RowLayout {
             Layout.fillWidth: true
+            spacing: Theme.space(12)
             Text {
-                text: "Estado: " + core.chatStateLabel
+                objectName: "chatState"
+                text: "Estado da conversa: " + core.chatStateLabel
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                font.weight: 600
+                Accessible.name: "Estado da conversa: " + core.chatStateLabel
+                Layout.fillWidth: true
+            }
+            Text {
+                text: "Modelo: " + ((core.modelsSelected && core.modelsSelected.model) ? core.modelsSelected.model : "não configurado")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontHelp
-                objectName: "chatState"
-                Accessible.name: "Estado da conversa: " + core.chatStateLabel
-                Layout.fillWidth: true
             }
         }
+
         ScrollView {
             id: chatScroll
             objectName: "chatMessages"
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.max(240, Window.window ? Window.window.height - 430 : 240)
+            Layout.preferredHeight: Math.max(260, Window.window ? Window.window.height - 430 : 260)
             clip: true
             ColumnLayout {
                 id: messageColumn
@@ -82,69 +100,96 @@ PageFrame {
                 spacing: Theme.space(12)
                 // A new or growing message keeps the latest text in view.
                 onHeightChanged: Qt.callLater(function () { var f = chatScroll.contentItem; f.contentY = Math.max(0, f.contentHeight - f.height) })
-                Text {
+
+                // Empty conversation: the optional nature of the LLM, and two suggestions that only fill the input.
+                ColumnLayout {
                     objectName: "chatEmpty"
                     visible: core.chatMessages.length === 0 && core.chatState === "idle"
-                    text: "Nenhuma mensagem ainda. Sugestões: \"Que horas são?\" ou \"Abrir o Brave\"."
-                    textFormat: Text.PlainText
-                    color: Theme.textMuted
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    wrapMode: Text.WordWrap
                     Layout.fillWidth: true
+                    spacing: Theme.space(12)
+                    EmptyState {
+                        iconName: "chat"
+                        message: "Nenhuma mensagem ainda. O motor LLM é opcional: voz, wake e comandos da Base funcionam sem ele."
+                    }
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: Theme.space(8)
+                        Chip {
+                            objectName: "suggestionTime"
+                            text: "Que horas são?"
+                            onClicked: { chatInput.text = text; chatInput.forceActiveFocus() }
+                        }
+                        Chip {
+                            objectName: "suggestionBrave"
+                            text: "Abrir o Brave"
+                            onClicked: { chatInput.text = text; chatInput.forceActiveFocus() }
+                        }
+                    }
                 }
+
                 Repeater {
                     model: core.chatMessages
-                    delegate: Rectangle {
+                    delegate: Item {
                         required property var modelData
                         Layout.fillWidth: true
-                        radius: Theme.radiusCard
-                        color: modelData.role === "user" ? Theme.tint : Theme.surfaceVariant
-                        border.width: 1
-                        border.color: Theme.hairline
-                        implicitHeight: bubble.implicitHeight + Theme.space(20)
-                        ColumnLayout {
+                        implicitHeight: bubble.implicitHeight
+                        Rectangle {
                             id: bubble
-                            anchors.fill: parent
-                            anchors.margins: Theme.space(10)
-                            spacing: 4
-                            Text {
-                                text: (modelData.role === "user" ? "Você" : "Gideon") + (modelData.state === "cancelled" ? " · cancelada" : modelData.state === "error" ? " · erro" : "")
-                                textFormat: Text.PlainText
-                                color: Theme.textMuted
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontCaption
-                            }
-                            TextEdit {
-                                text: modelData.text || "(sem texto)"
-                                readOnly: true
-                                selectByMouse: true
-                                textFormat: TextEdit.PlainText
-                                wrapMode: TextEdit.Wrap
-                                color: Theme.text
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontBody
-                                Layout.fillWidth: true
-                                Accessible.name: (modelData.role === "user" ? "Mensagem enviada: " : "Resposta: ") + text
+                            readonly property bool mine: modelData.role === "user"
+                            anchors.right: mine ? parent.right : undefined
+                            anchors.left: mine ? undefined : parent.left
+                            width: Math.min(parent.width * 0.9, Theme.space(760))
+                            implicitHeight: bubbleColumn.implicitHeight + Theme.space(20)
+                            radius: Theme.radiusCard
+                            color: mine ? Theme.tint : Theme.surfaceVariant
+                            border.width: 1
+                            border.color: Theme.hairline
+                            ColumnLayout {
+                                id: bubbleColumn
+                                anchors.fill: parent
+                                anchors.margins: Theme.space(10)
+                                spacing: 4
+                                Text {
+                                    text: (bubble.mine ? "Você" : "Gideon") + (modelData.state === "cancelled" ? " · cancelada" : modelData.state === "error" ? " · erro" : "")
+                                    textFormat: Text.PlainText
+                                    color: Theme.textMuted
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontCaption
+                                    font.weight: 600
+                                }
+                                TextEdit {
+                                    text: modelData.text || "(sem texto)"
+                                    readOnly: true
+                                    selectByMouse: true
+                                    textFormat: TextEdit.PlainText
+                                    wrapMode: TextEdit.Wrap
+                                    color: Theme.text
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontBody
+                                    Layout.fillWidth: true
+                                    Accessible.name: (bubble.mine ? "Mensagem enviada: " : "Resposta: ") + text
+                                }
                             }
                         }
                     }
                 }
+
+                // The reply in progress: the partial text when there is one, else the wait.
                 Rectangle {
                     objectName: "chatStreaming"
-                    visible: core.chatState === "waiting" || core.chatState === "streaming"
+                    visible: page.inFlight
                     Layout.fillWidth: true
+                    implicitHeight: streamColumn.implicitHeight + Theme.space(20)
                     radius: Theme.radiusCard
                     color: Theme.surfaceVariant
                     border.width: 1
-                    border.color: Theme.accent
-                    implicitHeight: streamColumn.implicitHeight + Theme.space(20)
+                    border.color: Theme.hairline
                     ColumnLayout {
                         id: streamColumn
                         anchors.fill: parent
                         anchors.margins: Theme.space(10)
                         spacing: 4
-                        Text { text: core.chatStateLabel; textFormat: Text.PlainText; color: Theme.textMuted; font.pixelSize: Theme.fontCaption; font.family: Theme.fontFamily }
+                        Text { text: "Gideon · " + core.chatStateLabel; textFormat: Text.PlainText; color: Theme.textMuted; font.pixelSize: Theme.fontCaption; font.family: Theme.fontFamily; font.weight: 600 }
                         TextEdit {
                             text: core.chatPartial || "Aguardando resposta…"
                             readOnly: true
@@ -159,21 +204,48 @@ PageFrame {
                         }
                     }
                 }
+
+                // Proposals of the conversation (not the agent's: those are on Agente). Negar is listed first.
+                Repeater {
+                    model: page.chatProposals
+                    delegate: AProposalCard {
+                        required property var modelData
+                        proposal: modelData
+                        connectionText: page.connProposalText(modelData)
+                        sending: decisions.sentId === modelData.proposal_id
+                        onDecide: function (proposalId, choice) {
+                            decisions.sentId = proposalId
+                            core.decideTool(proposalId, choice)
+                        }
+                    }
+                }
+
+                Text {
+                    objectName: "chatResult"
+                    visible: core.chatResult.length > 0
+                    text: core.chatResult
+                    textFormat: Text.PlainText
+                    color: Theme.warning
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontHelp
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                    Accessible.name: "Aviso da conversa: " + text
+                }
+                Text {
+                    objectName: "toolResult"
+                    visible: core.toolResult.length > 0
+                    text: core.toolResult
+                    textFormat: Text.PlainText
+                    color: Theme.warning
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontHelp
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
             }
         }
-        Text {
-            objectName: "chatResult"
-            visible: core.chatResult.length > 0
-            text: core.chatResult
-            textFormat: Text.PlainText
-            color: Theme.warning
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontHelp
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-            Accessible.name: "Aviso da conversa: " + text
-        }
-        FieldLabel { text: "Mensagem" }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.space(10)
@@ -184,13 +256,14 @@ PageFrame {
                 maximumLength: 4096
                 placeholderText: "Mensagem para o motor LLM"
                 Accessible.name: "Mensagem para o motor LLM"
-                enabled: core.chatAvailable && core.chatState !== "waiting" && core.chatState !== "streaming"
+                enabled: core.chatAvailable && !page.inFlight
                 Component.onCompleted: text = AppState.draftValue("#chat", "text")
                 onTextEdited: AppState.setDraft("#chat", "text", text)
                 onAccepted: page.sendDraft()
             }
             GButton {
                 objectName: "chatSend"
+                visible: !page.inFlight
                 variant: "primary"
                 text: "Enviar"
                 Accessible.name: "Enviar mensagem ao motor LLM"
@@ -199,19 +272,20 @@ PageFrame {
             }
             GButton {
                 objectName: "chatCancel"
+                visible: page.inFlight
                 variant: "secondary"
-                text: "Cancelar resposta"
-                Accessible.name: "Cancelar resposta do motor LLM"
-                enabled: core.chatState === "waiting" || core.chatState === "streaming"
+                text: "Cancelar"
+                Accessible.name: "Cancelar resposta"
+                enabled: page.inFlight
                 onClicked: core.cancelChat()
             }
         }
+        // Enter sends. A problem with the text replaces that hint; while a reply is in flight it says why input is off.
         Text {
             objectName: "chatInputProblem"
-            visible: chatInput.text.length > 0 && core.chatTextProblem(chatInput.text).length > 0
-            text: core.chatTextProblem(chatInput.text)
+            text: page.inputProblem.length > 0 ? page.inputProblem : (page.inFlight ? "Aguarde a resposta anterior." : "Enter envia.")
             textFormat: Text.PlainText
-            color: Theme.warning
+            color: page.inputProblem.length > 0 ? Theme.warning : Theme.textMuted
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
@@ -219,87 +293,12 @@ PageFrame {
         }
     }
 
-    // Tool proposals: only pending ones offer decisions; Negar is listed first because it is the safe choice.
-    Section {
-        objectName: "toolPanel"
-        title: "Propostas de ferramenta"
-        visible: core.chatAvailable && core.toolProposals.length > 0
-        Repeater {
-            model: core.toolProposals
-            delegate: Card {
-                required property var modelData
-                Text {
-                    objectName: "toolTitle_" + modelData.proposal_id
-                    text: "Ferramenta " + modelData.tool + " · " + L.toolStateText(modelData.state)
-                    textFormat: Text.PlainText
-                    color: Theme.text
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    font.weight: 600
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                Text {
-                    objectName: "connProposal_" + modelData.proposal_id
-                    visible: modelData.kind === "connection"
-                    text: page.connProposalText(modelData)
-                    textFormat: Text.PlainText
-                    color: Theme.text
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontHelp
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                    Accessible.name: "Proposta de conexão: " + text
-                }
-                Text {
-                    text: "Argumentos: " + JSON.stringify(modelData.args)
-                    textFormat: Text.PlainText
-                    color: Theme.textMuted
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontHelp
-                    wrapMode: Text.WrapAnywhere
-                    Layout.fillWidth: true
-                }
-                Text {
-                    visible: modelData.reason !== null
-                    text: "Motivo: " + core.codeMessage(modelData.reason || "")
-                    textFormat: Text.PlainText
-                    color: Theme.warning
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontHelp
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                Text {
-                    visible: modelData.result !== null
-                    text: "Resultado: " + (modelData.result || "")
-                    textFormat: Text.PlainText
-                    color: Theme.success
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontHelp
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-                RowLayout {
-                    visible: modelData.state === "pending"
-                    Layout.fillWidth: true
-                    spacing: Theme.space(10)
-                    Item { Layout.fillWidth: true }
-                    GButton { objectName: "deny_" + modelData.proposal_id; text: "Negar"; variant: "secondary"; Accessible.name: "Negar " + modelData.tool + " " + modelData.proposal_id; onClicked: core.decideTool(modelData.proposal_id, "deny") }
-                    GButton { objectName: "authorize_" + modelData.proposal_id; text: "Autorizar"; variant: "primary"; Accessible.name: "Autorizar " + modelData.tool + " " + modelData.proposal_id; onClicked: core.decideTool(modelData.proposal_id, "authorize") }
-                }
-            }
-        }
-        Text {
-            objectName: "toolResult"
-            visible: core.toolResult.length > 0
-            text: core.toolResult
-            textFormat: Text.PlainText
-            color: Theme.warning
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontHelp
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
+    QtObject {
+        id: decisions
+        property string sentId: ""
+    }
+    Connections {
+        target: core
+        function onToolResultChanged() { decisions.sentId = "" }
     }
 }

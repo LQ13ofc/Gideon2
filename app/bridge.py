@@ -3,6 +3,7 @@ import datetime,hashlib,json,math,os,re,stat,unicodedata,uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtNetwork import QLocalSocket
 CAPABILITY_ID=re.compile(r'[a-z0-9_]+(\.[a-z0-9_]+)+');PLUGIN_ID=re.compile(r'[A-Za-z0-9_-]+');SNAKE_CODE=re.compile(r'[a-z][a-z0-9_]*')
 PLUGIN_STATES=('disabled','starting','running','failed','stopped','quarantined')
@@ -1344,6 +1345,13 @@ class Bridge(QObject):
     def chatTextProblem(self,text):return chat_problem(text) or ''
     @Slot(str,result=str)
     def codeMessage(self,code):return code_message(code) if isinstance(code,str) and SNAKE_CODE.fullmatch(code) else ''
+    # Write-only clipboard for the copyable terminal commands (Diagnóstico > Recuperação). Bounded; never reads the clipboard.
+    @Slot(str,result=bool)
+    def copyText(self,text):
+        if not isinstance(text,str) or not 0<len(text)<=512 or not text.isprintable():return False
+        clipboard=QGuiApplication.clipboard()
+        if clipboard is None:return False
+        clipboard.setText(text);return True
     @Slot(str,result=str)
     def providerLabel(self,provider):return display_provider(provider)
     @Slot(str,result=str)

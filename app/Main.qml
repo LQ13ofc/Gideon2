@@ -71,7 +71,7 @@ ApplicationWindow {
         diag_estado: true, diag_motores: true, diag_recuperacao: true,
         conversa: core.chatAvailable, agente: core.chatAvailable,
         skills: core.skillsAvailable, conexoes: core.connectionsAvailable,
-        modelos: core.modelsAvailable, percepcao: core.perceptionAvailable,
+        modelos: core.modelsAvailable || core.llmConfigAvailable, percepcao: core.perceptionAvailable,
         diag_dev: Theme.devMode
     })
 
@@ -80,14 +80,8 @@ ApplicationWindow {
     function subsOf(tab) { return pageDefs.filter(function (d) { return d.tab === tab && availability[d.id] === true }) }
     readonly property string currentTab: tabOf(pageId)
 
-    // Pending decisions: tool proposals, connection scopes and skill steps waiting for the user.
-    readonly property int pendingCount: {
-        var n = 0
-        for (var i = 0; i < core.toolProposals.length; i++) if (core.toolProposals[i].state === "pending") n++
-        for (var j = 0; j < core.connectionsItems.length; j++) n += (core.connectionsItems[j].pending_scopes || []).length
-        if (core.skillCurrentRun && core.skillCurrentRun.steps) for (var k = 0; k < core.skillCurrentRun.steps.length; k++) if (core.skillCurrentRun.steps[k].state === "awaiting_approval") n++
-        return n
-    }
+    // Pending decisions of Permissões (docs/ui-spec/30-permissoes.md §8): the Core's count, shown on the tab badge.
+    readonly property int pendingCount: core.pendingCount
     readonly property var tabModel: tabDefs.map(function (t) {
         return {id: t.id, label: t.label, icon: t.icon, count: t.id === "permissoes" ? window.pendingCount : 0}
     })
@@ -118,7 +112,8 @@ ApplicationWindow {
     readonly property var offeredPages: pageDefs.filter(function (d) { return availability[d.id] === true }).map(function (d) { return d.id })
 
     // Settings from the window (Motor LLM form, dialogs) and the palette.
-    function openLlm() { llmDialog.open() }
+    // The Motor LLM form lives in Modelos LLM › Provedor e chaves (it works without the models plugin).
+    function openLlm() { modelsPage.part = "provedor"; goPage("modelos") }
 
     // ---- Status pill -------------------------------------------------------------------------------------------
     readonly property bool sessionCancellable: core.connected && core.sessionId.length > 0 && (core.state === "capturing" || core.state === "transcribing" || core.state === "executing" || core.state === "speaking")
@@ -228,7 +223,7 @@ ApplicationWindow {
             Plugins {}
             Skills {}
             Conexoes {}
-            ModelosLlm {}
+            ModelosLlm { id: modelsPage }
             Percepcao {}
             PermVisao {}
             PermConcessoes {}
@@ -262,115 +257,4 @@ ApplicationWindow {
         onActivated: function (item) { window.runTarget(item.target) }
     }
 
-    // Motor LLM form. The key field is cleared on open and on close: the key leaves QML with the save call and is never shown again.
-    Modal {
-        id: llmDialog
-        objectName: "llmDialog"
-        title: "Motor LLM"
-        closeOnly: true
-        width: Math.min(440, window.width - 32)
-        // Provider, model and consent start from the Core snapshot; no saved config means consent unchecked.
-        onOpened: {
-            AppState.llmRevisionCaptured = core.llmRevision
-            providerBox.currentIndex = Math.max(0, providerBox.indexOfValue(core.llmConfig.provider || "openrouter"))
-            modelField.text = core.llmConfig.model || ""
-            urlField.text = core.llmConfig.custom_url || ""
-            consentBox.checked = core.llmConfig.cloud_consent === true
-            keyField.text = ""
-        }
-        onClosed: keyField.text = ""
-
-        Text { text: "Motor opcional. Sem ele, voz, wake e comandos da Base continuam funcionando."; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        FieldLabel { text: "Provedor" }
-        Select {
-            id: providerBox
-            objectName: "llmProvider"
-            Layout.fillWidth: true
-            enabled: core.llmConfigAvailable
-            textRole: "text"; valueRole: "id"
-            Accessible.name: "Provedor do motor LLM"
-            model: [{id: "openrouter", text: "OpenRouter"}, {id: "opencode", text: "OpenCode"}, {id: "google", text: "Google AI Studio"}, {id: "custom", text: "Personalizado"}]
-        }
-        FieldLabel { text: "Modelo: letras, números e . _ : / - (até 128)" }
-        GTextField {
-            id: modelField
-            objectName: "llmModel"
-            Layout.fillWidth: true
-            maximumLength: 128
-            enabled: core.llmConfigAvailable
-            placeholderText: "ex.: gemini-3.5-flash-lite"
-            Accessible.name: "Modelo do motor LLM"
-            validator: RegularExpressionValidator { regularExpression: /[A-Za-z0-9._:\/-]{1,128}/ }
-        }
-        FieldLabel { visible: providerBox.currentValue === "custom"; text: "URL personalizada: somente https (http apenas em loopback de teste)" }
-        GTextField {
-            id: urlField
-            objectName: "llmUrl"
-            Layout.fillWidth: true
-            maximumLength: 200
-            enabled: providerBox.currentValue === "custom" && core.llmConfigAvailable
-            placeholderText: "https://"
-            Accessible.name: "URL do provedor personalizado"
-        }
-        Text {
-            objectName: "llmKeyStatus"
-            text: core.llmSecretsConfigured[providerBox.currentValue] === true ? "Chave configurada" : "Sem chave"
-            textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; Layout.fillWidth: true
-            Accessible.name: "Estado da chave: " + text
-        }
-        GTextField {
-            id: keyField
-            objectName: "llmKey"
-            Layout.fillWidth: true
-            echoMode: TextInput.Password
-            maximumLength: 256
-            inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
-            placeholderText: "Chave de API (somente escrita)"
-            enabled: core.llmConfigAvailable
-            Accessible.name: "Chave de API do provedor"
-        }
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: Theme.space(10)
-            GButton {
-                objectName: "saveKeyButton"
-                variant: "secondary"
-                text: "Salvar chave"
-                Accessible.name: "Salvar chave do provedor"
-                enabled: core.llmConfigAvailable && keyField.text.length > 0
-                // The field is cleared at once: the key leaves QML with this call.
-                onClicked: { core.setApiKey(providerBox.currentValue, keyField.text); keyField.text = "" }
-            }
-            GButton {
-                objectName: "clearKeyButton"
-                variant: "danger"
-                text: "Remover chave"
-                Accessible.name: "Remover chave do provedor"
-                enabled: core.llmConfigAvailable && core.llmSecretsConfigured[providerBox.currentValue] === true
-                onClicked: core.clearApiKey(providerBox.currentValue)
-            }
-        }
-        GCheckbox {
-            id: consentBox
-            objectName: "llmConsent"
-            checked: false
-            text: "Permitir envio de conversas ao provedor na nuvem"
-            enabled: core.llmConfigAvailable
-            Accessible.name: "Consentimento para envio à nuvem"
-            Accessible.description: "Mensagens serão enviadas ao provedor escolhido na nuvem"
-        }
-        Text { objectName: "llmConsentWarning"; text: "Mensagens serão enviadas ao provedor escolhido na nuvem"; textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        Text { text: "Consentimento salvo: " + (core.llmConfig.cloud_consent === true ? "concedido" : "não concedido"); textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        GButton {
-            objectName: "saveLlmConfigButton"
-            variant: "primary"
-            text: "Salvar configuração"
-            Accessible.name: "Salvar configuração do Motor LLM"
-            enabled: core.llmConfigAvailable && modelField.acceptableInput && core.llmConfig.provider !== "local" && core.llmConfig.provider !== "ollama"
-            onClicked: core.configureLlm(providerBox.currentValue, modelField.text, providerBox.currentValue === "custom" ? urlField.text : "", consentBox.checked, AppState.llmRevisionCaptured)
-        }
-        // A local provider is configured only through Modelos LLM; this form would otherwise overwrite it.
-        Text { objectName: "llmLocalNotice"; visible: core.llmConfig.provider === "local" || core.llmConfig.provider === "ollama"; text: "Configuração local ativa: altere em Modelos LLM."; textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        Text { objectName: "llmResult"; text: core.llmResult; textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-    }
 }
