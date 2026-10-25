@@ -11,7 +11,7 @@ var roleNames = {
 
 // Sub-tab labels (schema `subtab`) to the page ids of the Configurações tab.
 var subtabPages = {
-    "Voz e Wake": "cfg_voz", "Áudio": "cfg_audio", "Dispositivos": "cfg_dispositivos",
+    "Voz e Wake": "cfg_voz", "Idiomas": "cfg_idiomas", "Áudio": "cfg_audio", "Dispositivos": "cfg_dispositivos",
     "Aparência": "cfg_aparencia", "Privacidade": "cfg_privacidade", "Geral": "cfg_geral"
 }
 

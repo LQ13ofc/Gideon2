@@ -11,6 +11,7 @@ fn descriptor() -> WakeDescriptor {
         engine: "replay-engine".into(),
         supported_phrases: BTreeMap::from([("hey_gideon".into(), "HEY".into())]),
         active_phrase: "hey_gideon".into(),
+        active_phrases: vec![],
     }
 }
 

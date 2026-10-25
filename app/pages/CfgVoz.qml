@@ -7,44 +7,48 @@ import "../components"
 import "../shell"
 import "../shell/Labels.js" as L
 
-// Configurações > Voz e Wake: the wake phrase (only the qualified phrases of the pack; a change needs a Core restart), the
-// session limit (numbers are saved with "Salvar prazo") and the detection settings. Core values go through `ui` and show
-// "Aplicando…" until the Core confirms them.
+// Configurações > Voz e Wake: até 5 frases de despertar ativas ao mesmo tempo (cada uma com interruptor, qualificação e
+// sensibilidade), frases personalizadas com teste sintético, e os ajustes de sessão e detecção. Trocar a lista vale depois
+// de reiniciar o Core. Valores do Core passam por `ui` e mostram "Aplicando…" até o Core confirmar.
 PageFrame {
     id: page
     objectName: "page_cfg_voz"
     anchors.fill: parent
     visible: Window.window && Window.window.pageId === "cfg_voz"
 
-    readonly property var choices: core.wakeChoices
-    readonly property string savedPhrase: String(AppState.uiGet("core.wakePhrase", ""))
-    readonly property string activePhrase: String(core.snapshotPack.active_phrase || "")
-    readonly property bool canChange: AppState.blockReason("core.wakePhrase") === ""
-    property var picked: null
+    readonly property var rows: core.wakePhraseRows
+    readonly property var testState: core.wakePhraseTest
+    readonly property bool canEdit: core.preferencesAvailable
+    readonly property bool testing: testState.state === "running"
+    property var pickedWeak: null
+    property var pickedRemove: null
 
-    function choiceFor(id) {
-        for (var i = 0; i < choices.length; i++) if (choices[i].id === id) return choices[i]
-        return null
-    }
-
-    // B16 sensitivity: the saved value, or the value on its way to the Core while "Aplicando…" shows.
+    // B16 sensitivity (global): the saved value, or the value on its way to the Core while "Aplicando…" shows.
     readonly property real sensStored: Number(AppState.uiGet("core.wakeSensitivity", 1.0))
     readonly property real sensShown: AppState.isApplying("core.wakeSensitivity") ? Number(AppState.corePending["core.wakeSensitivity"]) : sensStored
     function sensText(v) { return Number(v).toFixed(2).replace(".", ",") }
     // Saved on release (or on a key press), in steps of 0.05; the Core answers through the ui settings.
     function saveSensitivity(v) { AppState.setSetting("core.wakeSensitivity", Number(Number(v).toFixed(2))) }
 
+    function measurementText(m) {
+        if (!m) return ""
+        var text = "Teste sintético (rótulo sintético): " + m.hits + " de " + m.positives + " acertos · "
+            + m.false_wakes + " falsos em " + m.negatives + " negativas"
+        if (m.latency_ms !== undefined) text += " · " + m.latency_ms + " ms"
+        return text
+    }
+
     PageHeader {
         title: "Voz e Wake"
-        subtitle: "Frase de despertar certificada, prazo da sessão e estado do wake."
+        subtitle: "Frases de despertar (até 5 ativas), testes sintéticos e prazo da sessão."
     }
     ECfgSearch {}
     ECfgNotice {}
 
     Section {
-        title: "Frase de despertar"
+        title: "Frases de despertar"
         Text {
-            text: "Só frases qualificadas podem ser escolhidas. A troca vale depois de reiniciar o Core."
+            text: "Escolha até 5 frases ativas. Frases do pacote usam a qualificação aprovada. Frases personalizadas ficam não testadas até o teste sintético. A troca vale depois de reiniciar o Core."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -53,7 +57,7 @@ PageFrame {
             Layout.fillWidth: true
         }
         Text {
-            visible: page.choices.length === 0
+            visible: page.rows.length === 0
             text: "Nenhum pacote de voz configurado. Reparo só pela linha de comando (gideon-install repair)."
             textFormat: Text.PlainText
             color: Theme.textMuted
@@ -62,101 +66,199 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-        Flow {
-            Layout.fillWidth: true
-            spacing: Theme.space(12)
-            visible: page.choices.length > 0
-            Repeater {
-                model: page.choices
-                delegate: Rectangle {
-                    id: tile
-                    required property var modelData
-                    objectName: "wakeCard_" + modelData.id
-                    readonly property bool certified: modelData.qualification === "dev_qualified"
-                    readonly property bool saved: page.savedPhrase === modelData.id
-                    readonly property bool active: page.activePhrase === modelData.id
-                    enabled: certified && page.canChange
-                    opacity: enabled ? 1 : 0.5
-                    width: 300
-                    implicitHeight: tileBody.implicitHeight + Theme.space(28)
-                    radius: Theme.radiusCard
-                    color: tileMouse.containsMouse && tile.enabled ? Theme.hover : Theme.surfaceVariant
-                    border.width: saved ? 2 : 1
-                    border.color: saved ? Theme.accent : Theme.strongOutline
-                    activeFocusOnTab: tile.enabled
-                    Accessible.role: Accessible.Button
-                    Accessible.name: modelData.text + ", " + modelData.qualification_label
-                    Keys.onSpacePressed: if (tile.enabled) { page.picked = tile.modelData; wakeConfirm.open() }
-                    Keys.onReturnPressed: if (tile.enabled) { page.picked = tile.modelData; wakeConfirm.open() }
-                    Rectangle {
-                        visible: tile.activeFocus
-                        anchors.fill: parent
-                        radius: parent.radius
-                        color: "transparent"
-                        border.width: 2
-                        border.color: Theme.focusRing
-                    }
-                    ColumnLayout {
-                        id: tileBody
-                        anchors.left: parent.left; anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: Theme.space(14)
-                        spacing: Theme.space(6)
+        Repeater {
+            model: page.rows
+            delegate: Rectangle {
+                id: row
+                required property var modelData
+                objectName: "wakeRow_" + modelData.id
+                readonly property bool canSwitchOn: modelData.selectable && page.canEdit
+                Layout.fillWidth: true
+                implicitHeight: rowBody.implicitHeight + Theme.space(24)
+                radius: Theme.radiusCard
+                color: Theme.surfaceVariant
+                border.width: modelData.active ? 2 : 1
+                border.color: modelData.active ? Theme.accent : Theme.strongOutline
+                Accessible.role: Accessible.Pane
+                Accessible.name: modelData.text + ", " + modelData.qualification_label
+
+                ColumnLayout {
+                    id: rowBody
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: Theme.space(12)
+                    spacing: Theme.space(6)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.space(10)
+                        Switch {
+                            id: rowSwitch
+                            objectName: "wakeSwitch_" + row.modelData.id
+                            checked: row.modelData.active
+                            enabled: page.canEdit && (row.modelData.active || row.canSwitchOn) && !page.testing
+                            Accessible.name: "Ativar " + row.modelData.text
+                            onToggled: {
+                                var id = row.modelData.id
+                                if (checked && row.modelData.custom && row.modelData.measurement && !row.modelData.measurement.passed) {
+                                    page.pickedWeak = row.modelData
+                                    weakConfirm.open()
+                                } else {
+                                    core.setWakePhraseActive(id, checked, false)
+                                }
+                                // The switch follows the Core snapshot, not the click: a refused change never sticks.
+                                checked = Qt.binding(function () { return row.modelData.active })
+                            }
+                        }
                         Text {
-                            text: tile.modelData.text
+                            text: row.modelData.text
                             textFormat: Text.PlainText
                             color: Theme.text
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSection
                             font.weight: 600
                             Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
                         }
                         Badge {
-                            text: tile.modelData.qualification_label
-                            tone: tile.certified ? "info" : "warning"
+                            objectName: "wakeBadge_" + row.modelData.id
+                            text: row.modelData.qualification_label
+                            tone: (row.modelData.qualification === "dev_qualified" || (row.modelData.measurement && row.modelData.measurement.passed)) ? "info" : "warning"
                         }
+                    }
+                    Text {
+                        visible: row.modelData.custom && !row.modelData.measurement
+                        text: "Não testada: pode falhar ou disparar à toa. Teste antes de ativar."
+                        textFormat: Text.PlainText
+                        color: Theme.warning
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontHelp
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        visible: row.modelData.measurement !== null && row.modelData.measurement !== undefined
+                        objectName: "wakeMeasurement_" + row.modelData.id
+                        text: page.measurementText(row.modelData.measurement)
+                        textFormat: Text.PlainText
+                        color: row.modelData.measurement && row.modelData.measurement.passed ? Theme.textMuted : Theme.warning
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        visible: row.modelData.qualification === "poc_required"
+                        text: "Requer prova de conceito: frase sem qualidade aprovada, bloqueada."
+                        textFormat: Text.PlainText
+                        color: Theme.textMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontCaption
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    RowLayout {
+                        visible: row.modelData.active
+                        Layout.fillWidth: true
+                        spacing: Theme.space(10)
                         Text {
-                            visible: text.length > 0
-                            text: (tile.saved ? "Salva" : "") + (tile.saved && tile.active ? " · " : "") + (tile.active ? "Ativa neste processo" : "")
-                            textFormat: Text.PlainText
-                            color: Theme.text
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontHelp
-                            Layout.fillWidth: true
-                        }
-                        Text {
-                            text: tile.certified ? "Qualificada em desenvolvimento; validação física pendente" : "Bloqueada: sem qualidade aprovada"
-                            textFormat: Text.PlainText
-                            color: Theme.textMuted
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontHelp
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-                        Text {
-                            visible: !tile.certified
-                            text: "Requer prova de conceito: frase sem qualidade aprovada"
+                            text: "Sensibilidade desta frase"
                             textFormat: Text.PlainText
                             color: Theme.textMuted
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontCaption
-                            wrapMode: Text.WordWrap
+                        }
+                        GSlider {
+                            objectName: "wakePhraseSensitivity_" + row.modelData.id
+                            from: 0.5
+                            to: 1.5
+                            stepSize: 0.05
                             Layout.fillWidth: true
+                            value: row.modelData.sensitivity !== null && row.modelData.sensitivity !== undefined ? row.modelData.sensitivity : page.sensShown
+                            enabled: page.canEdit && !page.testing
+                            Accessible.name: "Sensibilidade da frase " + row.modelData.text
+                            onPressedChanged: if (!pressed) core.setWakePhraseSensitivity(row.modelData.id, value)
+                            onMoved: if (!pressed) core.setWakePhraseSensitivity(row.modelData.id, value)
                         }
                     }
-                    MouseArea {
-                        id: tileMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: tile.enabled
-                        onClicked: { page.picked = tile.modelData; wakeConfirm.open() }
+                    RowLayout {
+                        visible: row.modelData.custom
+                        Layout.fillWidth: true
+                        spacing: Theme.space(10)
+                        GButton {
+                            objectName: "testWakePhrase_" + row.modelData.id
+                            variant: "secondary"
+                            text: "Testar frase"
+                            Accessible.name: "Testar a frase " + row.modelData.text + " com áudio sintético"
+                            enabled: core.preferencesAvailable && !page.testing
+                            onClicked: core.testWakePhrase(row.modelData.id)
+                        }
+                        GButton {
+                            objectName: "removeWakePhrase_" + row.modelData.id
+                            variant: "ghost"
+                            text: "Remover"
+                            Accessible.name: "Remover a frase personalizada " + row.modelData.text
+                            enabled: !row.modelData.active && page.canEdit
+                            onClicked: { page.pickedRemove = row.modelData; deleteConfirm.open() }
+                        }
                     }
                 }
             }
         }
         Text {
-            text: "Comprovado: a frase 'Hey Gideon' foi reconhecida em corpus de desenvolvimento, com verificação automática. Não comprovado: uso com microfone físico, em ambientes reais e com outras vozes. Não há reconhecimento comprovado em português (pt-BR). Não é certificação acústica. 'Okay Gideon' não tem qualidade aprovada e fica bloqueada."
-            visible: page.choices.length > 0
+            visible: page.testing
+            objectName: "wakeTestProgress"
+            text: "Testando a frase com áudio sintético… pode levar alguns segundos."
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            visible: page.testState.state === "failed" || page.testState.state === "done"
+            objectName: "wakeTestResult"
+            text: page.testState.state === "done" ? "Teste concluído: o resultado está na frase." : (page.testState.message || "O teste não concluiu.")
+            textFormat: Text.PlainText
+            color: page.testState.state === "done" ? Theme.textMuted : Theme.warning
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            visible: core.wakePhraseResult.length > 0
+            objectName: "wakePhraseResult"
+            text: core.wakePhraseResult
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(10)
+            GButton {
+                objectName: "addWakePhrase"
+                variant: "primary"
+                text: "Adicionar frase…"
+                Accessible.name: "Adicionar uma frase de despertar personalizada"
+                enabled: page.canEdit && core.wakePhraseCustomCount < 8
+                onClicked: { phraseField.text = ""; core.checkWakePhrase(""); addDialog.open() }
+            }
+            GButton {
+                objectName: "restoreWakeDefaults"
+                variant: "ghost"
+                text: "Restaurar padrão"
+                Accessible.name: "Restaurar a frase de despertar padrão"
+                enabled: page.canEdit && !page.testing
+                onClicked: core.restoreWakePhraseDefaults()
+            }
+        }
+        Text {
+            text: "Comprovado: 'Hey Gideon' foi reconhecida em corpus sintético de desenvolvimento (75 de 76, sem falso disparo em 320 negativas e silêncio de 1 h). Não comprovado: microfone físico, ambientes reais e outras vozes. 'Okay Gideon' não tem qualidade aprovada. Frases personalizadas são sempre não testadas até o teste sintético."
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -164,31 +266,6 @@ PageFrame {
             wrapMode: Text.WordWrap
             lineHeight: 1.3
             Layout.fillWidth: true
-        }
-        SettingRow {
-            settingKey: "core.wakePhrase"
-            RowLayout {
-                spacing: Theme.space(10)
-                Select {
-                    id: wakeChoice
-                    objectName: "wakeChoice"
-                    model: page.choices
-                    textRole: "text"
-                    valueRole: "id"
-                    implicitWidth: 240
-                    currentIndex: Math.max(0, indexOfValue(page.savedPhrase || page.activePhrase))
-                    enabled: page.canChange && page.choices.length > 0
-                    Accessible.name: "Frase de despertar do pacote"
-                }
-                GButton {
-                    objectName: "selectWakeButton"
-                    variant: "secondary"
-                    text: "Trocar frase…"
-                    Accessible.name: "Trocar a frase de despertar"
-                    enabled: page.canChange && wakeChoice.currentIndex >= 0 && page.choices.length > 0 && page.choices[wakeChoice.currentIndex].qualification === "dev_qualified"
-                    onClicked: { page.picked = page.choices[wakeChoice.currentIndex]; wakeConfirm.open() }
-                }
-            }
         }
     }
 
@@ -309,9 +386,9 @@ PageFrame {
 
     Collapsible {
         title: "Como funciona"
-        summary: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core."
+        summary: "Até 5 frases ativas. Trocar a lista exige reiniciar o Core. Frases personalizadas precisam de teste sintético."
         Text {
-            text: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core. O prazo da sessão vale na próxima sessão de voz. A sensibilidade ajusta o limiar do detector: com a escuta do microfone ligada (Dispositivos) vale na próxima sessão de voz; no modo de replay, só no próximo início do Core. Ainda não foi validada com microfone real."
+            text: "Cada frase ativa tem a própria sensibilidade e o próprio limiar; a sensibilidade geral vale para as demais. O teste de frase personalizada usa áudio gerado pela voz de teste e rotula o resultado como sintético: ele não prova reconhecimento com a sua voz nem com o microfone. O prazo da sessão vale na próxima sessão de voz."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -322,29 +399,43 @@ PageFrame {
     }
 
     Modal {
-        id: wakeConfirm
-        objectName: "wakeConfirm"
-        title: "Trocar frase de despertar?"
+        id: addDialog
+        objectName: "wakeAddDialog"
+        title: "Adicionar frase de despertar"
         Text {
-            text: "Frase atual: " + (page.choiceFor(page.savedPhrase) ? page.choiceFor(page.savedPhrase).text : "padrão do pacote")
+            text: "Use de 2 a 4 palavras, só letras e espaços. A frase é testada com áudio sintético antes de ser ativada."
             textFormat: Text.PlainText
-            color: Theme.text
+            color: Theme.textMuted
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontBody
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GTextField {
+            id: phraseField
+            objectName: "wakePhraseField"
+            placeholderText: "Ex.: Light Gideon"
+            maximumLength: 40
+            Layout.fillWidth: true
+            onTextChanged: checkTimer.restart()
+        }
+        Timer {
+            id: checkTimer
+            interval: 300
+            onTriggered: core.checkWakePhrase(phraseField.text)
+        }
+        Text {
+            objectName: "wakePhraseCheckText"
+            text: core.wakePhraseCheck.ok ? "Sons do detector: " + (core.wakePhraseCheck.tokens || "") : (core.wakePhraseCheck.message || "")
+            textFormat: Text.PlainText
+            color: core.wakePhraseCheck.ok ? Theme.textMuted : Theme.warning
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
         Text {
-            text: "Nova frase: " + (page.picked ? page.picked.text + " · " + page.picked.qualification_label : "")
-            textFormat: Text.PlainText
-            color: Theme.text
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontBody
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-        Text {
-            text: "A troca só vale depois que o Core for reiniciado. Até lá, a frase atual continua ativa."
+            text: "Não testada: pode falhar ou disparar à toa. Depois de salvar, teste a frase antes de ativá-la."
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -353,15 +444,56 @@ PageFrame {
             Layout.fillWidth: true
         }
         GButton {
-            objectName: "confirmWakeButton"
+            objectName: "confirmAddWakePhrase"
             variant: "primary"
-            text: "Trocar frase"
+            text: "Salvar frase"
             Layout.alignment: Qt.AlignRight
-            enabled: page.picked !== null && page.picked.qualification === "dev_qualified"
-            onClicked: {
-                AppState.setSetting("core.wakePhrase", page.picked.id)
-                wakeConfirm.close()
-            }
+            enabled: core.wakePhraseCheck.ok === true && phraseField.text.trim().split(/\s+/).join(" ") === core.wakePhraseCheck.text && page.canEdit
+            onClicked: { core.addWakePhrase(phraseField.text); addDialog.close() }
+        }
+    }
+
+    Modal {
+        id: weakConfirm
+        objectName: "wakeWeakConfirm"
+        title: "Ativar frase que falhou no teste?"
+        Text {
+            text: "O teste sintético desta frase não passou: ela pode não ser detectada, ou disparar sem você falar. Esse resultado não foi medido com a sua voz nem com o microfone."
+            textFormat: Text.PlainText
+            color: Theme.warning
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "confirmWeakActivation"
+            variant: "primary"
+            text: "Ativar mesmo assim"
+            Layout.alignment: Qt.AlignRight
+            onClicked: { core.setWakePhraseActive(page.pickedWeak.id, true, true); weakConfirm.close() }
+        }
+    }
+
+    Modal {
+        id: deleteConfirm
+        objectName: "wakeDeleteConfirm"
+        title: "Remover frase personalizada?"
+        Text {
+            text: page.pickedRemove ? "A frase “" + page.pickedRemove.text + "” e o resultado do teste serão apagados. Esta ação não pode ser desfeita." : ""
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "confirmDeleteWakePhrase"
+            variant: "primary"
+            text: "Remover frase"
+            Layout.alignment: Qt.AlignRight
+            onClicked: { core.removeWakePhrase(page.pickedRemove.id); deleteConfirm.close() }
         }
     }
 }

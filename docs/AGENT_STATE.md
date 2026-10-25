@@ -65,3 +65,10 @@
 
 ## 2026-10-24 — pendências implementadas (docs/PENDENCIAS_IMPLEMENTACAO.md)
 - Onboarding, autostart, modo econômico, perfis de config, atalhos, diagnóstico completo, efeitos com argumentos, banners de erro, limites em bytes; Core: sensibilidade do wake, restaurar padrões, preferências e listagem de dispositivos, áudio ao vivo opt-in. 16 gates verdes (design, b2feedback, a1, a4, a5, c1, c2, c3, c4, s4final, e1, e24, e3, s2final, b4package, e4).
+
+## 2026-10-25 — Frente 2 Idiomas (EN/PT/FR), fase de pesquisa e arquitetura (NÃO COMMITADO)
+- Pesquisa com fontes e lista exata de downloads, sem nada baixado: docs/research/idiomas-stt-tts.md. Resultado: Moonshine 0.1.5 não tem PT nem FR (verificado localmente); TTS PT/FR viável com Pocket TTS (mesmo motor do inglês); STT PT/FR sem candidato streaming confiável; KWS zh-en carrega frases PT/FR tokenizadas à mão, mas detecção não medida; sherpa aborta (rc 255) com token desconhecido.
+- Core: src/languages.rs + src/languages_catalog.json (estado bundled / available_not_installed / unsupported), op `language_preference`, bloco snapshot `languages`, preferências `stt_languages`/`tts_language`/`tts_voice` com defaults serde (ledger antigo carrega), rollback recusa idioma não instalado.
+- UI: sub-aba Configurações › Idiomas (app/pages/CfgIdiomas.qml), botões Instalar desativados com "Aguardando aprovação do download pelo dono"; docs/ui-spec/40-configuracoes.md §7.1A.
+- Gates rodados: cargo fmt --check, clippy -D warnings, cargo test (todos), test_bridge_protocol 228, test_snapshot_contract 16, test_ui_settings 24, test_languages_qml 4 (novo).
+- Limites: troca de idioma só vale no próximo início do Core (sem troca quente de worker); idioma da busca de configurações (app/uisettings.py) não indexa Idiomas; nenhum modelo PT/FR instalado nem medido.

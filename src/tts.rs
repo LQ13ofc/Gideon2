@@ -130,6 +130,87 @@ pub fn feedback(outcome: &crate::commands::Outcome) -> String {
         "Command failed.".into()
     }
 }
+/// Synthesizes `text` with the packaged TTS worker and returns its 24 kHz mono samples. No playback and no
+/// sink: the synthetic wake measurement (src/phrases.rs) is its only caller. Bounded text and time.
+pub async fn synthesize_in(
+    home: &std::path::Path,
+    config: &Config,
+    text: &str,
+) -> io::Result<Vec<f32>> {
+    if text.is_empty() || text.len() > 256 {
+        return Err(io::Error::other("invalid synthesis text"));
+    }
+    let profile: serde_json::Value = serde_json::from_slice(&std::fs::read(&config.manifest)?)?;
+    let root = PathBuf::from(
+        profile["root"]
+            .as_str()
+            .ok_or_else(|| io::Error::other("TTS assets"))?,
+    );
+    let mut command = crate::transport::namespace_command_in(
+        home,
+        &config.python,
+        "scripts/tts_worker.py",
+        &[config.manifest.display().to_string()],
+        &[root, config.manifest.clone()],
+    )?;
+    command
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("OMP_NUM_THREADS", "2")
+        .env("OPENBLAS_NUM_THREADS", "1")
+        .env("HF_HUB_OFFLINE", "1")
+        .env("HF_HUB_DISABLE_TELEMETRY", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let job = Job {
+        output_volume_percent: 100,
+        session_id: 1,
+        text: text.to_string(),
+    };
+    let mut child = command.spawn()?;
+    let result = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut input = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("stdin"))?;
+        input.write_all(&serde_json::to_vec(&job)?).await?;
+        input.write_all(b"\n").await?;
+        drop(input);
+        let mut reader = BufReader::new(
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("stdout"))?,
+        );
+        let mut ready = false;
+        let mut done = false;
+        let mut samples = Vec::new();
+        while let Some(line) = crate::transport::bounded_frame(&mut reader, 65536).await? {
+            match serde_json::from_slice::<Packet>(&line)? {
+                Packet::Ready { session_id: 1 } if !ready && !done => ready = true,
+                Packet::Pcm {
+                    session_id: 1,
+                    samples: chunk,
+                } if ready && !done => samples.extend(chunk),
+                Packet::Done { session_id: 1 } if ready && !done => done = true,
+                _ => return Err(io::Error::other("uncorrelated synthesis packet")),
+            }
+        }
+        if !done || !child.wait().await?.success() {
+            return Err(io::Error::other("synthesis worker failed"));
+        }
+        Ok(samples)
+    })
+    .await
+    .map_err(io::Error::other)
+    .and_then(|result| result);
+    if result.is_err() {
+        let _ = child.kill().await;
+    }
+    result
+}
+
 pub async fn speak(
     config: Config,
     job: Job,

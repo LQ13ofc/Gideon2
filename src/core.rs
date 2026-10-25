@@ -32,6 +32,10 @@ pub struct Core {
     configuration_status: crate::storage::ConfigurationStatus,
     configuration_recovery_available: bool,
     preferences: crate::storage::Config,
+    /// Installed-language catalog (`languages.rs`); only `bundled` entries are selectable.
+    languages: crate::languages::LanguageCatalog,
+    /// Languages the running workers were started with (first configuration seen at boot).
+    applied_languages: Option<crate::languages::Selection>,
     session: Option<Session>,
     next_session: u64,
     sequence: u64,
@@ -47,7 +51,18 @@ pub struct Core {
     stt_status: &'static str,
     stt_requests: VecDeque<SttRequest>,
     transcript: Option<Transcript>,
-    command_wake: Option<String>,
+    /// Wake phrase texts that open a command (one per active phrase). `None` = commands not configured.
+    command_wake: Option<Vec<String>>,
+    /// Wake phrase catalog: packaged defaults (from the pack) and the private custom store (src/phrases.rs).
+    phrase_defaults: Vec<crate::phrases::Entry>,
+    phrase_custom: crate::phrases::CustomFile,
+    phrase_root: Option<std::path::PathBuf>,
+    phrase_runtime: Option<crate::phrases::Runtime>,
+    /// Synthetic test waiting for transport, and the state `wake_phrases.test` reports.
+    phrase_job: Option<crate::phrases::TestJob>,
+    phrase_test: Option<crate::phrases::TestView>,
+    /// Outcome of the last validation or refused add (`phrase_check` in the response).
+    phrase_check: Option<crate::phrases::Check>,
     command_job: Option<Job>,
     expected_command: Option<Job>,
     command_outcome: Option<Outcome>,
@@ -87,6 +102,9 @@ impl Core {
                 session_timeout_ms: timeout.as_millis() as u64,
                 ..Default::default()
             },
+            languages: crate::languages::LanguageCatalog::builtin()
+                .expect("catálogo de idiomas embutido válido"),
+            applied_languages: None,
             session: None,
             next_session: 1,
             sequence: 0,
@@ -103,6 +121,13 @@ impl Core {
             stt_requests: VecDeque::new(),
             transcript: None,
             command_wake: None,
+            phrase_defaults: Vec::new(),
+            phrase_custom: Default::default(),
+            phrase_root: None,
+            phrase_runtime: None,
+            phrase_job: None,
+            phrase_test: None,
+            phrase_check: None,
             command_job: None,
             expected_command: None,
             command_outcome: None,
@@ -561,7 +586,10 @@ impl Core {
         }
     }
     pub fn configure_commands(&mut self, wake_text: String) {
-        self.command_wake = Some(wake_text);
+        self.command_wake = Some(vec![wake_text]);
+    }
+    pub fn configure_command_wakes(&mut self, wake_texts: Vec<String>) {
+        self.command_wake = Some(wake_texts);
     }
     pub fn take_command_job(&mut self) -> Option<Job> {
         self.command_job.take()
@@ -574,7 +602,13 @@ impl Core {
     fn dispatch_command(&mut self, now: Instant) {
         let transcript = self.transcript.as_ref().expect("final transcript");
         let id = transcript.session_id;
-        let parsed = commands::parse(&transcript.raw, self.command_wake.as_deref().unwrap_or(""));
+        // Any active wake phrase may open a command; the first grammar match wins.
+        let parsed = match self.command_wake.as_deref() {
+            Some(wakes) if !wakes.is_empty() => wakes
+                .iter()
+                .find_map(|wake| commands::parse(&transcript.raw, wake)),
+            _ => commands::parse(&transcript.raw, ""),
+        };
         let command = match parsed {
             Some(Command::Cancel) => {
                 self.finish("cancelled");
@@ -849,6 +883,11 @@ impl Core {
             configuration_status: self.configuration_status,
             configuration_recovery_available: self.configuration_recovery_available,
             preferences: self.preferences.clone(),
+            languages: crate::languages::view(
+                &self.languages,
+                &self.preferences,
+                self.applied_languages.as_ref(),
+            ),
             command: self.command_outcome.clone(),
             speech_status: self.speech_status,
             speech_samples: self.speech_samples,
@@ -866,6 +905,14 @@ impl Core {
                 devices: self.audio_devices.clone(),
                 live: self.live.view(self.preferences.live_audio),
             },
+            wake_phrases: crate::phrases::View::build(
+                &self.phrase_defaults,
+                &self.phrase_custom,
+                &self.phrase_settings(),
+                self.phrase_lexicon().is_some(),
+                self.phrase_test.clone(),
+            ),
+            phrase_check: self.phrase_check.clone(),
             request_id,
             code,
             state: self
@@ -884,6 +931,10 @@ impl Core {
         }
     }
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
+        // The first configuration is what the workers start with; later commits only change the stored choice.
+        if self.applied_languages.is_none() {
+            self.applied_languages = Some(crate::languages::Selection::from_config(config));
+        }
         self.preferences = config.clone();
         self.timeout = Duration::from_millis(config.session_timeout_ms);
     }
@@ -1199,12 +1250,265 @@ impl Core {
         self.flush_plugin_events("");
     }
     pub fn configure_pack(&mut self, pack: crate::pack::Snapshot) {
+        self.phrase_defaults = crate::phrases::defaults(&pack.wake_phrases);
         self.base_pack = Some(pack);
     }
     pub fn configure_storage(&mut self, storage: &crate::storage::Storage) {
         self.configure_preferences(&storage.config);
         self.configuration_status = storage.configuration_status;
         self.configuration_recovery_available = storage.recovery_available();
+        self.phrase_root = Some(storage.root.clone());
+        // An unreadable custom store is empty for the views; add, remove and test re-read it and refuse.
+        self.phrase_custom = crate::phrases::read_custom(&storage.root).unwrap_or_default();
+    }
+    /// Runtime of the wake phrase setup (worker interpreter, lexicon, TTS). Set once by transport.
+    pub fn configure_phrases(&mut self, runtime: crate::phrases::Runtime) {
+        self.phrase_runtime = Some(runtime);
+    }
+    pub fn take_phrase_job(&mut self) -> Option<crate::phrases::TestJob> {
+        self.phrase_job.take()
+    }
+    /// Closes the synthetic test: `ok` when a measurement was stored, otherwise `failed`.
+    pub fn phrase_test_finished(&mut self, id: &str, ok: bool) {
+        if let Some(test) = self.phrase_test.as_mut().filter(|t| t.id == id) {
+            test.state = if ok { "done" } else { "failed" };
+            test.code = (!ok).then_some(crate::phrases::code::TEST_FAILED);
+        }
+        self.emit(
+            String::new(),
+            None,
+            if ok {
+                "phrase_tested"
+            } else {
+                "phrase_test_failed"
+            },
+        );
+    }
+    fn phrase_lexicon(&self) -> Option<&crate::phrases::Lexicon> {
+        self.phrase_runtime
+            .as_ref()
+            .and_then(|r| r.lexicon.as_deref())
+    }
+    fn phrase_entries(&self) -> Vec<crate::phrases::Entry> {
+        crate::phrases::entries(&self.phrase_defaults, &self.phrase_custom)
+    }
+    /// The stored list, migrated from the legacy single phrase when the list is still empty.
+    fn phrase_settings(&self) -> Vec<crate::phrases::Setting> {
+        let default = self
+            .base_pack
+            .as_ref()
+            .map_or("hey_gideon", |p| p.default_phrase.as_str());
+        crate::phrases::migrated(
+            &self.preferences.wake_phrases,
+            self.preferences.wake_phrase.as_deref(),
+            default,
+        )
+    }
+    fn select_wake_phrases(
+        &mut self,
+        request_id: &str,
+        revision: u64,
+        phrases: Vec<crate::phrases::Setting>,
+        acknowledge_untested: bool,
+        storage: Option<&mut crate::storage::Storage>,
+    ) -> &'static str {
+        use crate::phrases::code;
+        if revision != self.preferences.revision {
+            return "stale_preferences";
+        }
+        if self.session.is_some() {
+            return "busy";
+        }
+        let active = phrases.iter().filter(|p| p.active).count();
+        if active > crate::phrases::MAX_ACTIVE {
+            return code::TOO_MANY_ACTIVE;
+        }
+        if active == 0 || !crate::phrases::valid_settings(&phrases) {
+            return code::INVALID_SELECTION;
+        }
+        let catalog = self.phrase_entries();
+        for setting in phrases.iter().filter(|p| p.active) {
+            let Some(entry) = catalog.iter().find(|e| e.id == setting.id) else {
+                return code::INVALID_SELECTION;
+            };
+            if entry.custom {
+                match &entry.measurement {
+                    None => return code::UNMEASURED,
+                    Some(m) if !m.passed && !acknowledge_untested => {
+                        return code::MEASUREMENT_FAILED
+                    }
+                    Some(_) => {}
+                }
+            } else if entry.qualification != "dev_qualified" {
+                return code::NOT_QUALIFIED;
+            }
+        }
+        let (Some(storage), Some(runtime)) = (storage, self.phrase_runtime.clone()) else {
+            return "preferences_unavailable";
+        };
+        if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
+            return "configuration_not_ready";
+        }
+        let root = storage.root.clone();
+        // Keyword set and worker preflight first; the running set changes only after both pass.
+        if crate::phrases::stage(
+            &root,
+            &runtime.python,
+            &runtime.home,
+            &runtime.base_manifest,
+            &catalog,
+            &phrases,
+            self.preferences.wake_sensitivity,
+        )
+        .is_err()
+        {
+            return code::START_FAILED;
+        }
+        match storage.update_wake_phrases(revision, phrases) {
+            Ok(()) => {
+                self.configure_storage(storage);
+                self.emit(request_id.to_string(), None, "preferences_updated");
+                "ok"
+            }
+            Err(_) => {
+                let _ = crate::phrases::undo_switch(&root);
+                "preferences_storage_error"
+            }
+        }
+    }
+    fn wake_phrase_add(
+        &mut self,
+        request_id: &str,
+        revision: u64,
+        text: &str,
+        storage: Option<&mut crate::storage::Storage>,
+    ) -> &'static str {
+        use crate::phrases::code;
+        let Some(storage) = storage else {
+            return "preferences_unavailable";
+        };
+        let check = crate::phrases::check(text, self.phrase_lexicon());
+        if !check.ok {
+            let refused = check.code;
+            self.phrase_check = Some(check);
+            return refused;
+        }
+        let (Some(shown), Some(tokens)) = (check.text.clone(), check.tokens.clone()) else {
+            return code::STORE_ERROR;
+        };
+        self.phrase_check = Some(check);
+        let Ok(mut file) = crate::phrases::read_custom(&storage.root) else {
+            return code::STORE_ERROR;
+        };
+        if revision != file.revision {
+            return code::STALE_STORE;
+        }
+        if self.phrase_defaults.iter().any(|e| e.tokens == tokens)
+            || file.phrases.iter().any(|p| p.tokens == tokens)
+        {
+            return code::DUPLICATE;
+        }
+        if file.phrases.len() >= crate::phrases::MAX_CUSTOM {
+            return code::STORE_FULL;
+        }
+        let Some(next) = file.revision.checked_add(1) else {
+            return code::STORE_ERROR;
+        };
+        file.phrases.push(crate::phrases::Stored {
+            id: crate::phrases::custom_id(&tokens),
+            sha256: crate::phrases::digest(&shown, &tokens),
+            text: shown,
+            tokens,
+            measurement: None,
+        });
+        file.revision = next;
+        if crate::phrases::write_custom(&storage.root, &file).is_err() {
+            return code::STORE_ERROR;
+        }
+        self.phrase_custom = file;
+        self.emit(request_id.to_string(), None, "phrase_added");
+        code::OK
+    }
+    fn wake_phrase_remove(
+        &mut self,
+        request_id: &str,
+        revision: u64,
+        id: &str,
+        storage: Option<&mut crate::storage::Storage>,
+    ) -> &'static str {
+        use crate::phrases::code;
+        let Some(storage) = storage else {
+            return "preferences_unavailable";
+        };
+        let Ok(mut file) = crate::phrases::read_custom(&storage.root) else {
+            return code::STORE_ERROR;
+        };
+        if revision != file.revision {
+            return code::STALE_STORE;
+        }
+        let Some(index) = file.phrases.iter().position(|p| p.id == id) else {
+            return code::NOT_FOUND;
+        };
+        let referenced = self.preferences.wake_phrases.iter().any(|s| s.id == id)
+            || self.preferences.wake_phrase.as_deref() == Some(id);
+        if referenced {
+            return code::IN_USE;
+        }
+        let Some(next) = file.revision.checked_add(1) else {
+            return code::STORE_ERROR;
+        };
+        file.phrases.remove(index);
+        file.revision = next;
+        if crate::phrases::write_custom(&storage.root, &file).is_err() {
+            return code::STORE_ERROR;
+        }
+        self.phrase_custom = file;
+        self.emit(request_id.to_string(), None, "phrase_removed");
+        code::OK
+    }
+    fn wake_phrase_test(&mut self, id: &str) -> &'static str {
+        use crate::phrases::code;
+        let (Some(runtime), Some(root)) = (self.phrase_runtime.clone(), self.phrase_root.clone())
+        else {
+            return code::TEST_UNAVAILABLE;
+        };
+        let (Some(tts), true) = (runtime.tts.clone(), runtime.lexicon.is_some()) else {
+            return code::TEST_UNAVAILABLE;
+        };
+        if self.phrase_job.is_some()
+            || self
+                .phrase_test
+                .as_ref()
+                .is_some_and(|t| t.state == "running")
+        {
+            return code::TEST_RUNNING;
+        }
+        let Some(entry) = self
+            .phrase_custom
+            .phrases
+            .iter()
+            .find(|p| p.id == id)
+            .cloned()
+        else {
+            return code::NOT_FOUND;
+        };
+        self.phrase_job = Some(crate::phrases::TestJob {
+            id: entry.id.clone(),
+            text: entry.text.clone(),
+            tokens: entry.tokens.clone(),
+            root,
+            python: runtime.python.clone(),
+            home: runtime.home.clone(),
+            base_manifest: runtime.base_manifest.clone(),
+            tts,
+            catalog: self.phrase_entries(),
+        });
+        self.phrase_test = Some(crate::phrases::TestView {
+            id: entry.id,
+            state: "running",
+            code: None,
+        });
+        code::OK
     }
     pub fn handle(&mut self, req: Request, now: Instant) -> Response {
         self.handle_with_storage(req, now, None)
@@ -1758,6 +2062,42 @@ impl Core {
                     "preferences_unavailable"
                 }
             }
+            Operation::LanguagePreference { revision, .. }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::LanguagePreference { .. } if self.session.is_some() => "busy",
+            Operation::LanguagePreference {
+                revision,
+                stt_languages,
+                tts_language,
+                tts_voice,
+            } => {
+                let unchanged = stt_languages == self.preferences.stt_languages
+                    && tts_language == self.preferences.tts_language
+                    && tts_voice == self.preferences.tts_voice;
+                if let Err(code) =
+                    self.languages
+                        .validate_selection(&stt_languages, &tts_language, &tts_voice)
+                {
+                    code
+                } else if unchanged {
+                    "ok"
+                } else if let Some(storage) = storage {
+                    let result =
+                        storage.update_languages(revision, stt_languages, tts_language, tts_voice);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        self.emit(req.request_id.clone(), None, "preferences_updated");
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
             Operation::Preferences { revision, .. }
             | Operation::RollbackPreferences { revision }
                 if revision != self.preferences.revision =>
@@ -1768,6 +2108,23 @@ impl Core {
                 if self.session.is_some() =>
             {
                 "busy"
+            }
+            Operation::RollbackPreferences { .. }
+                if self
+                    .preferences
+                    .previous_preferences
+                    .as_ref()
+                    .is_some_and(|prev| {
+                        !self
+                            .languages
+                            .selection_installed(&crate::languages::Selection {
+                                stt: prev.stt_languages.clone(),
+                                tts_language: prev.tts_language.clone(),
+                                tts_voice: prev.tts_voice.clone(),
+                            })
+                    }) =>
+            {
+                "language_not_installed"
             }
             Operation::RollbackPreferences { .. }
                 if self.base_pack.as_ref().is_some_and(|p| {
@@ -1856,6 +2213,30 @@ impl Core {
                 }
             }
 
+            Operation::SelectWakePhrases {
+                revision,
+                phrases,
+                acknowledge_untested,
+            } => self.select_wake_phrases(
+                &req.request_id,
+                revision,
+                phrases,
+                acknowledge_untested,
+                storage,
+            ),
+            Operation::WakePhraseValidate { text } => {
+                let check = crate::phrases::check(&text, self.phrase_lexicon());
+                let code = check.code;
+                self.phrase_check = Some(check);
+                code
+            }
+            Operation::WakePhraseAdd { revision, text } => {
+                self.wake_phrase_add(&req.request_id, revision, &text, storage)
+            }
+            Operation::WakePhraseRemove { revision, id } => {
+                self.wake_phrase_remove(&req.request_id, revision, &id, storage)
+            }
+            Operation::WakePhraseTest { id } => self.wake_phrase_test(&id),
             Operation::Text { raw } => {
                 if !self.virtual_input || self.command_wake.is_none() {
                     "input_disabled"
@@ -2116,11 +2497,21 @@ mod tests {
                     id: "opaque_7".into(),
                     text: "Activate Atlas".into(),
                     qualification: "dev_qualified",
+                    label: "OPAQUE_7".into(),
+                    tokens: "AE1 K T IH0 V EY1 T".into(),
+                    language: "en".into(),
+                    boost: 1.2,
+                    threshold: 0.22,
                 },
                 crate::pack::WakeChoice {
                     id: "opaque_8".into(),
                     text: "Other phrase".into(),
                     qualification: "poc_required",
+                    label: "OPAQUE_8".into(),
+                    tokens: "AH1 DH ER0 F R EY1 Z".into(),
+                    language: "en".into(),
+                    boost: 1.2,
+                    threshold: 0.22,
                 },
             ],
             active_phrase: Some("opaque_7".into()),

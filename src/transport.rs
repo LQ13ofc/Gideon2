@@ -395,16 +395,14 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>,
             replay.active_phrase.as_deref(),
             threshold,
         );
-        let mut command = namespace_command(
-            &replay.python,
-            "scripts/wake_worker.py",
-            &args,
-            &[
-                fixture_root.to_path_buf(),
-                asset_root.into(),
-                replay.manifest.clone(),
-            ],
-        )?;
+        let mut mounts = vec![
+            fixture_root.to_path_buf(),
+            asset_root.into(),
+            replay.manifest.clone(),
+        ];
+        mounts.extend(crate::live::keyword_dir(&replay.manifest)?);
+        let mut command =
+            namespace_command(&replay.python, "scripts/wake_worker.py", &args, &mounts)?;
         let mut child = command
             .env_remove("DBUS_SESSION_BUS_ADDRESS")
             .env_remove("PULSE_SERVER")
@@ -510,6 +508,55 @@ pub async fn serve(
         } else {
             None
         };
+    // Wake phrases (src/phrases.rs). With a pack, the stored list becomes a keyword set in the Core data dir,
+    // preflighted before this start; the worker runs that manifest. The packaged manifest stays the base.
+    let phrase_setup = match (base_pack.as_ref(), replay.as_ref()) {
+        (Some(pack), Some(r))
+            if storage.configuration_status == crate::storage::ConfigurationStatus::Ready =>
+        {
+            let base = r.manifest.clone();
+            let lexicon = base_pack_path
+                .as_deref()
+                .and_then(|p| crate::phrases::load_lexicon(p, &base))
+                .map(std::sync::Arc::new);
+            let catalog = crate::phrases::entries(
+                &crate::phrases::defaults(&pack.wake_phrases),
+                &crate::phrases::read_custom(&storage.root).unwrap_or_default(),
+            );
+            let stored = crate::phrases::migrated(
+                &storage.config.wake_phrases,
+                storage.config.wake_phrase.as_deref(),
+                &pack.default_phrase,
+            );
+            let settings = crate::phrases::effective(&catalog, &stored, &pack.default_phrase);
+            let manifest = crate::phrases::ensure_boot(
+                &storage.root,
+                &r.python,
+                home(),
+                &base,
+                &catalog,
+                &settings,
+                storage.config.wake_sensitivity,
+            )
+            .ok();
+            Some((base, lexicon, manifest))
+        }
+        _ => None,
+    };
+    let phrase_runtime = phrase_setup.as_ref().and_then(|(base, lexicon, _)| {
+        replay.as_ref().map(|r| crate::phrases::Runtime {
+            python: r.python.clone(),
+            home: home().to_path_buf(),
+            base_manifest: base.clone(),
+            lexicon: lexicon.clone(),
+            tts: tts.clone(),
+        })
+    });
+    if let Some(manifest) = phrase_setup.and_then(|(_, _, manifest)| manifest) {
+        if let Some(r) = replay.as_mut() {
+            r.manifest = manifest;
+        }
+    }
     storage.clear_stale_socket()?;
     let path = storage.socket_path();
     let listener = UnixListener::bind(&path)?;
@@ -530,6 +577,9 @@ pub async fn serve(
     core.configure_llm(&storage, net_allow_loopback);
     core.configure_connections(&storage);
     core.configure_registry(&storage);
+    if let Some(runtime) = phrase_runtime {
+        core.configure_phrases(runtime);
+    }
     core.configure_skills(&storage);
     // A6: the ledger's consent starts the same live pipeline as `--live-audio`, and only with a Ready ledger
     // and the wake profile (the live path replaces the boot replay). Safe mode carries the defaults: off.
@@ -597,7 +647,7 @@ pub async fn serve(
     }
     let (wake_sender, mut wake_rx) = mpsc::channel(2);
     let mut wake_tx = Some(wake_sender);
-    let mut command_wake_text = String::new();
+    let mut command_wake_texts: Vec<String> = Vec::new();
     let mut wake_input = match replay.as_mut() {
         Some(r) => {
             let bytes = fs::read(&r.manifest)?;
@@ -608,21 +658,44 @@ pub async fn serve(
                 core.enable_capture();
             }
             let mut descriptor: WakeDescriptor = serde_json::from_slice(&bytes)?;
-            if let Some(phrase) = storage.config.wake_phrase.as_ref() {
-                descriptor.active_phrase = phrase.clone();
+            // A Core keyword set names its own active list. The packaged manifest takes the stored legacy phrase
+            // only when that phrase is one of its own (a custom phrase falls back to the packaged default).
+            if descriptor.active_phrases.is_empty() {
+                if let Some(phrase) = storage
+                    .config
+                    .wake_phrase
+                    .as_ref()
+                    .filter(|p| descriptor.supported_phrases.contains_key(p.as_str()))
+                {
+                    descriptor.active_phrase = phrase.clone();
+                }
             }
+            let custom = crate::phrases::read_custom(&storage.root).unwrap_or_default();
             if let Some(pack) = base_pack.as_mut() {
                 pack.active_phrase = Some(descriptor.active_phrase.clone());
-                command_wake_text = pack
-                    .text(&descriptor.active_phrase)
-                    .ok_or_else(|| io::Error::other("wake phrase missing"))?
-                    .into();
+                command_wake_texts = descriptor
+                    .active_ids()
+                    .iter()
+                    .map(|id| {
+                        pack.text(id)
+                            .map(str::to_string)
+                            .or_else(|| {
+                                custom
+                                    .phrases
+                                    .iter()
+                                    .find(|p| &p.id == id)
+                                    .map(|p| p.text.clone())
+                            })
+                            .ok_or_else(|| io::Error::other("wake phrase missing"))
+                    })
+                    .collect::<io::Result<Vec<String>>>()?;
             } else {
-                command_wake_text = descriptor
-                    .supported_phrases
-                    .get(&descriptor.active_phrase)
+                command_wake_texts = descriptor
+                    .active_ids()
+                    .iter()
+                    .filter_map(|id| descriptor.supported_phrases.get(id))
                     .map(|label| label.replace('_', " "))
-                    .unwrap_or_default();
+                    .collect();
             }
             r.active_phrase = Some(descriptor.active_phrase.clone());
             let mut input =
@@ -638,7 +711,7 @@ pub async fn serve(
         core.configure_pack(pack);
     }
     if commands_sandbox {
-        core.configure_commands(command_wake_text);
+        core.configure_command_wakes(command_wake_texts);
     }
     // Test/dev only: shortens the 120 s proposal TTL (100..=120000 ms). Unset means production.
     let tool_ttl = match std::env::var("GIDEON_TOOL_PROPOSAL_TTL_MS") {
@@ -668,6 +741,11 @@ pub async fn serve(
     let mut speech_task: Option<(
         u64,
         tokio::task::JoinHandle<io::Result<crate::tts::Summary>>,
+    )> = None;
+    // Synthetic wake measurement of one custom phrase (src/phrases.rs run_test); at most one at a time.
+    let mut phrase_task: Option<(
+        String,
+        tokio::task::JoinHandle<io::Result<crate::phrases::Measurement>>,
     )> = None;
     let (speech_progress, mut speech_progress_rx) = mpsc::channel(2);
     let mut pending_replay = if stt_task.is_some() {
@@ -737,6 +815,17 @@ pub async fn serve(
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
+            result = async { (&mut phrase_task.as_mut().expect("active phrase test").1).await }, if phrase_task.is_some() => {
+                let (id, _) = phrase_task.take().expect("active phrase test");
+                let measured = result.ok().and_then(Result::ok);
+                let ok = measured.is_some();
+                if let Some(measurement) = measured {
+                    let _ = crate::phrases::record_measurement(&storage.root, &id, measurement);
+                }
+                core.phrase_test_finished(&id, ok);
+                core.configure_storage(&storage);
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
             Some(event)=live_events_rx.recv() => {core.live_event(event);},
             Some(wire) = plugin_events.recv() => {
                 if let Some(event) = plugins.accept(wire) {
@@ -855,6 +944,12 @@ pub async fn serve(
                 let _ = task.await;
             }
         }
+        if phrase_task.is_none() {
+            if let Some(job) = core.take_phrase_job() {
+                let id = job.id.clone();
+                phrase_task = Some((id, tokio::spawn(crate::phrases::run_test(job))));
+            }
+        }
         if let Some(job) = core.take_speech_job() {
             let config = tts.as_ref().expect("configured TTS").clone();
             let playback = live_audio.then(|| crate::live::Playback {
@@ -897,6 +992,10 @@ pub async fn serve(
         }
     }
     if let Some((_, task)) = speech_task.take() {
+        task.abort();
+        let _ = task.await;
+    }
+    if let Some((_, task)) = phrase_task.take() {
         task.abort();
         let _ = task.await;
     }

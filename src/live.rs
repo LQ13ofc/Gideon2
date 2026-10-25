@@ -338,10 +338,27 @@ pub fn worker_mounts(manifest: &Path) -> io::Result<Vec<PathBuf>> {
             mounts.push(dir.to_path_buf());
         }
     }
+    // A Core keyword set (src/phrases.rs) keeps its keyword file beside the manifest in its own directory.
+    if let Some(dir) = keyword_dir_of(&value) {
+        mounts.push(dir);
+    }
     if mounts.iter().any(|p| !p.is_absolute()) {
         return Err(io::Error::other("absolute mount required"));
     }
     Ok(mounts)
+}
+
+/// Directory of the keyword file named by a runtime manifest (`keywords_file`), when there is one.
+pub fn keyword_dir(manifest: &Path) -> io::Result<Option<PathBuf>> {
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(manifest)?)?;
+    Ok(keyword_dir_of(&value))
+}
+
+fn keyword_dir_of(value: &serde_json::Value) -> Option<PathBuf> {
+    value["keywords_file"]
+        .as_str()
+        .and_then(|file| Path::new(file).parent())
+        .map(Path::to_path_buf)
 }
 
 fn spawn_worker(wake: &WakeSpec, settings: &Settings, start_us: u64) -> io::Result<Child> {

@@ -13,6 +13,7 @@ from bridge import CONN_ACCESS,CONN_ARGS_LIMIT,CONN_CODES,CONN_MESSAGES,CONN_STA
 from bridge import REG_MESSAGES,REG_PURPOSES,REG_STATUSES,REG_VISUAL_WARNING,valid_agent_step
 from bridge import RESTART_BACK_TEXT,RESTART_TIMEOUT_MS,RESTART_TIMEOUT_TEXT,RESTART_WAIT_TEXT
 from bridge import display_effect,display_risk,grant_rows,pending_count
+from bridge import PHRASE_MESSAGES,WAKE_QUALIFICATION_LABELS,display_wake_entry,phrase_check_ok,wake_phrases_block_ok,wake_setting_list_ok
 from bridge import CAP_DEADLINE_MS,CAP_RESULT_LIMIT,CAPABILITY_MESSAGES,capability_code_message,capability_request,clip_bytes,hub_storage,package_info
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer
@@ -2972,6 +2973,66 @@ def audio_snapshot(devices=None,live=None,prefs=None):
     if devices is not None:snap['audio']['devices']=devices
     if prefs:snap['preferences'].update(prefs)
     return snap
+LANGUAGE_LABELS={'en':'Inglês','fr':'Francês','pt-BR':'Português (Brasil)'}
+def lang_item(ident,kind,state,**kw):
+    """One row of snapshot 'languages' with every key the Core sends (src/languages.rs ItemView)."""
+    item={'id':ident,'kind':kind,'label':LANGUAGE_LABELS[ident],'state':state,'engine':None,'size_bytes':None,'size_partial':False,'size_note':None,'license':None,'sha256':None,'quality':'não medido','evidence':None,'voices':[],'reason':None,'selected':False,'source':'teste'}
+    if state=='available_not_installed':item['reason']='Não instalado: Aguardando aprovação do download pelo dono'
+    item.update(kw);item['selectable']=state=='bundled'
+    return item
+def languages_block(stt=('en',),tts='en',voice='alba',restart=(False,False)):
+    stt_items=[lang_item('en','stt','bundled',engine='moonshine',license='MIT',selected='en' in stt,quality='medido pelo projeto'),
+               lang_item('fr','stt','available_not_installed',engine='vosk',size_bytes=41000000,size_partial=True,license='Apache 2.0',selected='fr' in stt),
+               lang_item('pt-BR','stt','available_not_installed',engine='vosk-pt',size_bytes=31000000,size_partial=True,license='Apache 2.0',selected='pt-BR' in stt)]
+    tts_items=[lang_item('en','tts','bundled',engine='pocket',license='CC-BY-4.0',voices=['alba'],selected=tts=='en',quality='medido pelo projeto'),
+               lang_item('fr','tts','available_not_installed',engine='pocket-fr',size_bytes=219336289,size_partial=True,license='CC-BY-4.0',selected=tts=='fr'),
+               lang_item('pt-BR','tts','available_not_installed',engine='pocket-pt',size_bytes=219337561,size_partial=True,license='CC-BY-4.0',selected=tts=='pt-BR')]
+    wake_items=[lang_item('en','wake','bundled',engine='kws'),lang_item('fr','wake','unsupported',reason='Sem modelo de ativação'),lang_item('pt-BR','wake','unsupported',reason='Sem modelo de ativação')]
+    return {'version':1,'engines':{'stt':stt_items,'tts':tts_items,'wake':wake_items},'stt_selected':list(stt),'tts_selected':tts,'tts_voice':voice,
+            'restart_required':{'stt':restart[0],'tts':restart[1]},'install':{'available':False,'reason':'Aguardando aprovação do download pelo dono'}}
+class LanguagesBridge(unittest.TestCase):
+    def snapshot(self,languages=None,prefs=None):
+        snap=audio_snapshot(prefs=prefs or {'stt_languages':['en'],'tts_language':'en','tts_voice':'alba'})
+        if languages is not None:snap['languages']=languages
+        return snap
+    def test_snapshot_block_validates_and_drives_the_properties(self):
+        from bridge import CODE_MESSAGES
+        bridge,_=connect_bridge(self,self.snapshot())
+        bridge._apply(validate_snapshot(self.snapshot(languages_block(stt=('en','fr'),restart=(True,False))),'r',1))
+        self.assertEqual(bridge.languageSttSelected,['en','fr'])
+        self.assertEqual((bridge.languageTtsSelected,bridge.languageTtsVoice),('en','alba'))
+        self.assertTrue(bridge.languageRestartStt);self.assertFalse(bridge.languageRestartTts)
+        self.assertEqual(len(bridge.languageSttItems),3);self.assertEqual(len(bridge.languageTtsItems),3)
+        self.assertEqual(bridge.languageInstallReason,'Aguardando aprovação do download pelo dono')
+        self.assertTrue(bridge.languagesAvailable)
+        self.assertIn('não instalado',CODE_MESSAGES['language_not_installed'])
+    def test_malformed_languages_blocks_are_rejected(self):
+        good=languages_block()
+        def broken(mutate):
+            block=copy.deepcopy(good);mutate(block);return block
+        bad=[broken(lambda b:b.update(extra=1)),
+             broken(lambda b:b['engines']['stt'][1].update(selectable=True)),
+             broken(lambda b:b.update(stt_selected=[])),
+             broken(lambda b:b['install'].update(available=True)),
+             broken(lambda b:b['restart_required'].update(stt='yes')),
+             broken(lambda b:b['engines']['tts'][0].update(state='mystery')),
+             broken(lambda b:b['engines']['stt'][0].update(kind='tts')),
+             broken(lambda b:b.update(stt_selected=['en','en']))]
+        for block in bad:
+            with self.assertRaises(ValueError):validate_snapshot(self.snapshot(block),'r',1)
+        # Preference keys are checked too: a wrong language tag or voice is refused before the UI sees it.
+        with self.assertRaises(ValueError):validate_snapshot(self.snapshot(prefs={'stt_languages':['en'],'tts_language':'en','tts_voice':'a b'}),'r',1)
+    def test_set_languages_refuses_malformed_input_locally_and_sends_one_request(self):
+        from bridge import CODE_MESSAGES
+        bridge,peer=connect_bridge(self,self.snapshot())
+        bridge.setLanguages('nope','en','alba');self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['invalid_languages'])
+        bridge.setLanguages('["en","en"]','en','alba');self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['invalid_languages'])
+        bridge.setLanguages('["en"]','en','bad voice!');self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['invalid_languages'])
+        bridge.setLanguages('["fr"]','en','alba');request=next_request(peer)
+        self.assertEqual(request['op'],'language_preference')
+        self.assertEqual((request['revision'],request['stt_languages'],request['tts_language'],request['tts_voice']),(0,['fr'],'en','alba'))
+        answer(peer,request,self.snapshot(),code='language_not_installed');settle(bridge)
+        self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['language_not_installed'])
 class AudioBridge(unittest.TestCase):
     def test_sensitivity_slot_sends_one_preferences_request_and_keeps_other_fields(self):
         bridge,peer=connect_bridge(self,audio_snapshot())
@@ -3197,6 +3258,61 @@ def qml_audio_child():
             del engine;del bridge
     print(f'qml audio checks ok: {len(checks)}',flush=True)
     return 0
+class WakePhrases(unittest.TestCase):
+    """Frases de ativação: strict wire validators, Portuguese codes and the row shape the page reads (no Qt)."""
+    BLOCK={'max_active':5,'max_custom':8,'custom_revision':1,'lexicon':True,
+           'settings':[{'id':'hey_gideon','active':True,'sensitivity':1.2},{'id':'custom_0123456789ab','active':False}],
+           'active':['hey_gideon'],
+           'phrases':[{'id':'hey_gideon','text':'Hey Gideon','tokens':'HH EY1 G IH1 D IY0 AH0 N','label':'HEY_GIDEON','language':'en',
+                       'qualification':'dev_qualified','custom':False,'selectable':True,'boost':1.2,'threshold':0.22},
+                      {'id':'custom_0123456789ab','text':'Light Gideon','tokens':'L AY1 T G IH1 D IY0 AH0 N','label':'CUSTOM_0123456789AB',
+                       'language':'en','qualification':'custom','custom':True,'selectable':False,'boost':1.2,'threshold':0.22,
+                       'measurement':{'source':'synthetic','positives':4,'hits':3,'negatives':6,'false_wakes':0,'latency_ms':900,'passed':True}}],
+           'test':{'id':'custom_0123456789ab','state':'done'}}
+    def test_block_and_list_validators_refuse_every_drift(self):
+        self.assertTrue(wake_phrases_block_ok(self.BLOCK))
+        for mutate in (lambda b:b.update(extra=1),
+                       lambda b:b['phrases'][0].update(qualification='certified'),
+                       lambda b:b['phrases'][1]['measurement'].update(source='human'),
+                       lambda b:b['phrases'][1]['measurement'].update(passed=1),
+                       lambda b:b.update(active=['a','b','c','d','e','f']),
+                       lambda b:b.update(test={'id':'x','state':'maybe'}),
+                       lambda b:b.update(max_active=True),
+                       lambda b:b.update(settings=[{'id':'hey_gideon','active':True,'sensitivity':2.0}])):
+            block=copy.deepcopy(self.BLOCK);mutate(block)
+            self.assertFalse(wake_phrases_block_ok(block))
+        self.assertTrue(wake_setting_list_ok([{'id':f'p{i}','active':True} for i in range(5)]))
+        self.assertFalse(wake_setting_list_ok([{'id':f'p{i}','active':True} for i in range(6)]))
+        self.assertFalse(wake_setting_list_ok([{'id':'p','active':True},{'id':'p','active':False}]))
+        self.assertFalse(wake_setting_list_ok([{'id':'p','active':1}]))
+    def test_check_and_codes_have_portuguese_text(self):
+        self.assertTrue(phrase_check_ok({'ok':True,'code':'ok','text':'Light Gideon','tokens':'L AY1 T G IH1 D IY0 AH0 N'}))
+        self.assertTrue(phrase_check_ok({'ok':False,'code':'word_not_in_lexicon','word':'blorf'}))
+        self.assertFalse(phrase_check_ok({'ok':'yes','code':'ok'}))
+        self.assertFalse(phrase_check_ok({'ok':False,'code':'ok','raw':'x'}))
+        core_codes=['phrase_empty','phrase_too_long','phrase_invalid_characters','phrase_needs_two_words','phrase_too_many_words',
+                    'phrase_too_generic','phrase_too_few_tokens','word_not_in_lexicon','token_not_in_vocabulary','lexicon_unavailable',
+                    'phrase_duplicate','phrase_store_full','phrase_not_found','phrase_in_use','phrase_unmeasured',
+                    'phrase_measurement_failed','phrase_test_running','phrase_test_unavailable','phrase_test_failed',
+                    'too_many_active_phrases','invalid_wake_phrases','wake_start_failed','stale_phrase_store','phrase_store_error',
+                    'configuration_not_ready']
+        for code in core_codes:
+            self.assertIn(code,PHRASE_MESSAGES,code)
+            self.assertTrue(PHRASE_MESSAGES[code].strip(),code)
+        self.assertIn('não testada',WAKE_QUALIFICATION_LABELS['custom'])
+    def test_rows_show_switch_sensitivity_and_qualification(self):
+        block=copy.deepcopy(self.BLOCK)
+        rows={r['id']:r for r in (display_wake_entry(e,block['settings'],set(block['active'])) for e in block['phrases'])}
+        self.assertTrue(rows['hey_gideon']['active'])
+        self.assertEqual(rows['hey_gideon']['sensitivity'],1.2)
+        self.assertEqual(rows['hey_gideon']['qualification_label'],'em desenvolvimento')
+        self.assertFalse(rows['custom_0123456789ab']['active'])
+        self.assertEqual(rows['custom_0123456789ab']['qualification_label'],'personalizada · teste sintético')
+        unmeasured=dict(block['phrases'][1],measurement=None)
+        self.assertEqual(display_wake_entry(unmeasured,block['settings'],set())['qualification_label'],'personalizada · não testada')
+        # The pack-level wake choices keep working for the legacy picker.
+        self.assertEqual(WAKE_QUALIFICATION_LABELS['dev_qualified'],'em desenvolvimento')
+
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_SHELL_CHILD:sys.exit(qml_shell_child())

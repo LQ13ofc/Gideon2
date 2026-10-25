@@ -19,6 +19,15 @@ struct Reference {
 struct Phrase {
     text: String,
     evidence: Reference,
+    /// KWS phone transcription (`HH EY1 G ...`). Required: custom phrases are tokenized the same way.
+    tokens: String,
+    #[serde(default)]
+    language: Option<String>,
+    /// Keyword boost and base threshold of the phrase; the evidence file must measure the same values.
+    #[serde(default)]
+    boost: Option<f32>,
+    #[serde(default)]
+    threshold: Option<f32>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,6 +38,9 @@ struct Definition {
     stt_profile_sha256: String,
     tts_profile_sha256: String,
     qualification_profile: Reference,
+    /// Pronunciation lexicon pinned by digest; needed to tokenize custom phrases (absent = no custom phrases).
+    #[serde(default)]
+    lexicon: Option<Reference>,
     phrases: BTreeMap<String, Phrase>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -36,6 +48,12 @@ pub struct WakeChoice {
     pub id: String,
     pub text: String,
     pub qualification: &'static str,
+    /// Keyword label (`HEY_GIDEON`), KWS phones, language and tuned boost/threshold of the phrase.
+    pub label: String,
+    pub tokens: String,
+    pub language: String,
+    pub boost: f32,
+    pub threshold: f32,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
@@ -121,6 +139,21 @@ fn json(path: &Path) -> io::Result<serde_json::Value> {
 }
 fn text(value: &serde_json::Value) -> io::Result<&str> {
     value.as_str().ok_or_else(invalid)
+}
+/// KWS phone transcription: 1..=200 bytes of upper-case phones (with stress digits) separated by spaces.
+fn valid_tokens(tokens: &str) -> bool {
+    !tokens.is_empty()
+        && tokens.len() <= 200
+        && tokens.split(' ').all(|p| {
+            !p.is_empty()
+                && p.bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        })
+}
+/// Path and digest of the pronunciation lexicon of a pack, when the pack declares one.
+pub fn lexicon_reference(path: &Path) -> io::Result<Option<(PathBuf, String)>> {
+    let def: Definition = serde_json::from_value(json(path)?).map_err(|_| invalid())?;
+    Ok(def.lexicon.map(|l| (l.path, l.sha256)))
 }
 fn artifacts(root: &str, hashes: &serde_json::Value) -> io::Result<()> {
     let root = Path::new(root);
@@ -260,6 +293,9 @@ pub fn load(path: &Path, wake_path: &Path, tts_path: &Path) -> io::Result<Snapsh
         return Err(invalid());
     }
     let mut choices = Vec::new();
+    if let Some(lexicon) = &def.lexicon {
+        verified(&lexicon.path, &lexicon.sha256)?;
+    }
     for (id, phrase) in def.phrases {
         if phrase.text.trim() != phrase.text
             || phrase.text.is_empty()
@@ -276,7 +312,26 @@ pub fn load(path: &Path, wake_path: &Path, tts_path: &Path) -> io::Result<Snapsh
         {
             return Err(invalid());
         }
-        if evidence["threshold"].as_f64() != Some(0.25)
+        let boost = phrase.boost.unwrap_or(crate::phrases::DEFAULT_BOOST);
+        let base_threshold = phrase
+            .threshold
+            .unwrap_or(crate::phrases::DEFAULT_THRESHOLD);
+        // Boost 0 is the unboosted measurement (the packaged Okay phrase); it stays in the keyword file.
+        let well_formed = (0.0..=10.0).contains(&boost)
+            && base_threshold > 0.0
+            && base_threshold < 1.0
+            && valid_tokens(&phrase.tokens);
+        if !well_formed {
+            return Err(invalid());
+        }
+        // The evidence measured exactly this boost and threshold (the keyword line it describes).
+        let measured = |value: &serde_json::Value, expected: f32| {
+            value
+                .as_f64()
+                .is_some_and(|v| (v - f64::from(expected)).abs() < 1e-6)
+        };
+        if !measured(&evidence["threshold"], base_threshold)
+            || !measured(&evidence["boost"], boost)
             || evidence["score"].as_f64() != Some(1.)
             || evidence["threads"].as_u64() != Some(1)
             || evidence["provider"] != "cpu"
@@ -304,6 +359,7 @@ pub fn load(path: &Path, wake_path: &Path, tts_path: &Path) -> io::Result<Snapsh
                 .as_f64()
                 .is_some_and(|n| n >= 3600.);
         choices.push(WakeChoice {
+            label: crate::phrases::label_of(&id),
             id,
             text: phrase.text,
             qualification: if qualified {
@@ -311,6 +367,10 @@ pub fn load(path: &Path, wake_path: &Path, tts_path: &Path) -> io::Result<Snapsh
             } else {
                 "poc_required"
             },
+            tokens: phrase.tokens,
+            language: phrase.language.unwrap_or_else(|| "en".into()),
+            boost,
+            threshold: base_threshold,
         });
     }
     let snapshot = Snapshot {

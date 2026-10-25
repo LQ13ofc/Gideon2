@@ -32,7 +32,7 @@ fn pactl_json_lists_inputs_outputs_defaults_and_sanitized_labels() {
         ids(&found.inputs),
         ["alsa_input.pci-0000_00_1f.3.analog-stereo", "usb-mic.1"]
     );
-    assert_eq!(found.inputs[0].label, "Mic _Built-in_ a____o");
+    assert_eq!(found.inputs[0].label, "Mic _Built-in_ ação");
     assert!(!found.inputs[0].default);
     assert!(found.inputs[1].default, "usb-mic.1 is the default source");
     assert_eq!(

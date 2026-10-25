@@ -486,6 +486,84 @@ class SnapshotContract(unittest.TestCase):
         self.assertFalse(PERCEPTION_OUTPUTS['computer_control.tree'](bad_tree))
         self.core.stop()
 
+    def test_wake_phrase_ops_validate_against_real_core(self):
+        # Frases de ativação on the real Core: every snapshot passes the bridge validator; the synthetic test runs the
+        # real TTS and the real KWS offline (no devices). Ops refused with stable codes; nothing silently accepted.
+        self.core.start()
+        data = self.core.snap('phrases boot')
+        self.assertTrue(data['wake_phrases']['lexicon'])
+        self.assertEqual(data['wake_phrases']['active'], ['hey_gideon'])
+        self.assertEqual(data['wake_phrases']['custom_revision'], 0)
+        self.assertEqual(self.core.req('wake_phrase_validate', text='hey blorf')['code'], 'word_not_in_lexicon')
+        self.assertEqual(self.core.snap('phrases refused')['phrase_check']['word'], 'blorf')
+        self.assertEqual(self.core.req('wake_phrase_validate', text='hey')['code'], 'phrase_needs_two_words')
+        added = self.core.req('wake_phrase_add', revision=0, text='Light Gideon')
+        self.assertEqual(added['code'], 'ok')
+        data = self.core.snap('phrases added')
+        self.assertEqual(data['wake_phrases']['custom_revision'], 1)
+        custom = next(p for p in data['wake_phrases']['phrases'] if p['custom'])
+        self.assertEqual(custom['qualification'], 'custom')
+        self.assertNotIn('measurement', custom)  # absent until a synthetic measurement exists
+        revision = data['preferences']['revision']
+        self.assertEqual(self.core.req('wake_phrase_add', revision=0, text='Light Gideon')['code'], 'stale_phrase_store')
+        # Not measured yet: the Core refuses to activate it, whatever the list.
+        refused = self.core.req('select_wake_phrases', revision=revision, phrases=[
+            {'id': 'hey_gideon', 'active': True}, {'id': custom['id'], 'active': True}], acknowledge_untested=False)
+        self.assertEqual(refused['code'], 'phrase_unmeasured')
+        self.assertEqual(self.core.req('select_wake_phrases', revision=revision, phrases=[
+            {'id': 'okay_gideon', 'active': True}], acknowledge_untested=False)['code'], 'wake_not_qualified')
+        # Synthetic measurement: asynchronous; the view reports running, then done with a stored result.
+        self.assertEqual(self.core.req('wake_phrase_test', id=custom['id'])['code'], 'ok')
+        until = time.monotonic() + 300
+        while True:
+            data = self.core.snap('phrases testing')
+            test = data['wake_phrases'].get('test')
+            if test and test['state'] != 'running':
+                break
+            self.assertLess(time.monotonic(), until, 'synthetic phrase test did not finish')
+            time.sleep(0.5)
+        self.assertEqual(test['state'], 'done')
+        measured = next(p for p in data['wake_phrases']['phrases'] if p['id'] == custom['id'])['measurement']
+        self.assertEqual(measured['source'], 'synthetic')
+        self.assertEqual(measured['negatives'], 6)
+        acknowledge = not measured['passed']
+        selected = self.core.req('select_wake_phrases', revision=revision, phrases=[
+            {'id': 'hey_gideon', 'active': True, 'sensitivity': 1.2}, {'id': custom['id'], 'active': True}],
+            acknowledge_untested=acknowledge)
+        self.assertEqual(selected['code'], 'ok')
+        data = self.core.snap('phrases selected')
+        self.assertEqual(data['wake_phrases']['active'], ['hey_gideon', custom['id']])
+        self.assertEqual(data['preferences']['wake_phrase'], 'hey_gideon')
+        self.assertEqual(data['configuration_status'], 'restart_required')
+        keywords = (self.root / 'wake-runtime' / 'current' / 'keywords.txt').read_text()
+        # Per-phrase sensitivity 1.2 moves the threshold to 0.22 * 0.8; the custom phrase keeps its own line.
+        self.assertIn('#0.176 @HEY_GIDEON', keywords)
+        self.assertIn(f"@{custom['id'].upper()}", keywords)
+        # While a restart is pending the Core refuses further wake changes (same rule as select_wake).
+        store_revision = data['wake_phrases']['custom_revision']
+        self.assertEqual(self.core.req('wake_phrase_remove', revision=store_revision, id=custom['id'])['code'],
+                         'configuration_not_ready')
+        self.assertEqual(self.core.req('select_wake_phrases', revision=revision, phrases=[
+            {'id': 'hey_gideon', 'active': True}], acknowledge_untested=False)['code'], 'configuration_not_ready')
+        # After the restart the list in use protects its custom phrase from removal.
+        self.core.stop()
+        self.core.start()
+        data = self.core.snap('phrases after restart')
+        self.assertEqual(data['configuration_status'], 'ready')
+        self.assertEqual(data['wake_phrases']['active'], ['hey_gideon', custom['id']])
+        self.assertEqual(self.core.req('wake_phrase_remove', revision=store_revision, id=custom['id'])['code'], 'phrase_in_use')
+        revision = data['preferences']['revision']
+        self.assertEqual(self.core.req('select_wake_phrases', revision=revision, phrases=[
+            {'id': 'hey_gideon', 'active': True}], acknowledge_untested=False)['code'], 'ok')
+        self.core.stop()
+        self.core.start()
+        data = self.core.snap('phrases restored')
+        self.assertEqual(data['wake_phrases']['active'], ['hey_gideon'])
+        self.assertEqual(self.core.req('wake_phrase_remove', revision=store_revision, id=custom['id'])['code'], 'ok')
+        data = self.core.snap('phrases removed')
+        self.assertFalse(any(p['custom'] for p in data['wake_phrases']['phrases']))
+        self.core.stop()
+
     def test_wake_replay_voice_session_validates_every_snapshot(self):
         # The replay starts at boot: capture, transcript, command receipt and speech (sink, PCM hash) all appear.
         self.core.start()
@@ -948,6 +1026,27 @@ class SnapshotContract(unittest.TestCase):
         self.assertTrue(pending['preferences']['live_audio'])
         self.assertEqual((pending['audio']['live']['restart_required'], pending['audio']['live']['enabled']), (True, False))
         self.assertTrue(any(e['kind'] == 'live_audio_enabled' for e in pending['events']))
+        c.stop()
+
+    def test_languages_block_validates_and_uninstalled_languages_are_refused(self):
+        """Frente 2: the languages block validates; PT and FR are refused as not installed; a refusal changes nothing."""
+        c = self.core.start()
+        snap = c.snap('languages before')
+        self.assertEqual(snap['languages']['stt_selected'], ['en'])
+        self.assertEqual((snap['languages']['tts_selected'], snap['languages']['tts_voice']), ('en', 'alba'))
+        self.assertEqual(snap['languages']['restart_required'], {'stt': False, 'tts': False})
+        self.assertFalse(snap['languages']['install']['available'])
+        revision = snap['preferences']['revision']
+        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['fr'], tts_language='en', tts_voice='alba')['code'], 'language_not_installed')
+        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['en'], tts_language='pt-BR', tts_voice='alba')['code'], 'language_not_installed')
+        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['de'], tts_language='en', tts_voice='alba')['code'], 'invalid_languages')
+        self.assertEqual(c.req('language_preference', revision=revision + 5, stt_languages=['en'], tts_language='en', tts_voice='alba')['code'], 'stale_preferences')
+        after = c.snap('after refusals')
+        self.assertEqual(after['preferences']['revision'], revision)
+        self.assertEqual(after['languages']['stt_selected'], ['en'])
+        # The same selection is accepted as a no-op: nothing is written.
+        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['en'], tts_language='en', tts_voice='alba')['code'], 'ok')
+        self.assertEqual(c.snap('no-op')['preferences']['revision'], revision)
         c.stop()
 
 if __name__ == '__main__':

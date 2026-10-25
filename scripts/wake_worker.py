@@ -61,29 +61,43 @@ class WakeEngine:
         if len(set(labels)) != len(labels) or any(not isinstance(x,str) or not x.isascii() or not x.replace('_','').isalnum() or len(x)>64 for x in [*phrases, *labels]):
             raise ValueError('invalid phrase IDs or labels')
         self.supported_phrases = tuple(phrases)
-        self.active_phrase = manifest['active_phrase']
-        if self.active_phrase not in phrases:
+        # `active_phrases` (Core runtime, several at once) or the single `active_phrase` (packaged profile).
+        active = manifest.get('active_phrases') or [manifest['active_phrase']]
+        if not isinstance(active, list) or not active or len(set(active)) != len(active) or any(p not in phrases for p in active) or len(active) > 5:
             raise ValueError('unsupported active phrase')
+        self.active_phrases = tuple(active)
+        self.active_phrase = active[0]
+        self.active_labels = {phrases[p]: p for p in active}
         self.active_label = phrases[self.active_phrase]
         self.labels = frozenset(labels)
         assets = Path(manifest['asset_root'])
+        # Core runtime manifests point the keyword file at a generated copy (src/phrases.rs); the packaged one stays in assets.
+        keywords = Path(manifest['keywords_file']) if 'keywords_file' in manifest else assets/'keywords.txt'
+        if not keywords.is_absolute(): raise ValueError('unsafe keywords path')
         required = {manifest['encoder'], manifest['decoder'], manifest['joiner'], 'tokens.txt', 'keywords.txt'}
         if set(manifest['hashes']) != required:
             raise ValueError('missing or unexpected artifact hashes')
         for name, digest in manifest['hashes'].items():
             if Path(name).name != name: raise ValueError('unsafe asset path')
-            check_hash(assets/name, digest)
+            check_hash(keywords if name == 'keywords.txt' else assets/name, digest)
         declared = []
         vocab = {line.split()[0] for line in (assets/'tokens.txt').read_text().splitlines() if line.split()}
-        for line in (assets/'keywords.txt').read_text().splitlines():
+        for line in keywords.read_text().splitlines():
             tokens = line.split()
-            if len(tokens)<2 or not tokens[-1].startswith('@') or any(t not in vocab for t in tokens[:-1]):
+            # Optional per-phrase `:boost` and `#threshold` fields sit between the phones and `@LABEL`.
+            options = [t for t in tokens[:-1] if t[:1] in (':', '#')]
+            phones = [t for t in tokens[:-1] if t[:1] not in (':', '#')]
+            if len(tokens)<2 or not tokens[-1].startswith('@') or any(t not in vocab for t in phones) or not phones or len(options) > 2:
                 raise ValueError('invalid keyword tokens')
+            for option in options:
+                if not (0.0 <= float(option[1:]) <= 10.0 if option[0] == ':' else 0.0 < float(option[1:]) < 1.0):
+                    raise ValueError('invalid keyword option')
             declared.append(tokens[-1][1:])
-        if len(declared) != len(self.labels) or set(declared) != self.labels:
+        # Several lines may carry one label (spelling variants); every label must be declared and nothing else.
+        if set(declared) != self.labels:
             raise ValueError('keyword catalog mismatch')
         self.start_us = start_us
-        self.kws = sherpa_onnx.KeywordSpotter(tokens=str(assets/'tokens.txt'), encoder=str(assets/manifest['encoder']), decoder=str(assets/manifest['decoder']), joiner=str(assets/manifest['joiner']), keywords_file=str(assets/'keywords.txt'), num_threads=1, provider='cpu', keywords_threshold=dev_threshold, keywords_score=1.0)
+        self.kws = sherpa_onnx.KeywordSpotter(tokens=str(assets/'tokens.txt'), encoder=str(assets/manifest['encoder']), decoder=str(assets/manifest['decoder']), joiner=str(assets/manifest['joiner']), keywords_file=str(keywords), num_threads=1, provider='cpu', keywords_threshold=dev_threshold, keywords_score=1.0)
         self.reset()
 
     def reset(self):
@@ -113,13 +127,13 @@ class WakeEngine:
             result = self.kws.get_result(self.stream)
             if result:
                 if result not in self.labels: raise ValueError('unsupported detection')
-                if result != self.active_label:
+                if result not in self.active_labels:
                     self.kws.reset_stream(self.stream)
                     continue
                 native = self.kws.keyword_spotter.get_result(self.stream)
                 times = native.timestamps
                 start = self.stream_start_us + int((native.start_time + min(times))*1e6) if times else self.last_end-80000
-                events.append({'phrase_id':self.active_phrase,'confidence':None,'start_us':start,'end_us':self.last_end,'engine':ENGINE})
+                events.append({'phrase_id':self.active_labels[result],'confidence':None,'start_us':start,'end_us':self.last_end,'engine':ENGINE})
                 self.kws.reset_stream(self.stream)
         return events
 
@@ -266,8 +280,12 @@ def parse(argv):
     parser.add_argument('--start-us', type=int, default=0)
     parser.add_argument('--active-phrase')
     parser.add_argument('--keywords-threshold', type=float, default=0.25)
+    # Preflight only: builds the engine (models, hashes, keyword file) and exits 0. Used before a switch.
+    parser.add_argument('--check', action='store_true')
     args = parser.parse_args(argv)
-    if args.live == (args.fixture is not None): raise ValueError('invalid arguments')
+    if args.check:
+        if args.live or args.fixture is not None: raise ValueError('invalid arguments')
+    elif args.live == (args.fixture is not None): raise ValueError('invalid arguments')
     if args.start_us < 0: raise ValueError('invalid start')
     check_threshold(args.keywords_threshold)
     return args
@@ -276,8 +294,13 @@ def parse(argv):
 if __name__ == '__main__':
     arguments = parse(sys.argv[1:])
     manifest = json.loads(Path(arguments.manifest).read_text())
-    if arguments.active_phrase: manifest['active_phrase'] = arguments.active_phrase
+    # A Core runtime manifest names its active list; the single-phrase override only applies to packaged profiles.
+    if arguments.active_phrase and 'active_phrases' not in manifest:
+        manifest['active_phrase'] = arguments.active_phrase
     engine = make_engine(manifest, arguments.keywords_threshold, arguments.start_us)
+    if arguments.check:
+        print(json.dumps({'check': 'ok', 'engine': manifest['engine'], 'active_phrases': list(getattr(engine, 'active_phrases', ()))}), flush=True)
+        sys.exit(0)
     vad = VadEngine(manifest['vad']) if 'vad' in manifest else None
     if arguments.live:
         live(engine, vad, sys.stdin.buffer, sys.stdout)

@@ -260,6 +260,34 @@ Cada sub-aba traz o seu wireframe em escala aproximada: 1 coluna = 10 px, 1 linh
 
 ---
 
+### 7.1A Idiomas (Frente 2, NOVO)
+
+**Título**: Idiomas · **Subtítulo**: "Em que idiomas a IA fala e entende. Só idiomas instalados podem ser escolhidos."
+**Faixa de resumo**: nenhuma. A página mostra duas seções e um botão Aplicar.
+
+**Seção "A IA entende em…"** (STT): caixas de seleção (GCheckbox), de 1 a 3 idiomas. Dados: `languages.engines.stt` e `languages.stt_selected`.
+**Seção "A IA fala em…"** (TTS): botões de rádio (GRadio), um idioma por vez; a voz segue o idioma. Dados: `languages.engines.tts`, `languages.tts_selected`, `languages.tts_voice`.
+
+Cada linha mostra: nome, estado (**Instalado** / **Não instalado** / **Não suportado**), tamanho ("cerca de N MB", "(parcial)" quando o total é soma de arquivos conhecidos), licença, qualidade ("não medido" quando não houver medição) e, quando houver, o motivo.
+
+**Estados e controles**
+- `bundled` (Instalado): selecionável. Hoje: inglês (TTS e STT) e o wake em inglês.
+- `available_not_installed` (Não instalado): aparece desativado, com o botão **Instalar** desativado e o motivo **"Aguardando aprovação do download pelo dono"**. Nenhum download é feito pela página.
+- `unsupported` (Não suportado): desativado, com o motivo do catálogo. Hoje: wake em português e em francês.
+
+**Regras.**
+- Aplicar envia uma única operação `language_preference` com a lista de STT, o idioma de fala e a voz (CAS em `revision`). O botão só fica ativo com mudança e com 1 a 3 idiomas de escuta.
+- O Core recusa idioma não instalado (`language_not_installed`), idioma sem suporte (`language_unsupported`) e lista inválida (`invalid_languages`). A recusa não grava nada.
+- A escolha salva vale no próximo início do Core: aparece a nota "Idioma salvo. Reinicie o Core para aplicar." (`restart_required.stt` / `restart_required.tts`).
+- Desfazer usa a reversão de preferências existente. Se o valor anterior não estiver instalado, a reversão é recusada (`language_not_installed`).
+- O idioma da interface é outra configuração e continua em português.
+
+**Medição e honestidade.** O estado "Instalado" de um idioma significa que o pacote tem os arquivos, não que a qualidade foi medida. A qualidade só aparece como medida quando houver evidência em `docs/evidence/`. Pesquisa e lista de downloads: `docs/research/idiomas-stt-tts.md`.
+
+**Dados do Core.** Snapshot `languages` (`version`, `engines`, `stt_selected`, `tts_selected`, `tts_voice`, `restart_required`, `install`); preferências `stt_languages`, `tts_language`, `tts_voice` (ausentes em ledgers antigos: padrão inglês).
+
+---
+
 ### 7.2 Áudio
 
 **Título**: Áudio · **Subtítulo**: "Volume e feedback da resposta do Gideon. Vale a partir da próxima sessão."

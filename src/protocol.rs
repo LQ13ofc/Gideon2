@@ -71,6 +71,39 @@ pub enum Operation {
         revision: u64,
         phrase_id: String,
     },
+    /// Wake phrase list (`wake_phrases` preference, at most 5 active). CAS on `revision`. An active custom
+    /// phrase whose synthetic test failed needs `acknowledge_untested`.
+    SelectWakePhrases {
+        revision: u64,
+        phrases: Vec<crate::phrases::Setting>,
+        acknowledge_untested: bool,
+    },
+    /// Checks a candidate custom phrase without storing it (live preview of the add dialog).
+    WakePhraseValidate {
+        text: String,
+    },
+    /// Stores a checked custom phrase. CAS on the custom store revision (`wake_phrases.custom_revision`).
+    WakePhraseAdd {
+        revision: u64,
+        text: String,
+    },
+    /// Removes a custom phrase that is not active. CAS on the custom store revision.
+    WakePhraseRemove {
+        revision: u64,
+        id: String,
+    },
+    /// Starts the synthetic measurement of a custom phrase (`wake_phrases.test` shows the progress).
+    WakePhraseTest {
+        id: String,
+    },
+    /// Idiomas de fala (`tts_language` + `tts_voice`) e de transcrição (`stt_languages`, 1..=3). CAS on
+    /// `revision`; only installed languages are accepted (`languages::LanguageCatalog`). Applies at next start.
+    LanguagePreference {
+        revision: u64,
+        stt_languages: Vec<String>,
+        tts_language: String,
+        tts_voice: String,
+    },
     /// A6 consent for the live microphone. `confirmed` must be true to turn it on: the client asserts that
     /// the user accepted the consent text. Takes effect at the next Core start (`restart_required`).
     LiveAudioPreference {
@@ -421,6 +454,7 @@ pub struct Response {
     pub configuration_status: crate::storage::ConfigurationStatus,
     pub configuration_recovery_available: bool,
     pub preferences: crate::storage::Config,
+    pub languages: crate::languages::View,
     pub command: Option<crate::commands::Outcome>,
     pub tool_proposals: Vec<crate::tools::View>,
     pub agent: Option<crate::agent::View>,
@@ -436,6 +470,11 @@ pub struct Response {
     pub capture: Option<crate::capture::CaptureSummary>,
     pub wake_status: &'static str,
     pub audio: crate::live::AudioView,
+    /// Wake phrase catalog, active list and synthetic measurements (src/phrases.rs `View`).
+    pub wake_phrases: crate::phrases::View,
+    /// Result of `wake_phrase_validate` (also attached to a refused `wake_phrase_add`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phrase_check: Option<crate::phrases::Check>,
     pub version: u16,
     pub request_id: String,
     pub code: &'static str,
@@ -528,6 +567,44 @@ enum WireRequest {
         request_id: String,
         revision: u64,
         phrase_id: String,
+    },
+    SelectWakePhrases {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        phrases: Vec<crate::phrases::Setting>,
+        #[serde(default)]
+        acknowledge_untested: bool,
+    },
+    WakePhraseValidate {
+        version: u16,
+        request_id: String,
+        text: String,
+    },
+    WakePhraseAdd {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        text: String,
+    },
+    WakePhraseRemove {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        id: String,
+    },
+    WakePhraseTest {
+        version: u16,
+        request_id: String,
+        id: String,
+    },
+    LanguagePreference {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        stt_languages: Vec<String>,
+        tts_language: String,
+        tts_voice: String,
     },
     LiveAudioPreference {
         version: u16,
@@ -1013,6 +1090,68 @@ impl<'de> Deserialize<'de> for Request {
                 Operation::SelectWake {
                     revision,
                     phrase_id,
+                },
+            ),
+            WireRequest::SelectWakePhrases {
+                version,
+                request_id,
+                revision,
+                phrases,
+                acknowledge_untested,
+            } => (
+                version,
+                request_id,
+                Operation::SelectWakePhrases {
+                    revision,
+                    phrases,
+                    acknowledge_untested,
+                },
+            ),
+            WireRequest::WakePhraseValidate {
+                version,
+                request_id,
+                text,
+            } => (version, request_id, Operation::WakePhraseValidate { text }),
+            WireRequest::WakePhraseAdd {
+                version,
+                request_id,
+                revision,
+                text,
+            } => (
+                version,
+                request_id,
+                Operation::WakePhraseAdd { revision, text },
+            ),
+            WireRequest::WakePhraseRemove {
+                version,
+                request_id,
+                revision,
+                id,
+            } => (
+                version,
+                request_id,
+                Operation::WakePhraseRemove { revision, id },
+            ),
+            WireRequest::WakePhraseTest {
+                version,
+                request_id,
+                id,
+            } => (version, request_id, Operation::WakePhraseTest { id }),
+            WireRequest::LanguagePreference {
+                version,
+                request_id,
+                revision,
+                stt_languages,
+                tts_language,
+                tts_voice,
+            } => (
+                version,
+                request_id,
+                Operation::LanguagePreference {
+                    revision,
+                    stt_languages,
+                    tts_language,
+                    tts_voice,
                 },
             ),
             WireRequest::LiveAudioPreference {

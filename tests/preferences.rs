@@ -396,3 +396,73 @@ fn live_audio_consent_is_strict_off_by_default_and_rollback_keeps_it() {
     assert_eq!(restored.code, "ok");
     assert!(!storage.config.live_audio);
 }
+
+#[test]
+fn languages_are_installed_only_cas_checked_and_rollback_refuses_uninstalled_previous() {
+    use gideon_base::storage::Config;
+    // An old ledger without language keys loads with English defaults.
+    let legacy: Config =
+        serde_json::from_str(r#"{"version":1,"session_timeout_ms":30000}"#).unwrap();
+    assert_eq!(legacy.stt_languages, vec!["en".to_string()]);
+    assert_eq!(legacy.tts_language, "en");
+    assert_eq!(legacy.tts_voice, "alba");
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let (mut storage, mut core) = open(&root);
+    let now = Instant::now();
+    let language =
+        |revision: u64, stt: &[&str], tts: &str, voice: &str| Operation::LanguagePreference {
+            revision,
+            stt_languages: stt.iter().map(|s| s.to_string()).collect(),
+            tts_language: tts.into(),
+            tts_voice: voice.into(),
+        };
+    // Not installed in this build: refused, nothing written.
+    let refused = core.handle_with_storage(
+        request("l0", language(0, &["fr"], "en", "alba")),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(refused.code, "language_not_installed");
+    assert_eq!(storage.config.revision, 0);
+    let unknown = core.handle_with_storage(
+        request("l1", language(0, &["de"], "en", "alba")),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(unknown.code, "invalid_languages");
+    let stale = core.handle_with_storage(
+        request("l2", language(9, &["en"], "en", "alba")),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(stale.code, "stale_preferences");
+    // Same values: ok, and no revision is written.
+    let same = core.handle_with_storage(
+        request("l3", language(0, &["en"], "en", "alba")),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(same.code, "ok");
+    assert_eq!(storage.config.revision, 0);
+
+    // A previous choice that is no longer installed cannot be restored by rollback.
+    storage
+        .update_languages(0, vec!["fr".into()], "en".into(), "alba".into())
+        .unwrap();
+    storage
+        .update_languages(1, vec!["en".into()], "en".into(), "alba".into())
+        .unwrap();
+    core.configure_storage(&storage);
+    let before = storage.config.clone();
+    let rollback = core.handle_with_storage(
+        request("l4", Operation::RollbackPreferences { revision: 2 }),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(rollback.code, "language_not_installed");
+    assert_eq!(storage.config, before);
+    assert_eq!(rollback.languages.stt_selected, vec!["en".to_string()]);
+    assert!(!rollback.languages.restart_required.stt);
+}

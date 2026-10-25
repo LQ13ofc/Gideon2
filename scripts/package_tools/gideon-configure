@@ -21,8 +21,9 @@ PREFIX = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = os.path.join(PREFIX, "templates")
 ASSETS = os.path.join(PREFIX, "assets")
 PLACEHOLDERS = ("@PREFIX@", "@PROFILE@")
-PHRASES = [("hey_gideon", "Hey Gideon", "evidence-hey.json"),
-           ("okay_gideon", "Okay Gideon", "evidence-okay.json")]
+# (id, text, evidence template, KWS phones, boost, threshold): same values as scripts/build_base_pack.py.
+PHRASES = [("hey_gideon", "Hey Gideon", "evidence-hey.json", "HH EY1 G IH1 D IY0 AH0 N", 1.2, 0.22),
+           ("okay_gideon", "Okay Gideon", "evidence-okay.json", "OW2 K EY1 G IH1 D IY0 AH0 N", 0.0, 0.25)]
 
 
 def die(message):
@@ -228,7 +229,7 @@ def main():
 
     # 3. Evidence: relocated qualification manifest has a new sha256; results are unchanged.
     qual_sha = digest(os.path.join(profile, "qualification-manifest.json"))
-    for _, _, name in PHRASES:
+    for _, _, name, _, _, _ in PHRASES:
         with open(os.path.join(TEMPLATES, name), "r", encoding="utf-8") as handle:
             evidence = json.load(handle)
         before = evidence.get("manifest_sha256")
@@ -240,9 +241,10 @@ def main():
 
     # 4. pack.json, same structure as scripts/build_base_pack.py.
     phrases = {}
-    for ident, text, name in PHRASES:
+    for ident, text, name, tokens, boost, threshold in PHRASES:
         path = os.path.join(profile, name)
-        phrases[ident] = {"text": text, "evidence": {"path": path, "sha256": digest(path)}}
+        phrases[ident] = {"text": text, "tokens": tokens, "language": "en", "boost": boost, "threshold": threshold,
+                          "evidence": {"path": path, "sha256": digest(path)}}
     pack = {
         "version": 1,
         "id": "base-en-dev-v1",

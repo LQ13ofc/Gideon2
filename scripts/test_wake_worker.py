@@ -71,6 +71,38 @@ class NativeWakeTests(unittest.TestCase):
             with self.assertRaises(ValueError):engine.accept(samples,stamp)
         self.assertEqual(engine.last_end,0)
         self.assertEqual(engine.accept(np.zeros(1280),0),[])
+    def test_core_keyword_set_boosts_one_phrase_and_names_several_active(self):
+        # src/phrases.rs writes the keyword file (boost/threshold per line) and a runtime manifest with `keywords_file`.
+        import tempfile,hashlib
+        with tempfile.TemporaryDirectory() as td:
+            keywords=Path(td)/'keywords.txt'
+            text=('HH EY1 G IH1 D IY0 AH0 N :1.2 #0.22 @HEY_GIDEON\n'
+                  'OW2 K EY1 G IH1 D IY0 AH0 N @OKAY_GIDEON\nHH AY1 G IH1 D IY0 AH0 N @REJECT_HI\n')
+            keywords.write_text(text)
+            manifest=dict(self.manifest);manifest['keywords_file']=str(keywords)
+            manifest['hashes']=dict(self.manifest['hashes'],**{'keywords.txt':hashlib.sha256(text.encode()).hexdigest()})
+            manifest['active_phrases']=['hey_gideon'];manifest['active_phrase']='hey_gideon'
+            engine=WakeEngine(manifest)
+            self.assertEqual(engine.active_phrases,('hey_gideon',))
+            row=next(r for r in manifest['fixtures'] if r['id']=='wake-hey__bf_emma__clean')
+            samples=np.concatenate([read_fixture(row),np.zeros(16000,dtype=np.float32)])
+            events=[]
+            for offset in range(0,len(samples),1280):events+=engine.accept(samples[offset:offset+1280],offset*1000000//16000)
+            self.assertEqual([e['phrase_id'] for e in events],['hey_gideon'])
+            # A keyword line whose label is not declared, or a malformed option, stops the worker before any frame.
+            def rewrite(body):
+                # Same hash discipline as the Core: the manifest digests the keyword file it names.
+                keywords.write_text(body);manifest['hashes']=dict(self.manifest['hashes'],**{'keywords.txt':hashlib.sha256(body.encode()).hexdigest()})
+            rewrite(text.replace('@REJECT_HI','@OTHER'))
+            with self.assertRaises(ValueError):WakeEngine(manifest)
+            rewrite(text.replace(':1.2',':99'))
+            with self.assertRaises(ValueError):WakeEngine(manifest)
+            rewrite(text.replace('#0.22','#2'))
+            with self.assertRaises(ValueError):WakeEngine(manifest)
+            manifest['active_phrases']=['hey_gideon','okay_gideon'];rewrite(text)
+            self.assertEqual(WakeEngine(manifest).active_phrases,('hey_gideon','okay_gideon'))
+            manifest['active_phrases']=['hey_gideon','not_supported']
+            with self.assertRaises(ValueError):WakeEngine(manifest)
 
 
 if __name__=='__main__':unittest.main()

@@ -12,7 +12,7 @@ Nada aqui prova microfone, alto-falante, PipeWire ou Pulse reais, nem qualidade 
   `reason` só existe quando `source` é `"none"`: `no_audio_tool` (nenhuma ferramenta no PATH) ou `audio_tool_failed`.
 - Ordem: `pactl --format=json list sources|sinks` (+ `info` para o padrão), depois `pactl list short sources|sinks`, depois `pw-dump`.
 - Execução: subprocesso direto, sem shell e sem bwrap, ambiente limpo (PATH, LC_ALL=C, HOME e XDG_RUNTIME_DIR), orçamento total de 3 s, saída máxima de 64 KiB por chamada.
-- Filtros: monitores (`monitor_of_sink` ou nome `.monitor`) nunca entram. Um nome bruto fora do charset de preferência é descartado, porque um id "sanitizado" apontaria para outro dispositivo. Rótulos são sanitizados para o mesmo charset (`_` por byte fora dele, até 128 bytes). Máximo de 16 por lista.
+- Filtros: monitores (`monitor_of_sink` ou nome `.monitor`) nunca entram. Um nome bruto fora do charset de preferência é descartado, porque um id "sanitizado" apontaria para outro dispositivo. Rótulos são texto de exibição: letras e dígitos Unicode, `._:@/+ -` mantidos; cada outro caractere vira `_`; até 128 bytes, cortando em fronteira de caractere (desde o teste acústico A8: "Estéreo analógico" aparece com acentos). Máximo de 16 por lista.
 - Limitação: a chamada é síncrona no Core e pode bloquear até 3 s no pior caso. `pw-dump` não informa o padrão, então `default` fica falso.
 
 ### A5 — `--live-audio` (desligado por padrão)

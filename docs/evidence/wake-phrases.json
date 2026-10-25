@@ -1,0 +1,131 @@
+{
+  "gate": "WAKE-PHRASES",
+  "protocol": "scripts/evaluate_wake.py on the A1 fixtures (396: 76 positive, 320 negative) plus 3600 s silence",
+  "qualification_manifest_sha256": "8abb349c5af1413146922e9daf40778e383c91234599c5116672e094e96c9c0c",
+  "before": {
+    "config": "packaged keyword line: no boost, threshold 0.25",
+    "positives": 76,
+    "detected_positive": 73,
+    "recall": 0.9605263157894737,
+    "negatives": 320,
+    "false_wakes": 0,
+    "procedural_silence_s": 3600,
+    "procedural_silence_false_wakes": 0,
+    "quality": "PASS_DEV_ONLY",
+    "keywords_sha256": "8e25528ac187a79c4ede2212f45f2e846e96308769c6d583615724d829e2ffe4"
+  },
+  "after": {
+    "config": "Core default: boost 1.2, phrase threshold 0.22 (sensitivity 1.0)",
+    "positives": 76,
+    "detected_positive": 75,
+    "recall": 0.9868421052631579,
+    "negatives": 320,
+    "false_wakes": 0,
+    "procedural_silence_s": 3600,
+    "procedural_silence_false_wakes": 0,
+    "quality": "PASS_DEV_ONLY",
+    "keywords_sha256": "45ceca19fa2d9ab6580c1614ecc7e26e4dd04fb0d3e23fe0a266f3021be668a5"
+  },
+  "target_check": {
+    "min_recall": 0.9,
+    "zero_false_on_negatives": true,
+    "met": true
+  },
+  "sweep_a1": [
+    {
+      "boost": 0.0,
+      "threshold": 0.25,
+      "recall": "73/76",
+      "false": "0/320"
+    },
+    {
+      "boost": 1.0,
+      "threshold": 0.25,
+      "recall": "73/76",
+      "false": "0/320"
+    },
+    {
+      "boost": 1.1,
+      "threshold": 0.25,
+      "recall": "74/76",
+      "false": "0/320"
+    },
+    {
+      "boost": 1.2,
+      "threshold": 0.25,
+      "recall": "74/76",
+      "false": "0/320"
+    },
+    {
+      "boost": 1.3,
+      "threshold": 0.25,
+      "recall": "74/76",
+      "false": "0/320"
+    },
+    {
+      "boost": 1.2,
+      "threshold": 0.22,
+      "recall": "75/76",
+      "false": "0/320",
+      "chosen": true
+    },
+    {
+      "boost": 1.2,
+      "threshold": 0.18,
+      "recall": "75/76",
+      "false": "0/320"
+    },
+    {
+      "boost": 1.2,
+      "threshold": 0.22,
+      "extra_variant_line": "HH EY1 G IH1 D IY0 N",
+      "recall": "75/76",
+      "false": "0/320"
+    },
+    {
+      "boost": 1.5,
+      "threshold": 0.25,
+      "recall": "74/76",
+      "false": "2/320",
+      "rejected": "false wakes"
+    },
+    {
+      "boost": 1.5,
+      "threshold": 0.3,
+      "recall": "73/76",
+      "false": "2/320",
+      "rejected": "false wakes"
+    },
+    {
+      "boost": 1.5,
+      "threshold": 0.22,
+      "recall": "75/76",
+      "false": "2/320",
+      "rejected": "false wakes"
+    },
+    {
+      "boost": 2.0,
+      "threshold": 0.3,
+      "recall": "67/76",
+      "false": "10/320",
+      "rejected": "false wakes"
+    },
+    {
+      "boost": 1.0,
+      "threshold": 0.2,
+      "recall": "73/76",
+      "false": "0/320"
+    }
+  ],
+  "sweep_lab_clips": {
+    "corpus": "/tmp/gideon-wake-lab/clips.json (51 positive, 54 negative; live-equivalent framing)",
+    "packaged_three_lines_threshold_0_25": "49/51, 0 false",
+    "boost_1_2_threshold_0_22": "51/51, 0 false",
+    "boost_1_5_threshold_0_25": "51/51, 0 false (rejected on A1: 2 false wakes)"
+  },
+  "limits": [
+    "Tuning used the same synthetic corpora that measure it; the lab clips are not an independent holdout.",
+    "Four Kokoro voices and one Pocket voice; no human speech, no room or device measurement.",
+    "Live hit rate on the owner microphone is not measured here (A7 pending human validation)."
+  ]
+}

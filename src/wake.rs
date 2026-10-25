@@ -9,6 +9,9 @@ pub struct WakeDescriptor {
     pub engine: String,
     pub supported_phrases: std::collections::BTreeMap<String, String>,
     pub active_phrase: String,
+    /// Several phrases at once (Core runtime keyword sets). Empty = only `active_phrase`.
+    #[serde(default)]
+    pub active_phrases: Vec<String>,
 }
 impl WakeDescriptor {
     pub fn validate(&self) -> Result<(), AudioError> {
@@ -20,10 +23,23 @@ impl WakeDescriptor {
             || self.supported_phrases.iter().any(|(id, label)| {
                 !crate::protocol::valid_id(id) || !crate::protocol::valid_id(label)
             })
+            || self.active_ids().len() > crate::phrases::MAX_ACTIVE
+            || self
+                .active_ids()
+                .iter()
+                .any(|id| !self.supported_phrases.contains_key(id))
         {
             return Err(AudioError::InvalidFormat);
         }
         Ok(())
+    }
+    /// Phrases that may wake the session: the list when given, otherwise the single active phrase.
+    pub fn active_ids(&self) -> Vec<String> {
+        if self.active_phrases.is_empty() {
+            vec![self.active_phrase.clone()]
+        } else {
+            self.active_phrases.clone()
+        }
     }
 }
 
@@ -107,6 +123,8 @@ pub fn worker_args(
 
 pub struct WakeInput {
     descriptor: WakeDescriptor,
+    /// Ids that may wake the session, fixed at construction (see `WakeDescriptor::active_ids`).
+    active: Vec<String>,
     last_end: u64,
     last_wake: Option<u64>,
     pre_roll: VecDeque<f32>,
@@ -115,8 +133,10 @@ pub struct WakeInput {
 impl WakeInput {
     pub fn new(descriptor: WakeDescriptor) -> Result<Self, AudioError> {
         descriptor.validate()?;
+        let active = descriptor.active_ids();
         Ok(Self {
             descriptor,
+            active,
             last_end: 0,
             last_wake: None,
             pre_roll: VecDeque::new(),
@@ -147,7 +167,7 @@ impl WakeInput {
         }
         if packet.detections.len() > 1
             || packet.detections.iter().any(|d| {
-                d.phrase_id != self.descriptor.active_phrase
+                !self.active.contains(&d.phrase_id)
                     || d.engine != self.descriptor.engine
                     || d.start_us >= d.end_us
                     || d.end_us != frame.end_us()
@@ -201,6 +221,7 @@ mod tests {
             ]
             .into(),
             active_phrase: active.into(),
+            active_phrases: vec![],
         })
         .unwrap()
     }
@@ -216,6 +237,7 @@ mod tests {
             engine: "other-backend".into(),
             supported_phrases: [("custom_phrase".into(), "CUSTOM".into())].into(),
             active_phrase: "unknown".into(),
+            active_phrases: vec![],
         };
         assert!(WakeInput::new(descriptor).is_err());
     }

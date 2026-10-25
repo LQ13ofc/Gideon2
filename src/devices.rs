@@ -180,19 +180,23 @@ fn empty(reason: &'static str) -> Devices {
     }
 }
 
-/// Label charset: ASCII letters, digits and `._:@/+ -`; every other byte becomes `_`.
+/// Label charset: Unicode letters and digits, `._:@/+ -`; every other character becomes `_`, and the
+/// result stays within `AUDIO_DEVICE_MAX` bytes. Labels are display text only: the id is the
+/// preference value and keeps the ASCII charset. Accented names ("Estéreo analógico") stay readable;
+/// controls and format marks (bidi overrides) are never kept.
 pub fn sanitize_label(raw: &str, fallback: &str) -> String {
-    let mut label: String = raw
-        .bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"._:@/+ -".contains(&b) {
-                b as char
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    label.truncate(AUDIO_DEVICE_MAX);
+    let mut label = String::new();
+    for ch in raw.chars() {
+        let kept = if ch.is_alphanumeric() || "._:@/+ -".contains(ch) {
+            ch
+        } else {
+            '_'
+        };
+        if label.len() + kept.len_utf8() > AUDIO_DEVICE_MAX {
+            break;
+        }
+        label.push(kept);
+    }
     let trimmed = label.trim();
     if trimmed.is_empty() {
         fallback.to_string()
@@ -339,11 +343,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn labels_are_sanitized_to_the_preference_charset() {
-        // Each non-ASCII byte becomes one underscore: "ç" and "ã" are two bytes each.
-        assert_eq!(sanitize_label("Mic (USB) ação", "x"), "Mic _USB_ a____o");
+    fn labels_keep_unicode_letters_and_replace_the_rest() {
+        assert_eq!(sanitize_label("Mic (USB) ação", "x"), "Mic _USB_ ação");
+        // Bidi override (U+202E) and markup characters are replaced, never kept.
+        assert_eq!(sanitize_label("Estéreo \u{202e}x<b>", "x"), "Estéreo _x_b_");
         assert_eq!(sanitize_label("   ", "fallback"), "fallback");
-        assert!(sanitize_label(&"a".repeat(300), "x").len() <= AUDIO_DEVICE_MAX);
+        assert!(sanitize_label(&"á".repeat(300), "x").len() <= AUDIO_DEVICE_MAX);
     }
 
     #[test]

@@ -17,6 +17,9 @@ use std::{
 pub struct PreviousPreferences {
     #[serde(default)]
     pub wake_phrase: Option<String>,
+    /// Wake phrase list before the last change (rollback target). Empty for older ledgers.
+    #[serde(default)]
+    pub wake_phrases: Vec<crate::phrases::Setting>,
     pub audible_feedback: bool,
     #[serde(default = "enabled")]
     pub visual_feedback: bool,
@@ -29,6 +32,12 @@ pub struct PreviousPreferences {
     pub audio_input_device: String,
     #[serde(default = "default_audio_device")]
     pub audio_output_device: String,
+    #[serde(default = "default_stt_languages")]
+    pub stt_languages: Vec<String>,
+    #[serde(default = "default_tts_language")]
+    pub tts_language: String,
+    #[serde(default = "default_tts_voice")]
+    pub tts_voice: String,
 }
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -47,6 +56,10 @@ pub struct Config {
     pub output_volume_percent: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_preferences: Option<PreviousPreferences>,
+    /// Wake phrase list (`wake_phrases: [{id, active, sensitivity?}]`, at most 5 active). Empty = legacy:
+    /// the single `wake_phrase` (or the packaged default) is the list. Written together with `wake_phrase`.
+    #[serde(default)]
+    pub wake_phrases: Vec<crate::phrases::Setting>,
     /// Wake threshold scale in `WAKE_SENSITIVITY_MIN..=WAKE_SENSITIVITY_MAX`; see `wake::accept_threshold`.
     #[serde(default = "default_wake_sensitivity")]
     pub wake_sensitivity: f32,
@@ -62,6 +75,34 @@ pub struct Config {
     /// record never re-grants consent. Restoring defaults turns it off.
     #[serde(default)]
     pub live_audio: bool,
+    /// Languages the STT worker transcribes (1..=3, installed languages only). Old ledgers load as English.
+    #[serde(default = "default_stt_languages")]
+    pub stt_languages: Vec<String>,
+    /// Language the TTS worker speaks, and its voice. Changes apply at the next Core start.
+    #[serde(default = "default_tts_language")]
+    pub tts_language: String,
+    #[serde(default = "default_tts_voice")]
+    pub tts_voice: String,
+}
+fn default_stt_languages() -> Vec<String> {
+    vec![crate::languages::DEFAULT_STT_LANGUAGE.into()]
+}
+fn default_tts_language() -> String {
+    crate::languages::DEFAULT_TTS_LANGUAGE.into()
+}
+fn default_tts_voice() -> String {
+    crate::languages::DEFAULT_TTS_VOICE.into()
+}
+/// Format only (ledger validity): tags are short ASCII labels, 1..=3 distinct STT tags, a bounded voice id.
+/// Whether a language is installed is decided by `languages::LanguageCatalog`, not here.
+pub fn valid_languages(stt: &[String], tts_language: &str, tts_voice: &str) -> bool {
+    (1..=crate::languages::MAX_STT_LANGUAGES).contains(&stt.len())
+        && stt
+            .iter()
+            .enumerate()
+            .all(|(i, tag)| crate::languages::valid_tag(tag) && !stt[..i].contains(tag))
+        && crate::languages::valid_tag(tts_language)
+        && crate::protocol::valid_id(tts_voice)
 }
 fn full_volume() -> u8 {
     100
@@ -113,6 +154,10 @@ impl Default for Config {
             audio_input_device: default_audio_device(),
             audio_output_device: default_audio_device(),
             live_audio: false,
+            wake_phrases: Vec::new(),
+            stt_languages: default_stt_languages(),
+            tts_language: default_tts_language(),
+            tts_voice: default_tts_voice(),
         }
     }
 }
@@ -124,12 +169,16 @@ impl Config {
             || !valid_wake_sensitivity(self.wake_sensitivity)
             || !valid_audio_device(&self.audio_input_device)
             || !valid_audio_device(&self.audio_output_device)
+            || !valid_languages(&self.stt_languages, &self.tts_language, &self.tts_voice)
+            || !crate::phrases::valid_settings(&self.wake_phrases)
             || self.previous_preferences.as_ref().is_some_and(|p| {
-                p.output_volume_percent > 100
+                !crate::phrases::valid_settings(&p.wake_phrases)
+                    || p.output_volume_percent > 100
                     || !(50..=60000).contains(&p.session_timeout_ms)
                     || !valid_wake_sensitivity(p.wake_sensitivity)
                     || !valid_audio_device(&p.audio_input_device)
                     || !valid_audio_device(&p.audio_output_device)
+                    || !valid_languages(&p.stt_languages, &p.tts_language, &p.tts_voice)
                     || p.wake_phrase
                         .as_deref()
                         .is_some_and(|id| !crate::protocol::valid_id(id))
@@ -753,6 +802,7 @@ impl Storage {
         next.validate()?;
         next.previous_preferences = Some(PreviousPreferences {
             wake_phrase: self.config.wake_phrase.clone(),
+            wake_phrases: self.config.wake_phrases.clone(),
             audible_feedback: self.config.audible_feedback,
             visual_feedback: self.config.visual_feedback,
             output_volume_percent: self.config.output_volume_percent,
@@ -760,8 +810,12 @@ impl Storage {
             wake_sensitivity: self.config.wake_sensitivity,
             audio_input_device: self.config.audio_input_device.clone(),
             audio_output_device: self.config.audio_output_device.clone(),
+            stt_languages: self.config.stt_languages.clone(),
+            tts_language: self.config.tts_language.clone(),
+            tts_voice: self.config.tts_voice.clone(),
         });
-        let changed_wake = next.wake_phrase != self.config.wake_phrase;
+        let changed_wake = next.wake_phrase != self.config.wake_phrase
+            || next.wake_phrases != self.config.wake_phrases;
         self.replace("config.json", &next)?;
         // Durable before the in-memory commit: a failed fsync leaves the old state visible.
         File::open(&self.root)?.sync_all()?;
@@ -785,6 +839,27 @@ impl Storage {
             .ok_or_else(|| io::Error::other("revision exhausted"))?;
         self.commit_preferences(next)
     }
+    /// Wake phrase list (CAS on `revision`). The legacy `wake_phrase` keeps the first active id so readers of
+    /// the old field agree. Catalog and keyword checks happen in the Core (src/phrases.rs) before this call.
+    pub fn update_wake_phrases(
+        &mut self,
+        revision: u64,
+        phrases: Vec<crate::phrases::Setting>,
+    ) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+            || !crate::phrases::valid_settings(&phrases)
+        {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.wake_phrase = phrases.iter().find(|p| p.active).map(|p| p.id.clone());
+        next.wake_phrases = phrases;
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
     pub fn select_wake(&mut self, revision: u64, phrase_id: String) -> io::Result<()> {
         if self.configuration_status != ConfigurationStatus::Ready
             || revision != self.config.revision
@@ -792,6 +867,12 @@ impl Storage {
             return Err(io::Error::other("configuration not ready"));
         }
         let mut next = self.config.clone();
+        // The legacy single selection is the whole list now: one active phrase, no sensitivity override.
+        next.wake_phrases = vec![crate::phrases::Setting {
+            id: phrase_id.clone(),
+            active: true,
+            sensitivity: None,
+        }];
         next.wake_phrase = Some(phrase_id);
         next.revision = revision
             .checked_add(1)
@@ -807,6 +888,29 @@ impl Storage {
         }
         let mut next = self.config.clone();
         next.live_audio = enabled;
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
+    /// Language switch (CAS on `revision`). Only the three language fields change; the choice takes
+    /// effect at the next Core start (the view reports `restart_required` per engine kind).
+    pub fn update_languages(
+        &mut self,
+        revision: u64,
+        stt: Vec<String>,
+        tts_language: String,
+        tts_voice: String,
+    ) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+        {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.stt_languages = stt;
+        next.tts_language = tts_language;
+        next.tts_voice = tts_voice;
         next.revision = revision
             .checked_add(1)
             .ok_or_else(|| io::Error::other("revision exhausted"))?;
@@ -828,6 +932,7 @@ impl Storage {
                 .checked_add(1)
                 .ok_or_else(|| io::Error::other("revision exhausted"))?,
             wake_phrase: previous.wake_phrase,
+            wake_phrases: previous.wake_phrases,
             audible_feedback: previous.audible_feedback,
             visual_feedback: previous.visual_feedback,
             output_volume_percent: previous.output_volume_percent,
@@ -835,6 +940,9 @@ impl Storage {
             wake_sensitivity: previous.wake_sensitivity,
             audio_input_device: previous.audio_input_device,
             audio_output_device: previous.audio_output_device,
+            stt_languages: previous.stt_languages,
+            tts_language: previous.tts_language,
+            tts_voice: previous.tts_voice,
             ..self.config.clone()
         };
         self.commit_preferences(next)

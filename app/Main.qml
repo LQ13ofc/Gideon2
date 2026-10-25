@@ -54,6 +54,7 @@ ApplicationWindow {
         {id: "perm_concessoes", tab: "permissoes", label: "Concessões"},
         {id: "perm_auditoria", tab: "permissoes", label: "Auditoria"},
         {id: "cfg_voz", tab: "configuracoes", label: "Voz e Wake"},
+        {id: "cfg_idiomas", tab: "configuracoes", label: "Idiomas"},
         {id: "cfg_audio", tab: "configuracoes", label: "Áudio"},
         {id: "cfg_dispositivos", tab: "configuracoes", label: "Dispositivos"},
         {id: "cfg_aparencia", tab: "configuracoes", label: "Aparência"},
@@ -258,6 +259,7 @@ ApplicationWindow {
             PermConcessoes {}
             PermAuditoria {}
             CfgVoz {}
+            CfgIdiomas {}
             CfgAudio {}
             CfgDispositivos {}
             CfgAparencia {}

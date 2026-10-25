@@ -30,13 +30,24 @@ STAGED_ERRORS=('staged_payload_invalid',)
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections','registry','audio'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections','registry','audio','languages','wake_phrases','phrase_check'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
 ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','approved_at_ms','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
 ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities','approved_at_ms'}
-PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','audio_input_device','audio_output_device','live_audio'})
+PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','audio_input_device','audio_output_device','live_audio','stt_languages','tts_language','tts_voice','wake_phrases'})
+# Frases de ativação (src/phrases.rs): the Core owns the catalog, tokens and measurements; these checks shape the wire.
+WAKE_PHRASE_BLOCK_KEYS=frozenset({'max_active','max_custom','custom_revision','lexicon','settings','active','phrases','test'})
+WAKE_PHRASE_ENTRY_KEYS=frozenset({'id','text','tokens','label','language','qualification','custom','selectable','boost','threshold','measurement'})
+WAKE_PHRASE_QUALIFICATIONS=('dev_qualified','poc_required','custom')
+WAKE_TEST_STATES=('running','done','failed')
+PHRASE_CHECK_KEYS=frozenset({'ok','code','text','tokens','word'})
+# Idiomas (src/languages.rs, docs/research/idiomas-stt-tts.md): the Core owns the catalog; these checks only shape the wire.
+LANGUAGE_STATES=('bundled','available_not_installed','unsupported')
+LANGUAGE_ITEM_KEYS=frozenset({'id','kind','label','state','engine','size_bytes','size_partial','size_note','license','sha256','quality','evidence','voices','reason','selected','selectable','source'})
+LANGUAGE_BLOCK_KEYS=frozenset({'version','engines','stt_selected','tts_selected','tts_voice','restart_required','install'})
+VOICE_ID=re.compile(r'[A-Za-z0-9_-]{1,64}')
 # Core bounds (src/storage.rs): sensitivity 0.5..=1.5; device names 1..=128 bytes from this charset.
 DEVICE_CHARS=frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:@/+ -')
 def wake_sensitivity_ok(value):return type(value) in (int,float) and math.isfinite(value) and 0.5<=value<=1.5
@@ -583,6 +594,67 @@ def perception_text(output):
     return '\n'.join(lines)[:2048]
 def perception_code_message(code):return PERCEPTION_MESSAGES.get(code) or code_message(code)
 
+def language_tag_ok(tag):return isinstance(tag,str) and 2<=len(tag)<=8 and all(c.isascii() and (c.isalnum() or c=='-') for c in tag)
+def language_list_ok(items):return isinstance(items,list) and 1<=len(items)<=3 and all(language_tag_ok(i) for i in items) and len(set(items))==len(items)
+def language_request_ok(stt,tts_language,tts_voice):return language_list_ok(stt) and language_tag_ok(tts_language) and isinstance(tts_voice,str) and VOICE_ID.fullmatch(tts_voice) is not None
+def language_item_ok(item,kind):
+    """One engine/language row of snapshot 'languages'. Strict keys; selectable only when bundled."""
+    if not isinstance(item,dict) or set(item)!=LANGUAGE_ITEM_KEYS or item['kind']!=kind or not language_tag_ok(item['id']):return False
+    def optional(value,limit):return value is None or (isinstance(value,str) and len(value.encode('utf-8'))<=limit)
+    return (isinstance(item['label'],str) and 0<len(item['label'])<=40 and item['state'] in LANGUAGE_STATES
+            and optional(item['engine'],160) and (item['size_bytes'] is None or (type(item['size_bytes']) is int and 0<=item['size_bytes']<=2**40))
+            and type(item['size_partial']) is bool and optional(item['size_note'],200) and optional(item['license'],200)
+            and (item['sha256'] is None or digest(item['sha256'])) and isinstance(item['quality'],str) and len(item['quality'])<=160
+            and optional(item['evidence'],200) and isinstance(item['voices'],list) and len(item['voices'])<=8
+            and all(isinstance(v,str) and VOICE_ID.fullmatch(v) is not None for v in item['voices'])
+            and optional(item['reason'],300) and type(item['selected']) is bool and type(item['selectable']) is bool
+            and item['selectable']==(item['state']=='bundled') and isinstance(item['source'],str) and len(item['source'])<=200)
+def valid_languages_block(block):
+    if not isinstance(block,dict) or set(block)!=LANGUAGE_BLOCK_KEYS or type(block['version']) is not int or block['version']!=1:return False
+    engines=block['engines']
+    if not isinstance(engines,dict) or set(engines)!={'stt','tts','wake'}:return False
+    if not all(isinstance(engines[k],list) and len(engines[k])<=16 and all(language_item_ok(i,k) for i in engines[k]) for k in ('stt','tts','wake')):return False
+    restart,install=block['restart_required'],block['install']
+    return (language_list_ok(block['stt_selected']) and language_tag_ok(block['tts_selected']) and isinstance(block['tts_voice'],str) and VOICE_ID.fullmatch(block['tts_voice']) is not None
+            and isinstance(restart,dict) and set(restart)=={'stt','tts'} and type(restart['stt']) is bool and type(restart['tts']) is bool
+            and isinstance(install,dict) and set(install)=={'available','reason'} and install['available'] is False and isinstance(install['reason'],str) and len(install['reason'])<=200)
+def short_text(value,limit=64):return isinstance(value,str) and len(value.encode('utf-8'))<=limit
+def wake_phrase_id_ok(value):return short_text(value,64) and len(value)>=1 and all(c.isascii() and (c.isalnum() or c in '_-') for c in value)
+def wake_setting_ok(item):
+    return (isinstance(item,dict) and set(item)<={'id','active','sensitivity'} and {'id','active'}<=set(item) and wake_phrase_id_ok(item['id'])
+            and type(item['active']) is bool and ('sensitivity' not in item or wake_sensitivity_ok(item['sensitivity'])))
+def wake_setting_list_ok(items):
+    return (isinstance(items,list) and len(items)<=16 and all(wake_setting_ok(i) for i in items)
+            and len({i['id'] for i in items})==len(items) and sum(1 for i in items if i['active'])<=5)
+def wake_measurement_ok(m):
+    if m is None:return True
+    return (isinstance(m,dict) and set(m)<={'source','positives','hits','negatives','false_wakes','latency_ms','passed'}
+            and {'source','positives','hits','negatives','false_wakes','passed'}<=set(m) and m['source']=='synthetic'
+            and all(type(m[k]) is int and 0<=m[k]<=64 for k in ('positives','hits','negatives','false_wakes')) and type(m['passed']) is bool
+            and (m.get('latency_ms') is None or (type(m.get('latency_ms')) is int and 0<=m['latency_ms']<=600000)))
+def wake_entry_ok(entry):
+    return (isinstance(entry,dict) and set(entry)<=WAKE_PHRASE_ENTRY_KEYS and {'id','text','tokens','label','language','qualification','custom','selectable','boost','threshold'}<=set(entry)
+            and wake_phrase_id_ok(entry['id']) and short_text(entry['text'],160) and short_text(entry['tokens'],200) and short_text(entry['label'],64) and short_text(entry['language'],8)
+            and entry['qualification'] in WAKE_PHRASE_QUALIFICATIONS and type(entry['custom']) is bool and type(entry['selectable']) is bool
+            and all(type(entry[k]) in (int,float) and 0<=entry[k]<=10 for k in ('boost','threshold')) and wake_measurement_ok(entry.get('measurement')))
+def wake_phrases_block_ok(block):
+    if not isinstance(block,dict) or not set(block)<=WAKE_PHRASE_BLOCK_KEYS or not {'max_active','max_custom','custom_revision','lexicon','settings','active','phrases'}<=set(block):return False
+    if not (type(block['max_active']) is int and type(block['max_custom']) is int and type(block['custom_revision']) is int and type(block['lexicon']) is bool):return False
+    if not wake_setting_list_ok(block['settings']):return False
+    if not (isinstance(block['active'],list) and len(block['active'])<=5 and all(wake_phrase_id_ok(i) for i in block['active'])):return False
+    if not (isinstance(block['phrases'],list) and len(block['phrases'])<=32 and all(wake_entry_ok(e) for e in block['phrases'])):return False
+    test=block.get('test')
+    return test is None or (isinstance(test,dict) and set(test)<={'id','state','code'} and wake_phrase_id_ok(test.get('id')) and test.get('state') in WAKE_TEST_STATES and ('code' not in test or short_text(test['code'])))
+def phrase_check_ok(check):
+    return (isinstance(check,dict) and set(check)<=PHRASE_CHECK_KEYS and {'ok','code'}<=set(check) and type(check['ok']) is bool and short_text(check['code'])
+            and all(short_text(check[k],200) for k in ('text','tokens','word') if k in check))
+def display_wake_entry(entry,settings,active):
+    """One row of Configurações › Voz e Wake: the Core entry plus the active switch, sensitivity and labels."""
+    setting=next((s for s in settings if s.get('id')==entry['id']),{})
+    if entry['custom']:qualification_label='personalizada · não testada' if entry.get('measurement') is None else 'personalizada · teste sintético'
+    else:qualification_label=WAKE_QUALIFICATION_LABELS.get(entry['qualification'],'')
+    return {**entry,'active':entry['id'] in active,'sensitivity':setting.get('sensitivity'),'qualification_label':qualification_label,
+            'measurement':entry.get('measurement')}
 def validate_snapshot(data,request_id,min_sequence):
     """Validate presentation data before QML sees it; no command policy lives here."""
     def require(condition):
@@ -618,6 +690,7 @@ def validate_snapshot(data,request_id,min_sequence):
         require(type(prefs['visual_feedback']) is bool and integer(prefs['output_volume_percent'],0,100))
         # A6 consent: the Core always reports it; strict bool.
         require(type(prefs.get('live_audio')) is bool)
+        if 'wake_phrases' in prefs:require(wake_setting_list_ok(prefs['wake_phrases']))
         if 'wake_sensitivity' in prefs:require(wake_sensitivity_ok(prefs['wake_sensitivity']))
         for key in ('audio_input_device','audio_output_device'):
             if key in prefs:require(audio_device_ok(prefs[key]))
@@ -629,8 +702,14 @@ def validate_snapshot(data,request_id,min_sequence):
             if 'wake_sensitivity' in previous:require(wake_sensitivity_ok(previous['wake_sensitivity']))
             for key in ('audio_input_device','audio_output_device'):
                 if key in previous:require(audio_device_ok(previous[key]))
+        # Idiomas: when the Core reports them, all three are present and well-formed.
+        if any(key in prefs for key in ('stt_languages','tts_language','tts_voice')):
+            require(language_request_ok(prefs.get('stt_languages'),prefs.get('tts_language'),prefs.get('tts_voice')))
         wake=prefs.get('wake_phrase')
         require(wake is None or (short(wake) and len(wake)>0 and all(c.isascii() and (c.isalnum() or c in '_-') for c in wake)))
+    if 'languages' in data:require(valid_languages_block(data['languages']))
+    if 'wake_phrases' in data:require(wake_phrases_block_ok(data['wake_phrases']))
+    if 'phrase_check' in data:require(phrase_check_ok(data['phrase_check']))
     hub=data.get('hub')
     if hub is not None:
         require(isinstance(hub,dict) and type(hub.get('version')) is int and hub['version']==1)
@@ -800,6 +879,9 @@ CODE_MESSAGES={
     # Preferências do app e do Core (app/uisettings.py e preferências da ponte).
     'stale_preferences':'Configurações mudaram no Core; atualize e tente de novo',
     'invalid_preferences':'Preferências recusadas pelo Core: valor inválido; nada foi salvo',
+    'invalid_languages':'Idiomas recusados: escolha de 1 a 3 idiomas válidos para escuta e uma voz de fala; nada foi salvo',
+    'language_not_installed':'Idioma ainda não instalado: o download depende da aprovação do dono; nada foi salvo',
+    'language_unsupported':'Idioma sem suporte nesta versão; nada foi salvo',
     'preferences_storage_error':'Preferências indisponíveis: o arquivo de configuração não pôde ser lido ou gravado',
     'preferences_unavailable':'Preferências indisponíveis agora; tente quando o Gideon estiver em espera',
     'consent_required':'Escuta do microfone não ativada: a confirmação não chegou ao Core; nada foi alterado',
@@ -876,7 +958,35 @@ CODE_MESSAGES={
 STALE_MESSAGE='Estado mudou; reabra a confirmação'
 # Display mapping (round 2). The Core wire values never change; these tables only choose the text the user reads.
 # Each table has checks in scripts/test_bridge_protocol.py (class DisplayMapping).
-WAKE_QUALIFICATION_LABELS={'dev_qualified':'em desenvolvimento','poc_required':'requer prova de conceito'}
+WAKE_QUALIFICATION_LABELS={'dev_qualified':'em desenvolvimento','poc_required':'requer prova de conceito','custom':'personalizada · não testada'}
+# Frases de ativação: Portuguese for every code the Core returns for the wake phrase ops (src/phrases.rs `code`).
+PHRASE_MESSAGES={
+    'phrase_empty':'Digite a frase.',
+    'phrase_too_long':'Frase longa demais: use até 40 letras.',
+    'phrase_invalid_characters':'Use só letras, espaços e apóstrofo: sem números nem pontuação.',
+    'phrase_needs_two_words':'Use de 2 a 4 palavras; uma palavra sozinha é genérica demais.',
+    'phrase_too_many_words':'Use no máximo 4 palavras.',
+    'phrase_too_generic':'Frase genérica demais: use palavras mais específicas.',
+    'phrase_too_few_tokens':'Frase curta demais para o detector: use palavras com mais sons.',
+    'word_not_in_lexicon':'Palavra fora do dicionário do detector. Tente outra forma de escrever.',
+    'token_not_in_vocabulary':'Som fora do vocabulário do detector.',
+    'lexicon_unavailable':'Dicionário do detector indisponível neste pacote: frases personalizadas estão desligadas.',
+    'phrase_duplicate':'Essa frase já existe.',
+    'phrase_store_full':'Limite de 8 frases personalizadas atingido: remova uma antes.',
+    'phrase_not_found':'Frase personalizada não encontrada.',
+    'phrase_in_use':'Desative a frase antes de removê-la.',
+    'phrase_unmeasured':'Teste a frase antes de ativá-la.',
+    'phrase_measurement_failed':'Atenção: o teste sintético desta frase falhou. Ela pode não ser detectada ou disparar sem você falar. Ative só se aceitar esse risco.',
+    'phrase_test_running':'Já há um teste em andamento. Aguarde o resultado.',
+    'phrase_test_unavailable':'Teste indisponível: a voz de teste ou o dicionário não estão prontos.',
+    'phrase_test_failed':'O teste não concluiu. Tente de novo.',
+    'too_many_active_phrases':'Escolha até 5 frases ativas.',
+    'invalid_wake_phrases':'Lista de frases recusada; nada foi salvo.',
+    'wake_start_failed':'O detector não iniciou com essa lista. A lista anterior continua valendo.',
+    'stale_phrase_store':'As frases personalizadas mudaram. Atualize a tela e tente de novo.',
+    'phrase_store_error':'Não foi possível salvar as frases personalizadas.',
+    'configuration_not_ready':'Configuração não está pronta: reinicie o Gideon ou recupere a configuração.',
+}
 LLM_PROVIDER_LABELS={'openrouter':'OpenRouter','opencode':'OpenCode','google':'Google','custom':'personalizado'}
 LANGUAGE_LABELS={'EN':'inglês'}
 RECEIPT_PREFIXES=(('Sandbox app process verified: ','Processo do app verificado no sandbox: '),)
@@ -1008,6 +1118,7 @@ SKILL_CODES=SKILL_OP_CODES|frozenset('skill_invalid:'+reason for reason in SKILL
 CODE_MESSAGES.update({f'skill_invalid:{reason}':text for reason,text in SKILL_REASON_MESSAGES.items()})
 CODE_MESSAGES.update({code:text for code,text in SKILL_OP_MESSAGES.items() if code not in CODE_MESSAGES})
 CODE_MESSAGES.update({'skill_invalid':'Skill recusada pela validação do Core; nada foi gravado','model_output_invalid':'O modelo não devolveu um manifest JSON válido'}) 
+CODE_MESSAGES.update(PHRASE_MESSAGES)
 CODE_MESSAGES.update(CONN_MESSAGES)
 CODE_MESSAGES.update(REG_MESSAGES)
 SKILL_ID=re.compile(r'[a-z][a-z0-9_]{2,40}');SKILL_STEP_ID=re.compile(r'[a-z][a-z0-9_]{0,23}');SKILL_IMPORT_NAME=re.compile(r'[A-Za-z0-9._-]{1,64}')
@@ -1294,7 +1405,8 @@ def hub_storage(hub):
             'orphans':hub.get('orphans'),'repository':hub.get('repository') or '','catalogSha':(hub.get('catalog_sha256') or '')[:12]}
 # op -> (result channel, done message or builder). One table drives every Core answer.
 OPS={
-    'preferences':('prefs',PREFS_DONE),'rollback_preferences':('prefs',PREFS_DONE),'select_wake':('prefs',PREFS_DONE),'feedback_preferences':('prefs',PREFS_DONE),
+    'preferences':('prefs',PREFS_DONE),'rollback_preferences':('prefs',PREFS_DONE),'select_wake':('prefs',PREFS_DONE),'select_wake_phrases':('prefs',PREFS_DONE),'wake_phrase_validate':('phrase',lambda _target:'Frase verificada'),
+    'wake_phrase_add':('phrase','Frase salva: faça o teste antes de ativar'),'wake_phrase_remove':('phrase','Frase personalizada removida'),'wake_phrase_test':('phrase','Teste sintético iniciado: o resultado aparece na lista'),'feedback_preferences':('prefs',PREFS_DONE),
     'recover_configuration':('prefs','Configuração recuperada; reinício necessário'),
     'hub_abort':('hub','Importação cancelada'),
     'hub_approve':('hub',lambda target:f'Permissões aprovadas: {target}'),
@@ -1344,15 +1456,18 @@ PENDING.update({'audio_devices':'Consultando dispositivos no Core…','preferenc
 # A6 consent for the live microphone (docs/A6-live-audio.md): one op, read back from preferences.live_audio and audio.live.restart_required.
 OPS.update({'live_audio_preference':('prefs','Escuta do microfone salva no Core; reinicie o Core para aplicar')})
 PENDING.update({'live_audio_preference':'Salvando a escuta do microfone no Core…'})
+# Idiomas (Frente 2): one op for the STT list and the TTS language/voice; applied at the next Core start.
+OPS.update({'language_preference':('prefs','Idiomas salvos no Core; reinicie o Core para aplicar')})
+PENDING.update({'language_preference':'Salvando idiomas no Core…'})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged','languages':'languagesChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio','languages')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
-    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal()
+    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
     def __init__(self,root):
@@ -1412,7 +1527,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),'audio':s.get('audio'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),'audio':s.get('audio'),'languages':s.get('languages'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -1983,6 +2098,69 @@ class Bridge(QObject):
     @Slot(str)
     def selectWake(self,ident):
         if self.preferencesAvailable:self._preferences('select_wake',revision=int(self.preferencesRevision),phrase_id=ident)
+    # ---- Frases de ativação (src/phrases.rs): lista ativa, frases personalizadas e teste sintético.
+    def _wake_block(self):return self.snapshot.get('wake_phrases') or {}
+    def _wake_items(self):
+        """Current wake phrase list as the Core stores it: `[{id, active, sensitivity?}]`."""
+        return [dict(s) for s in self._wake_block().get('settings',[])]
+    def _wake_send(self,items,acknowledge=False):
+        if sum(1 for i in items if i['active'])>5:return self._refuse('prefs',PHRASE_MESSAGES['too_many_active_phrases'])
+        if self.preferencesAvailable:self._preferences('select_wake_phrases',revision=int(self.preferencesRevision),phrases=items,acknowledge_untested=bool(acknowledge))
+    @Slot(str,bool,bool)
+    def setWakePhraseActive(self,ident,active,acknowledge):
+        if not wake_phrase_id_ok(ident):return self._refuse('prefs',CODE_MESSAGES['invalid_wake_phrases'])
+        items=self._wake_items()
+        if not any(i['id']==ident for i in items):items.append({'id':ident,'active':False})
+        for item in items:
+            if item['id']==ident:item['active']=bool(active)
+        self._wake_send(items,acknowledge)
+    @Slot(str,float)
+    def setWakePhraseSensitivity(self,ident,value):
+        if not wake_phrase_id_ok(ident) or not wake_sensitivity_ok(value):return self._refuse('prefs',SENSITIVITY_RANGE_TEXT)
+        items=self._wake_items()
+        for item in items:
+            if item['id']==ident:item['sensitivity']=round(float(value),2)
+        self._wake_send(items)
+    @Slot()
+    def restoreWakePhraseDefaults(self):
+        default=(self.snapshot.get('base_pack') or {}).get('default_phrase')
+        if isinstance(default,str):self._wake_send([{'id':default,'active':True}])
+    @Slot(str)
+    def checkWakePhrase(self,text):
+        if short_text(text,160):self._request('wake_phrase_validate',text=text)
+    @Slot(str)
+    def addWakePhrase(self,text):
+        if not short_text(text,160) or not self.preferencesAvailable:return
+        if self.online:self._preferences('wake_phrase_add',revision=int(self._wake_block().get('custom_revision',0)),text=text)
+    @Slot(str)
+    def removeWakePhrase(self,ident):
+        if wake_phrase_id_ok(ident) and self.online:self._preferences('wake_phrase_remove',revision=int(self._wake_block().get('custom_revision',0)),id=ident)
+    @Slot(str)
+    def testWakePhrase(self,ident):
+        if wake_phrase_id_ok(ident) and self.online:self._preferences('wake_phrase_test',id=ident)
+    @Property('QVariantList',notify=changed)
+    def wakePhraseRows(self):
+        block=self._wake_block()
+        settings=block.get('settings',[]);active=set(block.get('active',[]))
+        return [display_wake_entry(e,settings,active) for e in block.get('phrases',[])]
+    @Property('QVariantMap',notify=changed)
+    def wakePhraseCheck(self):
+        check=self.snapshot.get('phrase_check') or {}
+        return {**check,'message':'' if check.get('ok') else CODE_MESSAGES.get(check.get('code'),'')} if check else {}
+    @Property('QVariantMap',notify=changed)
+    def wakePhraseTest(self):
+        test=self._wake_block().get('test') or {}
+        return {**test,'message':CODE_MESSAGES.get(test.get('code'),'')} if test else {}
+    @Property(str,notify=changed)
+    def wakePhraseResult(self):return self.results.get('phrase','')
+    @Property(int,notify=changed)
+    def wakePhraseMaxActive(self):return int(self._wake_block().get('max_active',5))
+    @Property(int,notify=changed)
+    def wakePhraseActiveCount(self):return len(self._wake_block().get('active',[]))
+    @Property(int,notify=changed)
+    def wakePhraseCustomCount(self):return sum(1 for e in self._wake_block().get('phrases',[]) if e.get('custom'))
+    @Property(bool,notify=changed)
+    def wakePhraseLexicon(self):return bool(self._wake_block().get('lexicon',False))
     @Property(bool,notify=preferencesChanged)
     def visualFeedback(self):return self.snapshot.get('preferences',{}).get('visual_feedback',True)
     @Property(int,notify=preferencesChanged)
@@ -2114,6 +2292,35 @@ class Bridge(QObject):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
         if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
         self._preferences('live_audio_preference',revision=int(self.preferencesRevision),enabled=enabled,confirmed=enabled)
+    # ---- Idiomas (Frente 2). The view comes from snapshot 'languages'; the Core refuses non-installed languages.
+    def _languages(self):return dict(self.snapshot.get('languages') or {})
+    def _language_items(self,kind):return [dict(item) for item in ((self._languages().get('engines') or {}).get(kind) or [])]
+    @Property('QVariantList',notify=languagesChanged)
+    def languageSttItems(self):return self._language_items('stt')
+    @Property('QVariantList',notify=languagesChanged)
+    def languageTtsItems(self):return self._language_items('tts')
+    @Property('QVariantList',notify=languagesChanged)
+    def languageSttSelected(self):return list(self._languages().get('stt_selected') or [])
+    @Property(str,notify=languagesChanged)
+    def languageTtsSelected(self):return str(self._languages().get('tts_selected') or '')
+    @Property(str,notify=languagesChanged)
+    def languageTtsVoice(self):return str(self._languages().get('tts_voice') or '')
+    @Property(bool,notify=languagesChanged)
+    def languageRestartStt(self):return (self._languages().get('restart_required') or {}).get('stt') is True
+    @Property(bool,notify=languagesChanged)
+    def languageRestartTts(self):return (self._languages().get('restart_required') or {}).get('tts') is True
+    @Property(str,notify=languagesChanged)
+    def languageInstallReason(self):return str((self._languages().get('install') or {}).get('reason') or '')
+    @Property(bool,notify=languagesChanged)
+    def languagesAvailable(self):return self.preferencesAvailable and 'languages' in self.snapshot
+    @Slot(str,str,str)
+    def setLanguages(self,stt_json,tts_language,tts_voice):
+        """Saves the STT list (JSON array of tags) and the TTS language and voice. Shape is checked here; installation by the Core."""
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        try:stt=json.loads(stt_json)
+        except (TypeError,ValueError):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
+        if not language_request_ok(stt,tts_language,tts_voice):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
+        self._preferences('language_preference',revision=int(self.preferencesRevision),stt_languages=stt,tts_language=tts_language,tts_voice=tts_voice)
     @Slot(float)
     def setWakeSensitivity(self,value):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
