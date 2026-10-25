@@ -10,6 +10,7 @@
 //! Nothing here is verified on real microphones or speakers. Tests use fake tools (tests/fixtures).
 use crate::{
     devices::Devices,
+    levels::{self, FrameStats, Level, Summary, Verdict},
     storage::{valid_audio_device, Config},
     wake::{Packet, WorkerMode},
 };
@@ -41,6 +42,10 @@ const BACKOFF_BASE: Duration = Duration::from_millis(200);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 const PLAYER_EXIT: Duration = Duration::from_secs(5);
 const BWRAP: &str = "/usr/bin/bwrap";
+/// The level block is recomputed at most this often (5 times a second).
+pub const PUBLISH_INTERVAL: Duration = Duration::from_millis(200);
+/// Length of one `audio_probe` recording.
+pub const PROBE_DURATION: Duration = Duration::from_secs(3);
 
 /// Preference-derived settings the live input follows. A change restarts the pipeline at the next
 /// session boundary (the Core only publishes changes while no voice session is active).
@@ -48,12 +53,14 @@ const BWRAP: &str = "/usr/bin/bwrap";
 pub struct Settings {
     pub input_device: String,
     pub keywords_threshold: f32,
+    pub input_conditioning: crate::storage::InputConditioning,
 }
 impl Settings {
     pub fn from_config(config: &Config) -> Self {
         Self {
             input_device: config.audio_input_device.clone(),
             keywords_threshold: crate::wake::keywords_threshold(config.wake_sensitivity),
+            input_conditioning: config.input_conditioning,
         }
     }
 }
@@ -67,7 +74,7 @@ pub struct WakeSpec {
 }
 
 /// Status transitions reported by the supervisors. Vocabulary is closed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LiveEvent {
     Input {
         state: &'static str,
@@ -77,9 +84,19 @@ pub enum LiveEvent {
         state: &'static str,
         error: Option<&'static str>,
     },
+    /// One measured 20 ms recorder frame (A9 level meter). Numbers only.
+    Frame { stats: FrameStats, at: Instant },
 }
 
+/// The last wake detection, as the snapshot shows it (`audio.live.last_detection`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LastDetection {
+    /// Unix milliseconds of the detection.
+    pub at_ms: u64,
+    pub phrase_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct LiveView {
     /// The live pipeline runs in this process (`--live-audio` or the ledger preference at start).
     pub enabled: bool,
@@ -90,14 +107,75 @@ pub struct LiveView {
     pub restart_required: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<&'static str>,
+    /// Input level (A9): numbers only, refreshed at most 5 times a second; all silent when not capturing.
+    pub level: Level,
+    /// null, or one of `no_frames`, `clipping`, `very_noisy`, `very_quiet` (derived in the Core).
+    pub silence_warning: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_detection: Option<LastDetection>,
 }
 
-/// Snapshot block `audio`: `devices` only after an `audio_devices` op, `live` always.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+/// One `audio_probe` (A9): `running` while the 3 s recording lasts, then `done` with the measurements.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ProbeView {
+    pub id: u64,
+    pub device: String,
+    pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frames: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rms_dbfs: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_dbfs: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub floor_dbfs: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<&'static str>,
+}
+
+impl ProbeView {
+    pub fn running(id: u64, device: String) -> Self {
+        Self {
+            id,
+            device,
+            state: "running",
+            frames: None,
+            rms_dbfs: None,
+            peak_dbfs: None,
+            floor_dbfs: None,
+            verdict: None,
+            hint: None,
+            reason: None,
+        }
+    }
+    pub fn finished(id: u64, device: String, outcome: &ProbeOutcome) -> Self {
+        Self {
+            id,
+            device,
+            state: "done",
+            frames: Some(outcome.summary.frames),
+            rms_dbfs: Some(outcome.summary.rms_dbfs),
+            peak_dbfs: Some(outcome.summary.peak_dbfs),
+            floor_dbfs: Some(outcome.summary.floor_dbfs),
+            verdict: Some(outcome.verdict.as_str()),
+            hint: Some(outcome.hint.clone()),
+            reason: outcome.reason,
+        }
+    }
+}
+
+/// Snapshot block `audio`: `devices` only after an `audio_devices` op, `live` always, `probe` after an `audio_probe`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AudioView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub devices: Option<Devices>,
     pub live: LiveView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe: Option<ProbeView>,
 }
 
 #[derive(Clone, Debug)]
@@ -108,6 +186,10 @@ pub struct LiveState {
     input: &'static str,
     output: &'static str,
     error: Option<&'static str>,
+    meter: levels::Meter,
+    /// The level block as last published, with the time it was computed (at most every PUBLISH_INTERVAL).
+    published: Option<(Instant, Level)>,
+    last_detection: Option<LastDetection>,
 }
 impl Default for LiveState {
     fn default() -> Self {
@@ -117,6 +199,9 @@ impl Default for LiveState {
             input: "idle",
             output: "idle",
             error: None,
+            meter: levels::Meter::default(),
+            published: None,
+            last_detection: None,
         }
     }
 }
@@ -133,6 +218,9 @@ impl LiveState {
                 self.input = state;
                 if state == "capturing" {
                     self.error = None;
+                    // A new capture starts a new measurement: the floor and the history are not carried over.
+                    self.meter.reset(Instant::now());
+                    self.published = None;
                 }
                 self.error = error.or(self.error);
             }
@@ -140,17 +228,48 @@ impl LiveState {
                 self.output = state;
                 self.error = error.or(self.error);
             }
+            LiveEvent::Frame { stats, at } => {
+                self.meter.push(stats, at);
+                let due = self
+                    .published
+                    .as_ref()
+                    .is_none_or(|(t, _)| at.saturating_duration_since(*t) >= PUBLISH_INTERVAL);
+                if due {
+                    self.published = Some((at, self.meter.level(at)));
+                }
+            }
         }
     }
-    /// `preference` is the current ledger value (`Config::live_audio`).
-    pub fn view(&self, preference: bool) -> LiveView {
+    /// A wake phrase was recognised: feeds `last_detection` and the "heard, not recognised" state.
+    pub fn detected(&mut self, phrase_id: &str, now: Instant) {
+        self.meter.note_detection(now);
+        if crate::protocol::valid_id(phrase_id) {
+            self.last_detection = Some(LastDetection {
+                at_ms: crate::protocol::unix_ms(),
+                phrase_id: phrase_id.to_string(),
+            });
+        }
+    }
+    /// `preference` is the current ledger value (`Config::live_audio`); `now` times the age and the warnings.
+    pub fn view(&self, preference: bool, now: Instant) -> LiveView {
+        let capturing = self.input == "capturing";
+        let level = match (&self.published, capturing) {
+            (Some((_, level)), true) => Level {
+                last_frame_age_ms: self.meter.age_ms(now),
+                ..*level
+            },
+            _ => Level::silent(),
+        };
         LiveView {
             enabled: self.enabled,
             input_state: self.input,
             output_state: self.output,
-            mic_active: self.input == "capturing",
+            mic_active: capturing,
             restart_required: preference != self.started_with_preference,
             last_error: self.error,
+            level,
+            silence_warning: self.meter.warning(capturing, now),
+            last_detection: self.last_detection.clone(),
         }
     }
 }
@@ -305,12 +424,16 @@ pub fn sandboxed(program: &Path, args: &[String]) -> io::Result<Command> {
 }
 
 fn spawn_recorder(device: &str) -> Result<Child, &'static str> {
+    spawn_recorder_in(&std::env::var_os("PATH").unwrap_or_default(), device)
+}
+
+/// Same recorder pattern with an explicit tool `PATH` (the probe and its tests use it).
+pub fn spawn_recorder_in(path: &OsStr, device: &str) -> Result<Child, &'static str> {
     if !device_ok(device) {
         return Err("invalid_device");
     }
-    let path = std::env::var_os("PATH").unwrap_or_default();
     let (program, tool) =
-        find_tool(&path, &["pw-record", "parecord"]).ok_or("recorder_unavailable")?;
+        find_tool(path, &["pw-record", "parecord"]).ok_or("recorder_unavailable")?;
     let mut command =
         sandboxed(&program, &recorder_args(tool, device)).map_err(|_| "sandbox_unavailable")?;
     command
@@ -371,6 +494,7 @@ fn spawn_worker(wake: &WakeSpec, settings: &Settings, start_us: u64) -> io::Resu
         WorkerMode::Live { start_us },
         wake.active_phrase.as_deref(),
         settings.keywords_threshold,
+        Some(settings.input_conditioning.as_str()),
     );
     let mounts = worker_mounts(&wake.manifest)?;
     let mut command = crate::transport::namespace_command(
@@ -517,6 +641,11 @@ async fn run_once(
                 }
                 if filled == FRAME_BYTES {
                     filled = 0;
+                    // A9 level meter: the recorder's own frame, before the worker (numbers only are kept).
+                    let _ = events.send(LiveEvent::Frame {
+                        stats: levels::frame_stats(&buf),
+                        at: Instant::now(),
+                    });
                     match tokio::time::timeout(WRITE_TIMEOUT, worker_in.write_all(&buf)).await {
                         Ok(Ok(())) => *clock_us += FRAME_US,
                         _ => break Step::Failed("wake_worker_failed"),
@@ -550,6 +679,78 @@ async fn run_once(
         });
     }
     step
+}
+
+/// Result of one `audio_probe`: the summary of the recording, its verdict and the reason when it failed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProbeOutcome {
+    pub summary: Summary,
+    pub verdict: Verdict,
+    pub hint: String,
+    pub reason: Option<&'static str>,
+}
+
+impl ProbeOutcome {
+    pub fn failed(reason: &'static str) -> Self {
+        let (verdict, hint) = levels::failed(reason);
+        Self {
+            summary: Summary {
+                frames: 0,
+                rms_dbfs: levels::DBFS_MIN,
+                peak_dbfs: levels::DBFS_MIN,
+                floor_dbfs: levels::DBFS_MIN,
+            },
+            verdict,
+            hint,
+            reason: Some(reason),
+        }
+    }
+}
+
+/// Records `PROBE_DURATION` from one device with the same sandboxed recorder as the live input, in
+/// its own short-lived process. Nothing is written anywhere; only the summary leaves this function.
+pub async fn probe(device: String) -> ProbeOutcome {
+    probe_in(&std::env::var_os("PATH").unwrap_or_default(), &device).await
+}
+
+/// `probe` with an explicit tool `PATH` (tests put the fake recorder first).
+pub async fn probe_in(path: &OsStr, device: &str) -> ProbeOutcome {
+    let mut child = match spawn_recorder_in(path, device) {
+        Ok(child) => child,
+        Err(code) => return ProbeOutcome::failed(code),
+    };
+    let Some(mut out) = child.stdout.take() else {
+        let _ = child.start_kill();
+        return ProbeOutcome::failed("recorder_unavailable");
+    };
+    let deadline = tokio::time::Instant::now() + PROBE_DURATION;
+    let mut frames = Vec::new();
+    let mut buf = [0u8; FRAME_BYTES];
+    let mut ended = false;
+    loop {
+        match tokio::time::timeout_at(deadline, out.read_exact(&mut buf)).await {
+            Ok(Ok(_)) => frames.push(levels::frame_stats(&buf)),
+            Ok(Err(_)) => {
+                ended = true;
+                break;
+            }
+            // The 3 s are spent: a partial frame at the end is dropped on purpose.
+            Err(_) => break,
+        }
+    }
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    if ended && frames.is_empty() {
+        return ProbeOutcome::failed("recorder_exited");
+    }
+    let summary = levels::summarize(&frames);
+    let (verdict, hint) = levels::judge(&summary);
+    ProbeOutcome {
+        summary,
+        verdict,
+        hint,
+        reason: None,
+    }
 }
 
 /// Where speech PCM goes when `--live-audio` is on, and where its state is reported.
@@ -733,17 +934,18 @@ mod tests {
     #[test]
     fn view_reports_mic_only_while_capturing() {
         let mut state = LiveState::default();
-        assert!(!state.view(false).mic_active);
+        let now = Instant::now();
+        assert!(!state.view(false, now).mic_active);
         state.apply(LiveEvent::Input {
             state: "capturing",
             error: None,
         });
-        assert!(state.view(false).mic_active);
+        assert!(state.view(false, now).mic_active);
         state.apply(LiveEvent::Input {
             state: "error",
             error: Some("recorder_exited"),
         });
-        let view = state.view(false);
+        let view = state.view(false, now);
         assert!(!view.mic_active);
         assert_eq!(view.last_error, Some("recorder_exited"));
     }
@@ -753,15 +955,16 @@ mod tests {
         let mut state = LiveState::default();
         // Off at start, consent given: the next start applies it.
         state.configure(false, false);
-        assert!(state.view(true).restart_required);
-        assert!(!state.view(false).restart_required);
+        let now = Instant::now();
+        assert!(state.view(true, now).restart_required);
+        assert!(!state.view(false, now).restart_required);
         // On from the ledger at start, consent withdrawn: the running pipeline stops at the next start.
         state.configure(true, true);
-        assert!(!state.view(true).restart_required);
-        assert!(state.view(false).restart_required);
+        assert!(!state.view(true, now).restart_required);
+        assert!(state.view(false, now).restart_required);
         // On by the flag only: the ledger (off) is what it was at start, so nothing is pending.
         state.configure(true, false);
-        assert!(!state.view(false).restart_required);
+        assert!(!state.view(false, now).restart_required);
     }
 
     #[test]

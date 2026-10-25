@@ -171,7 +171,13 @@ fn sensitivity_maps_to_the_worker_threshold_within_safe_bounds() {
 fn worker_arguments_carry_mode_phrase_and_threshold() {
     use gideon_base::wake::{worker_args, WorkerMode};
     assert_eq!(
-        worker_args("/m.json", WorkerMode::Replay { fixture: 0 }, None, 0.25),
+        worker_args(
+            "/m.json",
+            WorkerMode::Replay { fixture: 0 },
+            None,
+            0.25,
+            None
+        ),
         ["/m.json", "0", "--keywords-threshold", "0.2500"]
     );
     assert_eq!(
@@ -179,7 +185,8 @@ fn worker_arguments_carry_mode_phrase_and_threshold() {
             "/m.json",
             WorkerMode::Live { start_us: 40_000 },
             Some("okay_gideon"),
-            0.375
+            0.375,
+            Some("off")
         ),
         [
             "/m.json",
@@ -190,6 +197,8 @@ fn worker_arguments_carry_mode_phrase_and_threshold() {
             "okay_gideon",
             "--keywords-threshold",
             "0.3750",
+            "--conditioning",
+            "off",
         ]
     );
 }

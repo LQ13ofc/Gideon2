@@ -59,6 +59,10 @@ pub enum Operation {
     Snapshot,
     /// A4: read-only enumeration of audio devices; the result is the snapshot block `audio.devices`.
     AudioDevices,
+    /// A9: records 3 s from one listed input (or `default`) and reports the level in `audio.probe`.
+    AudioProbe {
+        device: String,
+    },
     /// Replies `ok`, then the Core exits with `transport::RESTART_EXIT_CODE` after flushing. Refused
     /// with `busy` while a voice session, agent run, skill run or plugin invocation is active.
     CoreRestart,
@@ -111,15 +115,23 @@ pub enum Operation {
         enabled: bool,
         confirmed: bool,
     },
+    /// A11 consent for host actions (`preferences.real_actions`). Same consent rule as `LiveAudioPreference`;
+    /// refused while a voice session or a command/tool job is running (`busy`).
+    RealActionsPreference {
+        revision: u64,
+        enabled: bool,
+        confirmed: bool,
+    },
     RecoverConfiguration {
         revision: u64,
     },
-    /// Optional fields (`wake_sensitivity`, device names) keep the stored value when absent.
+    /// Optional fields (`wake_sensitivity`, `input_conditioning`, device names) keep the stored value when absent.
     Preferences {
         revision: u64,
         audible_feedback: bool,
         session_timeout_ms: u64,
         wake_sensitivity: Option<f32>,
+        input_conditioning: Option<crate::storage::InputConditioning>,
         audio_input_device: Option<String>,
         audio_output_device: Option<String>,
     },
@@ -385,8 +397,9 @@ pub fn unix_ms() -> u64 {
 /// Origin of an event kind. Closed set: core, plugin, hub, skill, connection, tool, agent, llm,
 /// speech, config, registry.
 pub fn origin_of(kind: &str) -> &'static str {
-    const PREFIXES: [(&str, &str); 15] = [
+    const PREFIXES: [(&str, &str); 16] = [
         ("live_audio_", "config"),
+        ("real_actions_", "config"),
         ("connection_", "connection"),
         ("tool_", "tool"),
         ("agent_", "agent"),
@@ -454,6 +467,8 @@ pub struct Response {
     pub configuration_status: crate::storage::ConfigurationStatus,
     pub configuration_recovery_available: bool,
     pub preferences: crate::storage::Config,
+    /// A11 host actions: the consent state and the last host action (content-free).
+    pub actions: crate::commands::ActionsView,
     pub languages: crate::languages::View,
     pub command: Option<crate::commands::Outcome>,
     pub tool_proposals: Vec<crate::tools::View>,
@@ -613,6 +628,13 @@ enum WireRequest {
         enabled: bool,
         confirmed: bool,
     },
+    RealActionsPreference {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        enabled: bool,
+        confirmed: bool,
+    },
     RecoverConfiguration {
         version: u16,
         request_id: String,
@@ -626,6 +648,8 @@ enum WireRequest {
         session_timeout_ms: u64,
         #[serde(default)]
         wake_sensitivity: Option<f32>,
+        #[serde(default)]
+        input_conditioning: Option<crate::storage::InputConditioning>,
         #[serde(default)]
         audio_input_device: Option<String>,
         #[serde(default)]
@@ -648,6 +672,11 @@ enum WireRequest {
     AudioDevices {
         version: u16,
         request_id: String,
+    },
+    AudioProbe {
+        version: u16,
+        request_id: String,
+        device: String,
     },
     CoreRestart {
         version: u16,
@@ -1169,6 +1198,21 @@ impl<'de> Deserialize<'de> for Request {
                     confirmed,
                 },
             ),
+            WireRequest::RealActionsPreference {
+                version,
+                request_id,
+                revision,
+                enabled,
+                confirmed,
+            } => (
+                version,
+                request_id,
+                Operation::RealActionsPreference {
+                    revision,
+                    enabled,
+                    confirmed,
+                },
+            ),
             WireRequest::RecoverConfiguration {
                 version,
                 request_id,
@@ -1185,6 +1229,7 @@ impl<'de> Deserialize<'de> for Request {
                 audible_feedback,
                 session_timeout_ms,
                 wake_sensitivity,
+                input_conditioning,
                 audio_input_device,
                 audio_output_device,
             } => (
@@ -1195,6 +1240,7 @@ impl<'de> Deserialize<'de> for Request {
                     audible_feedback,
                     session_timeout_ms,
                     wake_sensitivity,
+                    input_conditioning,
                     audio_input_device,
                     audio_output_device,
                 },
@@ -1225,6 +1271,11 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
             } => (version, request_id, Operation::AudioDevices),
+            WireRequest::AudioProbe {
+                version,
+                request_id,
+                device,
+            } => (version, request_id, Operation::AudioProbe { device }),
             WireRequest::CoreRestart {
                 version,
                 request_id,

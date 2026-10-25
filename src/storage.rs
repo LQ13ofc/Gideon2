@@ -28,6 +28,8 @@ pub struct PreviousPreferences {
     pub session_timeout_ms: u64,
     #[serde(default = "default_wake_sensitivity")]
     pub wake_sensitivity: f32,
+    #[serde(default)]
+    pub input_conditioning: InputConditioning,
     #[serde(default = "default_audio_device")]
     pub audio_input_device: String,
     #[serde(default = "default_audio_device")]
@@ -63,6 +65,9 @@ pub struct Config {
     /// Wake threshold scale in `WAKE_SENSITIVITY_MIN..=WAKE_SENSITIVITY_MAX`; see `wake::accept_threshold`.
     #[serde(default = "default_wake_sensitivity")]
     pub wake_sensitivity: f32,
+    /// Input conditioning of the wake spotter (`auto` default, `off`). Strict: other values fail to load.
+    #[serde(default)]
+    pub input_conditioning: InputConditioning,
     /// Preferred capture device name (`default` = system default). Bounded by `valid_audio_device`.
     #[serde(default = "default_audio_device")]
     pub audio_input_device: String,
@@ -75,6 +80,11 @@ pub struct Config {
     /// record never re-grants consent. Restoring defaults turns it off.
     #[serde(default)]
     pub live_audio: bool,
+    /// Consent to run the fixed command table on the host (A11, docs/A11-real-actions-test.md): open listed
+    /// applications and change the default audio sink. Off by default; strict bool; applies at once (no restart).
+    /// Sessions and queued jobs block the change (`busy`). Off keeps the sandbox executor.
+    #[serde(default)]
+    pub real_actions: bool,
     /// Languages the STT worker transcribes (1..=3, installed languages only). Old ledgers load as English.
     #[serde(default = "default_stt_languages")]
     pub stt_languages: Vec<String>,
@@ -120,6 +130,23 @@ fn default_wake_sensitivity() -> f32 {
 fn default_audio_device() -> String {
     DEFAULT_AUDIO_DEVICE.into()
 }
+/// Preference `input_conditioning`: `auto` shapes the frames the wake spotter hears (DC and 100 Hz high-pass,
+/// `scripts/audio_conditioning.py`); `off` passes them through. Capture, STT and VAD always get the raw frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputConditioning {
+    #[default]
+    Auto,
+    Off,
+}
+impl InputConditioning {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Off => "off",
+        }
+    }
+}
 /// Strict range check; NaN and infinities are outside every range and therefore rejected.
 pub fn valid_wake_sensitivity(value: f32) -> bool {
     (WAKE_SENSITIVITY_MIN..=WAKE_SENSITIVITY_MAX).contains(&value)
@@ -136,6 +163,7 @@ pub fn valid_audio_device(name: &str) -> bool {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct OptionalPreferences {
     pub wake_sensitivity: Option<f32>,
+    pub input_conditioning: Option<InputConditioning>,
     pub audio_input_device: Option<String>,
     pub audio_output_device: Option<String>,
 }
@@ -151,9 +179,11 @@ impl Default for Config {
             output_volume_percent: 100,
             previous_preferences: None,
             wake_sensitivity: default_wake_sensitivity(),
+            input_conditioning: InputConditioning::default(),
             audio_input_device: default_audio_device(),
             audio_output_device: default_audio_device(),
             live_audio: false,
+            real_actions: false,
             wake_phrases: Vec::new(),
             stt_languages: default_stt_languages(),
             tts_language: default_tts_language(),
@@ -770,6 +800,9 @@ impl Storage {
         if let Some(sensitivity) = optional.wake_sensitivity {
             next.wake_sensitivity = sensitivity;
         }
+        if let Some(conditioning) = optional.input_conditioning {
+            next.input_conditioning = conditioning;
+        }
         if let Some(device) = optional.audio_input_device {
             next.audio_input_device = device;
         }
@@ -808,6 +841,7 @@ impl Storage {
             output_volume_percent: self.config.output_volume_percent,
             session_timeout_ms: self.config.session_timeout_ms,
             wake_sensitivity: self.config.wake_sensitivity,
+            input_conditioning: self.config.input_conditioning,
             audio_input_device: self.config.audio_input_device.clone(),
             audio_output_device: self.config.audio_output_device.clone(),
             stt_languages: self.config.stt_languages.clone(),
@@ -893,6 +927,20 @@ impl Storage {
             .ok_or_else(|| io::Error::other("revision exhausted"))?;
         self.commit_preferences(next)
     }
+    /// A11 consent switch for host actions. CAS on `revision` like every preference; only `real_actions` changes.
+    pub fn update_real_actions(&mut self, revision: u64, enabled: bool) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+        {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.real_actions = enabled;
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
     /// Language switch (CAS on `revision`). Only the three language fields change; the choice takes
     /// effect at the next Core start (the view reports `restart_required` per engine kind).
     pub fn update_languages(
@@ -938,6 +986,7 @@ impl Storage {
             output_volume_percent: previous.output_volume_percent,
             session_timeout_ms: previous.session_timeout_ms,
             wake_sensitivity: previous.wake_sensitivity,
+            input_conditioning: previous.input_conditioning,
             audio_input_device: previous.audio_input_device,
             audio_output_device: previous.audio_output_device,
             stt_languages: previous.stt_languages,

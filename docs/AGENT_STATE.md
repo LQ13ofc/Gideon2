@@ -78,3 +78,11 @@
 - Frases: várias ativas (até 5), personalizadas com medição sintética, boost 1.2 (96,05% -> 98,68% no protocolo A1, 0 falsos). Léxico en.phone empacotado.
 - Idiomas: catálogo + UI; só EN instalado; PT/FR dependem de download aprovado (docs/research/idiomas-stt-tts.md).
 - Gates verdes: design, b2feedback, a1..a5, c1..c4, s4final, e1, e24, e3, s2final(216), b4package, e4(290).
+
+## 2026-10-25 — A11 ações reais no computador (NÃO COMMITADO)
+- Preferência `real_actions` (off por padrão, consentimento com `confirmed`, `busy` com sessão/job). Ligada: "open brave/kcalc" abre o app pelo lançador do sistema, "set volume/mute/unmute/volume up/down" muda o sink padrão via `wpctl`; cada efeito só vira recibo depois de observado (processo novo que sobrevive 1 s; volume relido). Desligada: executor de sandbox como antes.
+- Código: src/host.rs (novo), src/commands.rs, src/core.rs, src/storage.rs, src/protocol.rs, src/transport.rs, src/tts.rs; app/bridge.py, app/pages/CfgPrivacidade.qml, app/components/RealActionsConsent.qml.
+- Teste ao vivo neste PC (scripts/verify_a11_real_actions.py): 47/0. Evidência docs/evidence/real-actions.json; relatório docs/A11-real-actions-test.md.
+- Desvio: XAUTHORITY no ambiente do host (Brave sai sem ele). Janela não é verificada pelo Core.
+- Gates: fmt OK, clippy -D warnings OK, cargo test OK, test_bridge_protocol 238 OK, test_snapshot_contract 18 OK, test_ui_settings 25 OK.
+- Não feito: voz/wake ao vivo nesta rodada, pacote instalado, onboarding, ferramentas com ação real ao vivo.

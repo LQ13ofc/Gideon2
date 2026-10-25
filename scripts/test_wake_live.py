@@ -53,6 +53,14 @@ class LiveWorkerTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), '')
         self.assertEqual(engine.last_end, 0)
 
+    def test_conditioning_is_a_live_only_argument_defaulting_to_off(self):
+        self.assertEqual(w.parse(['m.json', '--live']).conditioning, 'off')
+        self.assertEqual(w.parse(['m.json', '--live', '--conditioning', 'auto']).conditioning, 'auto')
+        with self.assertRaises(ValueError):
+            w.parse(['m.json', '0', '--conditioning', 'auto'])
+        with self.assertRaises(SystemExit):
+            w.parse(['m.json', '--live', '--conditioning', 'on'])
+
 
 if __name__ == '__main__':
     unittest.main()

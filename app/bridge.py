@@ -29,14 +29,14 @@ STAGED_ERRORS=('staged_payload_invalid',)
 # Finish reasons of the capture session (src/core.rs finish), recorded in capture.reason.
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
-COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','command','speech','transcript','capture','agent','skills','connections','registry','audio','languages','wake_phrases','phrase_check'})
+COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'unmute':(),'volume_up':(),'volume_down':(),'status':(),'time':(),'date':(),'cancel':()}
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','actions','command','speech','transcript','capture','agent','skills','connections','registry','audio','languages','wake_phrases','phrase_check'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
 ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','approved_at_ms','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
 ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities','approved_at_ms'}
-PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','audio_input_device','audio_output_device','live_audio','stt_languages','tts_language','tts_voice','wake_phrases'})
+PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','input_conditioning','audio_input_device','audio_output_device','live_audio','real_actions','stt_languages','tts_language','tts_voice','wake_phrases'})
 # Frases de ativação (src/phrases.rs): the Core owns the catalog, tokens and measurements; these checks shape the wire.
 WAKE_PHRASE_BLOCK_KEYS=frozenset({'max_active','max_custom','custom_revision','lexicon','settings','active','phrases','test'})
 WAKE_PHRASE_ENTRY_KEYS=frozenset({'id','text','tokens','label','language','qualification','custom','selectable','boost','threshold','measurement'})
@@ -51,6 +51,8 @@ VOICE_ID=re.compile(r'[A-Za-z0-9_-]{1,64}')
 # Core bounds (src/storage.rs): sensitivity 0.5..=1.5; device names 1..=128 bytes from this charset.
 DEVICE_CHARS=frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:@/+ -')
 def wake_sensitivity_ok(value):return type(value) in (int,float) and math.isfinite(value) and 0.5<=value<=1.5
+# Preference `input_conditioning` (src/storage.rs InputConditioning): the Core accepts exactly these two values.
+INPUT_CONDITIONING_VALUES=('auto','off')
 def audio_device_ok(value):return isinstance(value,str) and 1<=len(value.encode('utf-8'))<=128 and all(c in DEVICE_CHARS for c in value)
 # A4/A5 snapshot block `audio` (src/live.rs, src/devices.rs). `live` is always present from the Core; `devices` only after audio_devices.
 AUDIO_SOURCES=('pactl','pw-dump','none')
@@ -67,15 +69,52 @@ def audio_devices_ok(d):
         if not isinstance(item['label'],str) or not 1<=len(item['label'].encode('utf-8'))<=128:return False
     if d['source']=='none':return 'reason' in d and d['reason'] in AUDIO_REASONS and not lists[0] and not lists[1]
     return 'reason' not in d
+# A9 level meter, warnings, last detection and the probe (src/levels.rs, src/live.rs). Numbers and closed codes only.
+LIVE_WARNINGS=('no_frames','clipping','very_noisy','very_quiet')
+PROBE_STATES=('running','done')
+PROBE_VERDICTS=('ok','quiet','noisy','silent','error')
+PROBE_REASONS=('recorder_unavailable','sandbox_unavailable','invalid_device','recorder_exited')
+LEVEL_KEYS=frozenset({'rms_dbfs','peak_dbfs','floor_dbfs','speech_active','speech_ms','speech_unmatched','frames','last_frame_age_ms','clipping'})
+PHRASE_ID=re.compile(r'[A-Za-z0-9_-]{1,64}')
+def dbfs_ok(value):return type(value) in (int,float) and math.isfinite(value) and -90<=value<=0
+def level_ok(level):
+    if not isinstance(level,dict) or set(level)!=LEVEL_KEYS:return False
+    if not all(dbfs_ok(level[k]) for k in ('rms_dbfs','peak_dbfs','floor_dbfs')):return False
+    if any(type(level[k]) is not bool for k in ('speech_active','speech_unmatched','clipping')):return False
+    if type(level['speech_ms']) is not int or level['speech_ms']<0 or type(level['frames']) is not int or level['frames']<0:return False
+    age=level['last_frame_age_ms']
+    if age is not None and (type(age) is not int or age<0):return False
+    return not level['speech_unmatched'] or (level['speech_active'] and level['speech_ms']>=0)
+def detection_ok(det):
+    return isinstance(det,dict) and set(det)=={'at_ms','phrase_id'} and type(det['at_ms']) is int and det['at_ms']>=0 and isinstance(det['phrase_id'],str) and PHRASE_ID.fullmatch(det['phrase_id']) is not None
+def probe_ok(probe):
+    if not isinstance(probe,dict) or probe.get('state') not in PROBE_STATES:return False
+    base={'id','device','state'}
+    done={'frames','rms_dbfs','peak_dbfs','floor_dbfs','verdict','hint'}
+    keys=set(probe)
+    if not base<=keys<=base|done|{'reason'} or type(probe['id']) is not int or probe['id']<1 or not audio_device_ok(probe['device']):return False
+    if probe['state']=='running':return keys==base
+    if not done<=keys:return False
+    if type(probe['frames']) is not int or probe['frames']<0 or probe['verdict'] not in PROBE_VERDICTS:return False
+    if not all(dbfs_ok(probe[k]) for k in ('rms_dbfs','peak_dbfs','floor_dbfs')):return False
+    if not isinstance(probe['hint'],str) or not 1<=len(probe['hint'].encode('utf-8'))<=300:return False
+    # A reason comes with the error verdict and nothing else.
+    return ('reason' in probe)==(probe['verdict']=='error') and ('reason' not in probe or probe['reason'] in PROBE_REASONS)
 def audio_live_ok(live):
-    if not isinstance(live,dict) or not {'enabled','input_state','output_state','mic_active','restart_required'}<=set(live)<={'enabled','input_state','output_state','mic_active','restart_required','last_error'}:return False
+    base={'enabled','input_state','output_state','mic_active','restart_required','level','silence_warning'}
+    if not isinstance(live,dict) or not base<=set(live)<=base|{'last_error','last_detection'}:return False
     if type(live['enabled']) is not bool or type(live['mic_active']) is not bool or type(live['restart_required']) is not bool:return False
     if live['input_state'] not in LIVE_INPUT_STATES or live['output_state'] not in LIVE_OUTPUT_STATES:return False
     if 'last_error' in live and live['last_error'] not in LIVE_ERRORS:return False
     # The microphone indicator is only true while the recorder captures; a disabled feature is idle.
     if live['mic_active']!=(live['input_state']=='capturing'):return False
+    if not level_ok(live['level']):return False
+    # The level and the warning describe the recorder only: while it is not capturing both are silent.
+    if live['input_state']!='capturing' and (live['level']['frames']!=0 or live['silence_warning'] is not None):return False
+    if live['silence_warning'] is not None and live['silence_warning'] not in LIVE_WARNINGS:return False
+    if 'last_detection' in live and not detection_ok(live['last_detection']):return False
     return live['enabled'] or (live['input_state']=='idle' and not live['mic_active'])
-def audio_ok(audio):return isinstance(audio,dict) and set(audio)<={'devices','live'} and 'live' in audio and audio_live_ok(audio['live']) and ('devices' not in audio or audio_devices_ok(audio['devices']))
+def audio_ok(audio):return isinstance(audio,dict) and set(audio)<={'devices','live','probe'} and 'live' in audio and audio_live_ok(audio['live']) and ('devices' not in audio or audio_devices_ok(audio['devices'])) and ('probe' not in audio or probe_ok(audio['probe']))
 # B16 texts (Portuguese only; no Core code reaches the screen). The default choice is the Core's 'default' preference.
 DEFAULT_DEVICE='default'
 DEFAULT_DEVICE_LABEL='Padrão do sistema'
@@ -106,6 +145,43 @@ def live_state_text(live):
         return 'erro: '+(LIVE_ERROR_MESSAGES.get(error,'falha na captura') if not error.startswith('player_') else 'falha na captura')
     return 'em espera'
 def live_input_text(live):return 'Escuta do microfone: '+live_state_text(live)
+# A11 host actions (docs/A11-real-actions-test.md): consent switch, state line and the Core's last host action. The Core
+# sends content-free fields only; every word the user reads here is set in this file.
+REAL_KINDS=('open_app','volume','mute','unmute','volume_up','volume_down')
+REAL_APPS=('brave','steam','kcalc')
+REAL_KIND_TEXT={'open_app':'Abriu','volume':'Volume ajustado','mute':'Mudo ativado','unmute':'Som ativado','volume_up':'Volume aumentado','volume_down':'Volume diminuído'}
+REAL_ACTION_MESSAGES={'consent_required':'Ações no computador não ativadas: a confirmação não chegou ao Core; nada foi alterado'}
+# Outcome codes of a command that produced no receipt (src/host.rs and src/core.rs codes).
+COMMAND_CODE_MESSAGES={'app_not_installed':'Aplicativo não instalado neste computador; nada foi aberto','launch_failed':'Não consegui iniciar o aplicativo; nada foi confirmado',
+    'launch_unconfirmed':'Pedi para abrir, mas o aplicativo não apareceu em 5 s; nada foi confirmado','volume_unavailable':'Não consegui ler o volume do computador; nada foi alterado',
+    'volume_unverified':'O volume lido não bate com o pedido; a mudança não foi confirmada','command_failed':'Comando não concluído; nada foi confirmado',
+    'app_unavailable':'Aplicativo fora da lista fixa; nada foi aberto','denied':'Valor fora da faixa de 0 a 100%; nada foi alterado','unsupported':'Comando não entendido; nada foi executado'}
+def valid_actions_block(block):
+    """`actions`: {real: {enabled: bool, last_action: null | {kind, app, ok, verified, at_ms}}}. Strict; app is set only for open_app."""
+    if not isinstance(block,dict) or set(block)!={'real'}:return False
+    real=block['real']
+    if not isinstance(real,dict) or set(real)!={'enabled','last_action'} or type(real['enabled']) is not bool:return False
+    last=real['last_action']
+    if last is None:return True
+    if not isinstance(last,dict) or set(last)!={'kind','app','ok','verified','at_ms'}:return False
+    if last['kind'] not in REAL_KINDS or (last['app'] is not None and last['app'] not in REAL_APPS):return False
+    if (last['kind']=='open_app')!=(last['app'] is not None):return False
+    if type(last['ok']) is not bool or type(last['verified']) is not bool or (last['verified'] and not last['ok']):return False
+    return type(last['at_ms']) is int and 0<=last['at_ms']<=2**64-1
+def real_action_line(last):
+    """State line of the last host action: 'Abriu: brave às 14:32 · confirmado'. Local time, HH:MM."""
+    if not isinstance(last,dict):return 'Nenhuma ação no computador desde o início do Core'
+    when=datetime.datetime.fromtimestamp(last['at_ms']/1000).strftime('%H:%M')
+    if not last['ok']:return f'Não concluiu às {when}; nada foi confirmado'
+    label=REAL_KIND_TEXT[last['kind']]+(f": {last['app']}" if last['app'] else '')
+    return f"{label} às {when} · {'confirmado' if last['verified'] else 'sem confirmação'}"
+def real_actions_state(enabled,last):
+    if enabled is not True:return 'Desligado: os comandos usam só a simulação interna, sem efeito no computador'
+    return real_action_line(last)
+def real_action_code_message(op,code):
+    """Refusal text of the consent op; other ops and codes keep the shared table."""
+    if op=='real_actions_preference' and code in REAL_ACTION_MESSAGES:return REAL_ACTION_MESSAGES[code]
+    return code_message(code)
 def live_output_text(live):
     if not live:return 'Saída ao vivo: sem informação do Core'
     if not live.get('enabled'):return 'Saída ao vivo: desligada — a resposta usa a saída virtual'
@@ -120,6 +196,53 @@ def devices_status(devices):
     if devices['source']=='none':return AUDIO_REASON_MESSAGES.get(devices.get('reason'),AUDIO_REASON_MESSAGES['audio_tool_failed'])
     if not devices['inputs'] and not devices['outputs']:return 'Nenhum dispositivo de áudio listado por '+AUDIO_SOURCE_LABELS.get(devices['source'],devices['source'])
     return ''
+# A9 texts (Portuguese only). Numbers are shown with a decimal comma; zones carry words as well as colour.
+LIVE_WARNING_TEXTS={
+    'no_frames':'Nenhum áudio chegando do microfone.',
+    'very_quiet':'Sinal muito baixo: aproxime-se ou aumente o ganho do microfone no sistema.',
+    'clipping':'O sinal está saturando (distorção): afaste-se do microfone ou reduza o ganho.',
+}
+PROBE_VERDICT_TEXTS={'ok':'Captando bem','quiet':'Sinal baixo','noisy':'Ruído alto','silent':'Silêncio','error':'Erro'}
+PROBE_VERDICT_ZONES={'ok':'ok','quiet':'warn','noisy':'bad','silent':'bad','error':'bad'}
+LEVEL_CALIBRATING_FRAMES=150
+def db_text(value):return f'{value:.1f}'.replace('.',',')+' dBFS'
+def very_noisy_text(floor):return f'Este microfone tem muito ruído de fundo ({round(floor)} dBFS). Teste outro dispositivo.'
+def level_zone(rms):
+    if rms>=-12:return 'hot'
+    if rms<-60:return 'low'
+    return 'ok'
+def floor_zone(floor):
+    if floor>-35:return 'bad'
+    if floor>-45:return 'warn'
+    return 'ok'
+ZONE_TEXTS={'hot':'Sinal alto: risco de distorção','low':'Sinal baixo','ok':'Sinal normal'}
+FLOOR_TEXTS={'bad':'ruído alto','warn':'ruído moderado','ok':'ruído baixo'}
+def level_view(live,online=True):
+    """Shape for the QML meter (audioLevel). Empty when the Core is offline or the recorder is not capturing."""
+    level=(live or {}).get('level') if online else None
+    capturing=bool(online and live and live.get('input_state')=='capturing' and live.get('level'))
+    if not capturing or not level:
+        return {'capturing':False,'rms':-90.0,'peak':-90.0,'floor':-90.0,'zone':'ok','zoneText':'','floorZone':'ok','floorText':'','speechActive':False,'unmatched':False,'calibrating':True,'frames':0,'warning':'','warningText':'','rmsText':'','peakText':'','floorLine':'Aguardando o microfone','ageMs':-1}
+    warning=live.get('silence_warning') or ''
+    floor=level['floor_dbfs']
+    warning_text=LIVE_WARNING_TEXTS.get(warning,'')
+    if warning=='very_noisy':warning_text=very_noisy_text(floor)
+    return {'capturing':True,'rms':level['rms_dbfs'],'peak':level['peak_dbfs'],'floor':floor,'zone':level_zone(level['rms_dbfs']),'zoneText':ZONE_TEXTS[level_zone(level['rms_dbfs'])],
+            'floorZone':floor_zone(floor),'floorText':FLOOR_TEXTS[floor_zone(floor)],'speechActive':level['speech_active'],'unmatched':level['speech_unmatched'],
+            'calibrating':level['frames']<LEVEL_CALIBRATING_FRAMES,'frames':level['frames'],'warning':warning,'warningText':warning_text,
+            'rmsText':db_text(level['rms_dbfs']),'peakText':db_text(level['peak_dbfs']),'floorLine':'Ruído de fundo: '+db_text(floor)+' ('+FLOOR_TEXTS[floor_zone(floor)]+')','ageMs':level['last_frame_age_ms'] if level['last_frame_age_ms'] is not None else -1}
+def live_hint_view(live,online=True):
+    """Hoje's state line while the microphone is on: listening, speech heard but not recognised (hint: say the phrase)."""
+    if not online or not live or live.get('enabled') is not True or live.get('input_state')!='capturing':return {'line':'','hint':''}
+    if (live.get('level') or {}).get('speech_unmatched') is True:return {'line':'Ouvindo… fala detectada mas nenhuma frase reconhecida','hint':'Diga: Hey Gideon'}
+    return {'line':'Ouvindo…','hint':''}
+def probe_view(probe):
+    """Shape for the QML probe table (audioProbe): {} when no probe ran; numbers are None while running."""
+    if not probe:return {}
+    done=probe['state']=='done'
+    return {'id':probe['id'],'device':probe['device'],'running':not done,'done':done,'verdict':probe.get('verdict') or '','verdictText':PROBE_VERDICT_TEXTS.get(probe.get('verdict'),''),
+            'zone':PROBE_VERDICT_ZONES.get(probe.get('verdict'),'bad'),'hint':probe.get('hint') or '','rms':probe.get('rms_dbfs'),'peak':probe.get('peak_dbfs'),'floor':probe.get('floor_dbfs'),
+            'frames':probe.get('frames',0),'reason':probe.get('reason') or ''}
 PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output'})
 TRANSCRIPT_KEYS=frozenset({'source','session_id','revision','audio_end_us','raw','normalized','is_final','confidence'})
 CAPTURE_KEYS=frozenset({'session_id','start_us','end_us','samples','pcm_sha256','reason'})
@@ -690,8 +813,11 @@ def validate_snapshot(data,request_id,min_sequence):
         require(type(prefs['visual_feedback']) is bool and integer(prefs['output_volume_percent'],0,100))
         # A6 consent: the Core always reports it; strict bool.
         require(type(prefs.get('live_audio')) is bool)
+        # A11 consent for host actions: the Core always reports it; strict bool.
+        require(type(prefs.get('real_actions')) is bool)
         if 'wake_phrases' in prefs:require(wake_setting_list_ok(prefs['wake_phrases']))
         if 'wake_sensitivity' in prefs:require(wake_sensitivity_ok(prefs['wake_sensitivity']))
+        if 'input_conditioning' in prefs:require(prefs['input_conditioning'] in INPUT_CONDITIONING_VALUES)
         for key in ('audio_input_device','audio_output_device'):
             if key in prefs:require(audio_device_ok(prefs[key]))
         previous=prefs.get('previous_preferences')
@@ -700,6 +826,7 @@ def validate_snapshot(data,request_id,min_sequence):
             if 'visual_feedback' in previous:require(type(previous['visual_feedback']) is bool)
             if 'output_volume_percent' in previous:require(integer(previous['output_volume_percent'],0,100))
             if 'wake_sensitivity' in previous:require(wake_sensitivity_ok(previous['wake_sensitivity']))
+            if 'input_conditioning' in previous:require(previous['input_conditioning'] in INPUT_CONDITIONING_VALUES)
             for key in ('audio_input_device','audio_output_device'):
                 if key in previous:require(audio_device_ok(previous[key]))
         # Idiomas: when the Core reports them, all three are present and well-formed.
@@ -708,6 +835,7 @@ def validate_snapshot(data,request_id,min_sequence):
         wake=prefs.get('wake_phrase')
         require(wake is None or (short(wake) and len(wake)>0 and all(c.isascii() and (c.isalnum() or c in '_-') for c in wake)))
     if 'languages' in data:require(valid_languages_block(data['languages']))
+    if 'actions' in data:require(valid_actions_block(data['actions']))
     if 'wake_phrases' in data:require(wake_phrases_block_ok(data['wake_phrases']))
     if 'phrase_check' in data:require(phrase_check_ok(data['phrase_check']))
     hub=data.get('hub')
@@ -1453,21 +1581,28 @@ OPS.update({
     'preferences_restore_defaults':('prefs','Padrões do Core restaurados; cópia anterior em config.json.bak'),
 })
 PENDING.update({'audio_devices':'Consultando dispositivos no Core…','preferences_restore_defaults':'Restaurando padrões do Core…'})
+# A9 probe of one input: 3 s of the microphone; the message says so, and the result comes in audio.probe.
+OPS.update({'audio_probe':('audio','Teste iniciado: o microfone será usado por 3 segundos')})
+PENDING.update({'audio_probe':'Iniciando o teste de 3 s no Core…'})
+CODE_MESSAGES.setdefault('invalid_device','Microfone não listado pelo sistema: atualize a lista e escolha de novo')
 # A6 consent for the live microphone (docs/A6-live-audio.md): one op, read back from preferences.live_audio and audio.live.restart_required.
 OPS.update({'live_audio_preference':('prefs','Escuta do microfone salva no Core; reinicie o Core para aplicar')})
 PENDING.update({'live_audio_preference':'Salvando a escuta do microfone no Core…'})
+# A11 consent for host actions (docs/A11-real-actions-test.md): applies at once; busy while a voice session or a command runs.
+OPS.update({'real_actions_preference':('prefs','Ações no computador salvas no Core')})
+PENDING.update({'real_actions_preference':'Salvando as ações no computador no Core…'})
 # Idiomas (Frente 2): one op for the STT list and the TTS language/voice; applied at the next Core start.
 OPS.update({'language_preference':('prefs','Idiomas salvos no Core; reinicie o Core para aplicar')})
 PENDING.update({'language_preference':'Salvando idiomas no Core…'})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged','languages':'languagesChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio','languages')
+SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged','languages':'languagesChanged','actions':'actionsChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio','languages','actions')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
-    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal()
+    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal();actionsChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
     def __init__(self,root):
@@ -1527,7 +1662,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),'audio':s.get('audio'),'languages':s.get('languages'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),'audio':s.get('audio'),'languages':s.get('languages'),'actions':s.get('actions'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -1565,7 +1700,7 @@ class Bridge(QObject):
             if code=='ok':self.textSent.emit(sent or '')
             return
         if code!='ok':
-            self.results[channel]=capability_code_message(code) if op=='capability_invoke' else code_message(code)
+            self.results[channel]=capability_code_message(code) if op=='capability_invoke' else real_action_code_message(op,code)
             if op=='capability_invoke':self.capability_pending=False
         elif op=='capability_invoke':self.capability_pending=True;self.results[channel]=PENDING[op]
         else:self.results[channel]=done(self.hub_target) if callable(done) else done
@@ -2249,6 +2384,8 @@ class Bridge(QObject):
         return {'revision':int(self.preferencesRevision),'audible_feedback':bool(prefs.get('audible_feedback',True)),'session_timeout_ms':int(prefs.get('session_timeout_ms',30000)),**changes}
     @Property(float,notify=preferencesChanged)
     def wakeSensitivity(self):return float((self.snapshot.get('preferences') or {}).get('wake_sensitivity',1.0))
+    @Property(bool,notify=preferencesChanged)
+    def inputConditioningOn(self):return (self.snapshot.get('preferences') or {}).get('input_conditioning','auto')!='off'
     @Property(str,notify=preferencesChanged)
     def audioInputSaved(self):return self._saved_device('audio_input_device')
     @Property(str,notify=preferencesChanged)
@@ -2292,6 +2429,17 @@ class Bridge(QObject):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
         if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
         self._preferences('live_audio_preference',revision=int(self.preferencesRevision),enabled=enabled,confirmed=enabled)
+    # ---- A11 host actions. The switch shows the ledger value; the state line is the Core's last host action (content-free).
+    @Property(bool,notify=preferencesChanged)
+    def realActionsEnabled(self):return (self.snapshot.get('preferences') or {}).get('real_actions') is True
+    @Property(str,notify=actionsChanged)
+    def realActionStateText(self):return real_actions_state(self.realActionsEnabled,((self.snapshot.get('actions') or {}).get('real') or {}).get('last_action'))
+    @Slot(bool)
+    def setRealActions(self,enabled):
+        """Consent switch. The dialog (Cancelar by default) runs before enabled=True; the Core refuses an enable without confirmed."""
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        self._preferences('real_actions_preference',revision=int(self.preferencesRevision),enabled=enabled,confirmed=enabled)
     # ---- Idiomas (Frente 2). The view comes from snapshot 'languages'; the Core refuses non-installed languages.
     def _languages(self):return dict(self.snapshot.get('languages') or {})
     def _language_items(self,kind):return [dict(item) for item in ((self._languages().get('engines') or {}).get(kind) or [])]
@@ -2326,6 +2474,10 @@ class Bridge(QObject):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
         if not wake_sensitivity_ok(value):return self._refuse('prefs',SENSITIVITY_RANGE_TEXT)
         self._preferences('preferences',**self._pref_request(wake_sensitivity=round(float(value),2)))
+    @Slot(bool)
+    def setInputConditioning(self,on):
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        self._preferences('preferences',**self._pref_request(input_conditioning='auto' if on else 'off'))
     @Slot(str,str)
     def setAudioDevices(self,input_device,output_device):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
@@ -2335,6 +2487,21 @@ class Bridge(QObject):
     def refreshAudioDevices(self):
         if not self.online:return self._refuse('audio','Core desconectado: nada a consultar')
         self._send('audio','audio_devices')
+    @Slot(str,result=bool)
+    def probeAudioInput(self,device):
+        """A9: 3 s of the microphone for one listed input (or 'default'). Refused locally when malformed; the Core refuses while a voice session or another probe runs."""
+        if not self.online:self._refuse('audio','Core desconectado: nada a testar');return False
+        if not audio_device_ok(device):self._refuse('audio',DEVICE_INVALID_TEXT);return False
+        return self._send('audio','audio_probe',device=device)
+    # A9 meter and probe (Dispositivos) and the state line (Hoje). Every value comes from audio.live / audio.probe.
+    @Property('QVariantMap',notify=audioChanged)
+    def audioLevel(self):return level_view(self._live(),self.online)
+    @Property('QVariantMap',notify=audioChanged)
+    def audioProbe(self):return probe_view((self.snapshot.get('audio') or {}).get('probe'))
+    @Property(bool,notify=audioChanged)
+    def audioProbeRunning(self):return ((self.snapshot.get('audio') or {}).get('probe') or {}).get('state')=='running'
+    @Property('QVariantMap',notify=audioChanged)
+    def liveStateView(self):return live_hint_view(self._live(),self.online)
     @Slot()
     def restoreCoreDefaults(self):
         if self.sessionId:return self._refuse('prefs',RESTORE_BUSY_TEXT)
@@ -2467,7 +2634,7 @@ class Bridge(QObject):
     @Property(str,notify=sessionChanged)
     def result(self):
         c=self.snapshot.get('command') or {};r=c.get('receipt')
-        return display_receipt(r['result']) if r else c.get('code','')
+        return display_receipt(r['result']) if r else COMMAND_CODE_MESSAGES.get(c.get('code',''),c.get('code',''))
     @Property(bool,notify=sessionChanged)
     def resultVerified(self):return bool((self.snapshot.get('command') or {}).get('receipt',{})) and bool(self.snapshot['command']['receipt']['verified'])
     @Property(str,notify=changed)

@@ -105,4 +105,36 @@ class NativeWakeTests(unittest.TestCase):
             with self.assertRaises(ValueError):WakeEngine(manifest)
 
 
+class ConditionedLiveTests(unittest.TestCase):
+    """The live loop hands the spotter conditioned frames; the Core packets keep the raw frames."""
+    class Spy:
+        def __init__(self):
+            self.last_end=0;self.heard=[]
+        def accept(self,samples,timestamp):
+            self.heard.append(np.array(samples,copy=True));self.last_end+=len(samples)*1000000//16000
+            return []
+        frame_samples=WakeEngine.frame_samples
+
+    def run_live(self,conditioner):
+        import io
+        from wake_worker import live
+        engine=self.Spy()
+        raw=b''.join(int(v).to_bytes(2,'little',signed=True) for v in np.full(320*60,6553,dtype=np.int64))  # DC 0.2
+        out=io.StringIO()
+        live(engine,None,io.BytesIO(raw),out,conditioner)
+        packets=[json.loads(line) for line in out.getvalue().splitlines()]
+        return engine,packets
+
+    def test_spotter_hears_conditioned_frames_and_packets_keep_raw_samples(self):
+        from audio_conditioning import AUTO_CHAIN,Conditioner
+        engine,packets=self.run_live(Conditioner(AUTO_CHAIN))
+        self.assertAlmostEqual(float(np.mean(packets[-1]['samples'])),0.2,places=3)  # Core keeps the raw DC
+        self.assertLess(abs(float(np.mean(engine.heard[-1]))),1e-3)  # the spotter sees it high-passed
+        self.assertEqual(len(engine.heard),60)
+    def test_conditioning_off_passes_the_raw_frames(self):
+        engine,packets=self.run_live(None)
+        self.assertAlmostEqual(float(np.mean(engine.heard[-1])),0.2,places=3)
+        self.assertEqual(packets[-1]['timestamp_us'],59*20000)
+
+
 if __name__=='__main__':unittest.main()

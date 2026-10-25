@@ -134,6 +134,25 @@ PageFrame {
         }
     }
 
+    // A9: the level the Core hears from the live input (numbers only, 5 updates a second at most). The meter names every
+    // zone in words; without the listening on, it says how to see it.
+    Section {
+        title: "Nível do microfone"
+        Text {
+            text: "Mostra o nível do microfone escolhido enquanto a escuta está ligada: o sinal, o ruído de fundo e alertas. Não grava nada."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        ILevelMeter {
+            objectName: "dispositivosLevelMeter"
+            view: core.audioLevel
+        }
+    }
+
     // Opened by the switch; Cancelar (the default) leaves the saved value as it was.
     LiveAudioConsent {
         id: consent
@@ -193,6 +212,7 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
+        EToggleSetting { settingKey: "core.inputConditioning" }
         EValueRow {
             label: "Escolha salva"
             value: page.choiceText(core.audioInputChoices, core.audioInputSaved)
@@ -274,6 +294,32 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
+    }
+
+    // A9: each listed input is recorded for 3 s, one after another; the result table ranks them. Nothing is saved unless "Usar este".
+    Section {
+        title: "Testar microfones"
+        Text {
+            text: "Cada teste usa o microfone por 3 segundos. Os microfones são testados um de cada vez, com ou sem a escuta ligada."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            objectName: "micProbeEmpty"
+            visible: (core.audioDevices.inputs || []).length === 0
+            text: "Atualize a lista de dispositivos antes de testar."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        IMicProbe {}
     }
 
     Section {

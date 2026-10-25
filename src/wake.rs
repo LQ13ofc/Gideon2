@@ -97,12 +97,14 @@ pub enum WorkerMode {
     Live { start_us: u64 },
 }
 
-/// Argument vector of `scripts/wake_worker.py`. Threshold is always explicit (4 decimals).
+/// Argument vector of `scripts/wake_worker.py`. Threshold is always explicit (4 decimals). `conditioning`
+/// (`auto` or `off`, live only) is passed when given: the replay path never conditions its fixtures.
 pub fn worker_args(
     manifest: &str,
     mode: WorkerMode,
     active_phrase: Option<&str>,
     threshold: f32,
+    conditioning: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![manifest.to_string()];
     match mode {
@@ -118,6 +120,9 @@ pub fn worker_args(
     }
     args.push("--keywords-threshold".into());
     args.push(format!("{threshold:.4}"));
+    if let Some(mode) = conditioning {
+        args.extend(["--conditioning".into(), mode.to_string()]);
+    }
     args
 }
 

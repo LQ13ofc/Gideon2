@@ -117,6 +117,7 @@ SCHEMA=(
     _entry('core.audibleFeedback','Resposta',_AUDIO,'bool',True,'Resposta por voz','Gideon responde em voz alta. Vale a partir da próxima sessão.',keywords=('resposta','voz','audio','falar','som'),source='core'),
     # Device choices come from the Core's audio_devices list (build_schema); the static option is the system default.
     _entry('core.audioInput','Entrada',_DISPOSITIVOS,'enum','default','Microfone (entrada)','Dispositivo de captura da escuta ao vivo. Vale na próxima sessão de voz.',options=_opts(('default','Padrão do sistema')),keywords=('microfone','mic','entrada','captura','dispositivo','input'),source='core'),
+    _entry('core.inputConditioning','Entrada',_DISPOSITIVOS,'bool',True,'Melhorar sinal do microfone (automático)','Filtra graves e a componente contínua só para o detector de wake. A fala gravada e a transcrição não mudam. Medido com ruído real do microfone (docs/A9-wake-real-noise.md). Vale na próxima sessão de voz.',keywords=('microfone','ruido','sinal','filtro','graves','wake','deteccao','automatico','melhorar','sinal'),source='core'),
     _entry('core.audioOutput','Saída',_DISPOSITIVOS,'enum','default','Alto-falante (saída)','Dispositivo de reprodução da resposta por voz. Vale na próxima sessão de voz.',options=_opts(('default','Padrão do sistema')),keywords=('alto-falante','saida','reproducao','dispositivo','output','speaker','som'),source='core'),
     _entry('audio.cues','Sinais',_AUDIO,'bool',True,'Sons de início e fim','Toca um sinal ao começar e terminar a escuta.',keywords=('som','sinal','bip','cues','escuta')),
     _entry('core.visualFeedback','Indicadores',_APARENCIA,'bool',True,'Indicador visual de atividade','Mostra o estado do Gideon na tela. Vale a partir da próxima sessão.',keywords=('indicador','visual','atividade','estado'),source='core'),
@@ -558,7 +559,7 @@ class UiSettings(QObject):
             pack=getattr(bridge,'snapshot',{}).get('base_pack') or {}
             return prefs.get('wake_phrase') or pack.get('default_phrase') or ''
         if key in DEVICE_PREF:return prefs.get(DEVICE_PREF[key]) or default
-        readers={'core.responseGain':'outputVolume','core.audibleFeedback':'audibleFeedback','core.visualFeedback':'visualFeedback','core.sessionTimeoutMs':'sessionTimeout','core.wakeSensitivity':'wakeSensitivity'}
+        readers={'core.responseGain':'outputVolume','core.audibleFeedback':'audibleFeedback','core.visualFeedback':'visualFeedback','core.sessionTimeoutMs':'sessionTimeout','core.wakeSensitivity':'wakeSensitivity','core.inputConditioning':'inputConditioningOn'}
         return getattr(bridge,readers[key],default)
 
     def _core_snapshot(self):
@@ -592,6 +593,7 @@ class UiSettings(QObject):
         elif key=='core.audibleFeedback':bridge.savePreferences(bool(coerced),int(bridge.sessionTimeout))
         elif key=='core.sessionTimeoutMs':bridge.savePreferences(bool(bridge.audibleFeedback),int(coerced))
         elif key=='core.wakeSensitivity':bridge.setWakeSensitivity(float(coerced))
+        elif key=='core.inputConditioning':bridge.setInputConditioning(bool(coerced))
         elif key in DEVICE_PREF:
             # The Core takes both device names in one request; the other one keeps its current value.
             other='core.audioOutput' if key=='core.audioInput' else 'core.audioInput'

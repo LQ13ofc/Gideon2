@@ -1,0 +1,2048 @@
+{
+ "suite": "wake-real-acoustic",
+ "date": "2026-10-25",
+ "status": "NO_AIR_PICKUP_AT_90PCT; LOOP_PATH_MEASURED",
+ "summary": "At the 90 % ceiling no real microphone (fifine, webcam) heard the monitor or the line-out speakers in the room. The only pair that carried the clips was the internal line-out wired electrically to the internal rear Mic (a codec loop, not air). The live Core was measured on that loop; the acoustic hit rate is 0 of 20.",
+ "owner_audio_state": {
+  "restored": true,
+  "restored_by": "/tmp/gideon-wake-lab/real/restore.py (read back, no problems)",
+  "sink_volumes_raw": {
+   "hdmi": 42598,
+   "fifine_out": 26214,
+   "internal": 38011
+  },
+  "source_volumes_raw": {
+   "fifine": 65536,
+   "webcam": 65536,
+   "internal_in": 65536
+  },
+  "mutes": "all no, before and after",
+  "defaults_unchanged": {
+   "sink": "alsa_output.pci-0000_03_00.1.hdmi-stereo-extra4",
+   "source": "alsa_input.usb-ASD_650_Camera_Full_HD_webcam_200901010001-02.analog-stereo"
+  },
+  "changed_only_during_tests": [
+   "sink volume (45, 60, 75, 90 %)"
+  ],
+  "mixer_changes": "none (amixer read only)"
+ },
+ "speaker_seconds": {
+  "probe_ramp": 79.8,
+  "loop_internal_matrix": 259.2,
+  "hdmi_fifine_and_webcam": 94.2,
+  "loop_tts_matrix_clips": 47.1,
+  "total_clip_and_probe_seconds": 480.3
+ },
+ "port_and_jack_state": {
+  "hdmi_sink": "port hdmi-output-4 available; ELD: VG2791R, speakers FL/FR advertised",
+  "internal_sink": "Line Out Front jack detected (on); headphones not available",
+  "fifine_sink": "analog-output-speaker, availability unknown (USB headphone out, nothing reported)",
+  "fifine_source": "analog-input-mic, availability unknown, not muted, noise floor present (not muted)",
+  "webcam_source": "analog-input-mic, availability unknown, not muted, noise floor present",
+  "internal_rear_mic": "Rear Mic Jack detected (on): the same plugged path as the line-out loop"
+ },
+ "probe_ramp": {
+  "method": "sweep 3 s, pink 2 s, spoken clip 1.65 s; each recorded by all sources; cross-correlation with the known stimulus against a 6 s ambient null",
+  "ambient_rms_dbfs": {
+   "fifine_mic": -46.8,
+   "webcam_asd": -13.1,
+   "internal_in": -43.9
+  },
+  "levels_pct": [
+   45,
+   60,
+   75,
+   90
+  ],
+  "pairs": [
+   {
+    "sink": "fifine_out",
+    "source": "fifine_mic",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.001,
+    "best_at": {
+     "level_pct": 60,
+     "stim": "speech"
+    },
+    "speech_at_90": {
+     "r_peak": 0.046,
+     "null_r": 0.065,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -49.9
+   },
+   {
+    "sink": "fifine_out",
+    "source": "internal_in",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.0,
+    "best_at": {
+     "level_pct": 45,
+     "stim": "sweep"
+    },
+    "speech_at_90": {
+     "r_peak": 0.005,
+     "null_r": 0.006,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -44.0
+   },
+   {
+    "sink": "fifine_out",
+    "source": "webcam_asd",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.001,
+    "best_at": {
+     "level_pct": 90,
+     "stim": "sweep"
+    },
+    "speech_at_90": {
+     "r_peak": 0.015,
+     "null_r": 0.039,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -21.8
+   },
+   {
+    "sink": "hdmi",
+    "source": "fifine_mic",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.011,
+    "best_at": {
+     "level_pct": 75,
+     "stim": "sweep"
+    },
+    "speech_at_90": {
+     "r_peak": 0.072,
+     "null_r": 0.065,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -42.6
+   },
+   {
+    "sink": "hdmi",
+    "source": "internal_in",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.001,
+    "best_at": {
+     "level_pct": 45,
+     "stim": "sweep"
+    },
+    "speech_at_90": {
+     "r_peak": 0.006,
+     "null_r": 0.006,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -43.9
+   },
+   {
+    "sink": "hdmi",
+    "source": "webcam_asd",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.013,
+    "best_at": {
+     "level_pct": 75,
+     "stim": "sweep"
+    },
+    "speech_at_90": {
+     "r_peak": 0.022,
+     "null_r": 0.039,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -20.0
+   },
+   {
+    "sink": "internal",
+    "source": "fifine_mic",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.005,
+    "best_at": {
+     "level_pct": 60,
+     "stim": "pink"
+    },
+    "speech_at_90": {
+     "r_peak": 0.053,
+     "null_r": 0.065,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -49.7
+   },
+   {
+    "sink": "internal",
+    "source": "internal_in",
+    "pickup_rows": 12,
+    "rows": 12,
+    "best_margin_r_minus_null": 0.599,
+    "best_at": {
+     "level_pct": 90,
+     "stim": "sweep"
+    },
+    "speech_at_90": {
+     "r_peak": 0.327,
+     "null_r": 0.006,
+     "pickup": true
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -18.3
+   },
+   {
+    "sink": "internal",
+    "source": "webcam_asd",
+    "pickup_rows": 0,
+    "rows": 12,
+    "best_margin_r_minus_null": -0.003,
+    "best_at": {
+     "level_pct": 45,
+     "stim": "sweep"
+    },
+    "speech_at_90": {
+     "r_peak": 0.012,
+     "null_r": 0.039,
+     "pickup": false
+    },
+    "clip_count": 0,
+    "max_rms_dbfs": -22.8
+   }
+  ],
+  "skipped": []
+ },
+ "two_channel_diagnosis_hdmi_90pct": {
+  "note": "passive pw-record copies made during the live runs (raw files stay in the lab folder; no audio here)",
+  "files": [
+   {
+    "file": "fifine-hdmi-2ch.raw",
+    "seconds": 119.1,
+    "left": {
+     "rms_dbfs": -44.8,
+     "peak": 0.176,
+     "clip_count": 0,
+     "dc": 0.0
+    },
+    "right": {
+     "rms_dbfs": -44.8,
+     "peak": 0.176,
+     "clip_count": 0,
+     "dc": 0.0
+    },
+    "lr_correlation": 1.0,
+    "lr_level_diff_db": 0.0,
+    "band_share_hum_50_60": 0.0417,
+    "band_share_speech_300_3400": 0.3896,
+    "agc_block_db_std": 5.61,
+    "agc_block_db_range": [
+     -57.0,
+     -33.4
+    ],
+    "clip_search": {
+     "positive_best_r_median": 0.112,
+     "negative_best_r_median": 0.111,
+     "positive_best_r_max": 0.161,
+     "negative_best_r_max": 0.185,
+     "clips_r_over_0_3": 0,
+     "clips_searched": 105
+    }
+   },
+   {
+    "file": "webcam-hdmi-2ch.raw",
+    "seconds": 119.1,
+    "left": {
+     "rms_dbfs": -20.1,
+     "peak": 1.0,
+     "clip_count": 3475,
+     "dc": 0.00088
+    },
+    "right": {
+     "rms_dbfs": -20.6,
+     "peak": 1.0,
+     "clip_count": 3351,
+     "dc": 0.00042
+    },
+    "lr_correlation": 0.9757,
+    "lr_level_diff_db": 0.5,
+    "band_share_hum_50_60": 0.0183,
+    "band_share_speech_300_3400": 0.0151,
+    "agc_block_db_std": 3.73,
+    "agc_block_db_range": [
+     -29.9,
+     -3.9
+    ],
+    "clip_search": {
+     "positive_best_r_median": 0.108,
+     "negative_best_r_median": 0.104,
+     "positive_best_r_max": 0.184,
+     "negative_best_r_max": 0.183,
+     "clips_r_over_0_3": 0,
+     "clips_searched": 105
+    }
+   }
+  ]
+ },
+ "loop_internal_live_core": {
+  "pair": {
+   "source": "alsa_input.pci-0000_00_1f.3.analog-stereo (internal rear Mic)",
+   "sink": "alsa_output.pci-0000_00_1f.3.analog-stereo (internal Line Out)",
+   "sink_volume_pct": 90,
+   "kind": "electrical loop, not acoustic"
+  },
+  "matrix": [
+   {
+    "sensitivity": 0.5,
+    "positives": 10,
+    "positive_hits": 8,
+    "negatives": 10,
+    "negative_false_triggers": 0,
+    "unclaimed_sessions": 0,
+    "latency_from_clip_end_ms_median": -935,
+    "latency_from_clip_start_ms_median": 1524,
+    "live_errors": [],
+    "clips": [
+     {
+      "id": "pos-hey_plain-bf_emma-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -185,
+      "transcript": "Hey, Gideons.",
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_giddy-af_bella",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-af_bella-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1087,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:08:06 UTC"
+     },
+     {
+      "id": "neg-hey_julian-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-pos_hey_pocket_time-pocket",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1089,
+      "transcript": "Hey, Gideon, what time is it?",
+      "command_result": "12:08:21 UTC"
+     },
+     {
+      "id": "pos-hey_plain-bf_emma-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -164,
+      "transcript": "Hey Gideons.",
+      "command_result": null
+     },
+     {
+      "id": "neg-white-noise-10s",
+      "class": "negative",
+      "expect": false,
+      "condition": "white-noise",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-am_michael-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-team_join-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-okay_gideon-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_giddy-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-bf_emma-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1089,
+      "transcript": "Hey, Gideon, open brave.",
+      "command_result": null
+     },
+     {
+      "id": "neg-gideon_alone-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-open_chrome-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-bf_emma-loud",
+      "class": "positive",
+      "expect": true,
+      "condition": "volume-loud",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1090,
+      "transcript": "Hey Gideon, open brave.",
+      "command_result": "Sandbox app process verified: com.brave.Browser.desktop"
+     },
+     {
+      "id": "pos-hey_time-am_michael-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -783,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:09:20 UTC"
+     },
+     {
+      "id": "neg-weather-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-am_michael-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": 62,
+      "transcript": "I'm a giddy up.",
+      "command_result": null
+     },
+     {
+      "id": "neg-team_join-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     }
+    ]
+   },
+   {
+    "sensitivity": 1.0,
+    "positives": 30,
+    "positive_hits": 22,
+    "negatives": 30,
+    "negative_false_triggers": 0,
+    "unclaimed_sessions": 0,
+    "latency_from_clip_end_ms_median": -990,
+    "latency_from_clip_start_ms_median": 1540,
+    "live_errors": [],
+    "clips": [
+     {
+      "id": "neg-yeah_yeah-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-okay_gideon-af_bella",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bf_emma-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1026,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:10:14 UTC"
+     },
+     {
+      "id": "neg-pink-noise-10s",
+      "class": "negative",
+      "expect": false,
+      "condition": "pink-noise",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bm_george-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1112,
+      "transcript": "A Gideon, what time is it?",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-af_bella-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-af_bella-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1009,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:10:41 UTC"
+     },
+     {
+      "id": "pos-hey_plain-am_michael-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": true,
+      "latency_from_clip_end_ms": -82,
+      "transcript": "A gideon.",
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_julian-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-am_michael-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -858,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:10:56 UTC"
+     },
+     {
+      "id": "pos-hey_plain-bf_emma-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -166,
+      "transcript": "Hey, Gideons.",
+      "command_result": null
+     },
+     {
+      "id": "neg-team_join-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-random_grocery-pocket",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-af_bella-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -929,
+      "transcript": "Hey, Gideon, what time is it?",
+      "command_result": "12:11:15 UTC"
+     },
+     {
+      "id": "neg-weather-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-am_michael-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": 103,
+      "transcript": "Giddy up.",
+      "command_result": null
+     },
+     {
+      "id": "neg-okay_gideon-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-bf_emma-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": true,
+      "latency_from_clip_end_ms": -393,
+      "transcript": "Hey Gideons!",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-am_michael-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-yeah_yeah-af_bella",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-af_bella-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_giddy-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-bm_george-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-what_app-af_bella",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_mute-bm_george-composite",
+      "class": "positive",
+      "expect": true,
+      "condition": "composite-concat",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1432,
+      "transcript": "Gideon mute",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-bm_george-loud",
+      "class": "positive",
+      "expect": true,
+      "condition": "volume-loud",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1281,
+      "transcript": "Hey Gideon, open brave.",
+      "command_result": "Sandbox app process verified: com.brave.Browser.desktop"
+     },
+     {
+      "id": "pos-hey_plain-bm_george-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": 1,
+      "transcript": "Gideon",
+      "command_result": null
+     },
+     {
+      "id": "neg-weather-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-okay_google_time-pocket",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-bf_emma-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1074,
+      "transcript": "Hey Gideon, open brave.",
+      "command_result": "Sandbox app process verified: com.brave.Browser.desktop"
+     },
+     {
+      "id": "neg-weather-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-what_app-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-open_chrome-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-loud",
+      "class": "positive",
+      "expect": true,
+      "condition": "volume-loud",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -972,
+      "transcript": "Hey, Gideon, open brave.",
+      "command_result": "Sandbox app process verified: com.brave.Browser.desktop"
+     },
+     {
+      "id": "pos-hey_brave-am_michael-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_jordan_brave-pocket",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-bf_emma-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -248,
+      "transcript": "Hey Gideons.",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bf_emma-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1060,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:13:16 UTC"
+     },
+     {
+      "id": "neg-gideon_alone-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-bm_george-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1242,
+      "transcript": "Hey Gideon, open brave.",
+      "command_result": "Sandbox app process verified: com.brave.Browser.desktop"
+     },
+     {
+      "id": "neg-yeah_yeah-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-silence-10s",
+      "class": "negative",
+      "expect": false,
+      "condition": "silence",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1017,
+      "transcript": "Hey, Gideon, open braves.",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-am_michael-quiet",
+      "class": "positive",
+      "expect": true,
+      "condition": "volume-quiet",
+      "triggered": true,
+      "latency_from_clip_end_ms": -888,
+      "transcript": "Hey, Gideon, open brave.",
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_julian-af_bella",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bm_george-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1267,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:14:02 UTC"
+     },
+     {
+      "id": "pos-pos_hey_pocket_mute-pocket",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -333,
+      "transcript": "Hey, Gideon, mute.",
+      "command_result": "Simulated audio verified: {\"level\": 0, \"muted\": true}"
+     },
+     {
+      "id": "pos-hey_brave-am_michael-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-team_join-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-open_chrome-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_jordan_time-pocket",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-quiet",
+      "class": "positive",
+      "expect": true,
+      "condition": "volume-quiet",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-yeah_yeah-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-music-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1075,
+      "transcript": "Hey, Gideon, open brain.",
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_julian-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-okay_gideon-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hi_gideon-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-gideon_alone-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     }
+    ]
+   },
+   {
+    "sensitivity": 1.5,
+    "positives": 10,
+    "positive_hits": 8,
+    "negatives": 10,
+    "negative_false_triggers": 0,
+    "unclaimed_sessions": 0,
+    "latency_from_clip_end_ms_median": -1078,
+    "latency_from_clip_start_ms_median": 1684,
+    "live_errors": [],
+    "clips": [
+     {
+      "id": "neg-hey_julian-af_bella",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bm_george-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1192,
+      "transcript": "A gideon, what time is it?",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-loud",
+      "class": "positive",
+      "expect": true,
+      "condition": "volume-loud",
+      "triggered": true,
+      "latency_from_clip_end_ms": -911,
+      "transcript": "Hey Gideon, open brains.",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_mute-af_bella-composite",
+      "class": "positive",
+      "expect": true,
+      "condition": "composite-concat",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1711,
+      "transcript": "I'm a little bit tired.",
+      "command_result": null
+     },
+     {
+      "id": "neg-weather-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-weather-bm_george",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-af_bella-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_brave-am_michael-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_julian-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-music-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_jordan_brave-pocket",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bf_emma-room",
+      "class": "positive",
+      "expect": true,
+      "condition": "room-fir-synthetic",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1111,
+      "transcript": "Hey Gideon, what time is it?",
+      "command_result": "12:16:28 UTC"
+     },
+     {
+      "id": "neg-team_join-af_bella",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-okay_gideon-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bm_george-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1061,
+      "transcript": "Gideon, what time is it?",
+      "command_result": null
+     },
+     {
+      "id": "neg-music-am_michael",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "neg-hey_giddy-bf_emma",
+      "class": "negative",
+      "expect": false,
+      "condition": "clean",
+      "triggered": false,
+      "latency_from_clip_end_ms": null,
+      "transcript": null,
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-bm_george-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -20,
+      "transcript": "Gideon",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_time-bm_george-clean",
+      "class": "positive",
+      "expect": true,
+      "condition": "clean",
+      "triggered": true,
+      "latency_from_clip_end_ms": -1095,
+      "transcript": "A Gideon, what time is it?",
+      "command_result": null
+     },
+     {
+      "id": "pos-hey_plain-af_bella-snr20",
+      "class": "positive",
+      "expect": true,
+      "condition": "noise-snr20db",
+      "triggered": true,
+      "latency_from_clip_end_ms": 1,
+      "transcript": "Gideon.",
+      "command_result": null
+     }
+    ]
+   }
+  ]
+ },
+ "tts_loop_live_core": {
+  "note": "audible_feedback on, lab TTS (pocket-tts, alba) on the loop sink; the first run had a runner skip bug and is replaced by this one",
+  "matrix": {
+   "sensitivity": 1.0,
+   "positives": 10,
+   "positive_hits": 8,
+   "negatives": 10,
+   "negative_false_triggers": 0,
+   "unclaimed_sessions": 0,
+   "latency_from_clip_end_ms_median": -952,
+   "latency_from_clip_start_ms_median": 1630,
+   "live_errors": [],
+   "clips": [
+    {
+     "id": "neg-hey_jordan_brave-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_jordan_time-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-music-bf_emma",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-gideon_alone-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-weather-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-random_grocery-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-bf_emma-snr20",
+     "class": "positive",
+     "expect": true,
+     "condition": "noise-snr20db",
+     "triggered": true,
+     "latency_from_clip_end_ms": -1061,
+     "transcript": "Hey Gideon, what time is it?",
+     "command_result": "12:38:45 UTC"
+    },
+    {
+     "id": "pos-hey_plain-am_michael-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": true,
+     "latency_from_clip_end_ms": -41,
+     "transcript": "I'm a kitty.",
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_giddy-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-team_join-bf_emma",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_julian-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-okay_google_time-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-am_michael-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": true,
+     "latency_from_clip_end_ms": -843,
+     "transcript": "Hey Gideon, what time is it?",
+     "command_result": "12:39:18 UTC"
+    },
+    {
+     "id": "pos-hey_brave-bm_george-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": true,
+     "latency_from_clip_end_ms": -1233,
+     "transcript": "A. Gideon, open brave.",
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-am_michael-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-bm_george-snr20",
+     "class": "positive",
+     "expect": true,
+     "condition": "noise-snr20db",
+     "triggered": true,
+     "latency_from_clip_end_ms": -1092,
+     "transcript": "Hey Gideon, what time is it?",
+     "command_result": "12:39:43 UTC"
+    },
+    {
+     "id": "pos-hey_plain-bf_emma-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": true,
+     "latency_from_clip_end_ms": -165,
+     "transcript": "Pigidians.",
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-af_bella-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_plain-bf_emma-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": true,
+     "latency_from_clip_end_ms": -83,
+     "transcript": "Hey, Gideons.",
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_brave-af_bella-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": true,
+     "latency_from_clip_end_ms": -1073,
+     "transcript": "Hey Gideon, open Brave.",
+     "command_result": "Sandbox app process verified: com.brave.Browser.desktop"
+    }
+   ]
+  }
+ },
+ "acoustic_live_core_hdmi_90pct": {
+  "fifine": {
+   "sensitivity": 1.0,
+   "positives": 10,
+   "positive_hits": 0,
+   "negatives": 10,
+   "negative_false_triggers": 0,
+   "unclaimed_sessions": 0,
+   "latency_from_clip_end_ms_median": null,
+   "latency_from_clip_start_ms_median": null,
+   "live_errors": [],
+   "clips": [
+    {
+     "id": "neg-hey_jordan_brave-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_jordan_time-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-music-bf_emma",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-gideon_alone-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-weather-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-random_grocery-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-bf_emma-snr20",
+     "class": "positive",
+     "expect": true,
+     "condition": "noise-snr20db",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_plain-am_michael-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_giddy-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-team_join-bf_emma",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_julian-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-okay_google_time-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-am_michael-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_brave-bm_george-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-am_michael-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-bm_george-snr20",
+     "class": "positive",
+     "expect": true,
+     "condition": "noise-snr20db",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_plain-bf_emma-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-af_bella-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_plain-bf_emma-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_brave-af_bella-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    }
+   ]
+  },
+  "webcam_default": {
+   "sensitivity": 1.0,
+   "positives": 10,
+   "positive_hits": 0,
+   "negatives": 10,
+   "negative_false_triggers": 0,
+   "unclaimed_sessions": 0,
+   "latency_from_clip_end_ms_median": null,
+   "latency_from_clip_start_ms_median": null,
+   "live_errors": [],
+   "clips": [
+    {
+     "id": "neg-hey_jordan_brave-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_jordan_time-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-music-bf_emma",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-gideon_alone-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-weather-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-random_grocery-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-bf_emma-snr20",
+     "class": "positive",
+     "expect": true,
+     "condition": "noise-snr20db",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_plain-am_michael-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_giddy-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-team_join-bf_emma",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-hey_julian-am_michael",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "neg-okay_google_time-pocket",
+     "class": "negative",
+     "expect": false,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-am_michael-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_brave-bm_george-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-am_michael-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-bm_george-snr20",
+     "class": "positive",
+     "expect": true,
+     "condition": "noise-snr20db",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_plain-bf_emma-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_time-af_bella-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_plain-bf_emma-clean",
+     "class": "positive",
+     "expect": true,
+     "condition": "clean",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    },
+    {
+     "id": "pos-hey_brave-af_bella-room",
+     "class": "positive",
+     "expect": true,
+     "condition": "room-fir-synthetic",
+     "triggered": false,
+     "latency_from_clip_end_ms": null,
+     "transcript": null,
+     "command_result": null
+    }
+   ]
+  }
+ },
+ "defects_found": [
+  {
+   "id": "L1",
+   "what": "lab home scripts stale (target/wake-lab-home/scripts/wake_worker.py without --conditioning; audio_conditioning.py missing): every live start ended in restart_limit with wake unavailable",
+   "fix": "lab copy synced from the repo (not versioned); the product package build copies from the repo"
+  },
+  {
+   "id": "L2",
+   "what": "harness: the wrong --home (/tmp/gideon-wake-lab/home has no scripts/) gave stt failed",
+   "fix": "use target/wake-lab-home"
+  },
+  {
+   "id": "L3",
+   "what": "harness: TTS venv target/tts-venv is outside the sandbox bind; TTS failed with tts_failed",
+   "fix": "use target/wake-lab-home/venvs/tts/bin/python"
+  },
+  {
+   "id": "L4",
+   "what": "harness: a TTS reply (about 6.4 s) kept the sink busy, and the skip-if-busy check skipped the rest of the list in one pass",
+   "fix": "wait up to 20 s for an idle sink before each clip"
+  },
+  {
+   "id": "P1",
+   "what": "webcam (default source) clips at full scale on 12.6 Hz rumble: 86 % of its energy is below 45 Hz; about 3,400 clipped samples in 2 min",
+   "fix": "none in code; recommend the fifine as default input and a clipping warning in the UI"
+  },
+  {
+   "id": "P2",
+   "what": "worker stderr is discarded (Stdio null in the live supervisor): a worker crash reads only as restart_limit",
+   "fix": "not changed; recommended follow-up in src/live.rs with a test"
+  }
+ ],
+ "recommendation": {
+  "default_input_device": "alsa_input.usb-MV-SILICON_fifine_Microphone_20190808-00.analog-stereo (fifine): clean, no clipping, speech band 39 %; the webcam is not suitable (rumble and clipping). Not changed; the owner decides.",
+  "sensitivity": "keep 1.0 (default). Loop: 0.5 8/10 and 1.5 8/10 with 0 false in 10 each; 1.0 22/30 with 0 false in 30. Not a rate on real acoustics.",
+  "acoustic_pickup": "NOT MEASURED. No mic heard the speakers at 90 %. Needs a speaker placed near the mic (or a headset) and a re-run of probe_ramp.py."
+ },
+ "gates": {
+  "repo_code_changed": false,
+  "cargo_test_run": false,
+  "note": "no repository code changed in this run; lab copies only"
+ },
+ "raw_local_paths": {
+  "probe": "/tmp/gideon-wake-lab/real/probe-ramp.json",
+  "matrix": "/tmp/gideon-wake-lab/acoustic/results/",
+  "two_channel_raw": "/tmp/gideon-wake-lab/real/*-2ch.raw (no audio in the repo)"
+ },
+ "tts_check_raw": {
+  "event_kinds": [
+   "capture_completed",
+   "command_authorized",
+   "command_rejected",
+   "command_success",
+   "no_speech",
+   "session_started",
+   "speech_completed",
+   "speech_started",
+   "transcript_final",
+   "transcript_partial"
+  ]
+ }
+}

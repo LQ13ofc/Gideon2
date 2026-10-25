@@ -66,6 +66,8 @@ pub struct Core {
     command_job: Option<Job>,
     expected_command: Option<Job>,
     command_outcome: Option<Outcome>,
+    /// Last host action (A11), content-free. Not persisted: a restart shows none.
+    last_real_action: Option<crate::commands::LastAction>,
     tts_enabled: bool,
     speech_job: Option<crate::tts::Job>,
     speech_status: &'static str,
@@ -90,6 +92,10 @@ pub struct Core {
     audio_devices: Option<crate::devices::Devices>,
     /// A5: `--live-audio` state (off unless the flag is set).
     live: crate::live::LiveState,
+    /// A9: the last `audio_probe` (running or done); its queued job (id, device) and the id counter.
+    audio_probe: Option<crate::live::ProbeView>,
+    audio_probe_job: Option<(u64, String)>,
+    audio_probe_seq: u64,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -131,6 +137,7 @@ impl Core {
             command_job: None,
             expected_command: None,
             command_outcome: None,
+            last_real_action: None,
             tts_enabled: false,
             speech_job: None,
             speech_status: "unavailable",
@@ -147,7 +154,47 @@ impl Core {
             restart_requested: false,
             audio_devices: None,
             live: Default::default(),
+            audio_probe: None,
+            audio_probe_job: None,
+            audio_probe_seq: 0,
         }
+    }
+    /// A9: a wake phrase was recognised by the live input (feeds `audio.live.last_detection`).
+    pub fn live_detected(&mut self, phrase_id: &str) {
+        self.live.detected(phrase_id, Instant::now());
+    }
+    /// A9: the queued probe for the transport task to run (id, device). Taken once.
+    pub fn take_audio_probe_job(&mut self) -> Option<(u64, String)> {
+        self.audio_probe_job.take()
+    }
+    /// A9: the probe finished (or failed); the snapshot shows `done` with its numbers.
+    pub fn audio_probe_reply(&mut self, id: u64, outcome: crate::live::ProbeOutcome) {
+        if let Some(probe) = self.audio_probe.as_mut().filter(|p| p.id == id) {
+            *probe = crate::live::ProbeView::finished(id, probe.device.clone(), &outcome);
+        }
+    }
+    /// A9 `audio_probe`: refused while a voice session runs or another probe is still recording. The
+    /// device must be `default` or an input the last `audio_devices` listed.
+    fn audio_probe_start(&mut self, device: String) -> &'static str {
+        let running = self
+            .audio_probe
+            .as_ref()
+            .is_some_and(|p| p.state == "running");
+        if self.voice_active() || running || self.audio_probe_job.is_some() {
+            return "busy";
+        }
+        let listed = self
+            .audio_devices
+            .as_ref()
+            .is_some_and(|d| d.inputs.iter().any(|input| input.id == device));
+        if !(device == "default" || (listed && crate::storage::valid_audio_device(&device))) {
+            return "invalid_device";
+        }
+        self.audio_probe_seq += 1;
+        let id = self.audio_probe_seq;
+        self.audio_probe = Some(crate::live::ProbeView::running(id, device.clone()));
+        self.audio_probe_job = Some((id, device));
+        "ok"
     }
     /// A5/A6: called once by `transport::serve`. `enabled` is the pipeline switch of this process (flag or
     /// ledger); `from_preference` is true when the ledger alone turned it on.
@@ -155,7 +202,7 @@ impl Core {
         self.live.configure(enabled, from_preference);
     }
     /// A5: status from the live input or output supervisors.
-    pub(crate) fn live_event(&mut self, event: crate::live::LiveEvent) {
+    pub fn live_event(&mut self, event: crate::live::LiveEvent) {
         self.live.apply(event);
     }
     pub fn set_boot_seed(&mut self, seed: u64) {
@@ -210,7 +257,9 @@ impl Core {
         let Some(id) = self.tools.finish(&job) else {
             return;
         };
-        match receipt.filter(|r| commands::verify(&job, r)) {
+        let receipt = receipt.filter(|r| commands::verify(&job, r));
+        self.record_host(&job, None, receipt.as_ref());
+        match receipt {
             Some(receipt) => {
                 self.tools.set(
                     &id,
@@ -452,7 +501,11 @@ impl Core {
                 match Capture::new(pre_roll, frame.end_us()) {
                     Ok(c) => {
                         if self.stt_status == "ready" {
-                            let sid = self.session.as_ref().unwrap().id;
+                            // audio_wake starts no session while a restart is pending (configuration not Ready, for
+                            // example after a wake phrase or sensitivity change): drop the detection, never panic.
+                            let Some(sid) = self.session.as_ref().map(|s| s.id) else {
+                                return;
+                            };
                             self.stt_requests
                                 .push_back(SttRequest::Start { session_id: sid });
                             let begin = frame.end_us() - c.samples.len() as u64 * 1_000_000 / 16000;
@@ -609,6 +662,10 @@ impl Core {
                 .find_map(|wake| commands::parse(&transcript.raw, wake)),
             _ => commands::parse(&transcript.raw, ""),
         };
+        // A11: real-only steps (unmute, volume up/down) exist only while host actions are consented; otherwise
+        // they are not understood, exactly like any other unrecognized phrase.
+        let real = self.preferences.real_actions;
+        let parsed = parsed.filter(|command| real || !command.real_only());
         let command = match parsed {
             Some(Command::Cancel) => {
                 self.finish("cancelled");
@@ -625,7 +682,12 @@ impl Core {
                 return;
             }
         };
-        if let Err(code) = commands::authorize(&command) {
+        let allowed = if real {
+            commands::authorize_host(&command)
+        } else {
+            commands::authorize(&command)
+        };
+        if let Err(code) = allowed {
             self.command_outcome = Some(Outcome {
                 session_id: id,
                 code,
@@ -634,9 +696,15 @@ impl Core {
             self.command_terminal("command_denied", now);
             return;
         }
+        // A host launch waits up to 5 s for the launcher and 5 s for the process; the sandbox keeps 2 s.
+        let budget = if real && command.host_action() {
+            Duration::from_secs(12)
+        } else {
+            Duration::from_secs(2)
+        };
         let s = self.session.as_mut().expect("live final session");
         s.stage = State::Executing;
-        s.deadline = s.overall_deadline.min(now + Duration::from_secs(2));
+        s.deadline = s.overall_deadline.min(now + budget);
         self.command_job = Some(Job {
             session_id: id,
             command,
@@ -651,6 +719,7 @@ impl Core {
             return;
         }
         let receipt = receipt.filter(|r| commands::verify(&job, r));
+        self.record_host(&job, Some(job.session_id), receipt.as_ref());
         let kind = if receipt.is_some() {
             "command_success"
         } else {
@@ -662,6 +731,50 @@ impl Core {
             receipt,
         });
         self.command_terminal(kind, now);
+    }
+    /// Failure of the session's own job with a fixed code (A11 host codes such as `app_not_installed`).
+    /// The event stays `command_failed`; the outcome code tells the user why.
+    pub fn command_error(&mut self, job: Job, code: &'static str, now: Instant) {
+        self.expire(now);
+        if !self.command_is_active(job.session_id) || self.expected_command.as_ref() != Some(&job) {
+            return;
+        }
+        self.record_host(&job, Some(job.session_id), None);
+        self.command_outcome = Some(Outcome {
+            session_id: job.session_id,
+            code,
+            receipt: None,
+        });
+        self.command_terminal("command_failed", now);
+    }
+    /// Keeps the last host action of the real-actions mode and emits its content-free audit event (A11).
+    /// Sandbox jobs and the time of day are not host actions and record nothing.
+    fn record_host(&mut self, job: &Job, session: Option<u64>, receipt: Option<&Receipt>) {
+        if !self.preferences.real_actions || !job.command.host_action() {
+            return;
+        }
+        let ok = receipt.is_some();
+        let app = match &job.command {
+            Command::OpenApp { desktop_id } => Some(commands::app_label(desktop_id)),
+            _ => None,
+        };
+        self.last_real_action = Some(crate::commands::LastAction {
+            kind: job.command.kind(),
+            app,
+            ok,
+            verified: receipt.is_some_and(|r| r.verified),
+            at_ms: crate::protocol::unix_ms(),
+        });
+        self.emit_with(
+            String::new(),
+            session,
+            "host_action",
+            if ok { "ok" } else { "failed" },
+        );
+    }
+    /// Whether the fixed table runs on the host now (`preferences.real_actions`).
+    pub fn real_actions(&self) -> bool {
+        self.preferences.real_actions
     }
     pub fn enable_tts(&mut self) {
         self.tts_enabled = true;
@@ -883,6 +996,12 @@ impl Core {
             configuration_status: self.configuration_status,
             configuration_recovery_available: self.configuration_recovery_available,
             preferences: self.preferences.clone(),
+            actions: crate::commands::ActionsView {
+                real: crate::commands::RealView {
+                    enabled: self.preferences.real_actions,
+                    last_action: self.last_real_action.clone(),
+                },
+            },
             languages: crate::languages::view(
                 &self.languages,
                 &self.preferences,
@@ -903,7 +1022,8 @@ impl Core {
             wake_status: self.wake_status,
             audio: crate::live::AudioView {
                 devices: self.audio_devices.clone(),
-                live: self.live.view(self.preferences.live_audio),
+                live: self.live.view(self.preferences.live_audio, Instant::now()),
+                probe: self.audio_probe.clone(),
             },
             wake_phrases: crate::phrases::View::build(
                 &self.phrase_defaults,
@@ -2035,6 +2155,50 @@ impl Core {
                     "preferences_unavailable"
                 }
             }
+            // A11 consent for host actions. Same rules as the microphone consent; also refused while a command or tool
+            // job is queued or running, so one job never changes its executor mid-flight.
+            Operation::RealActionsPreference { revision, .. }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::RealActionsPreference { .. }
+                if self.session.is_some() || self.command_job.is_some() || self.tools.busy() =>
+            {
+                "busy"
+            }
+            Operation::RealActionsPreference {
+                enabled: true,
+                confirmed: false,
+                ..
+            } if !self.preferences.real_actions => "consent_required",
+            Operation::RealActionsPreference { enabled, .. }
+                if enabled == self.preferences.real_actions =>
+            {
+                "ok"
+            }
+            Operation::RealActionsPreference {
+                revision, enabled, ..
+            } => {
+                if let Some(storage) = storage {
+                    let result = storage.update_real_actions(revision, enabled);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        // Content-free: the kind alone says whether host actions were consented or withdrawn.
+                        let kind = if enabled {
+                            "real_actions_enabled"
+                        } else {
+                            "real_actions_disabled"
+                        };
+                        self.emit(req.request_id.clone(), None, kind);
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
             Operation::SelectWake { revision, .. } if revision != self.preferences.revision => {
                 "stale_preferences"
             }
@@ -2184,6 +2348,7 @@ impl Core {
                             audible_feedback,
                             session_timeout_ms,
                             wake_sensitivity,
+                            input_conditioning,
                             audio_input_device,
                             audio_output_device,
                         } => storage.update_preferences_with(
@@ -2192,6 +2357,7 @@ impl Core {
                             session_timeout_ms,
                             crate::storage::OptionalPreferences {
                                 wake_sensitivity,
+                                input_conditioning,
                                 audio_input_device,
                                 audio_output_device,
                             },
@@ -2435,6 +2601,8 @@ impl Core {
                 self.audio_devices = Some(crate::devices::enumerate());
                 "ok"
             }
+            // A9: starts a 3 s recording in the transport task; the result is served by the next snapshot.
+            Operation::AudioProbe { device } => self.audio_probe_start(device),
         };
         self.sweep_tools();
         self.response(req.request_id, code)
@@ -2743,6 +2911,30 @@ mod tests {
         assert!(c.stt_requests.len() <= 1);
     }
     #[test]
+    fn detection_while_restart_is_pending_is_dropped_without_panic() {
+        // A wake phrase or sensitivity change sets RestartRequired; a detection then starts no session. It must be
+        // dropped (the Core used to unwrap a missing session here and exit).
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.stt_status = "ready";
+        c.configuration_status = crate::storage::ConfigurationStatus::RestartRequired;
+        c.enable_capture();
+        c.capture_packet(
+            AudioFrame {
+                timestamp_us: 0,
+                sample_rate: 16000,
+                channels: 1,
+                samples: vec![0.; 1600],
+            },
+            Some(true),
+            vec![0.; 1600],
+            true,
+            now,
+        );
+        assert!(c.session.is_none());
+        assert!(c.stt_requests.is_empty());
+    }
+    #[test]
     fn capture_no_speech_cancel_and_stalled_producer_release_pcm() {
         fn frame(ts: u64) -> AudioFrame {
             AudioFrame {
@@ -2917,6 +3109,119 @@ mod tests {
                 .code,
             "invalid_id"
         );
+    }
+    #[test]
+    fn real_actions_switch_grammar_authority_and_receipts() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), true);
+        c.configure_command_wakes(Vec::new());
+        let outcome = |c: &Core| c.response(String::new(), "ok").command.unwrap().code;
+        // Consent off: real-only steps are not understood, and a catalog app outside the sandbox is refused.
+        c.handle(
+            request(
+                "off-1",
+                Operation::Text {
+                    raw: "unmute".into(),
+                },
+            ),
+            now,
+        );
+        assert_eq!(outcome(&c), "unsupported");
+        assert!(c.take_command_job().is_none());
+        c.handle(
+            request(
+                "off-2",
+                Operation::Text {
+                    raw: "open kcalc".into(),
+                },
+            ),
+            now,
+        );
+        assert_eq!(outcome(&c), "app_unavailable");
+        assert!(c.take_command_job().is_none());
+        assert!(c
+            .response(String::new(), "ok")
+            .actions
+            .real
+            .last_action
+            .is_none());
+        // Consent on: the same phrases become host jobs; a host failure reports its fixed code.
+        c.preferences.real_actions = true;
+        c.handle(
+            request(
+                "on-1",
+                Operation::Text {
+                    raw: "open kcalc".into(),
+                },
+            ),
+            now,
+        );
+        let job = c.take_command_job().expect("host job");
+        assert_eq!(
+            job.command,
+            Command::OpenApp {
+                desktop_id: commands::KCALC.into()
+            }
+        );
+        let busy = c.handle(
+            request(
+                "busy",
+                Operation::RealActionsPreference {
+                    revision: 0,
+                    enabled: false,
+                    confirmed: false,
+                },
+            ),
+            now,
+        );
+        assert_eq!(busy.code, "busy");
+        c.command_error(job, "app_not_installed", now);
+        assert_eq!(outcome(&c), "app_not_installed");
+        let failed = c
+            .response(String::new(), "ok")
+            .actions
+            .real
+            .last_action
+            .unwrap();
+        assert_eq!(
+            (failed.kind, failed.app, failed.ok, failed.verified),
+            ("open_app", Some("kcalc"), false, false)
+        );
+        // A verified host receipt is recorded as a verified action; the audit event carries no app name.
+        c.handle(
+            request(
+                "on-2",
+                Operation::Text {
+                    raw: "unmute".into(),
+                },
+            ),
+            now,
+        );
+        let job = c.take_command_job().expect("unmute job");
+        let receipt = Receipt {
+            job: job.clone(),
+            verified: true,
+            scope: "host".into(),
+            result: "Som ativado · verificado com wpctl".into(),
+        };
+        c.command_reply(job, Some(receipt), now);
+        assert_eq!(outcome(&c), "command_success");
+        let done = c.response(String::new(), "ok");
+        let last = done.actions.real.last_action.unwrap();
+        assert_eq!(
+            (last.kind, last.app, last.ok, last.verified),
+            ("unmute", None, true, true)
+        );
+        assert!(done.actions.real.enabled);
+        let audit: Vec<_> = done
+            .events
+            .iter()
+            .filter(|e| e.kind == "host_action")
+            .collect();
+        assert_eq!(audit.len(), 2);
+        assert!(audit
+            .iter()
+            .all(|e| e.kind == "host_action" && matches!(e.outcome, "ok" | "failed")));
     }
     fn command_session(text: &str) -> (Core, Instant) {
         let now = Instant::now();

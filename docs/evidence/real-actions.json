@@ -1,0 +1,767 @@
+{
+  "steps": [
+    {
+      "raw": "set volume to 30",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.90",
+        "percent": 90,
+        "muted": false
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803605,
+          "command": {
+            "kind": "volume",
+            "level": 30
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Volume em 30% · verificado com wpctl"
+      },
+      "session_id": 2406578312813803605,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "mute",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803606,
+          "command": {
+            "kind": "mute"
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Mudo ativado · verificado com wpctl"
+      },
+      "session_id": 2406578312813803606,
+      "volume_after": {
+        "raw": "Volume: 0.30 [MUTED]",
+        "percent": 30,
+        "muted": true
+      }
+    },
+    {
+      "raw": "unmute",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30 [MUTED]",
+        "percent": 30,
+        "muted": true
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803607,
+          "command": {
+            "kind": "unmute"
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Som ativado · verificado com wpctl"
+      },
+      "session_id": 2406578312813803607,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "volume up",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803608,
+          "command": {
+            "kind": "volume_up"
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Volume em 40% · verificado com wpctl"
+      },
+      "session_id": 2406578312813803608,
+      "volume_after": {
+        "raw": "Volume: 0.40",
+        "percent": 40,
+        "muted": false
+      }
+    },
+    {
+      "raw": "volume down",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.40",
+        "percent": 40,
+        "muted": false
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803609,
+          "command": {
+            "kind": "volume_down"
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Volume em 30% · verificado com wpctl"
+      },
+      "session_id": 2406578312813803609,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "set volume to 150",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803610,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open kcalc",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803611,
+          "command": {
+            "kind": "open_app",
+            "desktop_id": "org.kde.kcalc.desktop"
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Abriu: kcalc (processo 509595 observado) · iniciado, sem confirmação de janela"
+      },
+      "session_id": 2406578312813803611,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open brave",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803612,
+          "command": {
+            "kind": "open_app",
+            "desktop_id": "com.brave.Browser.desktop"
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Abriu: brave (processo 509651 observado) · iniciado, sem confirmação de janela"
+      },
+      "session_id": 2406578312813803612,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open foo",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803613,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open ../../bin/sh",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803614,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open kcalc; reboot",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803615,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open kcalc && rm -rf /",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803616,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "mute and open kcalc",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803617,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open Brave.exe",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803618,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open brave kcalc",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803619,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "unmute",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30 [MUTED]",
+        "percent": 30,
+        "muted": true
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803621,
+          "command": {
+            "kind": "unmute"
+          }
+        },
+        "verified": true,
+        "scope": "host",
+        "result": "Som ativado · verificado com wpctl"
+      },
+      "session_id": 2406578312813803621,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "open kcalc",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "app_unavailable",
+      "receipt": null,
+      "session_id": 2406578312813803622,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "mute",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "command_success",
+      "receipt": {
+        "job": {
+          "session_id": 2406578312813803623,
+          "command": {
+            "kind": "mute"
+          }
+        },
+        "verified": true,
+        "scope": "sandbox",
+        "result": "Simulated audio verified: {\"level\": 0, \"muted\": true}"
+      },
+      "session_id": 2406578312813803623,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    },
+    {
+      "raw": "unmute",
+      "send_code": "ok",
+      "volume_before": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      },
+      "code": "unsupported",
+      "receipt": null,
+      "session_id": 2406578312813803624,
+      "volume_after": {
+        "raw": "Volume: 0.30",
+        "percent": 30,
+        "muted": false
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "baseline: kcalc not running before the run",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "baseline: brave not running before the run",
+      "ok": true,
+      "detail": "Brave was not running, so every brave pid after the launch belongs to this run"
+    },
+    {
+      "name": "core starts with real_actions off",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "no action before consent (sandbox executor)",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "consent refused without confirmation",
+      "ok": true,
+      "detail": "consent_required"
+    },
+    {
+      "name": "consent with confirmation accepted",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "snapshot shows real_actions on",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "real_actions_enabled event emitted",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "set volume to 30: command_success with host receipt",
+      "ok": true,
+      "detail": "command_success"
+    },
+    {
+      "name": "set volume to 30: wpctl read-back is 30%",
+      "ok": true,
+      "detail": "Volume: 0.30"
+    },
+    {
+      "name": "mute: host receipt and read-back muted",
+      "ok": true,
+      "detail": "command_success"
+    },
+    {
+      "name": "unmute: host receipt and read-back unmuted",
+      "ok": true,
+      "detail": "command_success"
+    },
+    {
+      "name": "volume up: 30 to 40",
+      "ok": true,
+      "detail": "Volume: 0.40"
+    },
+    {
+      "name": "volume down: 40 to 30",
+      "ok": true,
+      "detail": "Volume: 0.30"
+    },
+    {
+      "name": "volume 150 refused, sink unchanged",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "open kcalc: host receipt",
+      "ok": true,
+      "detail": "command_success"
+    },
+    {
+      "name": "open kcalc: a new kcalc process is alive",
+      "ok": true,
+      "detail": "[509595]"
+    },
+    {
+      "name": "open kcalc: window of the launched process is listed",
+      "ok": true,
+      "detail": "[{'pid': 509595, 'class': 'org.kde.kcalc', 'normal': True}]"
+    },
+    {
+      "name": "kcalc: launched process closed (only recorded pids)",
+      "ok": true,
+      "detail": "kcalc: closed by window close"
+    },
+    {
+      "name": "open brave: host receipt",
+      "ok": true,
+      "detail": "command_success"
+    },
+    {
+      "name": "open brave: new brave process observed",
+      "ok": true,
+      "detail": "[509651, 509663, 509664, 509666, 509692, 509694, 509706, 509760, 509763, 509788, 509856, 509862]"
+    },
+    {
+      "name": "open brave: window of the launched process is listed",
+      "ok": true,
+      "detail": "[{'pid': 509651, 'class': 'Brave-browser', 'normal': True}]"
+    },
+    {
+      "name": "brave: launched processes closed (only recorded pids)",
+      "ok": true,
+      "detail": "brave: closed by window close"
+    },
+    {
+      "name": "core still running after the Brave close",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "negative: 'open foo' is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "negative: 'open ../../bin/sh' is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "negative: 'open kcalc; reboot' is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "negative: 'open kcalc && rm -rf /' is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "negative: 'mute and open kcalc' is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "negative: 'open Brave.exe' is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "negative: 'open brave kcalc' is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "negatives left the sink unchanged",
+      "ok": true,
+      "detail": "Volume: 0.30"
+    },
+    {
+      "name": "negatives started no kcalc process",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "rapid mute: at most one accepted at a time",
+      "ok": true,
+      "detail": "['ok', 'busy', 'busy', 'busy', 'busy']"
+    },
+    {
+      "name": "rapid mute: sink matches the accepted commands (muted)",
+      "ok": true,
+      "detail": "Volume: 0.30 [MUTED]"
+    },
+    {
+      "name": "rapid mute: sink unmuted again",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "consent withdrawn",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "consent off: open kcalc refused by the sandbox grammar",
+      "ok": true,
+      "detail": "app_unavailable"
+    },
+    {
+      "name": "consent off: no kcalc started",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "consent off: mute is only the sandbox simulation",
+      "ok": true,
+      "detail": "command_success"
+    },
+    {
+      "name": "consent off: sink unchanged by the simulation",
+      "ok": true,
+      "detail": "Volume: 0.30"
+    },
+    {
+      "name": "consent off: unmute is not understood",
+      "ok": true,
+      "detail": "unsupported"
+    },
+    {
+      "name": "host_action events are content-free",
+      "ok": true,
+      "detail": "6"
+    },
+    {
+      "name": "sink restored to the exact raw channel value (tolerance 1e-4)",
+      "ok": true,
+      "detail": "0.728985 vs 0.728985"
+    },
+    {
+      "name": "sink restored to the exact mute state",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "core stopped by supervised shutdown",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "private root holds only core artifacts",
+      "ok": true,
+      "detail": "['audit.log', 'config.json', 'core.lock']"
+    }
+  ],
+  "binary_sha256": "ea8f90ec1f2cdc15f910c2f54b9bea2d629ee0807f6524af86c67db84cce53c4",
+  "baseline": {
+    "volume": {
+      "raw": "Volume: 0.90",
+      "percent": 90,
+      "muted": false
+    },
+    "raw": {
+      "node": 55,
+      "channel": [
+        0.728985,
+        0.728985
+      ],
+      "mute": false
+    },
+    "kcalc_pids": [],
+    "brave_pids": []
+  },
+  "kcalc": {
+    "receipt_result": "Abriu: kcalc (processo 509595 observado) · iniciado, sem confirmação de janela",
+    "new_pids": [
+      509595
+    ],
+    "windows": [
+      {
+        "pid": 509595,
+        "class": "org.kde.kcalc",
+        "normal": true
+      }
+    ],
+    "close": "kcalc: closed by window close"
+  },
+  "brave": {
+    "receipt_result": "Abriu: brave (processo 509651 observado) · iniciado, sem confirmação de janela",
+    "new_pids": [
+      509651,
+      509663,
+      509664,
+      509666,
+      509692,
+      509694,
+      509706,
+      509760,
+      509763,
+      509788,
+      509856,
+      509862
+    ],
+    "windows": [
+      {
+        "pid": 509651,
+        "class": "Brave-browser",
+        "normal": true
+      }
+    ],
+    "close": "brave: closed by window close"
+  },
+  "core_alive_after_brave_close": true,
+  "rapid": {
+    "send_codes": [
+      "ok",
+      "busy",
+      "busy",
+      "busy",
+      "busy"
+    ],
+    "volume_after": {
+      "raw": "Volume: 0.30 [MUTED]",
+      "percent": 30,
+      "muted": true
+    }
+  },
+  "last_snapshot_actions": {
+    "real": {
+      "enabled": false,
+      "last_action": {
+        "kind": "unmute",
+        "app": null,
+        "ok": true,
+        "verified": true,
+        "at_ms": 1792930785313
+      }
+    }
+  },
+  "restored": {
+    "target_channel": 0.728985,
+    "target_mute": false,
+    "after": {
+      "node": 55,
+      "channel": [
+        0.728985,
+        0.728985
+      ],
+      "mute": false
+    },
+    "wpctl": {
+      "raw": "Volume: 0.90",
+      "percent": 90,
+      "muted": false
+    }
+  },
+  "core_exit": 0,
+  "root_entries": [
+    "audit.log",
+    "config.json",
+    "core.lock"
+  ],
+  "gate": "A11_REAL_ACTIONS_LIVE",
+  "passed": 47,
+  "failed": 0
+}

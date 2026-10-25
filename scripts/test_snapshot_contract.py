@@ -129,7 +129,8 @@ class Core:
         try:
             validate_snapshot(data, ident, self.last_sequence)
         except Exception as error:  # the validator raises ValueError with a bare message; keep the label
-            raise AssertionError(f'{label}: bridge rejected snapshot: {error}\n{json.dumps(data, indent=1)[:4000]}')
+            audio = json.dumps(data.get('audio'), indent=1)[:2000]
+            raise AssertionError(f'{label}: bridge rejected snapshot: {error}\naudio block: {audio}\n{json.dumps(data, indent=1)[:4000]}')
         self.last_sequence = data['sequence']
         self.validated.append(label)
         return data
@@ -988,24 +989,68 @@ class SnapshotContract(unittest.TestCase):
         c = self.core.start()
         before = c.snap('before audio_devices')
         self.assertNotIn('devices', before['audio'], 'devices exist only after the first audio_devices')
-        self.assertEqual(before['audio']['live'], {'enabled': False, 'input_state': 'idle', 'output_state': 'idle', 'mic_active': False, 'restart_required': False})
+        live = before['audio']['live']
+        self.assertEqual({k: live[k] for k in ('enabled', 'input_state', 'output_state', 'mic_active', 'restart_required')}, {'enabled': False, 'input_state': 'idle', 'output_state': 'idle', 'mic_active': False, 'restart_required': False})
+        self.assertEqual((live['level']['frames'], live['silence_warning']), (0, None), 'A9: silent level while the recorder is off')
+        self.assertNotIn('probe', before['audio'], 'the probe block exists only after an audio_probe')
         self.assertEqual(c.req('audio_devices')['code'], 'ok')
         devices = c.snap('audio_devices answered')['audio']['devices']
         self.assertEqual(devices['source'], 'pactl')
         self.assertTrue(any(d['default'] for d in devices['inputs']), devices)
         self.assertNotIn('monitor', ' '.join(d['id'] for d in devices['inputs'] + devices['outputs']))
+        # A9 audio_probe: an unlisted device is refused; a listed one records 3 s through the fake recorder and reports the result.
+        self.assertEqual(c.req('audio_probe', device='not-listed')['code'], 'invalid_device')
+        self.assertEqual(c.req('audio_probe', device='usb-mic.1')['code'], 'ok')
+        running = c.snap('audio_probe running')['audio']['probe']
+        self.assertEqual((running['state'], running['device']), ('running', 'usb-mic.1'))
+        c.wait(lambda s: s['audio'].get('probe', {}).get('state') == 'done', 15, 'audio_probe done')
+        probe = c.snap('audio_probe done')['audio']['probe']
+        self.assertEqual((probe['state'], probe['verdict'], probe.get('reason')), ('done', 'ok', None), probe)
+        self.assertGreater(probe['frames'], 60, 'about 150 frames in 3 s')
         revision = before['preferences']['revision']
         base = {'audible_feedback': True, 'session_timeout_ms': 30000}
+        # The replayed wake (--wake-replay) opens a voice session at start; preferences are refused while it is open.
+        c.wait(lambda s: s['state'] == 'idle' and s.get('session_id') is None, 45, 'replayed wake session finished')
+        revision = c.snap('before preferences')['preferences']['revision']
         ack = c.req('preferences', revision=revision, **base, wake_sensitivity=0.8, audio_input_device='usb-mic.1')
         self.assertEqual(ack['code'], 'ok')
         saved = c.snap('sensitivity and input saved')['preferences']
         self.assertEqual((saved['wake_sensitivity'], saved['audio_input_device'], saved['audio_output_device']), (0.8, 'usb-mic.1', 'default'))
         self.assertEqual(saved['revision'], revision + 1)
+        # Preference input_conditioning: the default is auto; off is saved and reported, then restored with the defaults.
+        self.assertEqual(saved['input_conditioning'], 'auto')
+        off = c.req('preferences', revision=saved['revision'], audible_feedback=True, session_timeout_ms=30000, input_conditioning='off')
+        self.assertEqual(off['code'], 'ok')
+        self.assertEqual(c.snap('conditioning off')['preferences']['input_conditioning'], 'off')
+        saved = c.snap('conditioning off, saved')['preferences']
         restored = c.req('preferences_restore_defaults', revision=saved['revision'])
         self.assertEqual(restored['code'], 'ok')
         defaults = c.snap('defaults restored')['preferences']
         self.assertEqual((defaults['wake_sensitivity'], defaults['audio_input_device']), (1.0, 'default'))
         self.assertTrue((self.root / 'config.json.bak').exists(), 'the previous config is kept as config.json.bak')
+        c.stop()
+
+    def test_real_actions_consent_and_actions_block_validate_against_real_core(self):
+        """A11: the consent op, its refusal and the actions block validate; a refused enable changes nothing. No host action runs here."""
+        home = str(self.td)
+        self.core.env = lambda: {'PATH': '/usr/bin:/bin', 'HOME': home, 'XDG_CONFIG_HOME': home,
+                                 'XDG_DATA_HOME': home, 'XDG_CACHE_HOME': home, 'XDG_RUNTIME_DIR': home}
+        c = self.core.start()
+        before = c.snap('before real consent')
+        self.assertFalse(before['preferences']['real_actions'])
+        self.assertEqual(before['actions'], {'real': {'enabled': False, 'last_action': None}})
+        refused = c.req('real_actions_preference', revision=before['preferences']['revision'], enabled=True, confirmed=False)
+        self.assertEqual(refused['code'], 'consent_required')
+        self.assertFalse(c.snap('refused real consent')['preferences']['real_actions'])
+        granted = c.req('real_actions_preference', revision=before['preferences']['revision'], enabled=True, confirmed=True)
+        self.assertEqual(granted['code'], 'ok')
+        on = c.snap('real consent granted')
+        self.assertTrue(on['preferences']['real_actions'])
+        self.assertEqual(on['actions'], {'real': {'enabled': True, 'last_action': None}})
+        self.assertTrue(any(e['kind'] == 'real_actions_enabled' for e in on['events']))
+        withdrawn = c.req('real_actions_preference', revision=on['preferences']['revision'], enabled=False, confirmed=False)
+        self.assertEqual(withdrawn['code'], 'ok')
+        self.assertFalse(c.snap('real consent withdrawn')['actions']['real']['enabled'])
         c.stop()
 
     def test_live_consent_snapshots_validate_against_real_core(self):

@@ -24,6 +24,7 @@ fn set_all(revision: u64, wake_sensitivity: Option<f32>, input: &str, output: &s
         audible_feedback: false,
         session_timeout_ms: 9000,
         wake_sensitivity,
+        input_conditioning: None,
         audio_input_device: Some(input.into()),
         audio_output_device: Some(output.into()),
     }
@@ -218,6 +219,7 @@ fn preferences_op_validates_new_fields_and_keeps_absent_fields() {
             audible_feedback: true,
             session_timeout_ms: 30000,
             wake_sensitivity: None,
+            input_conditioning: None,
             audio_input_device: None,
             audio_output_device: None,
         },

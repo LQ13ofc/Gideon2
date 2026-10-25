@@ -10,14 +10,14 @@ from uisettings import APP_KEYS,CORE_KEYS,PRESETS,SCHEMA,SPECS,UiSettings,_legac
 
 # docs/ui-spec/01-ajustes-minimalismo.md 3.1 (minimum set) plus the Core-backed entries of docs/ui-spec/40-configuracoes.md.
 MINIMUM_KEYS={'theme.mode','theme.preset','theme.accent','theme.density','theme.radius','theme.fontSize','theme.fontFamily','theme.contrast','theme.animation','theme.translucency','theme.shadow','theme.titleWeight','theme.lineHeight','theme.colors','theme.orb','theme.orbSize','behavior.startTab','behavior.rememberWindow','behavior.tips','behavior.shortcuts','behavior.advanced','behavior.devMode','behavior.toastSeconds','behavior.confirmWrites','behavior.reduceMotionFollowSystem','voice.partials','voice.showConfidence','audio.cues'}
-CORE_EXPECTED={'core.wakePhrase','core.sessionTimeoutMs','core.responseGain','core.audibleFeedback','core.visualFeedback','core.wakeSensitivity','core.audioInput','core.audioOutput'}
+CORE_EXPECTED={'core.wakePhrase','core.sessionTimeoutMs','core.responseGain','core.audibleFeedback','core.visualFeedback','core.wakeSensitivity','core.inputConditioning','core.audioInput','core.audioOutput'}
 
 
 class FakeBridge:
     """Stands in for app/bridge.py: the same attribute and slot names, no socket."""
     def __init__(self):
         self.preferencesAvailable=True;self.outputVolume=100;self.visualFeedback=True;self.audibleFeedback=True;self.sessionTimeout=30000
-        self.wakeSensitivity=1.0
+        self.wakeSensitivity=1.0;self.inputConditioningOn=True
         self.wakeChoices=[{'id':'hey_gideon','text':'Hey Gideon','qualification_label':'em desenvolvimento'},{'id':'okay_gideon','text':'Okay Gideon','qualification_label':'requer prova de conceito'}]
         # Same rows as bridge.device_choices: the system default first, then the devices the Core listed.
         self.audioInputChoices=[{'value':'default','text':'Padrão do sistema'},{'value':'usb-mic.1','text':'USB Mic · padrão do sistema'}]
@@ -27,6 +27,7 @@ class FakeBridge:
     def saveFeedback(self,visual,volume):self.calls.append(('saveFeedback',visual,volume))
     def savePreferences(self,audible,timeout):self.calls.append(('savePreferences',audible,timeout))
     def setWakeSensitivity(self,value):self.calls.append(('setWakeSensitivity',value))
+    def setInputConditioning(self,on):self.calls.append(('setInputConditioning',on))
     def setAudioDevices(self,inputs,outputs):self.calls.append(('setAudioDevices',inputs,outputs))
 
 
@@ -222,6 +223,11 @@ class UiSettingsTests(unittest.TestCase):
         detached=UiSettings(None,'/srv/gideon-core',config_home=self.home)
         self.assertEqual(detached.set('core.visualFeedback',True)['code'],'preferences_unavailable')
 
+    def test_input_conditioning_switch_sends_auto_or_off_through_bridge(self):
+        self.assertEqual(self.ui.values['core.inputConditioning'],True)
+        self.assertEqual(self.ui.set('core.inputConditioning',False),{'ok':True,'value':False,'pending':True})
+        self.assertEqual(self.bridge.calls[-1],('setInputConditioning',False))
+        self.assertEqual(self.ui.set('core.inputConditioning','sim')['code'],'invalid_value')
     def test_voice_and_device_settings_go_through_bridge(self):
         self.assertEqual(self.ui.values['core.wakeSensitivity'],1.0)
         self.assertEqual(self.ui.values['core.audioInput'],'default')

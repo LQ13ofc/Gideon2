@@ -240,6 +240,48 @@ fn startup_sweep_quarantines_leftovers_and_orphans_without_deleting() {
 }
 
 #[test]
+fn input_conditioning_defaults_to_auto_is_strict_and_rolls_back() {
+    use gideon_base::storage::{InputConditioning, OptionalPreferences};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let mut store = Storage::open(&root).unwrap();
+    assert_eq!(store.config.input_conditioning, InputConditioning::Auto);
+    store
+        .update_preferences_with(
+            0,
+            false,
+            9000,
+            OptionalPreferences {
+                input_conditioning: Some(InputConditioning::Off),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(store.config.input_conditioning, InputConditioning::Off);
+    // The preference is saved as the snake_case word and the rollback target keeps the previous value.
+    let saved = std::fs::read_to_string(root.join("config.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(saved["input_conditioning"], "off");
+    assert_eq!(
+        store
+            .config
+            .previous_preferences
+            .as_ref()
+            .unwrap()
+            .input_conditioning,
+        InputConditioning::Auto
+    );
+    store.rollback_preferences(1).unwrap();
+    assert_eq!(store.config.input_conditioning, InputConditioning::Auto);
+    // Strict word: any other value is refused by the parser (no silent fallback to auto).
+    assert!(serde_json::from_str::<InputConditioning>("\"maybe\"").is_err());
+    assert_eq!(
+        serde_json::from_str::<InputConditioning>("\"off\"").unwrap(),
+        InputConditioning::Off
+    );
+}
+
+#[test]
 fn legacy_ledgers_load_with_wake_sensitivity_and_device_defaults() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("root");
@@ -320,6 +362,7 @@ fn restore_defaults_refuses_stale_revision_and_keeps_one_backup_generation() {
             9000,
             gideon_base::storage::OptionalPreferences {
                 wake_sensitivity: Some(0.5),
+                input_conditioning: None,
                 audio_input_device: Some("mic-a".into()),
                 audio_output_device: None,
             },

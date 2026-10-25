@@ -1,0 +1,1326 @@
+{
+  "gate": "WAKE-REAL-NOISE",
+  "date": "2026-10-25",
+  "scope": "offline; production WakeEngine (sherpa 1.13.8, zipformer competitive-v2) and scripts/audio_conditioning.py",
+  "what_is_synthetic": "Speech: 51 positive and 54 negative lab clips (Kokoro and Pocket TTS, not human). Mixed over REAL ambient recordings of the owner microphones.",
+  "keyword_line": "Core default at sensitivity 1.0: hey_gideon boost 1.2, phrase threshold 0.22 (global 0.25)",
+  "protocol": {
+    "snr_db_rms_active_speech_over_ambient_rms": [
+      -5,
+      0,
+      5,
+      10,
+      20
+    ],
+    "lead_s": 1.0,
+    "tail_s": 1.5,
+    "warm_up_s": 3.0,
+    "trials_per_cell": {
+      "positives": 51,
+      "negatives": 54
+    },
+    "pure_noise": "22 min per microphone, one continuous stream per chain",
+    "hit": "any hey_gideon event inside the trial",
+    "false_trigger": "any hey_gideon event in a negative trial, or in pure noise"
+  },
+  "ambient": {
+    "fifine_90s": {
+      "seconds": 89.9,
+      "rms_dbfs": -29.0,
+      "frame_rms_dbfs_p10_p50_p90_p99": [
+        -55.8,
+        -49.1,
+        -29.2,
+        -15.0
+      ],
+      "peak_dbfs": -0.0,
+      "samples_at_or_above_0_99": 11
+    },
+    "webcam_90s": {
+      "seconds": 89.8,
+      "rms_dbfs": -21.4,
+      "frame_rms_dbfs_p10_p50_p90_p99": [
+        -30.8,
+        -25.5,
+        -20.2,
+        -13.0
+      ],
+      "peak_dbfs": 0.0,
+      "samples_at_or_above_0_99": 2434
+    },
+    "onboard_90s": {
+      "seconds": 90.0,
+      "rms_dbfs": -44.0,
+      "frame_rms_dbfs_p10_p50_p90_p99": [
+        -44.5,
+        -44.0,
+        -43.4,
+        -43.2
+      ],
+      "peak_dbfs": -32.6,
+      "samples_at_or_above_0_99": 0
+    },
+    "fifine_22min": {
+      "seconds": 1320.0,
+      "rms_dbfs": -47.0,
+      "frame_rms_dbfs_p10_p50_p90_p99": [
+        -55.2,
+        -51.9,
+        -47.6,
+        -41.8
+      ],
+      "peak_dbfs": -3.0,
+      "samples_at_or_above_0_99": 0
+    },
+    "webcam_22min": {
+      "seconds": 1319.8,
+      "rms_dbfs": -23.0,
+      "frame_rms_dbfs_p10_p50_p90_p99": [
+        -30.4,
+        -25.5,
+        -20.5,
+        -15.6
+      ],
+      "peak_dbfs": 0.0,
+      "samples_at_or_above_0_99": 5098
+    },
+    "onboard_22min": {
+      "seconds": 1319.8,
+      "rms_dbfs": -44.1,
+      "frame_rms_dbfs_p10_p50_p90_p99": [
+        -44.7,
+        -44.1,
+        -43.6,
+        -43.3
+      ],
+      "peak_dbfs": -31.5,
+      "samples_at_or_above_0_99": 0
+    }
+  },
+  "recorder_check": "native pw-record 48 kHz stereo s24 (int32 container) decimated 3:1 is within 0.2 dB of the 16 kHz capture on all three microphones",
+  "speech_levels": {
+    "fifine": {
+      "ambient_bed_rms_dbfs": -29.04,
+      "snr_-5": {
+        "speech_peak_dbfs_median": -19.41,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_0": {
+        "speech_peak_dbfs_median": -14.41,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_5": {
+        "speech_peak_dbfs_median": -9.41,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_10": {
+        "speech_peak_dbfs_median": -4.41,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_20": {
+        "speech_peak_dbfs_median": 5.59,
+        "clipped_sample_fraction": 0.00516
+      }
+    },
+    "webcam": {
+      "ambient_bed_rms_dbfs": -21.43,
+      "snr_-5": {
+        "speech_peak_dbfs_median": -11.8,
+        "clipped_sample_fraction": 2e-05
+      },
+      "snr_0": {
+        "speech_peak_dbfs_median": -6.8,
+        "clipped_sample_fraction": 0.00039
+      },
+      "snr_5": {
+        "speech_peak_dbfs_median": -1.8,
+        "clipped_sample_fraction": 0.00022
+      },
+      "snr_10": {
+        "speech_peak_dbfs_median": 3.2,
+        "clipped_sample_fraction": 0.00162
+      },
+      "snr_20": {
+        "speech_peak_dbfs_median": 13.2,
+        "clipped_sample_fraction": 0.06118
+      }
+    },
+    "onboard": {
+      "ambient_bed_rms_dbfs": -43.95,
+      "snr_-5": {
+        "speech_peak_dbfs_median": -34.32,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_0": {
+        "speech_peak_dbfs_median": -29.32,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_5": {
+        "speech_peak_dbfs_median": -24.32,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_10": {
+        "speech_peak_dbfs_median": -19.32,
+        "clipped_sample_fraction": 0.0
+      },
+      "snr_20": {
+        "speech_peak_dbfs_median": -9.32,
+        "clipped_sample_fraction": 0.0
+      }
+    }
+  },
+  "chains": {
+    "off": {
+      "config": {
+        "hpf": false,
+        "hpf_hz": 100.0,
+        "ns": false,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": false,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": false,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": false
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 32,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 49,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 27,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 43,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 41,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 10,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 13,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 40,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 50,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 591,
+        "positives": 765,
+        "negatives_false_trigger": 2,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    },
+    "hpf": {
+      "config": {
+        "hpf": true,
+        "hpf_hz": 100.0,
+        "ns": false,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": false,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": false,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": false
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 31,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 49,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 50,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 29,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 42,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 42,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 46,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 10,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 18,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 46,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 611,
+        "positives": 765,
+        "negatives_false_trigger": 0,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    },
+    "hpf_agc": {
+      "config": {
+        "hpf": true,
+        "hpf_hz": 100.0,
+        "ns": false,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": true,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": false,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": false
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 31,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 40,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 46,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 22,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 40,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 40,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 45,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 8,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 33,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 45,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 50,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 49,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 592,
+        "positives": 765,
+        "negatives_false_trigger": 3,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    },
+    "hpf_agc_gate": {
+      "config": {
+        "hpf": true,
+        "hpf_hz": 100.0,
+        "ns": false,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": true,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": true,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": false
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 29,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 41,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 45,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 47,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 23,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 37,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 39,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 47,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 8,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 30,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 42,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 49,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 580,
+        "positives": 765,
+        "negatives_false_trigger": 2,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    },
+    "hpf_gate": {
+      "config": {
+        "hpf": true,
+        "hpf_hz": 100.0,
+        "ns": false,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": false,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": true,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": false
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 32,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 45,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 49,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 27,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 9,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 26,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 47,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 623,
+        "positives": 765,
+        "negatives_false_trigger": 1,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    },
+    "hpf_ns": {
+      "config": {
+        "hpf": true,
+        "hpf_hz": 100.0,
+        "ns": true,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": false,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": false,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": false
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 25,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 40,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 43,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 49,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 18,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 34,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 39,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 7,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 13,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 33,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 47,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 51,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 542,
+        "positives": 765,
+        "negatives_false_trigger": 1,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    },
+    "hpf_ns_agc_gate": {
+      "config": {
+        "hpf": true,
+        "hpf_hz": 100.0,
+        "ns": true,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": true,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": true,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": false
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 24,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 33,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 34,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 43,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 46,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 16,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 31,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 39,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 44,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 7,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 28,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 37,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 43,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 521,
+        "positives": 765,
+        "negatives_false_trigger": 1,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    },
+    "hpf_agc_gate_preemph": {
+      "config": {
+        "hpf": true,
+        "hpf_hz": 100.0,
+        "ns": false,
+        "ns_alpha": 0.003,
+        "ns_mix": 0.05,
+        "ns_beta": 1.0,
+        "ns_gain_floor": 0.1,
+        "agc": true,
+        "agc_target_db": -23.0,
+        "agc_max_gain_db": 24.0,
+        "agc_min_gain_db": -12.0,
+        "agc_attack": 0.5,
+        "agc_release": 0.05,
+        "gate": true,
+        "gate_margin_db": 6.0,
+        "gate_range_db": 12.0,
+        "gate_rise": 0.02,
+        "preemph": true
+      },
+      "cells": {
+        "fifine|-5": {
+          "positives_hit": 31,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|0": {
+          "positives_hit": 38,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "fifine|5": {
+          "positives_hit": 38,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "fifine|10": {
+          "positives_hit": 41,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "fifine|20": {
+          "positives_hit": 45,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|-5": {
+          "positives_hit": 18,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|0": {
+          "positives_hit": 33,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|5": {
+          "positives_hit": 34,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "webcam|10": {
+          "positives_hit": 41,
+          "positives": 51,
+          "negatives_false_trigger": 1,
+          "negatives": 54
+        },
+        "webcam|20": {
+          "positives_hit": 2,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|-5": {
+          "positives_hit": 22,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|0": {
+          "positives_hit": 39,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|5": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|10": {
+          "positives_hit": 48,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        },
+        "onboard|20": {
+          "positives_hit": 49,
+          "positives": 51,
+          "negatives_false_trigger": 0,
+          "negatives": 54
+        }
+      },
+      "totals": {
+        "positives_hit": 527,
+        "positives": 765,
+        "negatives_false_trigger": 5,
+        "negatives": 810
+      },
+      "pure_noise": {
+        "fifine": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "webcam": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        },
+        "onboard": {
+          "false_triggers": 0,
+          "minutes": 22.0
+        }
+      },
+      "pure_noise_total_minutes": 66.0,
+      "pure_noise_false_triggers": 0
+    }
+  },
+  "paired_vs_off": {
+    "hpf": {
+      "positives_missed_by_off_and_hit": 38,
+      "positives_hit_by_off_and_missed": 18
+    },
+    "hpf_agc": {
+      "positives_missed_by_off_and_hit": 50,
+      "positives_hit_by_off_and_missed": 49
+    },
+    "hpf_agc_gate": {
+      "positives_missed_by_off_and_hit": 48,
+      "positives_hit_by_off_and_missed": 59
+    },
+    "hpf_gate": {
+      "positives_missed_by_off_and_hit": 50,
+      "positives_hit_by_off_and_missed": 18
+    },
+    "hpf_ns": {
+      "positives_missed_by_off_and_hit": 24,
+      "positives_hit_by_off_and_missed": 73
+    },
+    "hpf_ns_agc_gate": {
+      "positives_missed_by_off_and_hit": 43,
+      "positives_hit_by_off_and_missed": 113
+    },
+    "hpf_agc_gate_preemph": {
+      "positives_missed_by_off_and_hit": 30,
+      "positives_hit_by_off_and_missed": 94
+    }
+  },
+  "selection": {
+    "rule": "maximum positives hit among chains with zero false triggers on negatives and in >= 20 min of pure noise per microphone",
+    "eligible": [
+      "hpf"
+    ],
+    "winner": "hpf",
+    "winner_config": {
+      "hpf": true,
+      "hpf_hz": 100.0,
+      "ns": false,
+      "ns_alpha": 0.003,
+      "ns_mix": 0.05,
+      "ns_beta": 1.0,
+      "ns_gain_floor": 0.1,
+      "agc": false,
+      "agc_target_db": -23.0,
+      "agc_max_gain_db": 24.0,
+      "agc_min_gain_db": -12.0,
+      "agc_attack": 0.5,
+      "agc_release": 0.05,
+      "gate": false,
+      "gate_margin_db": 6.0,
+      "gate_range_db": 12.0,
+      "gate_rise": 0.02,
+      "preemph": false
+    }
+  },
+  "limits": [
+    "Synthetic speech over real ambient: no human voice, no room, no distance measurement, no acoustic loop.",
+    "Negatives are lab sentences and sound-alikes. Zero false triggers in 66 min of pure noise bounds the rate only to about 2.7 per hour (rule of three, 95%); it is not a per-hour measurement.",
+    "SNR is defined on the RMS of the active speech against the whole 90 s ambient bed. Webcam cells at SNR 5 dB and above imply speech peaks above -2 dBFS with clipping, which a person at 30 to 60 cm does not produce; they are kept for completeness.",
+    "Hit differences of a few clips are within sample noise: the winner gains about 2.6 points over the baseline, not a validated gain.",
+    "Physical validation with the owner speaking at 30 to 60 cm is still pending (A7 PHYSICAL_PENDING)."
+  ]
+}

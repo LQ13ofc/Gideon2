@@ -101,6 +101,52 @@ PageFrame {
         }
     }
 
+    // A11: host actions. Off by default. The switch opens the consent dialog (Cancelar by default); the Core saves the choice
+    // and the state line shows the last action it confirmed. Desligado, the fixed commands only run the internal simulation.
+    Section {
+        title: "Ações no computador"
+        Text {
+            text: "Quando ligado, o Gideon abre aplicativos da lista fixa e muda o volume deste computador de verdade. Desligado, os comandos só fazem a simulação interna."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Toggle {
+            id: realSwitch
+            objectName: "realActionsSwitch"
+            text: "Executar ações no computador"
+            Accessible.name: "Executar ações no computador"
+            checked: core.realActionsEnabled
+            enabled: core.preferencesAvailable
+            onToggled: {
+                if (checked) realConsent.open()
+                else core.setRealActions(false)
+                // The switch follows the Core only: a click is not a change until the Core saves it.
+                checked = Qt.binding(function () { return core.realActionsEnabled })
+            }
+        }
+        Text {
+            objectName: "realActionsState"
+            text: core.realActionStateText
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            font.weight: 600
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Accessible.name: "Última ação no computador: " + text
+        }
+    }
+
+    RealActionsConsent {
+        id: realConsent
+        onAgreed: core.setRealActions(true)
+    }
+
     Section {
         title: "Envio à nuvem"
         Text {

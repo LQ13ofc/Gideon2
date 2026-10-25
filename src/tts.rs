@@ -123,6 +123,22 @@ pub fn feedback(outcome: &crate::commands::Outcome) -> String {
                 _ => "Sandbox ready.".into(),
             };
         }
+        // A11: a host receipt exists only after the effect was observed (process seen or volume read back).
+        if let Some(r) = outcome
+            .receipt
+            .as_ref()
+            .filter(|r| r.verified && r.scope == "host")
+        {
+            return match r.job.command {
+                Command::OpenApp { .. } => "Application opened.".into(),
+                Command::Volume { .. }
+                | Command::Mute
+                | Command::Unmute
+                | Command::VolumeUp
+                | Command::VolumeDown => "Audio updated.".into(),
+                _ => "Done.".into(),
+            };
+        }
     }
     if outcome.code == "unsupported" {
         "Command not understood.".into()

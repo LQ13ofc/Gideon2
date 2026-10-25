@@ -179,6 +179,38 @@ PageFrame {
                 Layout.fillWidth: true
                 Accessible.name: text
             }
+            // A9: while the Core listens, a compact level meter and one state line: speech heard but no phrase recognised
+            // says so, with the phrase to say. Numbers come from audio.live only.
+            ILevelMeter {
+                objectName: "hojeLevelMeter"
+                compact: true
+                visible: core.audioLevel.capturing === true
+                view: core.audioLevel
+            }
+            Text {
+                objectName: "hojeListenState"
+                visible: core.liveStateView.line !== undefined && core.liveStateView.line.length > 0
+                text: core.liveStateView.line || ""
+                textFormat: Text.PlainText
+                color: core.audioLevel.unmatched === true ? Theme.warning : Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: text
+            }
+            Text {
+                objectName: "hojeListenHint"
+                visible: (core.liveStateView.hint || "").length > 0
+                text: core.liveStateView.hint || ""
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: text
+            }
         }
     }
 

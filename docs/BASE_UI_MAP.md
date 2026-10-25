@@ -110,8 +110,8 @@ request_id. Invalidez de payload aninhado/deep JSON limpa estado e revoga contro
 | Dispositivos | Fixture/virtual source/sink | CPAL/PipeWire/hotplug/AEC/barge-in precisam implementação/validação |
 | Ganho da resposta TTS | 0–100% no sink virtual; 0 não cria job TTS | Não altera mixer nem volume do dispositivo do host |
 | Indicador visual | Config bool, oculta só o círculo decorativo | Estado textual/Cancel/erros/resultados continuam visíveis |
-| Volume/mute command | Estado simulado por invocação em tmpfs | Não usar receipt como volume atual do host |
-| Open app | Desktop ID allowlist → app fixture | Não afirmar que Brave real ou janela Wayland abriu |
+| Volume/mute command | Estado simulado por invocação em tmpfs (padrão). Com `real_actions` ligado (A11): `wpctl` no sink padrão, lido de volta | Recibo host só com efeito observado; desligado, não usar receipt como volume atual do host |
+| Open app | Desktop ID allowlist → app fixture (padrão). Com `real_actions` ligado (A11): `gtk-launch`/`gio`/`kioclient6`, processo novo observado | Janela não é verificada pelo Core (recibo diz "sem confirmação de janela"); ver docs/A11-real-actions-test.md |
 | Hora/data | UTC no executor sandbox | Não prometer timezone configurável antes de suporte |
 | Hub / Plugins | Catálogo, aprovação, staging, install/update/rollback/remove em namespace (B3.1–B3.3); plugin Python ativável em sandbox sem rede (C0) | Publisher não autenticado; checksum verifica só os bytes do catálogo |
 | LLM / Skills / Connections | LLM Engine em desenvolvimento (C1, plugin opcional); Skills e Connections não implementados | Nenhum painel Models/LLM fora do plugin |

@@ -256,8 +256,12 @@ def read_exact(stream, count):
     return bytes(data)
 
 
-def live(engine, vad, stdin, stdout):
-    """Frame loop for the Core's live path: one packet per 20 ms frame, bounded by the stdin pipe."""
+def live(engine, vad, stdin, stdout, conditioner=None):
+    """Frame loop for the Core's live path: one packet per 20 ms frame, bounded by the stdin pipe.
+
+    `conditioner` (scripts/audio_conditioning.py, preference `input_conditioning` = auto) shapes the frames
+    the spotter hears only. The packets and the VAD keep the raw frames, so capture and STT are unchanged.
+    """
     if hasattr(engine, 'warm_up'):
         engine.warm_up()
     while True:
@@ -266,7 +270,8 @@ def live(engine, vad, stdin, stdout):
             return
         timestamp = engine.last_end
         samples = engine.frame_samples(raw)
-        events = engine.accept(samples, timestamp)
+        heard = conditioner.process(samples) if conditioner is not None else samples
+        events = engine.accept(heard, timestamp)
         speech = vad.accept(samples) if vad else None
         stdout.write(json.dumps({'timestamp_us': timestamp, 'samples': plain(samples), 'detections': events, 'speech': speech}) + '\n')
         stdout.flush()
@@ -280,12 +285,15 @@ def parse(argv):
     parser.add_argument('--start-us', type=int, default=0)
     parser.add_argument('--active-phrase')
     parser.add_argument('--keywords-threshold', type=float, default=0.25)
+    # Live only: `auto` shapes the frames the spotter hears (scripts/audio_conditioning.py AUTO_CHAIN).
+    parser.add_argument('--conditioning', choices=('auto', 'off'), default='off')
     # Preflight only: builds the engine (models, hashes, keyword file) and exits 0. Used before a switch.
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args(argv)
     if args.check:
         if args.live or args.fixture is not None: raise ValueError('invalid arguments')
     elif args.live == (args.fixture is not None): raise ValueError('invalid arguments')
+    if args.conditioning != 'off' and not args.live: raise ValueError('invalid arguments')
     if args.start_us < 0: raise ValueError('invalid start')
     check_threshold(args.keywords_threshold)
     return args
@@ -303,6 +311,11 @@ if __name__ == '__main__':
         sys.exit(0)
     vad = VadEngine(manifest['vad']) if 'vad' in manifest else None
     if arguments.live:
-        live(engine, vad, sys.stdin.buffer, sys.stdout)
+        conditioner = None
+        # The test-only detector stays numpy-free (no conditioning there); production manifests never carry test_only.
+        if arguments.conditioning == 'auto' and manifest.get('test_only') is not True:
+            from audio_conditioning import AUTO_CHAIN, Conditioner
+            conditioner = Conditioner(AUTO_CHAIN)
+        live(engine, vad, sys.stdin.buffer, sys.stdout, conditioner)
     else:
         stream_fixture(engine, vad, manifest, manifest['fixtures'][arguments.fixture])

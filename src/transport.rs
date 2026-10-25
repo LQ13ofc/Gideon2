@@ -394,6 +394,7 @@ async fn replay_worker(replay: WakeReplay, tx: mpsc::Sender<Result<Packet, ()>>,
             },
             replay.active_phrase.as_deref(),
             threshold,
+            None,
         );
         let mut mounts = vec![
             fixture_root.to_path_buf(),
@@ -725,11 +726,11 @@ pub async fn serve(
     core.configure_tools(tool_ttl, commands_sandbox);
     let mut command_task: Option<(
         crate::commands::Job,
-        tokio::task::JoinHandle<io::Result<crate::commands::Receipt>>,
+        tokio::task::JoinHandle<Result<crate::commands::Receipt, &'static str>>,
     )> = None;
     let mut tool_task: Option<(
         crate::commands::Job,
-        tokio::task::JoinHandle<io::Result<crate::commands::Receipt>>,
+        tokio::task::JoinHandle<Result<crate::commands::Receipt, &'static str>>,
     )> = None;
     if tts.is_some() {
         core.enable_tts();
@@ -746,6 +747,8 @@ pub async fn serve(
         String,
         tokio::task::JoinHandle<io::Result<crate::phrases::Measurement>>,
     )> = None;
+    // A9 `audio_probe`: one 3 s recording at a time, in its own task (the Core loop never blocks on it).
+    let mut probe_task: Option<(u64, tokio::task::JoinHandle<crate::live::ProbeOutcome>)> = None;
     let (speech_progress, mut speech_progress_rx) = mpsc::channel(2);
     let mut pending_replay = if stt_task.is_some() {
         replay.take()
@@ -786,7 +789,12 @@ pub async fn serve(
             _ = async { match deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => { core.expire(std::time::Instant::now()); storage.audit(core.response(String::new(), "ok").sequence)?; },
             result = async { (&mut command_task.as_mut().expect("active task").1).await }, if command_task.is_some() => {
                 let (job, _) = command_task.take().expect("active task");
-                core.command_reply(job,result.ok().and_then(Result::ok),std::time::Instant::now());
+                match result {
+                    Ok(Ok(receipt)) => core.command_reply(job, Some(receipt), std::time::Instant::now()),
+                    // A11: host codes (app_not_installed, volume_unverified, ...) reach the user; a crashed task is generic.
+                    Ok(Err(code)) => core.command_error(job, code, std::time::Instant::now()),
+                    Err(_) => core.command_error(job, "command_failed", std::time::Instant::now()),
+                }
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             _ = async { match tool_deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => {
@@ -814,6 +822,13 @@ pub async fn serve(
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
+            result = async { (&mut probe_task.as_mut().expect("active probe").1).await }, if probe_task.is_some() => {
+                let (id, _) = probe_task.take().expect("active probe");
+                // A task that ended without an outcome is reported as a recorder that gave no audio.
+                let outcome = result.unwrap_or_else(|_| crate::live::ProbeOutcome::failed("recorder_exited"));
+                core.audio_probe_reply(id, outcome);
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
             result = async { (&mut phrase_task.as_mut().expect("active phrase test").1).await }, if phrase_task.is_some() => {
                 let (id, _) = phrase_task.take().expect("active phrase test");
                 let measured = result.ok().and_then(Result::ok);
@@ -874,6 +889,7 @@ pub async fn serve(
                         match wake_input.as_mut().expect("configured wake input").accept(p) {
                         Ok(detection) => {
                             core.wake_health("replaying");
+                            if let Some(found) = detection.as_ref() { core.live_detected(&found.phrase_id); }
                             let pre_roll=if detection.is_some() { wake_input.as_ref().expect("configured wake input").pre_roll() } else { Vec::new() };
                             core.capture_packet(frame,speech,pre_roll,detection.is_some(),std::time::Instant::now());
                         },
@@ -912,13 +928,22 @@ pub async fn serve(
                 let _ = task.await;
             }
         }
+        // A11: the executor is chosen when the job starts; the Core refuses to change the mode while a job is queued.
         if let Some(job) = core.take_command_job() {
             let pending = job.clone();
-            command_task = Some((job, tokio::spawn(crate::commands::execute(pending))));
+            let host = core.real_actions();
+            command_task = Some((
+                job,
+                tokio::spawn(crate::commands::execute_for(pending, host)),
+            ));
         }
         if let Some(job) = core.take_tool_job() {
             let pending = job.clone();
-            tool_task = Some((job, tokio::spawn(crate::commands::execute(pending))));
+            let host = core.real_actions();
+            tool_task = Some((
+                job,
+                tokio::spawn(crate::commands::execute_for(pending, host)),
+            ));
         }
         if connection_task.is_none() {
             if let Some((id, job)) = core.take_connection_job() {
@@ -941,6 +966,11 @@ pub async fn serve(
             if let Some((_, task)) = speech_task.take() {
                 task.abort();
                 let _ = task.await;
+            }
+        }
+        if probe_task.is_none() {
+            if let Some((id, device)) = core.take_audio_probe_job() {
+                probe_task = Some((id, tokio::spawn(crate::live::probe(device))));
             }
         }
         if phrase_task.is_none() {
@@ -995,6 +1025,10 @@ pub async fn serve(
         let _ = task.await;
     }
     if let Some((_, task)) = phrase_task.take() {
+        task.abort();
+        let _ = task.await;
+    }
+    if let Some((_, task)) = probe_task.take() {
         task.abort();
         let _ = task.await;
     }

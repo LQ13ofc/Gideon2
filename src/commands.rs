@@ -4,16 +4,93 @@ use std::{io, process::Stdio, time::Duration};
 use tokio::io::{AsyncWriteExt, BufReader};
 
 pub const BRAVE: &str = "com.brave.Browser.desktop";
+pub const STEAM: &str = "com.valvesoftware.Steam.desktop";
+pub const KCALC: &str = "org.kde.kcalc.desktop";
+/// The fixed host catalog (A11). Only these canonical ids reach the host launcher; `host::resolve` finds the
+/// installed desktop entry of each (aliases such as `brave-browser.desktop` included).
+pub const HOST_APPS: [&str; 3] = [BRAVE, STEAM, KCALC];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
-    OpenApp { desktop_id: String },
-    Volume { level: u8 },
+    OpenApp {
+        desktop_id: String,
+    },
+    Volume {
+        level: u8,
+    },
     Mute,
+    /// Real-actions only (A11): the sandbox executor has no unmute or volume steps.
+    Unmute,
+    VolumeUp,
+    VolumeDown,
     Status,
     Time,
     Date,
     Cancel,
+}
+impl Command {
+    /// Wire name of the command kind (the bridge's `COMMAND_KINDS` names).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Command::OpenApp { .. } => "open_app",
+            Command::Volume { .. } => "volume",
+            Command::Mute => "mute",
+            Command::Unmute => "unmute",
+            Command::VolumeUp => "volume_up",
+            Command::VolumeDown => "volume_down",
+            Command::Status => "status",
+            Command::Time => "time",
+            Command::Date => "date",
+            Command::Cancel => "cancel",
+        }
+    }
+    /// Commands that change the host (A11): executed on the host only while `real_actions` is on.
+    pub fn host_action(&self) -> bool {
+        matches!(
+            self,
+            Command::OpenApp { .. }
+                | Command::Volume { .. }
+                | Command::Mute
+                | Command::Unmute
+                | Command::VolumeUp
+                | Command::VolumeDown
+        )
+    }
+    /// Commands the sandbox grammar never runs: they exist only with `real_actions`.
+    pub fn real_only(&self) -> bool {
+        matches!(
+            self,
+            Command::Unmute | Command::VolumeUp | Command::VolumeDown
+        )
+    }
+}
+/// Short label of a catalog app for receipts and the state line (no path, no shell text).
+pub fn app_label(desktop_id: &str) -> &'static str {
+    match desktop_id {
+        BRAVE => "brave",
+        STEAM => "steam",
+        KCALC => "kcalc",
+        _ => "app",
+    }
+}
+/// Real-action record of the last host action (A11). Content-free: no paths, no receipt text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LastAction {
+    pub kind: &'static str,
+    pub app: Option<&'static str>,
+    pub ok: bool,
+    pub verified: bool,
+    pub at_ms: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RealView {
+    pub enabled: bool,
+    pub last_action: Option<LastAction>,
+}
+/// Snapshot block `actions` (A11).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ActionsView {
+    pub real: RealView,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,9 +154,15 @@ pub fn parse(raw: &str, wake: &str) -> Option<Command> {
             desktop_id: BRAVE.into(),
         }),
         "open steam" | "abra steam" => Some(Command::OpenApp {
-            desktop_id: "com.valvesoftware.Steam.desktop".into(),
+            desktop_id: STEAM.into(),
+        }),
+        "open kcalc" | "abra kcalc" | "open calculator" => Some(Command::OpenApp {
+            desktop_id: KCALC.into(),
         }),
         "mute" | "mute audio" | "silenciar" => Some(Command::Mute),
+        "unmute" | "unmute audio" | "desmutar" => Some(Command::Unmute),
+        "volume up" | "aumentar volume" => Some(Command::VolumeUp),
+        "volume down" | "diminuir volume" => Some(Command::VolumeDown),
         "status" | "what is your status" => Some(Command::Status),
         "what time is it" | "que horas são" => Some(Command::Time),
         "what is the date" | "qual é a data" => Some(Command::Date),
@@ -96,22 +179,63 @@ pub fn parse(raw: &str, wake: &str) -> Option<Command> {
         }
     }
 }
-/// Actor-owned grant; cannot be supplied through IPC or a transcript.
+/// Actor-owned grant for the sandbox executor; cannot be supplied through IPC or a transcript.
 pub fn authorize(command: &Command) -> Result<(), &'static str> {
     match command {
         Command::OpenApp { desktop_id } if desktop_id != BRAVE => Err("app_unavailable"),
         Command::Volume { level } if *level > 100 => Err("denied"),
+        // Second line of defence: the dispatch filter already keeps these out of the sandbox.
+        command if command.real_only() => Err("unsupported"),
         _ => Ok(()),
     }
 }
-/// Trusted sandbox worker verifies the effect; Rust validates identity and scope again.
+/// Grant for the host executor (A11, `real_actions` on): the fixed catalog and the 0-100% volume range.
+pub fn authorize_host(command: &Command) -> Result<(), &'static str> {
+    match command {
+        Command::OpenApp { desktop_id } if !HOST_APPS.contains(&desktop_id.as_str()) => {
+            Err("app_unavailable")
+        }
+        Command::Volume { level } if *level > 100 => Err("denied"),
+        _ => Ok(()),
+    }
+}
+/// Trusted executor verifies the effect (sandbox worker or host verification); Rust validates identity and scope again.
 pub fn verify(job: &Job, receipt: &Receipt) -> bool {
     receipt.job == *job
         && receipt.verified
-        && receipt.scope == "sandbox"
+        && matches!(receipt.scope.as_str(), "sandbox" | "host")
         && !receipt.result.is_empty()
         && receipt.result.len() <= 256
         && !receipt.result.chars().any(char::is_control)
+}
+/// Runs one job on the host when `host` is set (A11 `real_actions`) and the command changes the host; every
+/// other job keeps the sandbox executor. Errors are fixed codes for the Core (`command_error`).
+pub async fn execute_for(job: Job, host: bool) -> Result<Receipt, &'static str> {
+    if host && job.command.host_action() {
+        execute_host(job).await
+    } else {
+        execute(job).await.map_err(|_| "command_failed")
+    }
+}
+/// Host executor (A11). Launch and volume effects are checked by `crate::host`; a receipt exists only when the
+/// effect was observed (process seen, or the volume read back at the requested value).
+pub async fn execute_host(job: Job) -> Result<Receipt, &'static str> {
+    authorize_host(&job.command)?;
+    let result = match &job.command {
+        Command::OpenApp { desktop_id } => crate::host::open_app(desktop_id).await?,
+        command @ (Command::Volume { .. }
+        | Command::Mute
+        | Command::Unmute
+        | Command::VolumeUp
+        | Command::VolumeDown) => crate::host::volume(command).await?,
+        _ => return Err("unsupported"),
+    };
+    Ok(Receipt {
+        job,
+        verified: true,
+        scope: "host".into(),
+        result,
+    })
 }
 pub async fn execute(job: Job) -> io::Result<Receipt> {
     authorize(&job.command).map_err(io::Error::other)?;
@@ -269,8 +393,50 @@ mod tests {
         r.verified = false;
         assert!(!verify(&job, &r));
         r.verified = true;
-        r.scope = "host".into();
+        r.scope = "other".into();
         assert!(!verify(&job, &r));
+        r.scope = "host".into();
+        assert!(
+            verify(&job, &r),
+            "host receipts are accepted only from the host executor path"
+        );
+    }
+    #[test]
+    fn real_action_grammar_and_host_policy() {
+        assert_eq!(
+            parse("Hey Gideon, open kcalc.", "Hey Gideon"),
+            Some(Command::OpenApp {
+                desktop_id: KCALC.into()
+            })
+        );
+        assert_eq!(parse("unmute", ""), Some(Command::Unmute));
+        assert_eq!(parse("volume up", ""), Some(Command::VolumeUp));
+        assert_eq!(parse("diminuir volume", ""), Some(Command::VolumeDown));
+        for text in [
+            "volume up 5",
+            "unmute and open brave",
+            "volume up; mute",
+            "open kcalc!",
+        ] {
+            assert!(parse(text, "Hey Gideon").is_none(), "{text}");
+        }
+        assert!(Command::Unmute.real_only() && !Command::Mute.real_only());
+        // The sandbox never runs the real-only steps or apps outside its own catalog.
+        assert!(authorize(&Command::Unmute).is_err());
+        assert!(authorize(&Command::OpenApp {
+            desktop_id: KCALC.into()
+        })
+        .is_err());
+        assert!(authorize_host(&Command::OpenApp {
+            desktop_id: KCALC.into()
+        })
+        .is_ok());
+        assert!(authorize_host(&Command::OpenApp {
+            desktop_id: "../bin/sh".into()
+        })
+        .is_err());
+        assert!(authorize_host(&Command::Volume { level: 101 }).is_err());
+        assert!(authorize_host(&Command::VolumeUp).is_ok());
     }
     #[tokio::test]
     async fn real_namespace_executes_and_verifies_all_tools() {
