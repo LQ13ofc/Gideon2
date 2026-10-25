@@ -158,6 +158,11 @@ de QML da ponte (que carrega o app principal, com Dispositivos) passou. Não hou
   recuperação, a escrita de preferência é aceita com o reinício pendente. Antes era recusada.
 - `scripts/test_snapshot_contract.py` (`test_wake_phrase_ops_validate_against_real_core`): com o reinício pendente,
   a escrita de frases agora é aceita (antes `configuration_not_ready`).
+- `scripts/s2_final_driver.py` (check "selection requires real restart"): antes exigia que os controles de preferência
+  ficassem indisponíveis com reinício pendente. Isso contradiz U1 (escrita aceita). Agora o check exige
+  `configuration_status` = `restart_required`, o aviso "reinicie o Core para aplicar" na tela, escrita aceita, texto
+  indisponível. Não compara a frase em execução: o padrão empacotado já é `hey_gideon`, então ela não muda até o reinício.
+  O aviso da ponte ("Mudança salva: reinicie o Core para aplicar...") voltou a dizer que é preciso reiniciar.
 
 ## 6. Arquivos
 

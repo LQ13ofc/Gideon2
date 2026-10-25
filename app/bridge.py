@@ -2401,8 +2401,8 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def configurationMessage(self):
         if self.configurationStatus=='safe_mode':return ('Modo seguro: configuração inválida preservada; áudio e comandos bloqueados' if self.snapshot.get('configuration_recovery_available') else 'Modo seguro: arquivo excede o limite de recuperação automática; conteúdo preservado')
-        # U1: a saved change applies at the next start; further changes are still accepted while the restart is pending.
-        if self.configurationStatus=='restart_required':return 'Mudança salva: aplica ao reiniciar o Core. Você pode fazer outras mudanças antes do reinício.'
+        # The restart signal (the saved selection is not running yet). U1: further changes are still accepted while it is pending.
+        if self.configurationStatus=='restart_required':return 'Mudança salva: reinicie o Core para aplicar. Você pode fazer outras mudanças antes do reinício.'
         return ''
     @Slot(bool,int)
     def savePreferences(self,audible,timeout):

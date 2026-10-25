@@ -302,7 +302,14 @@ def configure():
          f"restart_required after wake selection (preferences result {bridge.preferencesResult!r}, "
          f"revision {bridge.preferencesRevision})")
     check("wake hey_gideon persisted by Core", wake_active(prefs()) and prefs().get("wake_phrase") == HEY_ID, prefs())
-    check("selection requires real restart", not bridge.preferencesAvailable and not bridge.textAvailable)
+    # Restart signal (snapshot + UI notice) with writes still accepted (A13 U1: the latest write wins). Text input
+    # stays unavailable while the restart is pending. The running phrase is not compared here: the packaged default
+    # is hey_gideon, so it is already the running phrase.
+    check("selection requires real restart", bridge.configurationStatus == "restart_required"
+          and "reinicie o Core para aplicar" in bridge.configurationMessage
+          and bridge.preferencesAvailable and not bridge.textAvailable,
+          {"status": bridge.configurationStatus, "message": bridge.configurationMessage,
+           "preferences": bridge.preferencesAvailable, "text": bridge.textAvailable})
     window.grabWindow().save(str(ART / "pack.png"))
     QTest.qWait(50)
     touch("installed")

@@ -3493,6 +3493,14 @@ class WakePhrases(unittest.TestCase):
         self.assertFalse(wake_setting_list_ok([{'id':f'p{i}','active':True} for i in range(6)]))
         self.assertFalse(wake_setting_list_ok([{'id':'p','active':True},{'id':'p','active':False}]))
         self.assertFalse(wake_setting_list_ok([{'id':'p','active':1}]))
+    def test_restart_pending_signals_restart_and_keeps_writes_open(self):
+        """A13 U1 + restart signal: the snapshot and the UI notice say restart; preference writes stay open; text does not."""
+        snap=ready(copy.deepcopy(BASE));snap.update(configuration_status='restart_required',text_input_available=False)
+        bridge,_=connect_bridge(self,snap)
+        self.assertEqual(bridge.configurationStatus,'restart_required')
+        self.assertIn('reinicie o Core para aplicar',bridge.configurationMessage)
+        self.assertTrue(bridge.preferencesAvailable)
+        self.assertFalse(bridge.textAvailable)
     def test_check_and_codes_have_portuguese_text(self):
         self.assertTrue(phrase_check_ok({'ok':True,'code':'ok','text':'Light Gideon','tokens':'L AY1 T G IH1 D IY0 AH0 N'}))
         self.assertTrue(phrase_check_ok({'ok':False,'code':'word_not_in_lexicon','word':'blorf'}))
