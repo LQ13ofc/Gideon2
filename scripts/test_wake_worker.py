@@ -16,6 +16,16 @@ class NativeWakeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.manifest=json.loads(MANIFEST.read_text())
         cls.row=next(r for r in cls.manifest['fixtures'] if r['id']=='wake-hey__bf_emma__clean')
+    def test_warm_up_keeps_the_core_clock_and_emits_nothing(self):
+        # Live priming is silence on the stream only: packet clock and detection mapping stay on the Core clock.
+        engine=WakeEngine(self.manifest,start_us=7_000_000)
+        engine.warm_up()
+        self.assertEqual(engine.last_end,7_000_000)
+        self.assertEqual(engine.stream_start_us,7_000_000-3_000_000)
+        self.assertEqual(len(engine.recent),0)
+        events=engine.accept(np.zeros(320,dtype=np.float32),7_000_000)
+        self.assertEqual(events,[])
+        self.assertEqual(engine.last_end,7_020_000)
     def test_pcm_crosses_stream_rotation_boundary(self):
         engine=WakeEngine(self.manifest)
         samples=np.concatenate([np.zeros(9*16000,dtype=np.float32),read_fixture(self.row),np.zeros(16000,dtype=np.float32)])

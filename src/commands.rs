@@ -35,6 +35,21 @@ pub struct Outcome {
     pub code: &'static str,
     pub receipt: Option<Receipt>,
 }
+/// STT often writes the wake word with a comma after its first word ("Hey, Gideon, open brave.").
+/// That single comma is read as a space so the wake prefix matches; every other comma keeps the
+/// exact grammar ("open, brave" is still refused).
+fn unify_wake_comma(text: &str, prefix: &str) -> String {
+    if let Some((first, _)) = prefix.split_once(' ') {
+        if let Some(rest) = text
+            .strip_prefix(first)
+            .and_then(|tail| tail.strip_prefix(", "))
+        {
+            return format!("{first} {rest}");
+        }
+    }
+    text.to_string()
+}
+
 /// Full-string grammar: no substring extraction, fuzzy names, or chained commands.
 pub fn parse(raw: &str, wake: &str) -> Option<Command> {
     let normalized = raw
@@ -42,8 +57,9 @@ pub fn parse(raw: &str, wake: &str) -> Option<Command> {
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
-    let mut text = normalized.as_str();
     let prefix = wake.to_lowercase();
+    let unified = unify_wake_comma(&normalized, &prefix);
+    let mut text = unified.as_str();
     if !prefix.is_empty() {
         if let Some(tail) = text.strip_prefix(&prefix) {
             // Only a token boundary can remove wake; never remove arbitrary leading text.
@@ -202,6 +218,37 @@ mod tests {
         })
         .is_err());
         assert!(authorize(&Command::Volume { level: 255 }).is_err());
+    }
+    #[test]
+    fn stt_comma_after_wake_word_is_the_only_comma_accepted() {
+        assert_eq!(
+            parse("Hey, Gideon, open brave.", "Hey Gideon"),
+            Some(Command::OpenApp {
+                desktop_id: BRAVE.into()
+            })
+        );
+        assert_eq!(
+            parse("Hey, Gideon. Mute.", "Hey Gideon"),
+            None,
+            "a period after the wake word is not the STT comma"
+        );
+        assert_eq!(
+            parse("Hey, Gideon, mute.", "Hey Gideon"),
+            Some(Command::Mute)
+        );
+        assert_eq!(
+            parse("Hey, Gideon, what time is it?", "Hey Gideon"),
+            Some(Command::Time)
+        );
+        assert_eq!(
+            parse("Hey, Custom, volume 50.", "Custom Phrase"),
+            None,
+            "only the first wake word takes the comma"
+        );
+        assert_eq!(parse("open, brave", ""), None);
+        assert_eq!(parse("Hey, Gideonish open brave", "Hey Gideon"), None);
+        assert_eq!(parse("Okay, Gideon, open brave", "Hey Gideon"), None);
+        assert_eq!(parse("hey, gideon, open brave, mute", "Hey Gideon"), None);
     }
     #[test]
     fn receipt_requires_effect_and_exact_correlation() {

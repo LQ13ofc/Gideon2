@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 ENGINE = 'sherpa-onnx-1.13.8/zipformer-zh-en-3M-2025-12-20-int8-chunk8/competitive-v2'
 TEST_ENGINE = 'test-energy-detector'
 FRAME_SAMPLES = 320  # 20 ms at 16 kHz; live frames are exactly this many s16 samples
+WARM_UP_SAMPLES = 3 * 16000  # live only: silence that primes a fresh keyword stream (see warm_up)
 THRESHOLD_MIN = 0.1
 THRESHOLD_MAX = 0.5
 
@@ -90,6 +91,17 @@ class WakeEngine:
         self.last_end = self.start_us
         self.stream_start_us = self.start_us
         self.recent = deque()
+
+    def warm_up(self, samples=WARM_UP_SAMPLES):
+        """Primes a fresh keyword stream with silence before the first Core frame (live only).
+
+        A cold stream misses speech that starts within its first seconds (A7 probe: 28/51 positives
+        with 1 s of lead, 47/51 with 4 s). Detections during priming are discarded. The stream origin
+        moves back by the priming length, so detection times still map onto the Core clock.
+        """
+        self.stream.accept_waveform(16000, np.zeros(samples, dtype=np.float32))
+        self.decode()
+        self.stream_start_us -= samples * 1_000_000 // 16000
 
     def frame_samples(self, raw):
         return np.frombuffer(raw, dtype='<i2').astype(np.float32) / np.float32(32768)
@@ -232,6 +244,8 @@ def read_exact(stream, count):
 
 def live(engine, vad, stdin, stdout):
     """Frame loop for the Core's live path: one packet per 20 ms frame, bounded by the stdin pipe."""
+    if hasattr(engine, 'warm_up'):
+        engine.warm_up()
     while True:
         raw = read_exact(stdin, FRAME_SAMPLES * 2)
         if raw is None:

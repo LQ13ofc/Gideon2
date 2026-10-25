@@ -1,0 +1,1048 @@
+{
+ "id": "A7-wake-live-virtual",
+ "scope": "Live wake path on the real Core (--live-audio) with PipeWire virtual devices only. No physical microphone or speaker was used.",
+ "status": "VIRTUAL_VERIFIED; PHYSICAL_PENDING",
+ "environment": {
+  "pipewire": "PulseAudio (on PipeWire 1.6.10) compatibility; pw-record/pw-play 1.6.x",
+  "virtual_devices": {
+   "sink": "gideon_lab_sink (null-sink, 48 kHz, 2ch)",
+   "mic": "gideon_lab_mic (remap-source of the sink monitor)"
+  },
+  "physical_devices": "not used; default sink and default source verified unchanged before and after; module ids unloaded at the end",
+  "core_binary": "target/release/gideon-base built from this commit + the fixes listed below",
+  "core_home_for_final_run": "private hard-linked copy of the 0.8.0-ac074071 package with the fixed scripts/wake_worker.py (target/wake-lab-home); packaged home used for runs A and B",
+  "wake_engine": "sherpa-onnx 1.13.8 keyword spotter zipformer-zh-en-3M-2025-12-20 (packaged assets), keyword hey_gideon",
+  "stt_engine": "moonshine-voice 0.1.5 small-streaming (packaged)",
+  "tts_for_output_check": "pocket-tts 3.3.0 (repo target/a5-assets, packaged venv)"
+ },
+ "clip_set": {
+  "total": 105,
+  "positives": 51,
+  "negatives": 54,
+  "format": "16 kHz mono s16 WAV, peak <= -6 dBFS",
+  "sources": {
+   "kokoro_corpus": "existing QA corpus ~/.cache/gideon/phase3.5/kokoro/canonical-corpus-py313-v2 (4 voices: bf_emma, bm_george, af_bella, am_michael; conditions clean, noise-snr20db, room-fir-synthetic, attenuation/volume variants)",
+   "pocket_tts": "scripts/tts_worker.py with target/a5-assets (alba voice): extra phrases incl. okay Google, hey Jordan",
+   "synthetic": "silence 10 s, white noise 10 s, pink noise 10 s, multi-talker babble 10 s (seeded numpy)"
+  },
+  "counts_by_class_condition": {
+   "positive:clean": 15,
+   "positive:noise-snr20db": 12,
+   "positive:room-fir-synthetic": 12,
+   "positive:volume-quiet": 4,
+   "positive:volume-loud": 4,
+   "positive:composite-concat": 4,
+   "negative:clean": 50,
+   "negative:silence": 1,
+   "negative:white-noise": 1,
+   "negative:pink-noise": 1,
+   "negative:tv-babble": 1
+  },
+  "phrases_positive": [
+   "Hey Gideon.",
+   "Hey Gideon, open Brave.",
+   "Hey Gideon, what time is it?",
+   "Hey Gideon, mute. (concatenated Hey Gideon. + gap + Mute.)"
+  ],
+  "phrases_negative": [
+   "Hey Julian, are you ready?",
+   "Hey Giddy, come over here.",
+   "Hi Gideon, how are you?",
+   "Okay Gideon, open Steam.",
+   "Okay Google (Pocket)",
+   "Hey Jordan (Pocket)",
+   "Gideon.",
+   "Open Chrome.",
+   "What app did you open?",
+   "The team will join us.",
+   "Yeah, yeah, I heard you.",
+   "ordinary English sentences",
+   "silence",
+   "white/pink noise",
+   "babble"
+  ]
+ },
+ "defects": [
+  {
+   "id": "D1",
+   "stage": "recorder (src/live.rs recorder_args)",
+   "symptom": "live input never produced a wake: capture started, no detection",
+   "root_cause": "pw-record writing to \"-\" emits an AU container (\".snd\", 24-byte header, big-endian samples). The Core and worker read it as little-endian s16, so the worker received byte-swapped noise (measured rms 11428, peak 32768 against a true rms 1524, peak 12686).",
+   "fix": "add --raw to pw-record arguments (parecord already used --raw).",
+   "evidence": "lab sandbox_probe header vs raw inside the same bwrap shape; chain_probe raw: xcorr 0.999 with the source clip, worker detects hey_gideon",
+   "test": "src/live.rs recorder_args exact-argv unit test"
+  },
+  {
+   "id": "D2",
+   "stage": "player (src/live.rs player_args)",
+   "symptom": "speech output: live player wrote some PCM, then output_state=error player_write_failed mid-speech",
+   "root_cause": "pw-play reading stdin without --raw parses it as a sound file: \"sndfile: failed to open audio file -: Format not recognised\", exit 1.",
+   "fix": "add --raw to pw-play arguments.",
+   "evidence": "direct test: no --raw rc=1, --raw rc=0; output_check before fix: playing->error; after fix: playing->idle, speech completed",
+   "test": "src/live.rs player_args unit test (first argument --raw)"
+  },
+  {
+   "id": "D3",
+   "stage": "live worker sandbox (src/live.rs spawn_worker)",
+   "symptom": "latent: live worker would fail to load models when its assets are outside the bound home",
+   "root_cause": "live worker mounted only the manifest; the replay profile also mounts asset_root (and the VAD directory lives outside the wake asset root in some layouts).",
+   "fix": "worker_mounts() mounts asset_root and the VAD model directory named by the manifest (optional fields, absolute paths required).",
+   "evidence": "not triggered in the packaged layout (assets sit under the bound home); reproduced by reading the mount list; repo-layout runs show the same missing-asset class of failure in STT",
+   "test": "src/live.rs worker_mounts_include_assets_and_vad_directory"
+  },
+  {
+   "id": "D4",
+   "stage": "wake engine start (scripts/wake_worker.py, live only)",
+   "symptom": "speech in the first seconds after the worker starts (boot, preference change, restart) is missed",
+   "root_cause": "a freshly created keyword stream has no encoder history; phrases that start within the first ~2-4 s of the stream are often not detected. Measured: 28/51 positives with 1 s of lead, 47/51 with 4 s of lead, same audio, same threshold.",
+   "fix": "WakeEngine.warm_up() primes the stream with 3 s of silence before the first Core frame (live only). Detections while priming are discarded; stream_start_us moves back by the priming length so detection times stay on the Core clock.",
+   "evidence": "offline cold probe 1 s lead: 28/51 -> 47/51 with warm-up. Live cold-start A/B (fresh Core, clip 0.3 s after capture starts): package worker 0/6, warm-up worker 6/6.",
+   "test": "scripts/test_wake_worker.py test_warm_up_keeps_the_core_clock_and_emits_nothing"
+  },
+  {
+   "id": "D5",
+   "stage": "command grammar (src/commands.rs parse)",
+   "symptom": "wake fired and the transcript was right, but no command ran (e.g. \"Hey, Gideon, open brave.\")",
+   "root_cause": "STT inserts a comma after the first wake word; the literal prefix \"hey gideon\" did not match \"hey, gideon\".",
+   "fix": "unify_wake_comma: one comma after the first wake word is read as a space. Every other comma keeps the exact grammar (\"open, brave\" is still refused).",
+   "evidence": "run A (before fix): open-brave command_success 7 of 15 wake hits at sensitivity 1.0; run B (after fix): 19 of 21",
+   "test": "src/commands.rs stt_comma_after_wake_word_is_the_only_comma_accepted"
+  }
+ ],
+ "runs": {
+  "A_recorder_fix_only": {
+   "description": "binary with D1 and D3; old player, old comma grammar, old worker",
+   "by_sensitivity": {
+    "0.5": {
+     "positives": 51,
+     "positive_hits": 41,
+     "positive_hit_rate": 0.804,
+     "by_condition": {
+      "clean": "12/15",
+      "composite-concat": "4/4",
+      "noise-snr20db": "10/12",
+      "room-fir-synthetic": "9/12",
+      "volume-loud": "3/4",
+      "volume-quiet": "3/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "5/5",
+      "Hey Gideon, open Brave.": "15/21",
+      "Hey Gideon, what time is it?": "12/13",
+      "Hey Gideon.": "9/12"
+     },
+     "by_voice": {
+      "af_bella": "8/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "9/12",
+      "bf_emma": "10/12",
+      "bm_george": "11/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 340.8,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1570,
+      "p10": 1430,
+      "p90": 1696,
+      "n": 41
+     },
+     "latency_from_clip_end_ms": {
+      "median": -1020,
+      "p10": -1313,
+      "p90": -82
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "none": 4,
+       "command_success": 1
+      },
+      "Hey Gideon, open Brave.": {
+       "none": 12,
+       "command_success": 3
+      },
+      "Hey Gideon.": {
+       "none": 9
+      },
+      "Hey Gideon, what time is it?": {
+       "none": 4,
+       "command_success": 8
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 538.9,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_time-af_bella-snr20",
+      "pos-hey_brave-bf_emma-clean",
+      "pos-hey_brave-am_michael-room",
+      "pos-hey_brave-af_bella-clean",
+      "pos-hey_brave-bf_emma-quiet",
+      "pos-hey_brave-af_bella-room",
+      "pos-hey_plain-am_michael-room",
+      "pos-hey_plain-af_bella-snr20",
+      "pos-hey_brave-bm_george-loud",
+      "pos-hey_plain-am_michael-clean"
+     ]
+    },
+    "1.0": {
+     "positives": 51,
+     "positive_hits": 41,
+     "positive_hit_rate": 0.804,
+     "by_condition": {
+      "clean": "12/15",
+      "composite-concat": "4/4",
+      "noise-snr20db": "11/12",
+      "room-fir-synthetic": "9/12",
+      "volume-loud": "3/4",
+      "volume-quiet": "2/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "5/5",
+      "Hey Gideon, open Brave.": "15/21",
+      "Hey Gideon, what time is it?": "13/13",
+      "Hey Gideon.": "8/12"
+     },
+     "by_voice": {
+      "af_bella": "8/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "9/12",
+      "bf_emma": "11/12",
+      "bm_george": "10/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 340.8,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1565,
+      "p10": 1451,
+      "p90": 1697,
+      "n": 41
+     },
+     "latency_from_clip_end_ms": {
+      "median": -968,
+      "p10": -1312,
+      "p90": -164
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "none": 5
+      },
+      "Hey Gideon, open Brave.": {
+       "none": 8,
+       "command_success": 7
+      },
+      "Hey Gideon.": {
+       "none": 8
+      },
+      "Hey Gideon, what time is it?": {
+       "none": 6,
+       "command_success": 7
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 538.9,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_brave-af_bella-quiet",
+      "pos-hey_plain-bm_george-clean",
+      "pos-hey_brave-am_michael-room",
+      "pos-hey_brave-af_bella-clean",
+      "pos-hey_brave-bf_emma-quiet",
+      "pos-hey_brave-af_bella-room",
+      "pos-hey_plain-am_michael-room",
+      "pos-hey_plain-af_bella-snr20",
+      "pos-hey_brave-bm_george-loud",
+      "pos-hey_plain-am_michael-clean"
+     ]
+    },
+    "1.5": {
+     "positives": 51,
+     "positive_hits": 44,
+     "positive_hit_rate": 0.863,
+     "by_condition": {
+      "clean": "13/15",
+      "composite-concat": "4/4",
+      "noise-snr20db": "11/12",
+      "room-fir-synthetic": "10/12",
+      "volume-loud": "3/4",
+      "volume-quiet": "3/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "5/5",
+      "Hey Gideon, open Brave.": "15/21",
+      "Hey Gideon, what time is it?": "12/13",
+      "Hey Gideon.": "12/12"
+     },
+     "by_voice": {
+      "af_bella": "11/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "10/12",
+      "bf_emma": "9/12",
+      "bm_george": "11/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 345.2,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1573.5,
+      "p10": 1451,
+      "p90": 1753,
+      "n": 44
+     },
+     "latency_from_clip_end_ms": {
+      "median": -984.5,
+      "p10": -1280,
+      "p90": -41
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "none": 4,
+       "command_success": 1
+      },
+      "Hey Gideon, open Brave.": {
+       "none": 10,
+       "command_success": 5
+      },
+      "Hey Gideon.": {
+       "none": 12
+      },
+      "Hey Gideon, what time is it?": {
+       "command_success": 8,
+       "none": 4
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 543.3,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_time-bf_emma-room",
+      "pos-hey_brave-bf_emma-clean",
+      "pos-hey_brave-am_michael-room",
+      "pos-hey_brave-af_bella-clean",
+      "pos-hey_brave-bf_emma-quiet",
+      "pos-hey_brave-bm_george-loud",
+      "pos-hey_brave-am_michael-snr20"
+     ]
+    }
+   }
+  },
+  "B_before_warmup": {
+   "description": "binary with D1, D2, D3, D5; packaged worker (no warm-up)",
+   "by_sensitivity": {
+    "0.5": {
+     "positives": 51,
+     "positive_hits": 41,
+     "positive_hit_rate": 0.804,
+     "by_condition": {
+      "clean": "12/15",
+      "composite-concat": "3/4",
+      "noise-snr20db": "11/12",
+      "room-fir-synthetic": "10/12",
+      "volume-loud": "3/4",
+      "volume-quiet": "2/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "4/5",
+      "Hey Gideon, open Brave.": "15/21",
+      "Hey Gideon, what time is it?": "13/13",
+      "Hey Gideon.": "9/12"
+     },
+     "by_voice": {
+      "af_bella": "9/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "10/12",
+      "bf_emma": "10/12",
+      "bm_george": "9/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 340.8,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1533,
+      "p10": 1410,
+      "p90": 1698,
+      "n": 41
+     },
+     "latency_from_clip_end_ms": {
+      "median": -1005,
+      "p10": -1291,
+      "p90": -123
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "command_success": 2,
+       "none": 2
+      },
+      "Hey Gideon, open Brave.": {
+       "command_success": 12,
+       "none": 3
+      },
+      "Hey Gideon.": {
+       "none": 9
+      },
+      "Hey Gideon, what time is it?": {
+       "command_success": 12,
+       "none": 1
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 538.9,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_mute-bm_george-composite",
+      "pos-hey_brave-bm_george-quiet",
+      "pos-hey_brave-bf_emma-clean",
+      "pos-hey_brave-af_bella-clean",
+      "pos-hey_brave-bf_emma-quiet",
+      "pos-hey_brave-af_bella-room",
+      "pos-hey_plain-am_michael-room",
+      "pos-hey_plain-af_bella-snr20",
+      "pos-hey_brave-bm_george-loud",
+      "pos-hey_plain-am_michael-clean"
+     ]
+    },
+    "1.0": {
+     "positives": 51,
+     "positive_hits": 50,
+     "positive_hit_rate": 0.98,
+     "by_condition": {
+      "clean": "15/15",
+      "composite-concat": "3/4",
+      "noise-snr20db": "12/12",
+      "room-fir-synthetic": "12/12",
+      "volume-loud": "4/4",
+      "volume-quiet": "4/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "4/5",
+      "Hey Gideon, open Brave.": "21/21",
+      "Hey Gideon, what time is it?": "13/13",
+      "Hey Gideon.": "12/12"
+     },
+     "by_voice": {
+      "af_bella": "12/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "11/12",
+      "bf_emma": "12/12",
+      "bm_george": "12/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 346.4,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1540.0,
+      "p10": 1410,
+      "p90": 1692,
+      "n": 50
+     },
+     "latency_from_clip_end_ms": {
+      "median": -1025.0,
+      "p10": -1270,
+      "p90": -82
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "none": 3,
+       "command_success": 1
+      },
+      "Hey Gideon, open Brave.": {
+       "command_success": 19,
+       "none": 2
+      },
+      "Hey Gideon.": {
+       "none": 12
+      },
+      "Hey Gideon, what time is it?": {
+       "none": 2,
+       "command_success": 11
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 544.5,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_mute-am_michael-composite"
+     ]
+    },
+    "1.5": {
+     "positives": 51,
+     "positive_hits": 45,
+     "positive_hit_rate": 0.882,
+     "by_condition": {
+      "clean": "13/15",
+      "composite-concat": "3/4",
+      "noise-snr20db": "11/12",
+      "room-fir-synthetic": "10/12",
+      "volume-loud": "4/4",
+      "volume-quiet": "4/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "3/5",
+      "Hey Gideon, open Brave.": "20/21",
+      "Hey Gideon, what time is it?": "13/13",
+      "Hey Gideon.": "9/12"
+     },
+     "by_voice": {
+      "af_bella": "10/12",
+      "alba (pocket-tts)": "2/3",
+      "am_michael": "10/12",
+      "bf_emma": "12/12",
+      "bm_george": "11/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 340.8,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1544,
+      "p10": 1430,
+      "p90": 1717,
+      "n": 45
+     },
+     "latency_from_clip_end_ms": {
+      "median": -965,
+      "p10": -1302,
+      "p90": -82
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "command_success": 1,
+       "none": 2
+      },
+      "Hey Gideon, open Brave.": {
+       "command_success": 16,
+       "none": 4
+      },
+      "Hey Gideon.": {
+       "none": 9
+      },
+      "Hey Gideon, what time is it?": {
+       "none": 3,
+       "command_success": 10
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 538.9,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_mute-bm_george-composite",
+      "pos-pos_hey_pocket_mute-pocket",
+      "pos-hey_brave-af_bella-room",
+      "pos-hey_plain-am_michael-room",
+      "pos-hey_plain-af_bella-snr20",
+      "pos-hey_plain-am_michael-clean"
+     ]
+    }
+   }
+  },
+  "C_final": {
+   "description": "same binary as B, worker with D4 (warm-up), private home",
+   "by_sensitivity": {
+    "0.5": {
+     "positives": 51,
+     "positive_hits": 42,
+     "positive_hit_rate": 0.824,
+     "by_condition": {
+      "clean": "12/15",
+      "composite-concat": "4/4",
+      "noise-snr20db": "9/12",
+      "room-fir-synthetic": "9/12",
+      "volume-loud": "4/4",
+      "volume-quiet": "4/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "5/5",
+      "Hey Gideon, open Brave.": "17/21",
+      "Hey Gideon, what time is it?": "12/13",
+      "Hey Gideon.": "8/12"
+     },
+     "by_voice": {
+      "af_bella": "10/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "8/12",
+      "bf_emma": "11/12",
+      "bm_george": "10/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 339.7,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1564.0,
+      "p10": 1453,
+      "p90": 1699,
+      "n": 42
+     },
+     "latency_from_clip_end_ms": {
+      "median": -997.5,
+      "p10": -1351,
+      "p90": -130
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "none": 4,
+       "command_success": 1
+      },
+      "Hey Gideon, open Brave.": {
+       "command_success": 14,
+       "none": 3
+      },
+      "Hey Gideon.": {
+       "none": 8
+      },
+      "Hey Gideon, what time is it?": {
+       "command_success": 11,
+       "none": 1
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 537.8,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_brave-am_michael-clean",
+      "pos-hey_plain-am_michael-snr20",
+      "pos-hey_plain-bm_george-snr20",
+      "pos-hey_time-bm_george-clean",
+      "pos-hey_brave-bf_emma-clean",
+      "pos-hey_brave-am_michael-room",
+      "pos-hey_brave-af_bella-room",
+      "pos-hey_plain-am_michael-room",
+      "pos-hey_plain-af_bella-snr20"
+     ]
+    },
+    "1.0": {
+     "positives": 51,
+     "positive_hits": 44,
+     "positive_hit_rate": 0.863,
+     "by_condition": {
+      "clean": "12/15",
+      "composite-concat": "4/4",
+      "noise-snr20db": "10/12",
+      "room-fir-synthetic": "10/12",
+      "volume-loud": "4/4",
+      "volume-quiet": "4/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "5/5",
+      "Hey Gideon, open Brave.": "17/21",
+      "Hey Gideon, what time is it?": "12/13",
+      "Hey Gideon.": "10/12"
+     },
+     "by_voice": {
+      "af_bella": "10/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "10/12",
+      "bf_emma": "10/12",
+      "bm_george": "11/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 344.1,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1607.0,
+      "p10": 1493,
+      "p90": 1719,
+      "n": 44
+     },
+     "latency_from_clip_end_ms": {
+      "median": -956.0,
+      "p10": -1322,
+      "p90": -41
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "none": 4,
+       "command_success": 1
+      },
+      "Hey Gideon, open Brave.": {
+       "command_success": 13,
+       "none": 4
+      },
+      "Hey Gideon.": {
+       "none": 10
+      },
+      "Hey Gideon, what time is it?": {
+       "command_success": 12
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 542.2,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_brave-am_michael-clean",
+      "pos-hey_plain-bm_george-snr20",
+      "pos-hey_time-af_bella-clean",
+      "pos-hey_plain-bf_emma-snr20",
+      "pos-hey_brave-bf_emma-clean",
+      "pos-hey_brave-am_michael-room",
+      "pos-hey_brave-af_bella-room"
+     ]
+    },
+    "1.5": {
+     "positives": 51,
+     "positive_hits": 44,
+     "positive_hit_rate": 0.863,
+     "by_condition": {
+      "clean": "13/15",
+      "composite-concat": "3/4",
+      "noise-snr20db": "9/12",
+      "room-fir-synthetic": "11/12",
+      "volume-loud": "4/4",
+      "volume-quiet": "4/4"
+     },
+     "by_phrase": {
+      "Hey Gideon, mute.": "4/5",
+      "Hey Gideon, open Brave.": "17/21",
+      "Hey Gideon, what time is it?": "13/13",
+      "Hey Gideon.": "10/12"
+     },
+     "by_voice": {
+      "af_bella": "11/12",
+      "alba (pocket-tts)": "3/3",
+      "am_michael": "9/12",
+      "bf_emma": "10/12",
+      "bm_george": "11/12"
+     },
+     "negatives": 54,
+     "negative_false_triggers": 0,
+     "negative_listening_s": 343.3,
+     "false_triggers_per_hour": 0.0,
+     "gap_sessions_outside_clips": 0,
+     "latency_from_clip_start_ms": {
+      "median": 1616.5,
+      "p10": 1434,
+      "p90": 1700,
+      "n": 44
+     },
+     "latency_from_clip_end_ms": {
+      "median": -993.0,
+      "p10": -1258,
+      "p90": -86
+     },
+     "commands_by_phrase": {
+      "Hey Gideon, mute.": {
+       "none": 3,
+       "command_success": 1
+      },
+      "Hey Gideon, open Brave.": {
+       "command_success": 15,
+       "none": 2
+      },
+      "Hey Gideon.": {
+       "none": 10
+      },
+      "Hey Gideon, what time is it?": {
+       "command_success": 11,
+       "none": 2
+      }
+     },
+     "live_errors": [],
+     "error_kinds": [],
+     "listening_s": 541.4,
+     "negatives_by_category": {
+      "Gideon.": "0/4",
+      "Hey Giddy, come over here.": "0/4",
+      "Hey Jordan, open Brave.": "0/1",
+      "Hey Jordan, what time is it?": "0/1",
+      "Hey Julian, are you ready?": "0/4",
+      "Hi Gideon, how are you?": "0/4",
+      "I think the music is a little too loud.": "0/4",
+      "Okay Gideon, open Steam.": "0/4",
+      "Okay Google, open Steam.": "0/1",
+      "Okay Google, what time is it?": "0/1",
+      "Open Chrome.": "0/4",
+      "Please add eggs and milk to the list.": "0/1",
+      "The team will join us.": "0/4",
+      "The weather changed before the train arrived.": "0/4",
+      "The weather is nice for a walk today.": "0/1",
+      "What app did you open?": "0/4",
+      "Yeah, yeah, I heard you.": "0/4",
+      "pink-noise": "0/1",
+      "silence": "0/1",
+      "tv-babble": "0/1",
+      "white-noise": "0/1"
+     },
+     "missed_positive_ids": [
+      "pos-hey_brave-am_michael-clean",
+      "pos-hey_brave-bm_george-snr20",
+      "pos-hey_brave-bf_emma-snr20",
+      "pos-hey_brave-bf_emma-clean",
+      "pos-hey_mute-am_michael-composite",
+      "pos-hey_plain-am_michael-room",
+      "pos-hey_plain-af_bella-snr20"
+     ]
+    }
+   }
+  }
+ },
+ "run_to_run_variance_note": "Identical wake settings gave 41/51 (A) and 50/51 (B) at sensitivity 1.0. The difference comes from timing (phase of the playback against the stream), not from code changes on the wake path. Treat differences under about 10 points as noise at this sample size.",
+ "engine_only_offline_sweep": {
+  "description": "scripts/wake_worker.py fed each positive with 1 s silence before and after (cold stream, no Core, no PipeWire), packaged worker without warm-up",
+  "hits_by_threshold": {
+   "0.375": "25/51",
+   "0.25": "28/51",
+   "0.125": "28/51"
+  }
+ },
+ "cold_start_probe_engine_only": {
+  "description": "same clip after leading silence of 1 s and 4 s (cycle_probe), packaged worker (no warm-up) and final worker (warm-up)",
+  "no_warmup": {
+   "lead_1s_hits": "28/51",
+   "lead_4s_hits": "47/51",
+   "of": 51
+  },
+  "warmup_lead_1s_hits": "47/51",
+  "note": "the warm-up result equals the 4 s-lead result: the priming silence plays the role of the leading silence"
+ },
+ "cold_start_live_ab": {
+  "description": "fresh Core per trial; the clip starts 0.3 s after live capture is reported; same binary, only the wake worker differs",
+  "package_worker_no_warmup": {
+   "hits": 0,
+   "of": 6,
+   "clips": [
+    "pos-hey_plain-af_bella-clean",
+    "pos-hey_plain-af_bella-room",
+    "pos-hey_plain-am_michael-clean",
+    "pos-hey_plain-am_michael-snr20",
+    "pos-hey_brave-af_bella-clean",
+    "pos-hey_brave-am_michael-clean"
+   ]
+  },
+  "warmup_worker": {
+   "hits": 6,
+   "of": 6,
+   "transcripts": [
+    "Hey, Gideon.",
+    "Hey, Gideon.",
+    "Gideon.",
+    "Gideon.",
+    "Hey, Gideon, open brave.",
+    "Hey, Gideon, open brave."
+   ]
+  }
+ },
+ "rotation_check": {
+  "description": "lead sweep 1..12 s of the seven positives that flipped between B and C; no monotonic pattern around the 10 s / 7 s stream rotation",
+  "conclusion": "no rotation-boundary defect shown; flips are marginal engine decisions"
+ },
+ "output_check": {
+  "description": "wake command with audible_feedback on; Pocket TTS speech; live player into gideon_lab_sink; sink monitor recorded",
+  "before_fix_D2": "speaking/playing -> player_write_failed (output_state error), speech_status completed (PCM still went to the virtual sink)",
+  "after_fix_D2": "speaking/playing -> completed/idle, last_error absent; speech 27 chunks, 51840 samples at 24 kHz, sink virtual"
+ },
+ "gates": {
+  "cargo_fmt_check": "see docs/A7-wake-live-test.md (final gate)",
+  "cargo_clippy": "see docs/A7-wake-live-test.md (final gate)",
+  "cargo_test": "see docs/A7-wake-live-test.md (final gate)",
+  "python_worker": "scripts/test_wake_worker.py 6 OK; scripts/test_wake_live.py 4 OK",
+  "default_startup_replay": "replay profile without --live-audio: replay_finished, transcript \"Hey Gideon, open brave.\""
+ },
+ "open_items": [
+  "Physical microphone and speakers were not used; room acoustics, distance and the owner voice are not measured.",
+  "Negatives: 54 clips, about 0.1 h of non-wake audio. Zero observed false triggers gives only a rule-of-three upper bound of about 30 per hour; a multi-hour negative run is still needed.",
+  "Latency is measured with snapshot polling (about 20 ms) and is relative to the clip, not to the end of the word \"Gideon\".",
+  "Command grammar still refuses an STT period after the wake word (\"Hey Gideon. Mute.\") and STT misrecognitions (\"A gideon\", \"Gideons\", bare \"Gideon\"); this is recognition quality, not the wake path.",
+  "The packaged launcher and gideon-core do not pass --live-audio; the live path is opt-in and unreachable from the normal package startup.",
+  "With --live-audio the speech output device defaults to \"default\" (the owner physical output). The lab always set gideon_lab_sink explicitly.",
+  "Only one TTS voice (alba) was used for the Pocket phrases; the Kokoro corpus voices are synthetic, not human recordings."
+ ]
+}

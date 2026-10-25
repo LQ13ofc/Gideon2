@@ -175,7 +175,16 @@ pub fn recorder_args(tool: &str, device: &str) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if tool == "pw-record" {
         args.extend(
-            ["--raw", "--rate", "16000", "--channels", "1", "--format", "s16"].map(String::from),
+            [
+                "--raw",
+                "--rate",
+                "16000",
+                "--channels",
+                "1",
+                "--format",
+                "s16",
+            ]
+            .map(String::from),
         );
         if device != "default" {
             args.extend(["--target".into(), device.into()]);
@@ -191,10 +200,23 @@ pub fn recorder_args(tool: &str, device: &str) -> Vec<String> {
 }
 
 /// Arguments of the player: raw s16le mono 24 kHz from stdin.
+/// `--raw` is required for pw-play as well: without it stdin is parsed as a sound file, the open fails
+/// ("Format not recognised") and the player exits before the first speech chunk.
 pub fn player_args(tool: &str, device: &str) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if tool == "pw-play" {
-        args.extend(["--rate", "24000", "--channels", "1", "--format", "s16"].map(String::from));
+        args.extend(
+            [
+                "--raw",
+                "--rate",
+                "24000",
+                "--channels",
+                "1",
+                "--format",
+                "s16",
+            ]
+            .map(String::from),
+        );
         if device != "default" {
             args.extend(["--target".into(), device.into()]);
         }
@@ -674,6 +696,7 @@ mod tests {
             "--device=alsa_input.x"
         );
         assert_eq!(player_args("pw-play", "default").last().unwrap(), "-");
+        assert_eq!(player_args("pw-play", "default")[0], "--raw");
         assert!(player_args("paplay", "default")
             .iter()
             .all(|a| !a.starts_with("--device")));
