@@ -199,6 +199,11 @@ Item {
                             text: "Será ativado ao reiniciar o Core. Enquanto isso, a entrada segue virtual."
                             small: true
                         }
+                        // A13: the assistant runs right after the consent (before the restart) and offers the cleaner microphone.
+                        IMicOffer {
+                            id: liveOffer
+                            visible: core.liveAudioEnabled
+                        }
                         IntroText {
                             objectName: "onboarding_physical_out"
                             text: "Alto-falante: escolha em Configurações › Dispositivos. A troca vale na próxima sessão de voz."
@@ -304,7 +309,7 @@ Item {
     // Consent of the optional microphone switch on step 3 (same text and focus rules as Dispositivos).
     LiveAudioConsent {
         id: liveConsent
-        onAgreed: core.setLiveAudio(true)
+        onAgreed: { core.setLiveAudio(true); liveOffer.armed = true }
     }
 
     // Plain paragraph of the guide (13 or 14 px, wrapped). `strong` is the bold lead, `indent` the bullet line.

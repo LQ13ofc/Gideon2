@@ -313,6 +313,54 @@ PageFrame {
             }
         }
 
+        // A13: the last stderr tail of the wake worker. It can name paths, so it lives here only (0600 file in the Core data
+        // dir, read on demand). The snapshot carries the content-free reason code alone.
+        Section {
+            id: devTail
+            Layout.columnSpan: 2
+            title: "Último erro do wake (diagnóstico)"
+            property string tailText: ""
+            function refreshTail() { tailText = core.connected ? core.liveLastErrorText() : "" }
+            Component.onCompleted: refreshTail()
+            Text {
+                text: "Motivo (sem conteúdo): " + (core.audioLive.last_error ? String(core.audioLive.last_error) : "nenhum registrado")
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            TextEdit {
+                id: liveTail
+                objectName: "liveLastErrorText"
+                text: devTail.tailText.length > 0 ? devTail.tailText : "Sem saída de erro guardada."
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.WrapAnywhere
+                color: Theme.text
+                font.family: "monospace"
+                font.pixelSize: Theme.fontHelp
+                Layout.fillWidth: true
+                Accessible.name: "Diagnóstico do worker de wake"
+            }
+            RowLayout {
+                spacing: Theme.space(10)
+                GButton {
+                    objectName: "copyLiveLastError"
+                    variant: "secondary"
+                    text: "Copiar"
+                    Accessible.name: "Copiar o diagnóstico do worker de wake"
+                    onClicked: { liveTail.selectAll(); liveTail.copy() }
+                }
+                GButton {
+                    objectName: "refreshLiveLastError"
+                    variant: "ghost"
+                    text: "Atualizar"
+                    onClicked: devTail.refreshTail()
+                }
+            }
+        }
         Section {
             Layout.columnSpan: 2
             title: "Versões, hashes e selos"

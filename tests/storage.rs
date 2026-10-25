@@ -150,11 +150,17 @@ fn safe_mode_preserves_invalid_bytes_and_requires_restart_after_recovery() {
     );
     assert_eq!(store.config.revision, 1702);
     assert!(!store.recovery_available());
-    assert!(store.update_preferences(1702, false, 9000).is_err());
+    // A13/U1: the restart is still required, but preference writes are accepted while it is pending (latest wins).
+    store.update_preferences(1702, false, 9000).unwrap();
+    assert_eq!(store.config.revision, 1703);
+    assert_eq!(
+        store.configuration_status,
+        ConfigurationStatus::RestartRequired
+    );
     drop(store);
     let store = Storage::open_for_runtime(&root).unwrap();
     assert_eq!(store.configuration_status, ConfigurationStatus::Ready);
-    assert_eq!(store.config.revision, 1702);
+    assert_eq!(store.config.revision, 1703);
 }
 
 #[test]

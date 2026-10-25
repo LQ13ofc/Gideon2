@@ -97,7 +97,7 @@ não gerou eventos nem erro, e a captura seguiu em `capturing`.
   -- -D warnings` ok; `scripts/test_bridge_protocol.py` 235 testes ok; pacote 9.9.8 instalado com
   a correção, matriz M0 a M5 sem derrubar o Core.
 
-### U1 — não corrigido: mudanças de sensibilidade seguintes são recusadas
+### U1 — corrigido na A13 (ver docs/A13-mic-assistant.md): mudanças de sensibilidade seguintes eram recusadas
 
 - O Core recusa toda mudança de frase depois da primeira, enquanto `restart_required` durar
   (`configuration_not_ready`). O mapeamento da UI (`app/bridge.py`, `CODE_MESSAGES`) para esse
@@ -107,14 +107,14 @@ não gerou eventos nem erro, e a captura seguiu em `capturing`.
   (b) aceitar as mudanças e aplicar no reinício. A escolha é de produto. Não mexi em
   `CfgVoz.qml` nem no texto da UI sem essa decisão.
 
-### U2 — não corrigido: lista de microfones só aparece depois de "Atualizar lista"
+### U2 — corrigido na A13 (ver docs/A13-mic-assistant.md): lista de microfones só aparece depois de "Atualizar lista"
 
 - A lista começa como "Dispositivos ainda não consultados". O proprietário tem a entrada em
   "Padrão do sistema" (webcam). Sem o clique, ele nunca vê o microfone físico.
 - Sugestão: consultar `audio_devices` ao abrir a página Dispositivos. `CfgDispositivos.qml` está
   sendo editado por outro agente: não mexi.
 
-### U3 — não corrigido, não reproduzido no Core: "Estado do wake: Falhou"
+### U3 — corrigido na A13 (ver docs/A13-mic-assistant.md), motivo agora exposto: "Estado do wake: Falhou"
 
 - Na rodada da UI, depois das mudanças de sensibilidade, o Core emitiu `wake_failed` (origem
   `speech`) e a tela mostrou "Falhou" sem motivo. Os eventos vivem só na memória, e o log de

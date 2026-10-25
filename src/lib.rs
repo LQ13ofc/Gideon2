@@ -13,6 +13,7 @@ pub mod levels;
 pub mod live;
 pub mod llmcfg;
 pub mod mcp;
+pub mod mic_assist;
 pub mod pack;
 pub mod phrases;
 pub mod plugins;

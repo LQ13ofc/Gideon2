@@ -540,12 +540,19 @@ class SnapshotContract(unittest.TestCase):
         # Per-phrase sensitivity 1.2 moves the threshold to 0.22 * 0.8; the custom phrase keeps its own line.
         self.assertIn('#0.176 @HEY_GIDEON', keywords)
         self.assertIn(f"@{custom['id'].upper()}", keywords)
-        # While a restart is pending the Core refuses further wake changes (same rule as select_wake).
+        # A13/U1: while a restart is pending, preference writes stay open (the latest write wins); other operations wait.
         store_revision = data['wake_phrases']['custom_revision']
         self.assertEqual(self.core.req('wake_phrase_remove', revision=store_revision, id=custom['id'])['code'],
-                         'configuration_not_ready')
-        self.assertEqual(self.core.req('select_wake_phrases', revision=revision, phrases=[
-            {'id': 'hey_gideon', 'active': True}], acknowledge_untested=False)['code'], 'configuration_not_ready')
+                         'phrase_in_use')
+        revision = data['preferences']['revision']
+        pending = self.core.req('select_wake_phrases', revision=revision, phrases=[
+            {'id': 'hey_gideon', 'active': True, 'sensitivity': 1.1}, {'id': custom['id'], 'active': True}],
+            acknowledge_untested=acknowledge)
+        self.assertEqual(pending['code'], 'ok')
+        data = self.core.snap('phrases pending latest write')
+        self.assertEqual(data['configuration_status'], 'restart_required')
+        self.assertEqual(self.core.req('virtual_wake')['code'], 'configuration_not_ready')
+        revision = data['preferences']['revision']
         # After the restart the list in use protects its custom phrase from removal.
         self.core.stop()
         self.core.start()

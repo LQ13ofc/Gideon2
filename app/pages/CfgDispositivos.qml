@@ -47,6 +47,26 @@ PageFrame {
     ECfgSearch {}
     ECfgNotice {}
 
+    // A13: the saved input (the system default included) measured bad by the microphone assistant, and a clean one exists.
+    // The Core text names the problems; "Usar o …" saves the other input as Gideon's own choice (never the system default).
+    Banner {
+        objectName: "micBannerWarning"
+        kind: "warn"
+        text: core.micBanner.text || ""
+        actionText: core.micBanner.action || ""
+        onActionRequested: core.useAudioInput(core.micBanner.device)
+    }
+
+    // U2 and A13: the device list loads when the page opens. The assistant runs by itself once per Core session, only
+    // while the live microphone is on (consent already given); otherwise the owner presses "Verificar microfones".
+    function loadDevices() {
+        if (!core.connected) return
+        core.refreshAudioDevices()
+        if (core.audioLive.enabled === true && core.micRecommendation.state === "idle") core.recommendMicrophones()
+    }
+    onVisibleChanged: if (visible) loadDevices()
+    Component.onCompleted: if (visible) loadDevices()
+
     // The list state as the Core reports it: unknown until the first refresh, unsupported when no tool answers, else empty.
     Text {
         objectName: "audioDevicesStatus"
@@ -153,10 +173,21 @@ PageFrame {
         }
     }
 
-    // Opened by the switch; Cancelar (the default) leaves the saved value as it was.
+    // Opened by the switch; Cancelar (the default) leaves the saved value as it was. A13: after the Core saves the
+    // switch on, the microphone assistant runs (before the restart) so the banner above is current.
+    property bool assistantArmed: false
+    Connections {
+        target: core
+        function onPreferencesChanged() {
+            if (page.assistantArmed && core.liveAudioEnabled) {
+                page.assistantArmed = false
+                core.recommendMicrophones()
+            }
+        }
+    }
     LiveAudioConsent {
         id: consent
-        onAgreed: core.setLiveAudio(true)
+        onAgreed: { core.setLiveAudio(true); page.assistantArmed = true }
     }
 
     Section {
@@ -293,6 +324,82 @@ PageFrame {
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
+        }
+    }
+
+    // A13 assistant: 2 s per listed input, one after another. Ranks them; never saves a choice by itself.
+    function recommendationText() {
+        var rec = core.micRecommendation
+        if (rec.state === "running") return "Verificando os microfones (2 s cada), um de cada vez…"
+        if (rec.state === "failed") return "Não foi possível verificar: " + (rec.error || "erro desconhecido") + "."
+        if (rec.state !== "done") return "Ainda não verificado. Verifique para comparar os microfones da lista."
+        var best = ""
+        for (var i = 0; i < rec.rows.length; i++) if (rec.rows[i].recommended) best = rec.rows[i].label
+        var head = rec.currentIsBad ? "O microfone atual não capta bem: " + rec.reason + "." : "O microfone atual está bom."
+        return head + (best.length > 0 ? " Melhor encontrado: " + best + "." : " Nenhum microfone limpo foi encontrado.")
+    }
+    Section {
+        title: "Assistente do microfone"
+        Text {
+            text: "Grava 2 segundos de cada microfone da lista, um de cada vez, e compara o sinal: saturação, ruído grave, ruído de fundo e nível. Não grava em disco e não muda o padrão do sistema. Escolher um microfone só acontece quando você clica em \"Usar este\"."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        GButton {
+            objectName: "micRecommendButton"
+            variant: "secondary"
+            text: "Verificar microfones"
+            Accessible.name: "Verificar os microfones da lista por 2 segundos cada"
+            enabled: core.connected && core.micRecommendation.state !== "running" && core.sessionId.length === 0
+            onClicked: core.recommendMicrophones()
+        }
+        Text {
+            objectName: "micRecommendStatus"
+            text: page.recommendationText()
+            textFormat: Text.PlainText
+            color: core.micRecommendation.currentIsBad === true ? Theme.warning : Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Accessible.name: "Resultado da verificação dos microfones: " + text
+        }
+        Repeater {
+            model: core.micRecommendation.rows
+            delegate: RowLayout {
+                objectName: "micRecommendRow"
+                Layout.fillWidth: true
+                spacing: Theme.space(10)
+                Text {
+                    text: modelData.label + (modelData.current ? " (atual)" : "") + (modelData.camera ? " · câmera" : "")
+                    textFormat: Text.PlainText
+                    color: Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontHelp
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Text {
+                    text: modelData.error !== "" ? "não medido" : modelData.problems
+                    textFormat: Text.PlainText
+                    color: modelData.problems === "sem problemas" ? Theme.success : Theme.textMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption
+                    wrapMode: Text.WordWrap
+                }
+                GButton {
+                    objectName: "micRecommendUse"
+                    variant: "ghost"
+                    text: "Usar este"
+                    Accessible.name: "Usar " + modelData.label + " como microfone do Gideon"
+                    enabled: core.preferencesAvailable && !modelData.camera && modelData.problems === "sem problemas" && !modelData.current
+                    onClicked: core.useAudioInput(modelData.id)
+                }
+            }
         }
     }
 

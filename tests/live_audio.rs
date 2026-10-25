@@ -437,9 +437,10 @@ fn restart_budget_stops_a_crashing_recorder() {
     let started = Instant::now();
     assert_eq!(set_preferences(&root, "fake-crash-d1", 1.0)["code"], "ok");
     // The recorder exits at once each time: the mic is never active, the error is reported and,
-    // after 3 restarts inside the window, the budget stops the pipeline.
+    // after 3 restarts inside the window, the budget stops the pipeline. A13: last_error is the cause
+    // that kept failing (content-free reason), not the generic limit.
     let snap = wait_snapshot(&root, 30, "restart limit", |s| {
-        s["audio"]["live"]["last_error"] == "restart_limit"
+        s["wake_status"] == "failed" && s["audio"]["live"]["last_error"] == "recorder_exited"
     });
     assert_eq!(snap["audio"]["live"]["input_state"], "error");
     assert_eq!(snap["audio"]["live"]["mic_active"], false);

@@ -96,6 +96,12 @@ pub struct Core {
     audio_probe: Option<crate::live::ProbeView>,
     audio_probe_job: Option<(u64, String)>,
     audio_probe_seq: u64,
+    /// A13: the microphone assistant. The view (`audio.recommendation`), the queued run (id, current
+    /// preference), the id of the run in progress and the id counter.
+    audio_recommend: crate::mic_assist::View,
+    audio_recommend_job: Option<(u64, String)>,
+    audio_recommend_running: Option<u64>,
+    audio_recommend_seq: u64,
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -157,6 +163,10 @@ impl Core {
             audio_probe: None,
             audio_probe_job: None,
             audio_probe_seq: 0,
+            audio_recommend: crate::mic_assist::View::default(),
+            audio_recommend_job: None,
+            audio_recommend_running: None,
+            audio_recommend_seq: 0,
         }
     }
     /// A9: a wake phrase was recognised by the live input (feeds `audio.live.last_detection`).
@@ -172,6 +182,50 @@ impl Core {
         if let Some(probe) = self.audio_probe.as_mut().filter(|p| p.id == id) {
             *probe = crate::live::ProbeView::finished(id, probe.device.clone(), &outcome);
         }
+    }
+    /// A13: the queued microphone assistant run for the transport task (id, current preference). Taken once.
+    pub fn take_recommend_job(&mut self) -> Option<(u64, String)> {
+        self.audio_recommend_job.take()
+    }
+    /// A13: the run finished. Stores its view and the device list it enumerated. A stale id is ignored.
+    pub fn audio_recommend_reply(&mut self, id: u64, done: crate::mic_assist::Done) {
+        if self.audio_recommend_running == Some(id) {
+            self.audio_recommend_running = None;
+            self.audio_devices = Some(done.devices);
+            self.audio_recommend = done.view;
+        }
+    }
+    /// A13: the run task ended without a result (it panicked or was cancelled).
+    pub fn audio_recommend_failed(&mut self, id: u64) {
+        if self.audio_recommend_running == Some(id) {
+            self.audio_recommend_running = None;
+            self.audio_recommend = crate::mic_assist::View::failed("audio_tool_failed");
+        }
+    }
+    /// A4: lists the inputs once. `transport::serve` calls it at start when the live pipeline is on, so the
+    /// device list is ready before the Dispositivos page opens (bounded by the enumeration budget).
+    pub fn refresh_audio_devices(&mut self) {
+        self.audio_devices = Some(crate::devices::enumerate());
+    }
+    /// A13 `audio_recommend_input`: refused during a voice session or while another probe or run is active.
+    fn audio_recommend_start(&mut self, current: String) -> &'static str {
+        let probing = self
+            .audio_probe
+            .as_ref()
+            .is_some_and(|p| p.state == "running");
+        if self.voice_active()
+            || probing
+            || self.audio_probe_job.is_some()
+            || self.audio_recommend_running.is_some()
+        {
+            return "busy";
+        }
+        self.audio_recommend_seq += 1;
+        let id = self.audio_recommend_seq;
+        self.audio_recommend_running = Some(id);
+        self.audio_recommend = crate::mic_assist::View::running();
+        self.audio_recommend_job = Some((id, current));
+        "ok"
     }
     /// A9 `audio_probe`: refused while a voice session runs or another probe is still recording. The
     /// device must be `default` or an input the last `audio_devices` listed.
@@ -1024,6 +1078,7 @@ impl Core {
                 devices: self.audio_devices.clone(),
                 live: self.live.view(self.preferences.live_audio, Instant::now()),
                 probe: self.audio_probe.clone(),
+                recommendation: self.audio_recommend.clone(),
             },
             wake_phrases: crate::phrases::View::build(
                 &self.phrase_defaults,
@@ -1466,7 +1521,7 @@ impl Core {
         let (Some(storage), Some(runtime)) = (storage, self.phrase_runtime.clone()) else {
             return "preferences_unavailable";
         };
-        if storage.configuration_status != crate::storage::ConfigurationStatus::Ready {
+        if storage.configuration_status == crate::storage::ConfigurationStatus::SafeMode {
             return "configuration_not_ready";
         }
         let root = storage.root.clone();
@@ -1663,6 +1718,30 @@ impl Core {
             self.recent_requests.pop_front();
         }
         self.recent_requests.push_back(req.request_id.clone());
+        // U1: while a restart is pending, preference writes stay open (the latest write wins and applies at the
+        // next start, or live for a sensitivity change). Every other operation still waits for the restart.
+        let writes_while_restart_pending = matches!(
+            req.operation,
+            Operation::Preferences { .. }
+                | Operation::RollbackPreferences { .. }
+                | Operation::PreferencesRestoreDefaults { .. }
+                | Operation::FeedbackPreferences { .. }
+                | Operation::SelectWake { .. }
+                | Operation::SelectWakePhrases { .. }
+                | Operation::WakePhraseValidate { .. }
+                | Operation::WakePhraseAdd { .. }
+                | Operation::WakePhraseRemove { .. }
+                | Operation::WakePhraseTest { .. }
+                | Operation::LanguagePreference { .. }
+                | Operation::LiveAudioPreference { .. }
+                | Operation::RealActionsPreference { .. }
+                | Operation::AudioDevices
+                | Operation::AudioProbe { .. }
+                | Operation::AudioRecommendInput
+        );
+        if let Some(storage) = storage.as_deref_mut() {
+            storage.live_pipeline = self.live.pipeline_enabled();
+        }
         let code = match req.operation {
             Operation::RecoverConfiguration { revision }
                 if revision != self.preferences.revision =>
@@ -1710,7 +1789,11 @@ impl Core {
                 self.emit(req.request_id.clone(), None, "core_restart_requested");
                 "ok"
             }
-            _ if self.configuration_status != crate::storage::ConfigurationStatus::Ready => {
+            _ if self.configuration_status == crate::storage::ConfigurationStatus::SafeMode
+                || (self.configuration_status
+                    == crate::storage::ConfigurationStatus::RestartRequired
+                    && !writes_while_restart_pending) =>
+            {
                 "configuration_not_ready"
             }
             Operation::PluginEnable { .. }
@@ -2603,6 +2686,11 @@ impl Core {
             }
             // A9: starts a 3 s recording in the transport task; the result is served by the next snapshot.
             Operation::AudioProbe { device } => self.audio_probe_start(device),
+            // A13: starts the assistant run in the transport task; the result is served by the next snapshot.
+            Operation::AudioRecommendInput => {
+                let current = self.preferences.audio_input_device.clone();
+                self.audio_recommend_start(current)
+            }
         };
         self.sweep_tools();
         self.response(req.request_id, code)
@@ -2933,6 +3021,108 @@ mod tests {
         );
         assert!(c.session.is_none());
         assert!(c.stt_requests.is_empty());
+    }
+    fn wake_setting(id: &str, sensitivity: Option<f32>) -> crate::phrases::Setting {
+        crate::phrases::Setting {
+            id: id.into(),
+            active: true,
+            sensitivity,
+        }
+    }
+    fn preferences(revision: u64, wake_sensitivity: Option<f32>) -> Operation {
+        Operation::Preferences {
+            revision,
+            audible_feedback: false,
+            session_timeout_ms: 30000,
+            wake_sensitivity,
+            input_conditioning: None,
+            audio_input_device: None,
+            audio_output_device: None,
+        }
+    }
+    #[test]
+    fn preference_writes_stay_open_while_a_restart_is_pending() {
+        // U1: one wake change used to refuse every later change with configuration_not_ready until restart.
+        // Now preference writes are accepted (the latest write wins); other operations still wait.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        let mut storage = crate::storage::Storage::open(&root).unwrap();
+        let revision = storage.config.revision;
+        storage
+            .update_wake_phrases(revision, vec![wake_setting("hey_gideon", None)])
+            .unwrap();
+        assert_eq!(
+            storage.configuration_status,
+            crate::storage::ConfigurationStatus::RestartRequired
+        );
+        let mut core = Core::new(Duration::from_secs(30), false);
+        core.configure_storage(&storage);
+        let now = Instant::now();
+        let first = core.handle_with_storage(
+            request("pref-1", preferences(storage.config.revision, Some(1.2))),
+            now,
+            Some(&mut storage),
+        );
+        assert_eq!(first.code, "ok");
+        let second = core.handle_with_storage(
+            request("pref-2", preferences(storage.config.revision, Some(0.8))),
+            now,
+            Some(&mut storage),
+        );
+        assert_eq!(second.code, "ok");
+        assert_eq!(storage.config.wake_sensitivity, 0.8);
+        assert_eq!(
+            core.handle_with_storage(
+                request("wake", Operation::VirtualWake),
+                now,
+                Some(&mut storage)
+            )
+            .code,
+            "configuration_not_ready"
+        );
+        assert_eq!(
+            storage.configuration_status,
+            crate::storage::ConfigurationStatus::RestartRequired
+        );
+    }
+    #[test]
+    fn sensitivity_change_restarts_only_without_the_live_pipeline() {
+        // A13: with the live pipeline running, a sensitivity-only change reaches the worker by its restart between
+        // sessions (transport publishes the new keyword set), so the Core does not ask for a restart.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        {
+            let mut storage = crate::storage::Storage::open(&root).unwrap();
+            let revision = storage.config.revision;
+            storage
+                .update_wake_phrases(revision, vec![wake_setting("hey_gideon", None)])
+                .unwrap();
+        }
+        let mut storage = crate::storage::Storage::open(&root).unwrap();
+        assert_eq!(
+            storage.configuration_status,
+            crate::storage::ConfigurationStatus::Ready
+        );
+        storage.live_pipeline = true;
+        let revision = storage.config.revision;
+        storage
+            .update_wake_phrases(revision, vec![wake_setting("hey_gideon", Some(0.8))])
+            .unwrap();
+        assert_eq!(
+            storage.configuration_status,
+            crate::storage::ConfigurationStatus::Ready
+        );
+        assert_eq!(storage.config.wake_phrases[0].sensitivity, Some(0.8));
+        // Without the live pipeline the same change needs the restart (the replay worker loads its keyword set once).
+        storage.live_pipeline = false;
+        let revision = storage.config.revision;
+        storage
+            .update_wake_phrases(revision, vec![wake_setting("hey_gideon", Some(1.2))])
+            .unwrap();
+        assert_eq!(
+            storage.configuration_status,
+            crate::storage::ConfigurationStatus::RestartRequired
+        );
     }
     #[test]
     fn capture_no_speech_cancel_and_stalled_producer_release_pcm() {

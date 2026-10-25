@@ -59,7 +59,8 @@ AUDIO_SOURCES=('pactl','pw-dump','none')
 AUDIO_REASONS=('no_audio_tool','audio_tool_failed')
 LIVE_INPUT_STATES=('idle','capturing','error')
 LIVE_OUTPUT_STATES=('idle','playing','error')
-LIVE_ERRORS=('recorder_unavailable','recorder_exited','sandbox_unavailable','wake_worker_unavailable','wake_worker_failed','restart_limit','invalid_device','player_unavailable','player_write_failed','player_failed','player_timeout')
+# A13: content-free reasons of a failed live input (src/live.rs reason_for). Older codes stay accepted.
+LIVE_ERRORS=('recorder_unavailable','recorder_exited','sandbox_unavailable','wake_worker_unavailable','wake_worker_failed','restart_limit','invalid_device','player_unavailable','player_write_failed','player_failed','player_timeout','worker_crashed','worker_import_error','device_unavailable','model_missing')
 def audio_devices_ok(d):
     if not isinstance(d,dict) or not {'inputs','outputs','source'}<=set(d)<={'inputs','outputs','source','reason'}:return False
     lists=(d['inputs'],d['outputs'])
@@ -114,7 +115,62 @@ def audio_live_ok(live):
     if live['silence_warning'] is not None and live['silence_warning'] not in LIVE_WARNINGS:return False
     if 'last_detection' in live and not detection_ok(live['last_detection']):return False
     return live['enabled'] or (live['input_state']=='idle' and not live['mic_active'])
-def audio_ok(audio):return isinstance(audio,dict) and set(audio)<={'devices','live','probe'} and 'live' in audio and audio_live_ok(audio['live']) and ('devices' not in audio or audio_devices_ok(audio['devices'])) and ('probe' not in audio or probe_ok(audio['probe']))
+# A13 microphone assistant (src/mic_assist.rs): numbers, closed reason ids and device ids only; no audio.
+REC_STATES=('idle','running','done','failed')
+REC_PROBLEMS=('clipping','rumble','too_noisy','too_quiet')
+REC_REASONS=REC_PROBLEMS+('best',)
+REC_ERRORS=('recorder_unavailable','recorder_exited','sandbox_unavailable','invalid_device','audio_tool_failed','no_audio_tool')
+REC_ENTRY_BASE=frozenset({'id','label','camera','current','problems','score'})
+REC_ENTRY_KEYS=REC_ENTRY_BASE|frozenset({'reason','rms_dbfs','peak_dbfs','floor_dbfs','clip','rumble','speech','error'})
+def rec_entry_ok(item):
+    if not isinstance(item,dict) or not REC_ENTRY_BASE<=set(item)<=REC_ENTRY_KEYS:return False
+    if not audio_device_ok(item['id']) or not isinstance(item['label'],str) or not 1<=len(item['label'].encode('utf-8'))<=128:return False
+    if type(item['camera']) is not bool or type(item['current']) is not bool:return False
+    if not isinstance(item['problems'],list) or len(item['problems'])>len(REC_PROBLEMS) or any(p not in REC_PROBLEMS for p in item['problems']):return False
+    if type(item['score']) not in (int,float) or not math.isfinite(item['score']) or not 0<=item['score']<=1:return False
+    if not all(dbfs_ok(item[k]) for k in ('rms_dbfs','peak_dbfs','floor_dbfs') if k in item):return False
+    if 'error' in item:return item['error'] in REC_ERRORS and 'reason' not in item and not item['problems'] and item['score']==0
+    return item.get('reason')==(item['problems'][0] if item['problems'] else 'best') and item['reason'] in REC_REASONS
+def recommendation_ok(rec):
+    base={'state','ranked','recommended','current','current_is_bad','reason'}
+    if not isinstance(rec,dict) or not base<=set(rec)<=base|{'error'} or rec['state'] not in REC_STATES:return False
+    if ('error' in rec)!=(rec['state']=='failed') or ('error' in rec and rec['error'] not in REC_ERRORS):return False
+    ranked=rec['ranked']
+    if not isinstance(ranked,list) or len(ranked)>17 or not all(rec_entry_ok(i) for i in ranked):return False
+    if rec['state']!='done' and (ranked or rec['recommended'] is not None or rec['current_is_bad'] is not None or rec['reason'] is not None):return False
+    if rec['current'] is not None and not audio_device_ok(rec['current']):return False
+    if rec['current_is_bad'] is not None and type(rec['current_is_bad']) is not bool:return False
+    if rec['reason'] is not None and rec['reason'] not in REC_REASONS:return False
+    if rec['current_is_bad'] is not None and rec['current_is_bad']!=(rec['reason']!='best'):return False
+    # The top-level reason describes the current device's row, when that device was measured.
+    own=next((i for i in ranked if i['current']),None)
+    if rec['state']=='done' and own is not None and 'error' not in own and (own['id']!=rec['current'] or rec['reason']!=own['reason'] or rec['current_is_bad']!=(own['reason']!='best')):return False
+    # A recommendation is a clean, measured, non-camera device; it is never the 'default' pseudo entry.
+    clean={i['id'] for i in ranked if 'error' not in i and not i['problems'] and not i['camera'] and i['id']!='default'}
+    return rec['recommended'] is None or rec['recommended'] in clean
+def audio_ok(audio):return isinstance(audio,dict) and set(audio)<={'devices','live','probe','recommendation'} and 'live' in audio and audio_live_ok(audio['live']) and ('devices' not in audio or audio_devices_ok(audio['devices'])) and ('probe' not in audio or probe_ok(audio['probe'])) and ('recommendation' not in audio or recommendation_ok(audio['recommendation']))
+REC_PROBLEM_TEXT={'rumble':'capta quase só ruído grave','clipping':'satura','too_noisy':'tem muito ruído de fundo','too_quiet':'capta sinal muito fraco'}
+REC_ERROR_TEXT={'recorder_unavailable':'o gravador de áudio não está instalado','recorder_exited':'o gravador parou antes de gravar','sandbox_unavailable':'o isolamento do gravador (bwrap) não está disponível','invalid_device':'dispositivo inválido','audio_tool_failed':'a ferramenta de áudio falhou','no_audio_tool':'nenhuma ferramenta de áudio encontrada'}
+def recommendation_banner(rec,saved_device,default_device=None):
+    """Dispositivos banner (A13): only when the saved input (default included) measured bad and a clean alternative exists.
+    `default_device` is the id the system marks as default, when the saved choice is 'default'. None means no banner."""
+    if not isinstance(rec,dict) or rec.get('state')!='done' or rec.get('current_is_bad') is not True:return None
+    resolved=default_device if saved_device==DEFAULT_DEVICE else saved_device
+    if rec.get('current')!=resolved or not rec.get('recommended'):return None
+    current=next((i for i in rec['ranked'] if i['id']==rec['current']),None)
+    best=next((i for i in rec['ranked'] if i['id']==rec['recommended']),None)
+    if current is None or best is None or not current['problems']:return None
+    problems=' e '.join(REC_PROBLEM_TEXT[p] for p in current['problems'])
+    return {'device':best['id'],'text':f"O microfone atual ({current['label']}) {problems}. O melhor encontrado é {best['label']}.",'action':f"Usar o {best['label']}"}
+def recommendation_view(rec):
+    """Plain dict for QML: state, progress-free ranking rows with their Portuguese problem names, and the recommended id."""
+    rec=rec if isinstance(rec,dict) else {'state':'idle','ranked':[],'recommended':None,'current':None,'current_is_bad':None,'reason':None}
+    rows=[{'id':i['id'],'label':i['label'],'camera':i['camera'],'current':i['current'],'error':i.get('error',''),'score':round(float(i['score']),3),'reason':i.get('reason',''),
+           'problems':', '.join(REC_PROBLEM_TEXT[p] for p in i['problems']) if i['problems'] else ('' if 'error' in i else 'sem problemas'),
+           'recommended':i['id']==rec.get('recommended')} for i in rec.get('ranked') or []]
+    error=rec.get('error')
+    return {'state':rec.get('state','idle'),'rows':rows,'recommended':rec.get('recommended') or '','current':rec.get('current') or '',
+            'currentIsBad':rec.get('current_is_bad') is True,'reason':rec.get('reason') or '','error':REC_ERROR_TEXT.get(error,'') if error else ''}
 # B16 texts (Portuguese only; no Core code reaches the screen). The default choice is the Core's 'default' preference.
 DEFAULT_DEVICE='default'
 DEFAULT_DEVICE_LABEL='Padrão do sistema'
@@ -122,7 +178,7 @@ DEFAULT_MARK=' · padrão do sistema'
 UNAVAILABLE_DEVICE_LABEL='Dispositivo salvo · indisponível agora'
 AUDIO_REASON_MESSAGES={'no_audio_tool':'Nenhuma ferramenta de áudio encontrada: instale pipewire-pulse/pactl','audio_tool_failed':'A ferramenta de áudio falhou ao listar dispositivos; tente Atualizar lista'}
 AUDIO_SOURCE_LABELS={'pactl':'PipeWire/Pulse (pactl)','pw-dump':'PipeWire (pw-dump)'}
-LIVE_ERROR_MESSAGES={'recorder_unavailable':'gravador de áudio indisponível (instale pipewire-pulse)','recorder_exited':'o gravador de áudio parou','sandbox_unavailable':'isolamento do gravador indisponível (bwrap ausente)','wake_worker_unavailable':'worker de wake indisponível','wake_worker_failed':'worker de wake falhou','restart_limit':'limite de reinícios atingido','invalid_device':'dispositivo de entrada inválido','player_unavailable':'reprodutor de áudio indisponível','player_write_failed':'falha ao enviar áudio ao reprodutor','player_failed':'o reprodutor de áudio falhou','player_timeout':'o reprodutor de áudio não respondeu'}
+LIVE_ERROR_MESSAGES={'recorder_unavailable':'gravador de áudio indisponível (instale pipewire-pulse)','recorder_exited':'o gravador de áudio parou','sandbox_unavailable':'isolamento do gravador indisponível (bwrap ausente)','wake_worker_unavailable':'worker de wake indisponível','wake_worker_failed':'worker de wake falhou','restart_limit':'limite de reinícios atingido','invalid_device':'dispositivo de entrada inválido','player_unavailable':'reprodutor de áudio indisponível','player_write_failed':'falha ao enviar áudio ao reprodutor','player_failed':'o reprodutor de áudio falhou','player_timeout':'o reprodutor de áudio não respondeu','worker_crashed':'o worker de wake parou com erro (veja o diagnóstico)','worker_import_error':'faltam bibliotecas do worker de wake (veja o diagnóstico)','device_unavailable':'o microfone escolhido não está disponível','model_missing':'arquivo do modelo de wake ausente ou alterado'}
 RESTORE_BUSY_TEXT='Indisponível durante a sessão de voz; tente quando o Gideon estiver em espera'
 SENSITIVITY_RANGE_TEXT='Sensibilidade fora de 0,5 a 1,5; nada foi enviado'
 DEVICE_INVALID_TEXT='Dispositivo inválido; nada foi enviado'
@@ -1113,7 +1169,8 @@ PHRASE_MESSAGES={
     'wake_start_failed':'O detector não iniciou com essa lista. A lista anterior continua valendo.',
     'stale_phrase_store':'As frases personalizadas mudaram. Atualize a tela e tente de novo.',
     'phrase_store_error':'Não foi possível salvar as frases personalizadas.',
-    'configuration_not_ready':'Configuração não está pronta: reinicie o Gideon ou recupere a configuração.',
+    # U1: only a safe-mode configuration needs recovery; a pending restart just needs the Core restarted.
+    'configuration_not_ready':'Esta ação espera o reinício do Core. Reinicie o Core para continuar; a mudança salva já vale.',
 }
 LLM_PROVIDER_LABELS={'openrouter':'OpenRouter','opencode':'OpenCode','google':'Google','custom':'personalizado'}
 LANGUAGE_LABELS={'EN':'inglês'}
@@ -1584,6 +1641,10 @@ PENDING.update({'audio_devices':'Consultando dispositivos no Core…','preferenc
 # A9 probe of one input: 3 s of the microphone; the message says so, and the result comes in audio.probe.
 OPS.update({'audio_probe':('audio','Teste iniciado: o microfone será usado por 3 segundos')})
 PENDING.update({'audio_probe':'Iniciando o teste de 3 s no Core…'})
+# A13 microphone assistant: 2 s from each listed input, one at a time; nothing is saved and the system default is not changed.
+OPS.update({'audio_recommend_input':('audio','Verificação dos microfones iniciada: 2 s em cada entrada; nada é salvo')})
+PENDING.update({'audio_recommend_input':'Verificando os microfones no Core…'})
+CODE_MESSAGES.setdefault('audio_tool_failed','A ferramenta de áudio falhou; tente de novo')
 CODE_MESSAGES.setdefault('invalid_device','Microfone não listado pelo sistema: atualize a lista e escolha de novo')
 # A6 consent for the live microphone (docs/A6-live-audio.md): one op, read back from preferences.live_audio and audio.live.restart_required.
 OPS.update({'live_audio_preference':('prefs','Escuta do microfone salva no Core; reinicie o Core para aplicar')})
@@ -2340,7 +2401,8 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def configurationMessage(self):
         if self.configurationStatus=='safe_mode':return ('Modo seguro: configuração inválida preservada; áudio e comandos bloqueados' if self.snapshot.get('configuration_recovery_available') else 'Modo seguro: arquivo excede o limite de recuperação automática; conteúdo preservado')
-        if self.configurationStatus=='restart_required':return 'Configuração salva; reinicie o Core para ativar os recursos'
+        # U1: a saved change applies at the next start; further changes are still accepted while the restart is pending.
+        if self.configurationStatus=='restart_required':return 'Mudança salva: aplica ao reiniciar o Core. Você pode fazer outras mudanças antes do reinício.'
         return ''
     @Slot(bool,int)
     def savePreferences(self,audible,timeout):
@@ -2356,7 +2418,7 @@ class Bridge(QObject):
         else:self._request(op,**kw)
         self.changed.emit()
     @Property(bool,notify=changed)
-    def preferencesAvailable(self):return self.online and self.configurationStatus=='ready' and 'preferences' in self.snapshot and not self.sessionId and self.preferences_request is None
+    def preferencesAvailable(self):return self.online and self.configurationStatus in ('ready','restart_required') and 'preferences' in self.snapshot and not self.sessionId and self.preferences_request is None
     @Property(bool,notify=changed)
     def rollbackAvailable(self):return self.preferencesAvailable and bool(self.snapshot.get("preferences",{}).get("previous_preferences"))
     @Property(bool,notify=changed)
@@ -2493,6 +2555,32 @@ class Bridge(QObject):
         if not self.online:self._refuse('audio','Core desconectado: nada a testar');return False
         if not audio_device_ok(device):self._refuse('audio',DEVICE_INVALID_TEXT);return False
         return self._send('audio','audio_probe',device=device)
+    # A13 microphone assistant: one run (2 s per listed input). The result is audio.recommendation; nothing is saved by the run.
+    @Slot(result=bool)
+    def recommendMicrophones(self):
+        if not self.online:self._refuse('audio','Core desconectado: nada a verificar');return False
+        if self.sessionId:self._refuse('audio','Indisponível durante a sessão de voz');return False
+        return self._send('audio','audio_recommend_input')
+    @Slot(str,result=bool)
+    def useAudioInput(self,device):
+        """A13 'Usar o …': saves the chosen input as Gideon's own preference. The system default is never changed."""
+        if not self.preferencesAvailable:self._refuse('prefs',self._prefs_unavailable_text());return False
+        if not audio_device_ok(device):self._refuse('prefs',DEVICE_INVALID_TEXT);return False
+        self._preferences('preferences',**self._pref_request(audio_input_device=device));return True
+    def _default_input_id(self):return next((i['id'] for i in (self._devices() or {}).get('inputs',[]) if i.get('default')),None)
+    @Property('QVariantMap',notify=audioChanged)
+    def micRecommendation(self):return recommendation_view((self.snapshot.get('audio') or {}).get('recommendation'))
+    @Property('QVariantMap',notify=audioChanged)
+    def micBanner(self):
+        banner=recommendation_banner((self.snapshot.get('audio') or {}).get('recommendation'),self._saved_device('audio_input_device'),self._default_input_id())
+        return {**banner,'show':True} if banner else {'show':False,'device':'','text':'','action':''}
+    @Slot(result=str)
+    def liveLastErrorText(self):
+        """A13 diagnostics: the last worker stderr tail, from the 0600 file in the Core data dir. Only Diagnóstico › Desenvolvedor reads it; never the snapshot."""
+        try:
+            with open(self.root/'live-last-error.txt','rb') as handle:data=handle.read(4096)
+        except OSError:return ''
+        return data.decode('utf-8','replace')[-2048:]
     # A9 meter and probe (Dispositivos) and the state line (Hoje). Every value comes from audio.live / audio.probe.
     @Property('QVariantMap',notify=audioChanged)
     def audioLevel(self):return level_view(self._live(),self.online)

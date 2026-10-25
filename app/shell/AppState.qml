@@ -90,7 +90,7 @@ Item {
         if (key.indexOf("core.") !== 0 || typeof core === "undefined" || !core) return ""
         if (!core.connected) return "Core desconectado"
         if (core.configurationStatus === "safe_mode") return "modo seguro"
-        if (core.configurationStatus === "restart_required") return "reinício do Core pendente"
+        // U1: a pending restart does not block preference writes; the Core applies the latest one at its next start.
         if (String(core.sessionId || "").length > 0) return "sessão de voz em andamento; tente quando o Gideon estiver em espera"
         if (!core.preferencesAvailable) return "o Core está ocupado com outra alteração"
         if ((key === "core.responseGain" || key === "core.audibleFeedback") && !core.voiceAvailable) return "motor de voz não está disponível no Core"

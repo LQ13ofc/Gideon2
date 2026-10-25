@@ -321,6 +321,10 @@ pub struct Storage {
     pub(crate) verified: RefCell<crate::hub::VerifiedCache>,
     /// Unreferenced Hub payloads and crashed pending writes moved to quarantine by the startup sweep.
     pub(crate) orphans: u64,
+    /// Set by the Core before each control call: the live microphone pipeline runs in this process. A
+    /// per-phrase sensitivity change then reaches the wake worker by a restart between sessions (see
+    /// `commit_preferences`), so it does not need a Core restart.
+    pub live_pipeline: bool,
 }
 /// `hub-generation` is written after every ledger rename; a damaged marker fails closed.
 fn read_generations(root: &Path) -> Generations {
@@ -505,6 +509,7 @@ impl Storage {
             generations,
             verified: RefCell::new(Default::default()),
             orphans: 0,
+            live_pipeline: false,
         };
         storage.sweep();
         Ok(storage)
@@ -785,7 +790,7 @@ impl Storage {
         timeout_ms: u64,
         optional: OptionalPreferences,
     ) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready {
+        if !self.writes_open() {
             return Err(io::Error::other("configuration not ready"));
         }
         if revision != self.config.revision {
@@ -815,9 +820,7 @@ impl Storage {
     /// atomic). The reset itself is a normal commit: revision + 1, and `previous_preferences` holds
     /// the pre-reset values, so `rollback_preferences` can still undo it.
     pub fn restore_preferences_defaults(&mut self, revision: u64) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
-            || revision != self.config.revision
-        {
+        if !self.writes_open() || revision != self.config.revision {
             return Err(io::Error::other("configuration not ready"));
         }
         let current = read_config_bytes(&self.root.join("config.json"))?;
@@ -848,21 +851,40 @@ impl Storage {
             tts_language: self.config.tts_language.clone(),
             tts_voice: self.config.tts_voice.clone(),
         });
-        let changed_wake = next.wake_phrase != self.config.wake_phrase
-            || next.wake_phrases != self.config.wake_phrases;
+        // A change of the active list (ids or active switches) always needs a restart: the worker and the
+        // Core's command phrases are fixed at start. A sensitivity-only change needs one too, unless the live
+        // pipeline runs: the Core then publishes the new keyword set and the live worker restarts between sessions.
+        let active_list = |c: &Config| {
+            (
+                c.wake_phrase.clone(),
+                c.wake_phrases
+                    .iter()
+                    .map(|p| (p.id.clone(), p.active))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let list_changed = active_list(&next) != active_list(&self.config);
+        let sensitivity_changed = next.wake_phrases != self.config.wake_phrases;
+        let needs_restart = list_changed || (sensitivity_changed && !self.live_pipeline);
         self.replace("config.json", &next)?;
         // Durable before the in-memory commit: a failed fsync leaves the old state visible.
         File::open(&self.root)?.sync_all()?;
         self.config = next;
-        if changed_wake {
+        if needs_restart {
             self.configuration_status = ConfigurationStatus::RestartRequired;
         }
         Ok(())
     }
+    /// Preference writes are accepted while the configuration is `ready` and while a restart is pending
+    /// (`restart_required`): the latest write wins and takes effect at the next start. Safe mode refuses them.
+    fn writes_open(&self) -> bool {
+        matches!(
+            self.configuration_status,
+            ConfigurationStatus::Ready | ConfigurationStatus::RestartRequired
+        )
+    }
     pub fn update_feedback(&mut self, revision: u64, visual: bool, volume: u8) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
-            || revision != self.config.revision
-        {
+        if !self.writes_open() || revision != self.config.revision {
             return Err(io::Error::other("configuration not ready"));
         }
         let mut next = self.config.clone();
@@ -880,7 +902,7 @@ impl Storage {
         revision: u64,
         phrases: Vec<crate::phrases::Setting>,
     ) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
+        if !self.writes_open()
             || revision != self.config.revision
             || !crate::phrases::valid_settings(&phrases)
         {
@@ -895,9 +917,7 @@ impl Storage {
         self.commit_preferences(next)
     }
     pub fn select_wake(&mut self, revision: u64, phrase_id: String) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
-            || revision != self.config.revision
-        {
+        if !self.writes_open() || revision != self.config.revision {
             return Err(io::Error::other("configuration not ready"));
         }
         let mut next = self.config.clone();
@@ -915,9 +935,7 @@ impl Storage {
     }
     /// A6 consent switch. CAS on `revision` like every preference; only `live_audio` changes.
     pub fn update_live_audio(&mut self, revision: u64, enabled: bool) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
-            || revision != self.config.revision
-        {
+        if !self.writes_open() || revision != self.config.revision {
             return Err(io::Error::other("configuration not ready"));
         }
         let mut next = self.config.clone();
@@ -929,9 +947,7 @@ impl Storage {
     }
     /// A11 consent switch for host actions. CAS on `revision` like every preference; only `real_actions` changes.
     pub fn update_real_actions(&mut self, revision: u64, enabled: bool) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
-            || revision != self.config.revision
-        {
+        if !self.writes_open() || revision != self.config.revision {
             return Err(io::Error::other("configuration not ready"));
         }
         let mut next = self.config.clone();
@@ -950,9 +966,7 @@ impl Storage {
         tts_language: String,
         tts_voice: String,
     ) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
-            || revision != self.config.revision
-        {
+        if !self.writes_open() || revision != self.config.revision {
             return Err(io::Error::other("configuration not ready"));
         }
         let mut next = self.config.clone();
@@ -965,9 +979,7 @@ impl Storage {
         self.commit_preferences(next)
     }
     pub fn rollback_preferences(&mut self, revision: u64) -> io::Result<()> {
-        if self.configuration_status != ConfigurationStatus::Ready
-            || revision != self.config.revision
-        {
+        if !self.writes_open() || revision != self.config.revision {
             return Err(io::Error::other("configuration not ready"));
         }
         let previous = self

@@ -590,6 +590,10 @@ pub async fn serve(
         && replay.is_some();
     let live_audio = live_flag || live_from_ledger;
     core.configure_live(live_audio, live_from_ledger);
+    // A13: the device list is ready before the Dispositivos page opens when the live pipeline runs.
+    if live_audio {
+        core.refresh_audio_devices();
+    }
     // A5: live settings (input device, spotter threshold) and live status. Settings are published
     // only between voice sessions, so a running utterance is never cut by a preference change.
     let (live_settings_tx, live_settings_rx) =
@@ -749,6 +753,8 @@ pub async fn serve(
     )> = None;
     // A9 `audio_probe`: one 3 s recording at a time, in its own task (the Core loop never blocks on it).
     let mut probe_task: Option<(u64, tokio::task::JoinHandle<crate::live::ProbeOutcome>)> = None;
+    // A13 microphone assistant: one run at a time (the Core refuses a second one while it runs).
+    let mut recommend_task: Option<(u64, tokio::task::JoinHandle<crate::mic_assist::Done>)> = None;
     let (speech_progress, mut speech_progress_rx) = mpsc::channel(2);
     let mut pending_replay = if stt_task.is_some() {
         replay.take()
@@ -840,7 +846,21 @@ pub async fn serve(
                 core.configure_storage(&storage);
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
-            Some(event)=live_events_rx.recv() => {core.live_event(event);},
+            Some(event)=live_events_rx.recv() => {
+                // A13: the last worker stderr tail goes to the 0600 diagnostics file only (never to the snapshot).
+                if let crate::live::LiveEvent::WorkerTail { tail } = &event {
+                    let _ = crate::live::write_last_error(&storage.root, tail);
+                }
+                core.live_event(event);
+            },
+            result = async { (&mut recommend_task.as_mut().expect("active recommendation").1).await }, if recommend_task.is_some() => {
+                let (id, _) = recommend_task.take().expect("active recommendation");
+                match result {
+                    Ok(done) => core.audio_recommend_reply(id, done),
+                    Err(_) => core.audio_recommend_failed(id),
+                }
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
             Some(wire) = plugin_events.recv() => {
                 if let Some(event) = plugins.accept(wire) {
                     // Plugin logs and partial text are high-rate and never audited (no amplification).
@@ -973,6 +993,11 @@ pub async fn serve(
                 probe_task = Some((id, tokio::spawn(crate::live::probe(device))));
             }
         }
+        if recommend_task.is_none() {
+            if let Some((id, current)) = core.take_recommend_job() {
+                recommend_task = Some((id, tokio::spawn(crate::mic_assist::run(current))));
+            }
+        }
         if phrase_task.is_none() {
             if let Some(job) = core.take_phrase_job() {
                 let id = job.id.clone();
@@ -995,8 +1020,12 @@ pub async fn serve(
                 )),
             ));
         }
-        // A5: a changed device or sensitivity reaches the live input only between voice sessions.
-        if live_audio && !core.voice_active() {
+        // A5: a changed device or sensitivity reaches the live input only between voice sessions. A13: and only
+        // while the configuration is ready: a pending restart keeps the worker on the list it started with.
+        if live_audio
+            && !core.voice_active()
+            && storage.configuration_status == crate::storage::ConfigurationStatus::Ready
+        {
             let desired = crate::live::Settings::from_config(&storage.config);
             if *live_settings_tx.borrow() != desired {
                 live_settings_tx.send_replace(desired);

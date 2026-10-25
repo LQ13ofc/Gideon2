@@ -63,6 +63,10 @@ pub enum Operation {
     AudioProbe {
         device: String,
     },
+    /// A13: records 2 s from every listed input (one at a time), ranks them and reports the current input.
+    /// The result is the snapshot block `audio.recommendation`. Refused with `busy` during a voice session or
+    /// while another probe or recommendation runs.
+    AudioRecommendInput,
     /// Replies `ok`, then the Core exits with `transport::RESTART_EXIT_CODE` after flushing. Refused
     /// with `busy` while a voice session, agent run, skill run or plugin invocation is active.
     CoreRestart,
@@ -678,6 +682,10 @@ enum WireRequest {
         request_id: String,
         device: String,
     },
+    AudioRecommendInput {
+        version: u16,
+        request_id: String,
+    },
     CoreRestart {
         version: u16,
         request_id: String,
@@ -1276,6 +1284,10 @@ impl<'de> Deserialize<'de> for Request {
                 request_id,
                 device,
             } => (version, request_id, Operation::AudioProbe { device }),
+            WireRequest::AudioRecommendInput {
+                version,
+                request_id,
+            } => (version, request_id, Operation::AudioRecommendInput),
             WireRequest::CoreRestart {
                 version,
                 request_id,

@@ -7,4 +7,7 @@ Banner {
     objectName: "configurationMessage"
     kind: "warn"
     text: AppState.configNotice()
+    // U1: a pending restart applies the saved change; the owner can apply it now (the Core refuses during a session).
+    actionText: (typeof core !== "undefined" && core && core.configurationStatus === "restart_required" && core.coreRestartAvailable) ? "Reiniciar agora" : ""
+    onActionRequested: core.coreRestart()
 }

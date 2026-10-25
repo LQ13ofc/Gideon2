@@ -54,6 +54,10 @@ pub struct Settings {
     pub input_device: String,
     pub keywords_threshold: f32,
     pub input_conditioning: crate::storage::InputConditioning,
+    /// Identity of the stored phrase list with its sensitivities (A13). A change restarts the worker, which
+    /// loads the keyword file staged for the new list (`phrases::stage`). Published only while the
+    /// configuration is ready (transport), so a worker never starts on a list the Core has not started with.
+    pub keyword_key: u64,
 }
 impl Settings {
     pub fn from_config(config: &Config) -> Self {
@@ -61,8 +65,70 @@ impl Settings {
             input_device: config.audio_input_device.clone(),
             keywords_threshold: crate::wake::keywords_threshold(config.wake_sensitivity),
             input_conditioning: config.input_conditioning,
+            keyword_key: keyword_key(config),
         }
     }
+}
+
+/// Stable hash of the stored wake phrase list: ids, active switches and per-phrase sensitivities.
+fn keyword_key(config: &Config) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for phrase in &config.wake_phrases {
+        phrase.id.hash(&mut hasher);
+        phrase.active.hash(&mut hasher);
+        phrase.sensitivity.map(f32::to_bits).hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Content-free reason of a failed live input (`audio.live.last_error`). The closed vocabulary is fixed.
+pub const WORKER_CRASHED: &str = "worker_crashed";
+pub const WORKER_IMPORT_ERROR: &str = "worker_import_error";
+pub const DEVICE_UNAVAILABLE: &str = "device_unavailable";
+pub const RECORDER_EXITED: &str = "recorder_exited";
+pub const MODEL_MISSING: &str = "model_missing";
+/// Bytes of worker stderr kept for diagnostics (the last ones).
+pub const STDERR_TAIL: usize = 2048;
+/// File in the Core data dir with the last worker stderr tail (0600). Never part of the snapshot.
+pub const LAST_ERROR_FILE: &str = "live-last-error.txt";
+
+/// Maps a supervisor failure to its reason. Worker failures are classified from the stderr tail: a Python
+/// traceback names its exception class, and the tail itself never leaves the Core except in the 0600 file.
+pub fn reason_for(step_code: &str, tail: &[u8]) -> &'static str {
+    match step_code {
+        "recorder_exited" => RECORDER_EXITED,
+        "recorder_unavailable" | "sandbox_unavailable" | "invalid_device" => DEVICE_UNAVAILABLE,
+        _ => {
+            let text = String::from_utf8_lossy(tail);
+            if text.contains("ModuleNotFoundError") || text.contains("ImportError") {
+                WORKER_IMPORT_ERROR
+            } else if text.contains("FileNotFoundError")
+                || text.contains("No such file or directory")
+                || text.contains("artifact hashes")
+            {
+                MODEL_MISSING
+            } else {
+                WORKER_CRASHED
+            }
+        }
+    }
+}
+
+/// Writes the diagnostic tail to `root/live-last-error.txt` with mode 0600, never following a link.
+pub fn write_last_error(root: &Path, tail: &[u8]) -> io::Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let path = root.join(LAST_ERROR_FILE);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path)?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    io::Write::write_all(&mut file, tail)?;
+    file.sync_all()
 }
 
 /// The wake worker that consumes the live stream (same manifest as the replay profile).
@@ -86,6 +152,8 @@ pub enum LiveEvent {
     },
     /// One measured 20 ms recorder frame (A9 level meter). Numbers only.
     Frame { stats: FrameStats, at: Instant },
+    /// The last worker stderr of a failed worker (A13). Goes to `LAST_ERROR_FILE` only; never into the snapshot.
+    WorkerTail { tail: Vec<u8> },
 }
 
 /// The last wake detection, as the snapshot shows it (`audio.live.last_detection`).
@@ -176,6 +244,8 @@ pub struct AudioView {
     pub live: LiveView,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeView>,
+    /// A13 microphone assistant: `idle` until `audio_recommend_input` runs.
+    pub recommendation: crate::mic_assist::View,
 }
 
 #[derive(Clone, Debug)]
@@ -238,7 +308,12 @@ impl LiveState {
                     self.published = Some((at, self.meter.level(at)));
                 }
             }
+            LiveEvent::WorkerTail { .. } => {}
         }
+    }
+    /// True when this process runs the live pipeline (flag or ledger at start).
+    pub fn pipeline_enabled(&self) -> bool {
+        self.enabled
     }
     /// A wake phrase was recognised: feeds `last_detection` and the "heard, not recognised" state.
     pub fn detected(&mut self, phrase_id: &str, now: Instant) {
@@ -503,7 +578,8 @@ fn spawn_worker(wake: &WakeSpec, settings: &Settings, start_us: u64) -> io::Resu
         &args,
         &mounts,
     )?;
-    command.stdin(Stdio::piped());
+    // A13: stderr is kept (tail only) so a failed start says why; see `read_tail`.
+    command.stdin(Stdio::piped()).stderr(Stdio::piped());
     command.spawn()
 }
 
@@ -527,19 +603,25 @@ pub async fn run_input(
     let mut failures: VecDeque<Instant> = VecDeque::new();
     loop {
         let current = settings.borrow_and_update().clone();
-        match run_once(
+        let mut tail = Vec::new();
+        let step = run_once(
             &wake,
             &current,
             &mut settings,
             &packets,
             &events,
             &mut clock_us,
+            &mut tail,
         )
-        .await
-        {
+        .await;
+        match step {
             Step::Reconfigure => {}
             Step::Closed => return,
             Step::Failed(code) => {
+                // A13: the cause is a content-free code. The stderr tail is only handed to the Core, which keeps it
+                // in the 0600 diagnostics file.
+                let reason = reason_for(code, &tail);
+                let _ = events.send(LiveEvent::WorkerTail { tail });
                 let now = Instant::now();
                 while failures
                     .front()
@@ -548,9 +630,10 @@ pub async fn run_input(
                     failures.pop_front();
                 }
                 if failures.len() >= RESTART_LIMIT {
+                    // The budget is spent: the state reports the cause that kept failing, not only the limit.
                     let _ = events.send(LiveEvent::Input {
                         state: "error",
-                        error: Some("restart_limit"),
+                        error: Some(reason),
                     });
                     let _ = packets.send(Err(())).await;
                     return;
@@ -558,7 +641,7 @@ pub async fn run_input(
                 failures.push_back(now);
                 let _ = events.send(LiveEvent::Input {
                     state: "error",
-                    error: Some(code),
+                    error: Some(reason),
                 });
                 let delay = BACKOFF_BASE * 2u32.pow(failures.len() as u32 - 1);
                 tokio::select! {
@@ -574,6 +657,27 @@ pub async fn run_input(
     }
 }
 
+/// Keeps the last `STDERR_TAIL` bytes of a worker's stderr until it closes. Output is never written anywhere else.
+async fn read_tail(mut stderr: tokio::process::ChildStderr) -> Vec<u8> {
+    let mut tail: VecDeque<u8> = VecDeque::with_capacity(STDERR_TAIL);
+    let mut chunk = [0u8; 512];
+    loop {
+        match stderr.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                for byte in &chunk[..n] {
+                    if tail.len() == STDERR_TAIL {
+                        tail.pop_front();
+                    }
+                    tail.push_back(*byte);
+                }
+            }
+        }
+    }
+    tail.into()
+}
+
+/// One worker + recorder run. `tail_out` receives the worker's stderr tail when the run ends after the worker started.
 async fn run_once(
     wake: &WakeSpec,
     current: &Settings,
@@ -581,11 +685,16 @@ async fn run_once(
     packets: &mpsc::Sender<Result<Packet, ()>>,
     events: &mpsc::UnboundedSender<LiveEvent>,
     clock_us: &mut u64,
+    tail_out: &mut Vec<u8>,
 ) -> Step {
     let mut worker = match spawn_worker(wake, current, *clock_us) {
         Ok(child) => child,
         Err(_) => return Step::Failed("wake_worker_unavailable"),
     };
+    let tail_task = worker
+        .stderr
+        .take()
+        .map(|stderr| tokio::spawn(read_tail(stderr)));
     let (Some(mut worker_in), Some(worker_out)) = (worker.stdin.take(), worker.stdout.take())
     else {
         let _ = worker.start_kill();
@@ -672,6 +781,12 @@ async fn run_once(
     let _ = worker.start_kill();
     let _ = recorder.wait().await;
     let _ = worker.wait().await;
+    // The worker is gone, so its stderr reaches EOF; the bound only protects against a stray descendant holding it.
+    if let Some(task) = tail_task {
+        if let Ok(Ok(tail)) = tokio::time::timeout(Duration::from_millis(500), task).await {
+            *tail_out = tail;
+        }
+    }
     if matches!(step, Step::Reconfigure | Step::Closed) {
         let _ = events.send(LiveEvent::Input {
             state: "idle",
@@ -751,6 +866,44 @@ pub async fn probe_in(path: &OsStr, device: &str) -> ProbeOutcome {
         hint,
         reason: None,
     }
+}
+
+/// Records `duration` from one device with the probe's sandboxed recorder and returns the samples (16 kHz mono
+/// s16). Used by the microphone assistant (src/mic_assist.rs); nothing is written anywhere. A recorder that
+/// ends before its first frame is `recorder_exited`; a partial frame at the end is dropped.
+pub async fn record_in(
+    path: &OsStr,
+    device: &str,
+    duration: Duration,
+) -> Result<Vec<i16>, &'static str> {
+    let mut child = spawn_recorder_in(path, device)?;
+    let Some(mut out) = child.stdout.take() else {
+        let _ = child.start_kill();
+        return Err("recorder_unavailable");
+    };
+    let deadline = tokio::time::Instant::now() + duration;
+    let mut samples = Vec::new();
+    let mut buf = [0u8; FRAME_BYTES];
+    let mut ended = false;
+    loop {
+        match tokio::time::timeout_at(deadline, out.read_exact(&mut buf)).await {
+            Ok(Ok(_)) => samples.extend(
+                buf.chunks_exact(2)
+                    .map(|pair| i16::from_le_bytes([pair[0], pair[1]])),
+            ),
+            Ok(Err(_)) => {
+                ended = true;
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    if ended && samples.is_empty() {
+        return Err("recorder_exited");
+    }
+    Ok(samples)
 }
 
 /// Where speech PCM goes when `--live-audio` is on, and where its state is reported.
@@ -989,6 +1142,52 @@ mod tests {
         assert_eq!(worker_mounts(&manifest).unwrap(), [manifest.clone()]);
         std::fs::write(&manifest, r#"{"asset_root":"relative/assets"}"#).unwrap();
         assert!(worker_mounts(&manifest).is_err());
+    }
+
+    #[test]
+    fn worker_failures_map_to_content_free_reasons() {
+        let traceback = b"Traceback (most recent call last):\n  import sherpa_onnx\nModuleNotFoundError: No module named 'sherpa_onnx'\n";
+        assert_eq!(
+            reason_for("wake_worker_failed", traceback),
+            WORKER_IMPORT_ERROR
+        );
+        let missing = b"FileNotFoundError: [Errno 2] No such file or directory: '/x/encoder.onnx'";
+        assert_eq!(reason_for("wake_worker_failed", missing), MODEL_MISSING);
+        let hashes = b"ValueError: missing or unexpected artifact hashes";
+        assert_eq!(reason_for("wake_worker_failed", hashes), MODEL_MISSING);
+        let manifest = b"json.decoder.JSONDecodeError: Expecting value";
+        assert_eq!(reason_for("wake_worker_failed", manifest), WORKER_CRASHED);
+        assert_eq!(reason_for("wake_worker_unavailable", b""), WORKER_CRASHED);
+        assert_eq!(reason_for("recorder_exited", b""), RECORDER_EXITED);
+        assert_eq!(reason_for("recorder_unavailable", b""), DEVICE_UNAVAILABLE);
+        assert_eq!(reason_for("invalid_device", b""), DEVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn last_error_file_is_private_and_replaced_on_each_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        write_last_error(root.path(), b"first").unwrap();
+        write_last_error(root.path(), b"second").unwrap();
+        let path = root.path().join(LAST_ERROR_FILE);
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn keyword_key_follows_sensitivity_and_the_active_list() {
+        let mut config = Config::default();
+        let base = Settings::from_config(&config).keyword_key;
+        config.wake_phrases = vec![crate::phrases::Setting {
+            id: "hey_gideon".into(),
+            active: true,
+            sensitivity: Some(0.8),
+        }];
+        let with_sensitivity = Settings::from_config(&config).keyword_key;
+        assert_ne!(base, with_sensitivity);
+        config.wake_sensitivity = 1.4;
+        assert_eq!(Settings::from_config(&config).keyword_key, with_sensitivity);
     }
 
     #[test]

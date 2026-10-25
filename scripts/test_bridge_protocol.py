@@ -3297,6 +3297,74 @@ class AudioContract(unittest.TestCase):
         self.assertEqual(device_choices(None,'inputs','default'),[{'value':'default','text':'Padrão do sistema'}])
         self.assertEqual(live_input_text(None),'Escuta do microfone: sem informação do Core')
         self.assertEqual(live_output_text({'enabled':True,'input_state':'idle','output_state':'playing','mic_active':False}),'Saída ao vivo: reproduzindo')
+class MicAssistant(unittest.TestCase):
+    """A13: the banner, the recommendation contract and the Portuguese view of audio.recommendation."""
+    WEBCAM = 'alsa_input.usb-ASD_650_Camera_Full_HD_webcam_200901010001-02.analog-stereo'
+    FIFINE = 'alsa_input.usb-MV-SILICON_fifine_Microphone_20190808-00.analog-stereo'
+    def rec(self, **over):
+        cam = {'id':self.WEBCAM,'label':'Webcam ASD','camera':True,'current':True,'problems':['clipping','rumble'],'score':0.0,'reason':'clipping',
+               'rms_dbfs':-20.0,'peak_dbfs':0.0,'floor_dbfs':-30.0,'clip':0.06,'rumble':0.86,'speech':0.015}
+        fine = {'id':self.FIFINE,'label':'Fifine','camera':False,'current':False,'problems':[],'score':0.33,'reason':'best',
+                'rms_dbfs':-44.8,'peak_dbfs':-15.0,'floor_dbfs':-55.0,'clip':0.0,'rumble':0.12,'speech':0.39}
+        base = {'state':'done','ranked':[fine,cam],'recommended':self.FIFINE,'current':self.WEBCAM,'current_is_bad':True,'reason':'clipping'}
+        base.update(over)
+        return base
+    def test_banner_names_the_problems_and_offers_the_clean_input(self):
+        from bridge import recommendation_banner
+        banner = recommendation_banner(self.rec(), 'default', self.WEBCAM)
+        self.assertEqual(banner['device'], self.FIFINE)
+        self.assertEqual(banner['action'], 'Usar o Fifine')
+        self.assertEqual(banner['text'], 'O microfone atual (Webcam ASD) satura e capta quase só ruído grave. O melhor encontrado é Fifine.')
+        self.assertNotIn('_', banner['text'])
+    def test_banner_is_hidden_when_the_saved_input_is_not_the_measured_one_or_is_fine(self):
+        from bridge import recommendation_banner
+        self.assertIsNone(recommendation_banner(self.rec(), self.FIFINE, self.WEBCAM))   # switched since the run
+        self.assertIsNone(recommendation_banner(self.rec(state='running'), 'default', self.WEBCAM))
+        self.assertIsNone(recommendation_banner(self.rec(current_is_bad=False, reason='best'), 'default', self.WEBCAM))
+        self.assertIsNone(recommendation_banner(self.rec(recommended=None), 'default', self.WEBCAM))
+        self.assertIsNone(recommendation_banner(None, 'default', self.WEBCAM))
+    def test_recommendation_contract_rejects_each_break(self):
+        from bridge import recommendation_ok
+        self.assertTrue(recommendation_ok(self.rec()))
+        self.assertTrue(recommendation_ok({'state':'idle','ranked':[],'recommended':None,'current':None,'current_is_bad':None,'reason':None}))
+        self.assertTrue(recommendation_ok({'state':'failed','ranked':[],'recommended':None,'current':None,'current_is_bad':None,'reason':None,'error':'audio_tool_failed'}))
+        bad = [
+            self.rec(recommended=self.WEBCAM),                       # a camera is never recommended
+            self.rec(current_is_bad=False),                          # bad flag must agree with the reason
+            self.rec(reason='rumble'),                              # reason must agree with the problems list
+            self.rec(state='failed'),                               # failed needs an error code
+            self.rec(state='idle'),                                 # idle carries no ranking
+            self.rec(recommended='x y'),                            # device ids are bounded
+        ]
+        for item in bad:
+            with self.subTest(item=item):
+                self.assertFalse(recommendation_ok(item))
+        broken_entry = self.rec()
+        broken_entry['ranked'][0]['reason'] = 'rumble'
+        self.assertFalse(recommendation_ok(broken_entry))
+        with_error = self.rec()
+        # An error entry carries an error code and no reason; with a reason it is refused.
+        self.assertTrue(recommendation_ok(with_error))
+        with_error['ranked'][1] = {'id':self.WEBCAM,'label':'Webcam ASD','camera':True,'current':True,'problems':[],'score':0.0,'error':'recorder_exited','reason':'best'}
+        self.assertFalse(recommendation_ok(with_error))
+    def test_view_is_portuguese_and_carries_no_raw_codes(self):
+        from bridge import recommendation_view, recommendation_ok
+        view = recommendation_view(self.rec())
+        self.assertEqual(view['recommended'], self.FIFINE)
+        self.assertEqual(view['rows'][1]['problems'], 'satura, capta quase só ruído grave')
+        self.assertTrue(view['currentIsBad'])
+        self.assertEqual(recommendation_view(None)['state'], 'idle')
+        failed = recommendation_view({'state':'failed','ranked':[],'recommended':None,'current':None,'current_is_bad':None,'reason':None,'error':'recorder_exited'})
+        self.assertEqual(failed['error'], 'o gravador parou antes de gravar')
+        self.assertNotIn('_', failed['error'])
+        self.assertTrue(recommendation_ok(self.rec()))
+    def test_live_error_reasons_have_portuguese_text(self):
+        from bridge import LIVE_ERRORS
+        for code in ('worker_crashed','worker_import_error','device_unavailable','model_missing'):
+            with self.subTest(code=code):
+                self.assertIn(code, LIVE_ERRORS)
+                self.assertNotEqual(LIVE_ERROR_MESSAGES[code], code)
+                self.assertNotIn('_', LIVE_ERROR_MESSAGES[code])
 class AudioQml(unittest.TestCase):
     def test_voice_devices_general_and_indicators_follow_qml_rules(self):
         env={**os.environ,'QT_QPA_PLATFORM':'offscreen','QT_QUICK_CONTROLS_STYLE':'Basic'}

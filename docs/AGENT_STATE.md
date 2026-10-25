@@ -86,3 +86,11 @@
 - Desvio: XAUTHORITY no ambiente do host (Brave sai sem ele). Janela não é verificada pelo Core.
 - Gates: fmt OK, clippy -D warnings OK, cargo test OK, test_bridge_protocol 238 OK, test_snapshot_contract 18 OK, test_ui_settings 25 OK.
 - Não feito: voz/wake ao vivo nesta rodada, pacote instalado, onboarding, ferramentas com ação real ao vivo.
+
+## 2026-10-25 — A13 assistente de microfone e U1 a U3 (NÃO COMMITADO)
+- Assistente (`audio_recommend_input`, `src/mic_assist.rs`): 2 s por entrada, ranking, `audio.recommendation`, aviso em Dispositivos, oferta no onboarding e no consentimento. Relatório: docs/A13-mic-assistant.md; dados: docs/evidence/a13-mic-assistant.json.
+- U1: escritas de preferência aceitas com reinício pendente; sensibilidade ao vivo reinicia só o worker entre sessões (verificado com o Core real).
+- U3: motivo sem conteúdo em `audio.live.last_error`; stderr em `live-last-error.txt` (0600), copiar em Diagnóstico › Desenvolvedor.
+- Ajuste com dado real: limiar de ruído grave 0,5 → 0,75 (fifine 0,34 a 0,50; webcam 0,88 a 0,98).
+- Pendência: regressão do laboratório caiu para 37/51 positivos (A7: 41 a 50); não investigada. Validação com voz e microfone do dono continua pendente.
+- Gates: fmt OK, clippy -D warnings OK, cargo test OK (498), test_bridge_protocol 243 OK, test_snapshot_contract 18 OK, test_ui_settings 25 OK, test_wake_live 5 OK, test_wake_worker 9 OK.
