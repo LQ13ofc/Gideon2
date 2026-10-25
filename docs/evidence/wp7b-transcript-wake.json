@@ -1,0 +1,11 @@
+{
+  "description": "Offline transcript-based wake on the WP-7 synthetic PT/FR utterances. Input: docs/evidence/wp7b-stt-hypotheses.json (Parakeet hypotheses of the 32 TTS clips, full utterance). Rule: a token whose accent-free form is within Levenshtein distance D of 'gideon' (length >= 4) counts as the wake name. Positives: the 14 references containing 'Gideon'. Negatives: the 18 without it.",
+  "method": "scratch script (not versioned): token fuzzy match over the stored hypotheses; no live audio",
+  "results": [
+    {"max_distance": 1, "positives_hit": 4, "positives": 14, "false_hits": 0, "negatives": 18},
+    {"max_distance": 2, "positives_hit": 7, "positives": 14, "false_hits": 0, "negatives": 18},
+    {"max_distance": 3, "positives_hit": 8, "positives": 14, "false_hits": 1, "negatives": 18, "false_hit_example": "fr09: 'aider' (Puis-je vous aider avec quelque chose aujourd'hui ?)"}
+  ],
+  "misses_at_distance_2": ["pt01 'Olá, deu.'", "pt02 'Oi, Dedon, que horas são?'", "pt03 'Lagdon, abra o navegador Brave.'", "pt04 'Deu. Aumente o volume.'", "pt05 'Deu. Desative o som.'", "pt16 'Pare a música agora.'", "fr16 'Dis donc, arrête la musique maintenant.'"],
+  "conclusion": "Best setting 7/14 (50%) with 0 false triggers; below the 80% bar. Not implemented as a live detector in WP-7b."
+}

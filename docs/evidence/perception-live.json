@@ -1,0 +1,136 @@
+{
+  "generated_by": "scripts/perception_live.py",
+  "counts": {
+    "pass": 8,
+    "fail": 0,
+    "blocked": 0
+  },
+  "checks": [
+    {
+      "name": "screen_capture",
+      "status": "pass",
+      "detail": {
+        "width": 1920,
+        "height": 1080,
+        "sha256": "d9f8126aeb7b1342ae574d1098ebad73f95a40c1eada69d97813bf8cbc3bf1d5",
+        "file_left_behind": false,
+        "image_kept": false,
+        "seconds": 0.42
+      }
+    },
+    {
+      "name": "camera_frame",
+      "status": "pass",
+      "detail": {
+        "refused_without_opt_in": true,
+        "width": 160,
+        "height": 120,
+        "mean_luma": 23,
+        "sha256": "7343ac13249ba597f2a9b271be28050b0136d5ece51b47d31eebb39657a8d01e",
+        "image_kept": false,
+        "opt_in_restored": true,
+        "seconds": 0.71
+      }
+    },
+    {
+      "name": "mic_gain_and_meter",
+      "status": "pass",
+      "detail": {
+        "gain_before": 100,
+        "gain_restored": 100,
+        "seconds": 2.49,
+        "rms": 11,
+        "peak": 41,
+        "audio_kept": false
+      }
+    },
+    {
+      "name": "display_scale_brightness",
+      "status": "pass",
+      "detail": {
+        "output": "DP-1",
+        "scale_before": 100,
+        "scale_after_restore": 100,
+        "brightness_before": 95,
+        "brightness_after_restore": 95,
+        "restored_changes": 2,
+        "seconds": 0.78
+      }
+    },
+    {
+      "name": "audio_stream_and_route",
+      "status": "pass",
+      "detail": {
+        "default_sink": 55,
+        "lab_stream": 124,
+        "app_volume": {
+          "set": 40,
+          "previous": 100,
+          "restored": 100
+        },
+        "route": {
+          "to_lab_sink": 118,
+          "restored_default": 55
+        },
+        "default_sink_after": 55,
+        "seconds": 1.26
+      }
+    },
+    {
+      "name": "shortcut_trigger",
+      "status": "pass",
+      "detail": {
+        "backend": "portal",
+        "trigger": "CTRL+ALT+G",
+        "component": "/component/com_anthropic_Claude",
+        "events_received": [
+          {
+            "id": "ptt_toggle",
+            "at_ms": 1792952132906
+          }
+        ],
+        "seconds": 1.71
+      }
+    },
+    {
+      "name": "shortcut_kglobalaccel_fallback",
+      "status": "pass",
+      "detail": {
+        "backend": "kglobalaccel",
+        "trigger": "CTRL+ALT+H",
+        "invoke_rc": 0,
+        "events_received": [
+          {
+            "id": "kga_live_probe",
+            "at_ms": 1792952134434
+          }
+        ],
+        "unregistered": true,
+        "seconds": 1.63
+      }
+    },
+    {
+      "name": "computer_tree_and_type",
+      "status": "pass",
+      "detail": {
+        "tree_elements": 3,
+        "typed": {
+          "backend": "remote_desktop",
+          "kind": "type",
+          "injected": 3,
+          "verified": true
+        },
+        "key": {
+          "backend": "remote_desktop",
+          "kind": "key",
+          "injected": 1,
+          "verified": false
+        },
+        "seconds": 5.73
+      }
+    }
+  ],
+  "worker_sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
+  "session": "wayland",
+  "desktop": "KDE"
+}

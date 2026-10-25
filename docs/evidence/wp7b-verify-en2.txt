@@ -1,0 +1,234 @@
+clip                                      expect    started  final  command           result 
+---------------------------------------------------------------------------------------------
+pos-hey_brave-af_bella-clean.wav          positive  True     True   command_success   PASS   
+pos-hey_plain-af_bella-clean.wav          positive  True     True   command_rejected  PASS   
+pos-hey_time-af_bella-clean.wav           positive  True     True   command_success   PASS   
+pos-hey_brave-am_michael-clean.wav        positive  True     True   command_success   PASS   
+pos-hey_plain-am_michael-clean.wav        positive  True     True   command_rejected  PASS   
+pos-hey_time-am_michael-clean.wav         positive  True     True   command_success   PASS   
+pos-hey_brave-bf_emma-clean.wav           positive  True     True   command_success   PASS   
+pos-hey_plain-bf_emma-clean.wav           positive  True     True   command_rejected  PASS   
+neg-babble-10s.wav                        negative  False    False  None              PASS   
+neg-gideon_alone-af_bella.wav             negative  False    False  None              PASS   
+neg-hey_giddy-af_bella.wav                negative  False    False  None              PASS   
+neg-hey_julian-af_bella.wav               negative  False    False  None              PASS   
+{
+  "install_root": "/home/lucas/GideonWp7",
+  "profile": "wp7en2",
+  "wake_sensitivity": 1.0,
+  "language": "en",
+  "rows": [
+    {
+      "clip": "pos-hey_brave-af_bella-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_success",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_partial",
+        "transcript_partial",
+        "transcript_final",
+        "command_authorized",
+        "command_success"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "pos-hey_plain-af_bella-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_rejected",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_final",
+        "command_rejected"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "pos-hey_time-af_bella-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_success",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_partial",
+        "transcript_final",
+        "command_authorized",
+        "command_success"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "pos-hey_brave-am_michael-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_success",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_final",
+        "command_authorized",
+        "command_success"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "pos-hey_plain-am_michael-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_rejected",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_final",
+        "command_rejected"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "pos-hey_time-am_michael-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_success",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_partial",
+        "transcript_final",
+        "command_authorized",
+        "command_success"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "pos-hey_brave-bf_emma-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_success",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_partial",
+        "transcript_final",
+        "command_authorized",
+        "command_success"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "pos-hey_plain-bf_emma-clean.wav",
+      "expected": "positive",
+      "session_started": true,
+      "transcript_final": true,
+      "command": "command_rejected",
+      "false_session": false,
+      "events": [
+        "session_started",
+        "transcript_partial",
+        "transcript_partial",
+        "capture_completed",
+        "transcript_final",
+        "command_rejected"
+      ],
+      "passed": true
+    },
+    {
+      "clip": "neg-babble-10s.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    },
+    {
+      "clip": "neg-gideon_alone-af_bella.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    },
+    {
+      "clip": "neg-hey_giddy-af_bella.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    },
+    {
+      "clip": "neg-hey_julian-af_bella.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    }
+  ],
+  "checks": {
+    "preferences_ok": true,
+    "live_preference_ok": true,
+    "stt_ready_at_end": true,
+    "live-last-error.txt_absent": true,
+    "stt-last-error.txt_absent": true,
+    "positives_pass": true,
+    "negatives_pass": true,
+    "lab_modules_unloaded": true
+  },
+  "lab_modules": [
+    "536870916",
+    "536870918"
+  ],
+  "stt_ready": true,
+  "final_stt_status": "ready",
+  "final_stt_last_error": null,
+  "lab_modules_left": 0,
+  "launcher_tail": "gideon-verify: OK 31053 entries, 3053272629 bytes regular files\ngideon-launch: core restarted on request\ngideon-verify: OK 31053 entries, 3053272629 bytes regular files\n",
+  "passed": true
+}
+EXIT 0

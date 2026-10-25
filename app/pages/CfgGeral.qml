@@ -20,6 +20,20 @@ PageFrame {
     // The name of the settings profile in use; the danger zone asks for it.
     readonly property string profileName: AppState.uiLive() ? String(ui.activeProfile) : "Padrão"
     readonly property bool safeMode: core.configurationStatus === "safe_mode"
+    // CFG-02: the speech languages the Core has installed (state bundled) and selectable, one entry per language with its first voice.
+    readonly property var speechOptions: {
+        var out = []
+        var items = core.languageTtsItems
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].selectable !== true) continue
+            out.push({value: items[i].id, label: items[i].label, voice: items[i].voices.length > 0 ? items[i].voices[0] : ""})
+        }
+        return out
+    }
+    readonly property int speechIndex: {
+        for (var i = 0; i < speechOptions.length; i++) if (speechOptions[i].value === core.languageTtsSelected) return i
+        return -1
+    }
 
     // Iniciar no login: what the file says now (read on page load and after each change).
     property var autostart: ({supported: false, reason: "configurações do app indisponíveis", enabled: false, exists: false, managed: false, path: ""})
@@ -168,15 +182,26 @@ PageFrame {
             label: "Idioma da interface"
             value: "Português (fixo)"
         }
+        // CFG-02: the interface stays in Portuguese (its translation is not built yet). The language the assistant speaks is a
+        // real Core choice (preferences via language_preference); only installed languages are offered.
         SettingRow {
-            label: "Outros idiomas"
-            help: "Reconhecimento e voz usam inglês, fixo no pacote."
-            disabledReason: "só o português existe na interface"
+            label: "Idioma da fala"
+            help: "Em que idioma o Gideon fala. A tradução da interface ainda não existe: ela continua em português. Vale no próximo início do Core."
+            disabledReason: page.speechOptions.length > 0 ? "" : "nenhum outro idioma de fala instalado"
             Select {
-                model: ["Português"]
-                enabled: false
+                id: speechBox
+                objectName: "speechLanguageSelect"
                 implicitWidth: 240
-                Accessible.name: "Outros idiomas (indisponível)"
+                textRole: "label"
+                model: page.speechOptions
+                enabled: page.speechOptions.length > 0 && core.preferencesAvailable
+                currentIndex: page.speechIndex
+                Accessible.name: "Idioma da fala: " + displayText
+                onActivated: function (index) {
+                    var item = page.speechOptions[index]
+                    core.setLanguages(JSON.stringify(core.languageSttSelected), item.value, item.voice)
+                    speechBox.currentIndex = Qt.binding(function () { return page.speechIndex })
+                }
             }
         }
         SettingRow {

@@ -1,0 +1,183 @@
+# Auditoria de lacunas — Gideon (base)
+
+Data: 2026-10-25. Escopo: auditoria somente leitura. Nenhum outro arquivo foi alterado.
+Repo: `/home/lucas/Documentos/Gideon/base`.
+
+## 1. Método e fontes
+
+- Repositório: `docs/PENDENCIAS_IMPLEMENTACAO.md`, `docs/UI_NOTION_REQS.md`, `docs/AGENT_STATE.md`,
+  `docs/HUMAN_VALIDATION.md`, `docs/ui-spec/*.md` (lidos por busca de marcadores `NOVO`, `Indisponível`,
+  `pendente`, `em desenvolvimento`, `UNSUPPORTED`, `requer prova`), `app/**/*.qml`, `app/bridge.py`,
+  `app/uisettings.py`, `src/*.rs` (ops `unsupported`, `real_backend_unsupported`, stubs), `scripts/*worker*.py`
+  e `scripts/make_c4_catalog.py`.
+- Cada linha abaixo foi conferida no código ou no documento citado. Onde o documento diz "faltando" e o código
+  já tem, a linha vira item DOCS (documentação desatualizada) e não lacuna de código.
+- Notion (lido por `notion-fetch` nesta sessão, com data da página): "S1 · Gideon Base", "S2 · Gideon App e Hub",
+  "S3 · Plugins e LLM Engine", "S4 · Skill Engine e compartilhamento", "S5 · Connections e integrações",
+  "13 · Interface, HUD e Design System", "Backlog — ideias não aprovadas". Lidos por trecho de busca (não integralmente):
+  "09 · Modelos LLM", "10 · Contexto pessoal, Memory, Habits e Soul", "11 · Skill Platform", "12 · Connections",
+  "16 · Automations", "17 · Quality Lab", "Decisões vigentes", "Política — Modelos LLM (somente plugin)".
+- Não lido integralmente: `docs/UI_INVENTORY.md` (780 linhas) e `docs/APP_DESCRICAO.md`. Só foram usados por busca de
+  marcadores; itens que dependam deles devem ser revalidados antes da implementação.
+
+## 2. Contagem por área
+
+| Área | Itens |
+|---|---|
+| PROD — áreas do Notion sem página/backend | 6 |
+| HUD — estados e superfícies do HUD | 3 |
+| CFG — Configurações desativadas ou incompletas | 7 |
+| DISP / PERC — dispositivos e percepção/ação | 8 |
+| CONN — Connections (conectores) | 6 |
+| EXT — Hub de plugins | 3 |
+| SKILL — Skills | 3 |
+| LLM — motor LLM | 3 |
+| VOZ — voz, wake, áudio e idiomas | 9 |
+| DIAG — diagnóstico | 5 |
+| OPS — ações do dono, sem código | 9 |
+| DOCS — documentação divergente do código | 4 |
+| **Total** | **66** |
+
+Legenda das colunas: "Dono/download" = precisa de decisão do dono ou de download/credencial que o agente não pode fazer.
+Tamanho: S (até ~0,5 dia de agente), M (1–2 dias), L (3+ dias ou depende de hardware/conta).
+
+## 3. Tabela de lacunas
+
+| id | area | what is missing | where (file:line) | source | owner decision or download | size |
+|---|---|---|---|---|---|---|
+| PROD-01 | PROD | **[WP-16 FEITO, docs/WP16.md]** Memória ligada ao Core (`src/memory.rs`, `personal` no Core, ponte `personalOp`) e à página Permissões › Memória (`app/pages/Memoria.qml`); testes de Core, ponte, QML e contrato real. Original: Área Memory (fatos, fontes, exclusão) inexistente: nenhuma página nem módulo de backend. | `app/Main.qml:40-66` (`pageDefs` sem memória); sem módulo em `src/` | N: 13 · Interface (lista de áreas); N: Backlog (sem encaixe no roteiro); N: Decisões vigentes | sim (escopo: entra no roteiro ou fica no backlog) | L |
+| PROD-02 | PROD | **[WP-16 FEITO, docs/WP16.md]** Almas ligadas ao Core (`src/souls.rs`) e à página Configurações › Almas (`app/pages/Almas.qml`); dica só ao plugin LLM, sem alegar mudança de identidade. Original: Área Souls (personalidade, modos, proveniência) inexistente. | `app/Main.qml:40-66`; sem backend em `src/` | N: 13 · Interface; N: Backlog | sim | L |
+| PROD-03 | PROD | **[WP-16 FEITO, docs/WP16.md]** Hábitos ligados ao Core (`src/habits.rs`, Skill fixada por versão) e à página Extensões › Hábitos (`app/pages/Habitos.qml`). Frase de disparo exata inicia o hábito pela trilha de voz (`dispatch_command`), com as mesmas verificações do motor (correspondência testada em unidade; ponta a ponta por voz não exercitada). Original: Área Habits (procedimentos aprendidos e revisão) inexistente. Habit só existe como Skill privada (N: S4). | `app/Main.qml:40-66`; sem backend | N: 13 · Interface; N: S4 (Conceitos: Habit); N: Backlog | sim | L |
+| PROD-04 | PROD | **[WP-16 FEITO, docs/WP16.md]** Automações ligadas ao Core (`src/automations.rs`, timer de 15 s em `transport.rs`) e à página Assistente › Automações (`app/pages/Automacoes.qml`); criação verificada com o Core real e exibida na página; pausa, execução agora e apagar cobertos por `tests/personal_areas.rs`; disparo do timer no tempo ainda não observado (ver WP16 §5). Original: Área Automations (rotinas e trabalhos agendados) inexistente. | `app/Main.qml:40-66`; sem agendador em `src/` | N: 13 · Interface; N: 16 · Automations (trecho); N: Decisões vigentes ("não posicionadas") | sim | L |
+| PROD-05 | PROD | **[WP-16 FEITO, docs/WP16.md]** Histórico em texto (`src/conversations.rs`) na página Assistente › Histórico (`app/pages/Conversas.qml`), com prazo de retenção, renomear, apagar e exportar. Original: Conversations com histórico: a página mostra só a sessão atual e a spec afirma "Sem histórico de conversas". Notion pede "diálogo e histórico". | `app/pages/Conversa.qml`; `docs/ui-spec/50-diagnostico.md:433` | N: 13 · Interface (Conversations); D: ui-spec/50 S19 | sim (privacidade vs histórico) | M |
+| PROD-06 | PROD | Devices não é área principal: só existe dentro de Configurações › Dispositivos. Notion 13 lista Devices como área própria; S2 pede Config/Voice/Devices. Divergência a decidir. | `app/Main.qml:59` (`cfg_dispositivos`) | N: 13 · Interface (Devices); N: S2 (Janela principal) | sim | S |
+| HUD-01 | HUD | **[WP3 FEITO]** Nove estados visuais do HUD (Idle, WakeDetected, Listening, Transcribing, Thinking, Acting, Speaking, Error, AwaitingConfirmation) em `app/components/Orb.qml` e `app/pages/InicioHoje.qml`, com transcrição, ferramenta em execução, progresso, recibo verificado e Cancelar; movimento reduzido respeitado. Evidência e comandos: docs/WP3.md. Original: Estados do HUD ausentes como estados visuais: faltam WakeDetected, Transcribing, Acting e AwaitingConfirmation como modos próprios. O Orb tem só 5 modos (idle, listening, thinking, speaking, error). Transcribing/executing são só texto em `hud`. | `app/components/Orb.qml:8` (comentário dos 5 modos) e `:11,28,48,60,66`; `app/pages/InicioHoje.qml:36-54` (mapeamento para texto) | N: 13 · Interface (Voice HUD nativo); N: S2 (Gate B1 "HUD Aura Idle/WakeDetected/Listening/Transcribing/Executing/Speaking/Error/Confirm") | não | M |
+| HUD-02 | HUD | **[WP3 FEITO]** Aviso "Microfone ativo" é texto visível no HUD sempre que o gravador do Core captura (`audio.live.mic_active`); teste com estado do Core em `scripts/test_hud_qml.py`. Limite: captura de microfone físico não foi testada aqui (docs/WP3.md). Original: Aviso visível de microfone ativo no HUD. Hoje o aviso só existe como `Accessible.description` (oculto) e como badge na página Percepção. | `app/pages/InicioHoje.qml:130`; `app/pages/Percepcao.qml:104-107` | N: 13 · Interface (aviso de microfone ativo); N: S2 (B1 HUD) | não | S |
+| HUD-03 | HUD | **[WP-16 PARCIAL, docs/WP16.md]** Ctrl+M agora pede `listen_start` ao Core: a recusa com motivo (`live_audio_disabled`, `capture_unavailable`, `stt_unavailable`, `busy`) é verificada com o Core real e chega como aviso. O caminho positivo (sessão real com microfone ao vivo) NÃO foi exercitado: exige microfone com consentimento ligado e o dono. Original: **[WP-4 NÃO FEITO]** Ctrl+M não inicia escuta: só encerra captura já em andamento e, sem captura, mostra "Microfone indisponível". Não há operação no Core para o cliente iniciar captura real (`VirtualWake` só existe com `--virtual-input`, teste). Spec B15 prevê ligar/desligar o microfone. | `app/Main.qml:180-188` (`toggleListening`) | D: PENDENCIAS B15; comentário em `app/Main.qml:180-181` | sim (exige operação no Core para iniciar captura pelo cliente) | M |
+| CFG-01 | CFG | **[WP-4 PARCIAL, docs/WP4.md]** Escolha de voz ligada ao Core (`language_preference`): lista só as vozes instaladas do idioma de fala. Hoje há uma só (Alba, inglês), então a lista tem uma opção. Outras vozes dependem de CFG-03. | `app/pages/CfgAudio.qml` (`voiceOptions`, `voiceSelect`) | D: PENDENCIAS; N: S2 (voz da Base) | sim (outras vozes exigem download aprovado) | L |
+| CFG-02 | CFG | **[WP-4 PARCIAL, docs/WP4.md]** "Idioma da fala" é escolha real do Core (`language_preference`), só com idiomas instalados (`speechLanguageSelect`). Interface continua em português: falta traduzir a interface inteira. | `app/pages/CfgGeral.qml` (`speechOptions`, `speechLanguageSelect`) | D: PENDENCIAS (decisão do dono); N: 13 · Interface (Settings: idioma) | sim (tradução da interface) | L |
+| CFG-03 | CFG | **[WP-16: NÃO FEITO, docs/WP16.md]** Não há idioma a instalar hoje: PT e FR já vêm no pacote (`bundled`), e o catálogo não tem entrada `available_not_installed`, então os botões Instalar não aparecem. O texto deixou de dizer "aguardando aprovação". Falta a operação `language_install` no Core (`src/languages.rs`, fora deste pacote) e a decisão do dono sobre idiomas extras. Original: **[WP-4 NÃO FEITO]** Botões "Instalar" de idiomas (STT, TTS) seguem desativados, com o motivo do Core. Falta a operação de instalação no Core (`src/languages.rs`, fora do pacote) e a aprovação do download pelo dono. | `app/pages/CfgIdiomas.qml:146-150` e `:186-190` (`enabled: false`); texto em `:198` | D: AGENT_STATE 2026-10-25 (Frente 2); D: docs/research/idiomas-stt-tts.md | sim (download aprovado pelo dono, com origem/tamanho/hash) | L |
+| CFG-04 | CFG | **[WP12 PARCIAL]** Core e ponte prontos (`history_retention`, purge de auditoria e linha do tempo; `docs/WP12.md`). [WP15] Expurgo de `skill-runs.json` pronto e testado (`src/skills.rs` `retain_runs`, `Engine::purge_runs`; `docs/WP15.md`), mas nada o chama: falta a chamada em `purge_history_now` (`src/core.rs`, fora do pacote). [WP-4 FEITO na tela, docs/WP4.md]: controle `historyRetentionSelect` em CfgPrivacidade (7 dias, 30 dias, 90 dias, não guardar) ligado a `setHistoryRetention`. Continua PARCIAL só pelo expurgo de `skill-runs.json`, que depende da chamada em `purge_history_now` (`src/core.rs`, fora do pacote). | `app/pages/CfgPrivacidade.qml` (`historyRetentionSelect`) | N: S2 (Gate B2 "privacy and data retention"); N: UI_NOTION_REQS (Preferências) | sim (política de retenção) | M |
+| CFG-05 | CFG | **[WP-4 FEITO, docs/WP4.md]** Botões "Salvar" e "Cancelar" removidos do cartão de prévia (`app/components/EPreviewCard.qml`): cada escolha de Aparência já é salva na hora, então a prévia não tem o que confirmar. | `app/components/EPreviewCard.qml`; `app/pages/CfgAparencia.qml` | D: docs/ui-spec/40 (Aparência) | não | S |
+| CFG-06 | CFG | **[WP12 FEITO]** `app/uisettings.py` (`NAV_ENTRIES`), testes em `scripts/test_ui_settings.py`. Busca de configurações não indexa a área Idiomas. | `app/uisettings.py` (catálogo de busca); referência em `docs/AGENT_STATE.md:74` | D: AGENT_STATE 2026-10-25 (Limites) | não | S |
+| CFG-07 | CFG | **[FEITO (WP-7b, docs/WP7b.md)]** Troca de idioma sem reiniciar o Core: `src/transport.rs` reinicia o worker STT quando a família de motor muda (Moonshine para Parakeet) e usa a voz nova no próximo trabalho de fala. Medido ao vivo nos dois sentidos de PT e FR: `language_hot_swap_ready` verdadeiro (`docs/evidence/wp7b-verify-pt.txt`, `docs/evidence/wp7b-verify-fr.txt`). Ponte (`app/bridge.py`, `restart_required`) ainda mostra o texto antigo: fora do pacote. | `src/transport.rs` (`engines_for`, bloco `lang_task`); `src/stt.rs` (`Pipe::reconfigure`); `src/languages.rs` (`install_tts`, `render_nemo_stt`) | docs/WP7b.md | sim (texto da ponte: `app/bridge.py`) | S |
+| DISP-01 | DISP | **[WP-12 PARCIAL, docs/WP12p.md]** Backend real FEITO e testado no PC (frame v4l2 real, opt-in, nada guardado: `scripts/perception_worker.py`, `scripts/perception_live.py`). Falta a ponte/UI: `CfgDispositivos` ainda mostra "simulada" até a integração de docs/WP12p.md. Original: Câmera apenas simulada; sem backend real. | `app/pages/CfgDispositivos.qml:434-438` ("Câmera: simulada", "Indisponível: sem câmera real") | N: 13 · Interface (Devices: câmera); D: HUMAN B5 | sim (webcam + portal/permissão do dono) | L |
+| DISP-02 | DISP | **[WP-12 PARCIAL, docs/WP12p.md]** Captura real FEITA e testada no PC (portal Screenshot, PNG hasheado e apagado; 1920x1080 verificado por inspeção visual). Falta a ponte/UI (integração em docs/WP12p.md). Original: Captura de tela apenas simulada; sem backend real (portal). | `app/pages/CfgDispositivos.qml:440-444` ("Indisponível: sem captura de tela real") | N: 13 · Interface (Devices: tela); D: HUMAN B2 (portais) | sim (portal + sessão Wayland real) | L |
+| PERC-01 | PERC | **[WP-12 PARCIAL, docs/WP12p.md]** Worker real FEITO e testado no PC (captura portal; `perception_live.py` `screen_capture` pass). Árvore/texto e ponte pendentes. Original: `screen_observe` sem backend real; só sintético. | `scripts/make_c4_catalog.py:35-36` (`screen_observe.capture`, `.status`); `app/bridge.py:704` (`PERCEPTION_PLUGINS`) | N: S3 (C4.1 screen.observe); D: HUMAN B5 | sim (portal de captura) | L |
+| PERC-02 | PERC | **[WP-12 PARCIAL, docs/WP12p.md]** Árvore AT-SPI e digitação/tecla por RemoteDesktop FEITAS e testadas no PC na janela de teste do próprio Gideon (texto `gid` verificado por leitura AT-SPI; `perception_live.py` `computer_tree_and_type` pass). Em tentativas anteriores o portal não respondeu ao consentimento (ver docs/WP12p.md). Clique por coordenada não existe (decisão da C4). Original: `computer_control` (mouse/teclado/janelas) sem backend real; exige libei/portal. | `scripts/make_c4_catalog.py:37-38` (`computer_control.act`) | N: S3 (C4.2); D: HUMAN B5 | sim (ambiente Wayland/libei) | L |
+| PERC-03 | PERC | **[WP-12 PARCIAL, docs/WP12p.md]** Volume por stream (wpctl) e rota padrão FEITOS e testados no PC com restauração exata; EQ e redução de ruído recusados como "não suportado" (sem backend: exigiria filter-chain, fora do escopo pedido). Original: `audio_advanced` (roteamento, EQ, volume por app) sem backend real. | `scripts/make_c4_catalog.py:39-40` | N: S3 (C4.3); D: HUMAN B5 | sim (PipeWire real) | L |
+| PERC-04 | PERC | **[WP-12 PARCIAL, docs/WP12p.md]** Ganho (wpctl) e medidor de microfone (pw-record, 10 s máximo, nada guardado) FEITOS e testados no PC. Monitoração recusada por design (realimentação nos alto-falantes): decisão do dono. Original: `mic_advanced` (processamento e monitoração) sem backend real. | `scripts/make_c4_catalog.py:41-43` | N: S3 (C4.4); D: HUMAN B5 | sim (microfone real) | M |
+| PERC-05 | PERC | **[WP-12 PARCIAL, docs/WP12p.md]** Opt-in e um quadro real da webcam FEITOS e testados no PC. Gestos recusados como "não suportado": não há modelo de gesto instalado (decisão do dono: instalar modelo). Original: `camera_gesture` (gestos com webcam) sem backend real. | `scripts/make_c4_catalog.py:44-46` | N: S3 (C4.5); D: HUMAN B5 | sim (webcam real) | L |
+| PERC-06 | PERC | **[WP-12 PARCIAL, docs/WP12p.md]** Escala e brilho reais FEITOS e testados no PC com restauração (kscreen-doctor); o catálogo deixou de ser UNSUPPORTED por inteiro. Falta a ponte/UI (cartão ainda diz UNSUPPORTED). Original: `display_manipulate` marcado UNSUPPORTED por inteiro (sem API de compositor). A regra de honestidade está correta; falta decisão de aceitar ou especificar plugin por desktop. | `app/components/CPerceptionCard.qml:49`; `scripts/make_c4_catalog.py:47-48` | N: S3 (C4.6 permite UNSUPPORTED); D: HUMAN B5 | sim (aceitar UNSUPPORTED ou abrir plugin específico) | S |
+| CONN-01 | CONN | Conector GitHub real inexistente: sem backend de produção, `real_backend_unsupported` e apenas o servidor falso. | `src/connections.rs:2599-2601`, `:2847-2849` (`fake_base` ausente), `:3378` | N: S5 (E2.1 GitHub); D: HUMAN B7 | sim (conta e OAuth do dono; consentimento explícito) | L |
+| CONN-02 | CONN | Conector Google real inexistente (Gmail, Calendar, Drive). Mesmo caminho de recusa. | `src/connections.rs:2599-2601`, `:2847-2849`, `:3378`; descriptor `google` em `:716` | N: S5 (E2.2 Google); D: HUMAN B7 | sim (conta e OAuth do dono) | L |
+| CONN-03 | CONN | Home Assistant real inexistente: só o servidor falso. | `src/connections.rs:2878` (`real_backend_unsupported`), `:3378`; `TOKEN_PROVIDERS` em `:661` | N: S5 (E2.3 Home Assistant); D: HUMAN B7 | sim (token e instância do dono) | M |
+| CONN-04 | CONN | Servidores MCP reais não conectam: produção recusa e o perfil real não existe. | `src/connections.rs:79`, `:2627-2630` (sem registro de fake), `:3426` (`mcp_profile()` → `real_backend_unsupported`); `src/mcp.rs:798` | N: S5 (E2.4 MCP); D: HUMAN A (E2.4) | sim (decisão de confiança por servidor) | M |
+| CONN-05 | CONN | Conectores E2.5 (SSH/infra, notas, Discord/mensagens) não implementados: busca por `ssh`, `discord` e `notes` em `src/connections.rs` não acha conectores. Notion marca como posteriores. | `src/connections.rs:710` e `:716` (descritores existentes: github, google) | N: S5 (E2.5 Posteriores) | sim (prioridade do dono) | L |
+| CONN-06 | CONN | Rota visual (fallback de clique) só para `create_issue`; Notion pede fallback visual apenas quando autorizado e documentado. Política a confirmar. | `src/connections.rs` (rota visual); `docs/HUMAN_VALIDATION.md` (E3) | N: S5 (E3 Escolha do melhor caminho); D: HUMAN E3 | sim (política de fallback visual) | S |
+| EXT-01 | EXT | FEITO no código (WP-5, docs/WP5.md): assinatura Ed25519 verificada contra chaves fixadas (`hub::pinned_publisher_keys`); `publisher_verified` é calculado e falha fechado. Ativação pendente: a lista de chaves está vazia até o dono fixar a chave pública. Antes: `publisher_verified` era sempre `false` no catálogo. Notion pede verificação de publisher (assinatura opcional, mas recomendada). | `src/hub.rs:239` e `:560` (`publisher_verified: false`); `app/bridge.py:2717` (texto "publisher não autenticado") | N: S2 (Gate B3 "signature opcional mas recomenda verificação de publisher"); D: HUMAN (B4/B9 e D4) | sim (chave/identidade de publisher) | M |
+| EXT-02 | EXT | Atualização do pacote sem interface: o update existe só no instalador (`gideon-install update`). | `docs/AGENT_STATE.md:7` ("package update has no UI"); `app/bridge.py` sem operação de update | D: AGENT_STATE (Limites); D: HUMAN B9 | não | M |
+| EXT-03 | EXT | PARCIAL (WP-5, docs/WP5.md; WP15, docs/WP15.md): canal de update do catálogo com verificação de assinatura, anti-downgrade, aplicar e reverter, testado em `src/hub.rs` (`check_update`, `apply_update`, `rollback_update`). Falta o carregamento do catálogo ativo no arranque (`src/transport.rs`), a operação/UI e a decisão do dono sobre a origem do download. Autostart já existe. Original: assinatura, canal de update e autostart do pacote adiados (decisão D4). Autostart existe (B2), mas falta canal/assinatura. | `docs/HUMAN_VALIDATION.md` (D4); `src/hub.rs` (sem assinatura) | D: HUMAN D4; D: PENDENCIAS B2 | sim | M |
+| SKILL-01 | SKILL | Criador de Skill por LLM não validado com LLM real: D3 roda com LLM roteirizado. A aba "Criar" é manual. | `app/pages/Skills.qml:83-84`, `:118` ("Criar"); `tests/skills_d3.rs`; `scripts/verify_*` (roteirizado) | N: S4 (D3 Criador automático por LLM); D: HUMAN "D3 LLM real NÃO gerou skill" | sim (LLM real ou local, chave/download) | M |
+| SKILL-02 | SKILL | FEITO no código (WP-5, docs/WP5.md): pacote `.gskill` com assinatura Ed25519 sobre `package_sha256`, verificada contra chaves fixadas; assinatura forjada ou malformada bloqueia a importação. Ativação pendente da chave do dono. Original: assinatura de publisher não implementada (campo `signature` nulo). | `src/skills.rs:3275` ("publisher signatures are not implemented"), `:3288` | N: S4 (D4 "optional publisher signature"); D: HUMAN B6 | sim (decisão de chave de publisher) | M |
+| SKILL-03 | SKILL | PARCIAL (WP-5, docs/WP5.md): formato de índice `skill-imports/index.json` (JSON com name, version, sha256, url, signature) definido, validado e verificado na importação. WP15: índice listado no snapshot (`skills.index`, sem operação nova), testado. Falta buscar `url`: o broker de rede (`src/broker.rs`, `scripts/net_broker.py`) só faz POST de chat com allowlist de provedores; exige rota GET, allowlist do GitHub e decisão do dono sobre a origem do índice. Falta a UI. Original: compartilhamento por repositório GitHub indexado pelo Hub não existia: a importação lê só `<data>/skill-imports/<name>.gskill` local. | `src/skills.rs:66` (`IMPORT_DIR`), `:3271-3272`, `:3327` | N: S4 (D4 "repositório GitHub indexado pelo Gideon Hub"); N: S2 (B3 catálogo) | sim (decisão de formato do índice) | M |
+| LLM-01 | LLM | Adaptador llama.cpp/GGUF ausente na certificação: só providers `local` e `ollama` (loopback). Binário e GGUF não baixados nem testados. | `src/llmcfg.rs:65-77` (providers suportados); `docs/HUMAN_VALIDATION.md` (B4) | N: S3 (C2 Locais candidatos: llama.cpp/GGUF); D: HUMAN B4 | sim (download autorizado do binário e de um GGUF pequeno, com origem, tamanho e hash) | M |
+| LLM-02 | LLM | Loop do agente com LLM real não validado: o C3 usa LLM roteirizado. Plugin LLM nunca recebe resultado de ferramenta. | `docs/HUMAN_VALIDATION.md` (C3: "LLM roteirizado"; limites C1); `docs/AGENT_STATE.md:7` | N: S3 (C3 Agent Runtime, Gate); D: HUMAN C3 | sim (chave ou modelo local) | M |
+| LLM-03 | LLM | Provedores remotos ao vivo bloqueados: OpenRouter 403, OpenCode 402, DeepSeek 402, ZenMux 403. Só Google e Mistral passaram. | `docs/AGENT_STATE.md:17`; `docs/HUMAN_VALIDATION.md` (A, C1/C2) | D: HUMAN A (C1/C2) | sim (saldo e chaves do dono) | S |
+| VOZ-01 | VOZ | **[WP7 NÃO FEITO: corpus não coletado nesta rodada]** Frase "Okay Gideon" falhou (FAILED) e segue sem qualidade aprovada; a UI bloqueia com "requer prova de conceito". | `app/bridge.py:1148` (`WAKE_QUALIFICATION_LABELS`); `docs/HUMAN_VALIDATION.md` (A1: `Okay: FAILED`) | N: S1 (A1 "Okay Gideon" candidata futura); D: HUMAN B1 | sim (corpus e decisão de qualidade) | L |
+| VOZ-02 | VOZ | Validação acústica do wake com microfone real inexistente (A8 inconclusivo, nenhum par caixa/microfone captou). | `docs/AGENT_STATE.md:77`; `docs/A8` (referenciado); `app/uisettings.py:113` ("Efeito acústico ainda não validado") | D: HUMAN B1 e Adendo (sensibilidade) | sim (voz e microfone do dono, consentimento) | M |
+| VOZ-03 | VOZ | **[WP7 NÃO FEITO: sem código nesta rodada; exige alto-falante e microfone reais]** Eco e barge-in (AEC e interrupção por voz) sem código: nenhuma ocorrência de AEC, barge-in ou cancelamento de eco em `src/`, `app/`, `scripts/*worker*`. | `src/live.rs`, `src/tts.rs`, `scripts/tts_worker.py` (sem AEC); `docs/HUMAN_VALIDATION.md` (B1 "Eco e barge-in") | N: S1 (A5 "fala cancelável"); D: HUMAN B1 | sim (hardware e alto-falante reais) | L |
+| VOZ-04 | VOZ | **[WP7 NÃO FEITO: sem código de recuperação nesta rodada]** Hotplug de microfone USB e troca de saída no PipeWire sem código de recuperação. | `src/live.rs`, `src/levels.rs` (sem tratamento de hotplug); `docs/HUMAN_VALIDATION.md` (B1 "Hotplug e PipeWire") | N: S2 (B4 perfis e áudio); D: HUMAN B1 | sim (dispositivo real) | L |
+| VOZ-05 | VOZ | **[WP-7b PARCIAL: seleção de PT/FR no Core, pacote com modelos verificados por hash, fala e transcrição ao vivo medidas; wake PT/FR NÃO FEITO (KWS 0 de 14; transcrição 7 de 14 offline, abaixo de 80%); ao vivo PT 0 de 7 e FR 0 de 7 positivos, negativos 7 de 7; docs/WP7b.md]** | `src/languages_catalog.json` (PT/FR `bundled`); `src/languages.rs`; `src/transport.rs`; `scripts/build_package.py`; `docs/evidence/wp7b-*` | docs/WP7b.md, docs/WP7.md | sim (decisão do dono sobre a rota do wake PT/FR) | L |
+| VOZ-06 | VOZ | Efeito acústico da sensibilidade do wake não validado. | `app/uisettings.py:113` ("Efeito acústico ainda não validado com microfone real"); `docs/PENDENCIAS_IMPLEMENTACAO.md` (A1) | D: HUMAN Adendo (Sensibilidade) | sim (teste com microfone do dono) | S |
+| VOZ-07 | VOZ | **[WP7 NÃO FEITO: depende de decisão do dono sobre a lista de apps]** Lista de apps abríveis fixa: só Brave, Steam e KCalc. Notion A4 fala em "abrir app por desktop ID". Ampliar exige decisão. | `src/host.rs:44-48` (`candidates`); `src/commands.rs:6` (`BRAVE`) e `:60-63` (`real_only`) | N: S1 (A4 "abrir app por desktop ID"); D: AGENT_STATE A11 | sim (lista de apps) | S |
+| VOZ-08 | VOZ | Ações reais não verificam janela: o Core confirma o processo e o volume, mas não a janela aberta. | `docs/AGENT_STATE.md` (A11: "Janela não é verificada pelo Core"); `src/host.rs` | D: AGENT_STATE A11 (Desvio) | não | M |
+| VOZ-09 | VOZ | **[WP7 NÃO FEITO: depende de decisão do dono sobre o runtime empacotado]** Worker de comandos e de MCP usa `/usr/bin/python3` do host; não entra no runtime empacotado. | `src/commands.rs:243`; `src/transport.rs:1147`; `src/mcp.rs:798` | D: HUMAN D5 | sim (decisão de runtime empacotado) | S |
+| DIAG-01 | DIAG | **[WP12 PARCIAL; WP-16: a ponte lê `pack_sha256` como `packHash`, a tela de Diagnóstico ainda não exibe]** Seis dos sete campos na ponte (`protocolVersion`, `catalogSha256`, `packEngines`, `packAudioInput/Output`, `lastSpeech`); [WP15] `packHash` calculado no Core em `src/pack.rs` e exposto como `pack_sha256` no snapshot (`docs/WP15.md`); falta a ponte ler esse campo como `packHash` (`app/bridge.py`, fora do pacote). Campos de diagnóstico descritos na spec, mas ausentes da ponte: `packHash`, `catalogSha256`, `packEngines`, `packAudioInput`, `packAudioOutput`, `lastSpeech`, `protocolVersion` (zero ocorrências em `app/bridge.py`). | `docs/ui-spec/50-diagnostico.md:553-572` (M21-M39) e `:853-862` (V01-V10) | D: ui-spec/50 (NOVO, precisa de ponte/Core) | não | M |
+| DIAG-02 | DIAG | **[WP-4 FEITO, docs/WP4.md]** `app/Main.qml` lê `core.developerMode` (`preferences.developer_mode` do Core). `behavior.devMode` virou chave do Core em `app/uisettings.py`, então Configurações, Estado e Desenvolvedor usam a mesma fonte. Verificado com Core real (página Desenvolvedor aberta com o modo ligado). | `app/Main.qml` (`diag_dev`), `app/uisettings.py` (`behavior.devMode`) | D: ui-spec/50 §8.2 (NOVO) | não | S |
+| DIAG-03 | DIAG | **[WP-4 FEITO, docs/WP4.md]** Linha "Resposta de reserva" (M27) em Diagnóstico › Motores lê `llmFallbackUsed` (evento `llm_fallback_used` do Core). Sem conteúdo da resposta. | `app/pages/DiagMotores.qml` (`fallbackUsedRow`) | D: ui-spec/50 (M27, M-NOVO-2) | não | S |
+| DIAG-04 | DIAG | **[WP12 FEITO]** `app/bridge.py` (`CODE_MESSAGES`), teste `Wp12Diagnostics`. Mensagens de código ausentes na ponte: `hub_storage_error` e `hub_import_timeout` (emitidos pelo Core em `src/hub.rs`, sem tradução em `app/bridge.py`). Os demais códigos da spec (handshake, plugin_start_failed, ledger_invalid) já aparecem na ponte. | `docs/ui-spec/50-diagnostico.md:175-202`; `app/bridge.py` (zero ocorrências dos dois códigos) | D: ui-spec/50 §3.3-3.6 (N11) | não | S |
+| DIAG-05 | DIAG | **[WP-4 FEITO, docs/WP4.md]** Estado › "Desempenho e recursos" mostra `coreLatency` e `diagResources` (CPU e memória do Core, dos auxiliares e da janela). Motores › "Latência da resposta em voz" mostra `speechLatency`. Verificado com Core real. | `app/pages/DiagEstado.qml` (`diagPerformance`), `app/pages/DiagMotores.qml` (`diagSpeechLatency`) | N: 13 · Interface (Diagnostics) | não | M |
+| OPS-01 | OPS | Revogar as chaves colocadas no chat (OpenCode, OpenRouter, Google, Mistral, ZenMux, DeepSeek). Ação só do dono, no painel de cada provedor. | `docs/HUMAN_VALIDATION.md` (C) | D: HUMAN C | sim (ação manual do dono) | S |
+| OPS-02 | OPS | Apagar arquivo temporário de chaves dos testes ao vivo (fora do repo), depois de revogar. | `docs/HUMAN_VALIDATION.md` (C, caminho em scratchpad) | D: HUMAN C | sim | S |
+| OPS-03 | OPS | Limpar o banco do claude-mem (pode conter prompts colados e chaves). Não exportar. | `docs/HUMAN_VALIDATION.md` (C) | D: HUMAN C | sim | S |
+| OPS-04 | OPS | Varredura de segredos no repo antes de qualquer commit ou push. Nenhum push autorizado. | `docs/HUMAN_VALIDATION.md` (C) | D: HUMAN C | sim (executar antes do commit) | S |
+| OPS-05 | OPS | Commit e identidade do pacote: E4 rodou com árvore suja (`package_dirty_flag: true`). Para release, commitar e reconstruir. | `docs/HUMAN_VALIDATION.md` (D2); `docs/AGENT_STATE.md:53` | D: HUMAN D2 | sim | S |
+| OPS-06 | OPS | Flatpak: escopo não decidido (portais de áudio/background, bwrap aninhado). | `docs/HUMAN_VALIDATION.md` (B3, D3) | D: HUMAN B3/D3 | sim | M |
+| OPS-07 | OPS | Validação em KDE Plasma Wayland real (UI, portais, teclado, tema, PT). Nunca executada. | `docs/HUMAN_VALIDATION.md` (B2) | D: HUMAN B2 | sim (sessão física do dono) | L |
+| OPS-08 | OPS | Instalação, update, rollback e recuperação em disco real (`kill -9` durante update, `repair`). Nunca executados fora do ambiente virtual. | `docs/HUMAN_VALIDATION.md` (B9) | D: HUMAN B9 | sim | M |
+| OPS-09 | OPS | Desempenho medido: ocioso 30 min (RSS e CPU reais) e jogo em tela cheia com wake ativo. Nunca medido. | `docs/HUMAN_VALIDATION.md` (B8) | D: HUMAN B8 | sim (máquina e sessão do dono) | M |
+| DOCS-01 | DOCS | Spec marca "restore_defaults" como NOVO (precisa de ponte/Core), mas a op existe no Core e na ponte. Atualizar spec. | `docs/ui-spec/40-configuracoes.md:690`; implementado em `src/protocol.rs:147,670,1268`, `src/storage.rs:822`, `app/bridge.py:1641` | D: ui-spec/40 (GE-13) | não | S |
+| DOCS-02 | DOCS | Spec afirma que não existe reinício do Core pela UI; o botão e a ponte existem. Atualizar spec. | `docs/ui-spec/50-diagnostico.md:750`; implementado em `app/pages/DiagRecuperacao.qml:58` (`restartCoreButton`), `app/bridge.py:481` | D: ui-spec/50 (R-R1) | não | S |
+| DOCS-03 | DOCS | Subtítulo diz "Dispositivos físicos ainda não existem", mas os dispositivos já são listados pelo Core (A4). Atualizar texto ou dados. | `docs/ui-spec/40-configuracoes.md:379`; `src/devices.rs` | D: ui-spec/40 (Dispositivos) | não | S |
+| DOCS-04 | DOCS | Decisão D1 de Home Assistant diz que `garage_door.*` NÃO é perigoso, mas o código já trata como perigoso. Confirmar com o dono e atualizar o documento. | `docs/HUMAN_VALIDATION.md:202` (D1); `src/connections.rs:678-679` (`garage_door` em `dangerous_service`) | D: HUMAN D1 | sim (confirmar a decisão) | S |
+
+## 4. Pacotes de implementação, em ordem
+
+A ordem respeita dependências. Dentro de uma fase, os pacotes usam arquivos disjuntos e podem rodar em paralelo.
+Respeitar a regra do projeto: no máximo 1 revisor e 1 corretor ao mesmo tempo; implementadores sem limite, cada um
+no seu pacote.
+
+### Fase 0 — decisões e downloads do dono (antes de qualquer código)
+
+Bloqueiam os pacotes marcados como "sim" na coluna do dono. Responder por escrito:
+
+- Escopo das áreas Notion: PROD-01 a PROD-04 (entrar no roteiro ou ficar no backlog), PROD-05 (histórico ou
+  privacidade), PROD-06 (Devices como área própria).
+- Privacidade: CFG-04 (política de retenção).
+- Idioma e voz: CFG-01, CFG-02, CFG-03 (download aprovado), VOZ-05 (download de modelos PT/FR).
+- Hub e Skills: EXT-01 e EXT-03 (chave de publisher), SKILL-02, SKILL-03 (formato do índice GitHub).
+- Conectores: CONN-01 a CONN-03 (contas e OAuth), CONN-04 (confiança MCP), CONN-05 (prioridade E2.5),
+  CONN-06 (fallback visual).
+- LLM: LLM-01 (download autorizado de llama.cpp e GGUF, com hash), LLM-02 e LLM-03 (chaves).
+- Áudio e comandos: VOZ-07 (lista de apps), VOZ-09 (runtime do worker), HUD-03 (semântica de Ctrl+M).
+- Percepção: PERC-06 (aceitar UNSUPPORTED de display ou abrir plugin específico).
+- Documentação: DOCS-04 (confirmar garage_door).
+
+### Fase 1 — pacotes independentes (arquivos disjuntos, paralelos)
+
+| Pacote | Arquivos que toca | Itens | Depende de |
+|---|---|---|---|
+| WP-1 Bridge e diagnóstico | `app/bridge.py`, `app/uisettings.py` | DIAG-01, DIAG-03, DIAG-04, DIAG-05 (dados), CFG-06, CFG-07 (texto) | nada |
+| WP-2 Core de preferências e diagnóstico | `src/storage.rs`, `src/protocol.rs`, `src/core.rs` | DIAG-02, CFG-04 (preferência de retenção no Core) | decisão CFG-04 |
+| WP-3 Superfície do HUD | `app/components/Orb.qml`, `app/pages/InicioHoje.qml` | HUD-01, HUD-02 | nada (usa estados que o Core já envia) |
+| WP-4 Configurações desativadas | `app/pages/CfgAudio.qml`, `app/pages/CfgGeral.qml`, `app/pages/CfgIdiomas.qml`, `app/pages/CfgPrivacidade.qml`, `app/pages/CfgAparencia.qml`, `app/components/EPreviewCard.qml` | CFG-01, CFG-02, CFG-03 (após download), CFG-04 (UI), CFG-05 | decisões da Fase 0; CFG-04 precisa de WP-1 e WP-2 |
+| WP-5 Hub e Skills, assinatura | `src/skills.rs`, `src/hub.rs` | EXT-01, EXT-03, SKILL-02, SKILL-03 | chave de publisher (Fase 0) |
+| WP-6 Adaptador LLM local | `src/llmcfg.rs`, `scripts/net_broker.py`, fixtures do plugin `llm_engine` | LLM-01 | download autorizado (Fase 0) |
+| WP-7 Áudio e wake | `src/live.rs`, `src/levels.rs`, `src/wake.rs`, `scripts/wake_worker.py`, `scripts/stt_worker.py`, `scripts/tts_worker.py` | VOZ-03, VOZ-04 (código), VOZ-01 (corpus), VOZ-05 (código dos idiomas) | downloads e corpus (Fase 0) |
+| WP-8 Documentação | `docs/ui-spec/*`, `docs/HUMAN_VALIDATION.md`, `docs/AGENT_STATE.md` | DOCS-01 a DOCS-04; atualizar a cada pacote | nada |
+| WP-9 Ações do dono (manual) | nenhum arquivo do repo | OPS-01 a OPS-09 | nada |
+
+### Fase 2 — pacotes com bloqueio externo ou mais longos
+
+| Pacote | Arquivos que toca | Itens | Bloqueio |
+|---|---|---|---|
+| WP-10 Áreas Notion | `app/Main.qml` (`pageDefs`, nav, Ctrl+M em `:180-188`), novos módulos em `src/` e `app/pages/` | PROD-01 a PROD-06, HUD-03 | decisão de escopo (Fase 0). Único dono de `app/Main.qml` |
+| WP-11 Conectores reais | `src/connections.rs` | CONN-01 a CONN-05 | contas e OAuth do dono (Fase 0); um agente por vez no arquivo |
+| WP-12 Percepção reais | `scripts/make_c4_catalog.py`, `app/pages/Percepcao.qml`, `app/components/CPerceptionCard.qml`, `app/pages/CfgDispositivos.qml` (DISP-01/02) | DISP-01, DISP-02, PERC-01 a PERC-05 | portais e hardware reais; hoje só sintético |
+| WP-13 Skills criadas por LLM | `src/skills.rs` (D3), `app/pages/Skills.qml` | SKILL-01 | LLM real (chave ou modelo local) |
+| WP-14 Validação humana | nenhum | VOZ-02, VOZ-06, VOZ-08, OPS-05 a OPS-09 | sessão física do dono |
+
+Conflitos a evitar: `app/bridge.py` e `src/core.rs` só podem ser editados por WP-1 e WP-2 respectivamente. `app/Main.qml`
+é exclusivo de WP-10, e `src/connections.rs` de WP-11. Os pacotes de UI que dependem de propriedade nova da ponte
+(CFG-04, DIAG) esperam WP-1.
+
+## 5. Itens não verificados nesta auditoria
+
+- `docs/UI_INVENTORY.md` e `docs/APP_DESCRICAO.md` foram lidos só por busca; itens específicos deles podem existir
+  fora desta lista.
+- Notion "09", "10", "11", "12", "16", "17" e "Política — Modelos LLM" foram lidos por trecho de busca, não integralmente.
+- `docs/ui-spec/*` tem cerca de 215 marcações NOVO. Foram conferidas por amostra (DIAG-01 a DIAG-04 e DOCS-01/02);
+  o restante não foi verificado item a item e pode conter itens já implementados.
+- Não foi executado nenhum gate, teste ou build. Esta auditoria é de leitura e busca de texto.
+- Não foi usado o grafo (`graphify`) nem rodado `scripts/graph.py`, porque a auditoria é somente de leitura.
+
+## 6. Resumo
+
+- 66 lacunas em 12 áreas (ver seção 2).
+- Lacunas de código reais e independentes de decisão: HUD-01, HUD-02, DIAG-01, DIAG-03, DIAG-04, DIAG-05, CFG-05, CFG-06,
+  VOZ-07 (código), EXT-02.
+- Bloqueadas por decisão ou download do dono: a maioria das áreas Notion, todos os conectores reais, percepção real,
+  LLM local e voz PT/FR.
+- Bloqueadas por hardware ou sessão física: VOZ-02, VOZ-03, VOZ-04, VOZ-06, VOZ-08, OPS-07 a OPS-09.
+- Divergências de documentação: DOCS-01 a DOCS-04 (quatro itens em que o texto afirma algo que o código já fez, ou o contrário).

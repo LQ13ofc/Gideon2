@@ -1,0 +1,50 @@
+{
+  "engine": "pocket-tts-3.3.0/french/cpu",
+  "language": "french",
+  "voice_name": "estelle",
+  "root": "/home/lucas/Documentos/Gideon/base/target/tts-fr-assets",
+  "config": "/home/lucas/Documentos/Gideon/base/target/tts-fr-assets/config.yaml",
+  "voice": "/home/lucas/Documentos/Gideon/base/target/tts-fr-assets/estelle.safetensors",
+  "artifacts": [
+    {
+      "name": "model.safetensors",
+      "sha256": "32e575398f06a5dbca16a7dfb8048e3cd3440502d80b07089adfb3318f79dec2",
+      "size": 219029196,
+      "source": "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/8843db76457a91db32077edf8dfcd1c0e3e755fd/languages/french/model.safetensors",
+      "upstream_sha256": "32e575398f06a5dbca16a7dfb8048e3cd3440502d80b07089adfb3318f79dec2",
+      "upstream_git_blob": null,
+      "revision": "8843db76457a91db32077edf8dfcd1c0e3e755fd",
+      "verified": "lfs_sha256"
+    },
+    {
+      "name": "tokenizer.json",
+      "sha256": "6211acffe9cb95172f71f0051f18e26ea305b2b32ea00b331ee976551c70887f",
+      "size": 246403,
+      "source": "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/8843db76457a91db32077edf8dfcd1c0e3e755fd/languages/french/tokenizer.json",
+      "upstream_sha256": null,
+      "upstream_git_blob": "1b1771e8304a781fef547c86026ad2528cd9ba30",
+      "revision": "8843db76457a91db32077edf8dfcd1c0e3e755fd",
+      "verified": "git_blob_id"
+    },
+    {
+      "name": "estelle.safetensors",
+      "sha256": "f763800c6865a7c13e3368db7c24345d7ab22abd06c2ca40a3428d14c5357248",
+      "size": 8259384,
+      "source": "https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/4e1e0a3e611c51c0b4ed8174fc10f32a54644303/languages/french/embeddings/estelle.safetensors",
+      "upstream_sha256": "f763800c6865a7c13e3368db7c24345d7ab22abd06c2ca40a3428d14c5357248",
+      "upstream_git_blob": null,
+      "revision": "4e1e0a3e611c51c0b4ed8174fc10f32a54644303",
+      "verified": "lfs_sha256"
+    },
+    {
+      "name": "config.yaml",
+      "sha256": "f2c95ad53a889c7c52a23d0b83430e47c1c0ea2c2c726a72f358d872dbc29415",
+      "source": "pocket-tts 3.3.0 bundled french.yaml; local-only paths"
+    }
+  ],
+  "license": {
+    "code": "MIT (pocket-tts)",
+    "weights": "cc-by-4.0 (cartao do modelo kyutai/pocket-tts)",
+    "voice_embedding": "NAO VERIFICADO: a licenca por voz do embedding predefinido nao consta do repositorio tts-voices"
+  }
+}

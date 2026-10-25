@@ -21,6 +21,7 @@ Rectangle {
     readonly property var caps: item ? item.capabilities : (entry ? entry.capabilities : [])
 
     signal reviewRequested(var plugin)
+    signal importRequested(var plugin)
     signal closeRequested()
 
     Layout.preferredWidth: 360
@@ -43,6 +44,7 @@ Rectangle {
     function runPrimary() {
         if (!panel.act.enabled) return
         if (panel.act.kind === "review") panel.reviewRequested({plugin_id: panel.pid, semver: panel.semver, publisher: panel.entry ? panel.entry.publisher : "", permissions: panel.entry ? panel.entry.permissions : [], manifest_sha256: panel.entry ? panel.entry.manifest_sha256 : ""})
+        else if (panel.act.kind === "import") panel.importRequested({plugin_id: panel.pid})
         else if (panel.act.kind === "install" && panel.entry) core.installHub(panel.entry.plugin_id, panel.entry.manifest_sha256)
         else if (panel.act.kind === "enable") core.enablePlugin(panel.pid)
         else if (panel.act.kind === "disable") core.disablePlugin(panel.pid)
@@ -85,7 +87,7 @@ Rectangle {
             }
         }
         Text {
-            text: "v" + panel.semver + " · publisher " + (panel.entry ? panel.entry.publisher : "—") + " · não verificado"
+            text: "v" + panel.semver + " · publisher " + (panel.entry ? panel.entry.publisher : "—") + (core.hubPublisherVerified ? " · verificado por assinatura" : " · não verificado")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -95,7 +97,7 @@ Rectangle {
         }
         Text {
             visible: panel.entry !== null
-            text: "Publisher: " + (panel.entry ? panel.entry.publisher : "") + " (não autenticado)"
+            text: "Publisher: " + (panel.entry ? panel.entry.publisher : "") + (core.hubPublisherVerified ? " (verificado por assinatura)" : " (não autenticado)")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily

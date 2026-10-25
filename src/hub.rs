@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{self, Read},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Component, Path, PathBuf},
 };
 
@@ -34,7 +34,7 @@ struct Manifest {
     build_source: String,
     support_policy: String,
     #[serde(default)]
-    signature: Option<String>,
+    signature: Option<PublisherSignature>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     runtime: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -84,6 +84,10 @@ pub struct Entry {
     pub capabilities: Vec<String>,
     pub status: &'static str,
     pub reason: &'static str,
+    /// True only when the publisher signature of this plugin verifies against a pinned key. Not
+    /// serialized yet: the bridge contract (ENTRY_KEYS) is exact; the aggregate flag is in Snapshot.
+    #[serde(skip)]
+    pub(crate) publisher_verified: bool,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
@@ -415,7 +419,13 @@ fn relative(s: &str) -> bool {
             .components()
             .all(|c| matches!(c, Component::Normal(_)))
 }
+/// Loads the catalog and checks publisher signatures against the pinned keys of this Core.
 pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
+    load_trusted(path, expected, &pinned_publisher_keys())
+}
+
+/// `load` with an explicit trust list (the pinned list in production; tests inject their own).
+pub fn load_trusted(path: &Path, expected: &str, trust: &[PublisherKey]) -> io::Result<Snapshot> {
     if !path.is_absolute() || !digest(expected) {
         return Err(fail());
     }
@@ -439,6 +449,7 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         return Err(fail());
     }
     let mut plugin_ids = HashSet::new();
+    let mut publisher_verified = Vec::with_capacity(catalog.plugins.len());
     for m in &catalog.plugins {
         if !crate::protocol::valid_id(&m.plugin_id)
             || !plugin_ids.insert(&m.plugin_id)
@@ -466,7 +477,6 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                 .collect::<HashSet<_>>()
                 .len()
                 != m.dependencies.len()
-            || m.signature.as_ref().is_some_and(|s| !text(s, 256))
             || !crate::plugins::valid_declaration(
                 &m.plugin_id,
                 m.runtime.as_deref(),
@@ -491,12 +501,18 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         if targets.len() != m.targets.len() {
             return Err(fail());
         }
+        // A forged or mismatched signature fails the whole catalog; an unknown key is simply unverified.
+        let message = manifest_signing_message(m).map_err(|_| fail())?;
+        let trust_state = publisher_trust(&message, m.signature.as_ref(), &m.publisher, trust)
+            .map_err(|_| fail())?;
+        publisher_verified.push(trust_state == Trust::Verified);
     }
     let target = format!("{}_{}", std::env::consts::OS, std::env::consts::ARCH);
-    let entries = catalog
+    let entries: Vec<Entry> = catalog
         .plugins
         .iter()
-        .map(|m| {
+        .zip(publisher_verified)
+        .map(|(m, verified)| {
             let reason = if m.api_version != 1 {
                 "api_version"
             } else if !m.targets.contains(&target) {
@@ -543,6 +559,7 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
                     "incompatible"
                 },
                 reason,
+                publisher_verified: verified,
             }
         })
         .collect();
@@ -557,9 +574,109 @@ pub fn load(path: &Path, expected: &str) -> io::Result<Snapshot> {
         orphans: 0,
         repository: Some(catalog.repository),
         catalog_sha256: Some(expected.to_owned()),
-        publisher_verified: false,
+        // Aggregate: every plugin of a non-empty catalog has a signature that verifies.
+        publisher_verified: !entries.is_empty() && entries.iter().all(|e| e.publisher_verified),
         entries,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Publisher signatures (Ed25519). The signed message is the lowercase hex SHA-256 of the signed
+// package hash as UTF-8 text: for a plugin manifest, the canonical JSON of the manifest with
+// `signature` set to null (keys sorted, compact, see `manifest_signing_message`); for a skill
+// package, its `package_sha256` (see skills.rs). A signature only counts when its key is pinned
+// with the same publisher name.
+// ---------------------------------------------------------------------------
+
+/// `{"key_id": "...", "algorithm": "ed25519", "signature": "<128 lowercase hex>"}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublisherSignature {
+    pub key_id: String,
+    pub algorithm: String,
+    pub signature: String,
+}
+
+/// A publisher public key this Core pins. `public_key_hex` is the 32-byte Ed25519 key (64 hex).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublisherKey {
+    pub key_id: String,
+    pub publisher: String,
+    pub public_key_hex: String,
+}
+
+/// Publisher keys pinned in this Core. Owner-managed: add the owner's public key here (never a
+/// private key). While the list is empty no publisher can verify, and every plugin reports
+/// `publisher_verified: false`.
+pub fn pinned_publisher_keys() -> Vec<PublisherKey> {
+    Vec::new()
+}
+
+/// Outcome of checking one signature against the pinned keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trust {
+    /// No signature was presented.
+    Unsigned,
+    /// Signed by a key that is not pinned: the signature proves nothing and the item stays unverified.
+    Unverified,
+    /// Signed by a pinned key of the same publisher, and the signature verifies.
+    Verified,
+}
+
+/// Canonical message of a manifest: SHA-256 of its compact JSON with sorted keys and `signature` null.
+fn manifest_signing_message(manifest: &Manifest) -> io::Result<String> {
+    let mut value = serde_json::to_value(manifest).map_err(io::Error::other)?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert("signature".to_owned(), serde_json::Value::Null);
+    }
+    let bytes = serde_json::to_vec(&value).map_err(io::Error::other)?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+/// Checks a signature over `message`. `Err` means the signature is present and must be refused:
+/// malformed, or made by a pinned key of this publisher but not valid (tampered).
+pub fn publisher_trust(
+    message: &str,
+    signature: Option<&PublisherSignature>,
+    publisher: &str,
+    trust: &[PublisherKey],
+) -> Result<Trust, &'static str> {
+    let Some(sig) = signature else {
+        return Ok(Trust::Unsigned);
+    };
+    if sig.algorithm != "ed25519"
+        || !crate::protocol::valid_id(&sig.key_id)
+        || sig.signature.len() != 128
+        || !sig
+            .signature
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("bad_signature");
+    }
+    let Some(key) = trust.iter().find(|k| k.key_id == sig.key_id) else {
+        return Ok(Trust::Unverified);
+    };
+    if key.publisher != publisher {
+        return Err("bad_signature");
+    }
+    let public = decode_hex(&key.public_key_hex).ok_or("bad_signature")?;
+    let signed = decode_hex(&sig.signature).ok_or("bad_signature")?;
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public)
+        .verify(message.as_bytes(), &signed)
+        .map_err(|_| "bad_signature")?;
+    Ok(Trust::Verified)
+}
+
+/// Lowercase or uppercase hex to bytes; `None` for odd length or any other character.
+pub fn decode_hex(text: &str) -> Option<Vec<u8>> {
+    if text.len() % 2 != 0 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    text.as_bytes()
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1399,6 +1516,223 @@ fn publish_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
 fn publish_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     std::fs::hard_link(source, destination)?;
     std::fs::remove_file(source)
+}
+
+// ---------------------------------------------------------------------------
+// EXT-03 (WP15): update channel for the Hub catalog. A candidate catalog is accepted only when it
+// loads with every plugin signed by a pinned key (fail closed), names the same repository, and never
+// lowers the semver of a plugin the active catalog already has. Accepted catalogs are kept by digest
+// in the update folder; `hub-update.json` names the active and the previous digest, and `rollback`
+// swaps them back. Every file is private and is written through a temporary name and a rename.
+// Nothing is downloaded here: the candidate is a file the owner places where the Core can read it.
+// ---------------------------------------------------------------------------
+
+const UPDATE_STATE_FILE: &str = "hub-update.json";
+const UPDATE_STATE_MAX: u64 = 4096;
+
+/// `hub-update.json`: digests of the active catalog and of the one it replaced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateState {
+    pub active: String,
+    pub previous: Option<String>,
+}
+
+/// One plugin that a candidate adds or moves to a newer semver.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginChange {
+    pub plugin_id: String,
+    pub from: Option<String>,
+    pub to: String,
+}
+
+/// What a candidate would change. Produced by `check_update`; nothing is written by a check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UpdateCheck {
+    pub candidate_sha256: String,
+    pub changes: Vec<PluginChange>,
+}
+
+fn update_file(digest: &str) -> String {
+    format!("catalog-{digest}.json")
+}
+
+fn digest_of(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn semver_parts(value: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = value.split('.').map(|p| p.parse::<u64>().ok());
+    let tuple = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(tuple)
+}
+
+/// Reads a regular file of at most `limit` bytes, never through a symlink.
+fn read_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() > limit {
+        return Err(fail());
+    }
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(limit + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(fail());
+    }
+    Ok(bytes)
+}
+
+/// Writes `bytes` as `dir/name` with mode 0600: a new temporary file, synced, then renamed over the name.
+fn write_private_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), &'static str> {
+    use std::io::Write as _;
+    let storage = || "update_storage_error";
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(|_| storage())?;
+    let temporary = dir.join(format!(".{name}.pending"));
+    let _ = fs::remove_file(&temporary);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&temporary)
+        .map_err(|_| storage())?;
+    file.write_all(bytes).map_err(|_| storage())?;
+    file.sync_all().map_err(|_| storage())?;
+    drop(file);
+    fs::rename(&temporary, dir.join(name)).map_err(|_| storage())
+}
+
+/// The update state of `dir`; `None` when no update was ever applied. A damaged state is refused.
+pub fn update_state(dir: &Path) -> Result<Option<UpdateState>, &'static str> {
+    let bytes = match read_bounded(&dir.join(UPDATE_STATE_FILE), UPDATE_STATE_MAX) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("update_storage_error"),
+    };
+    let state: UpdateState = serde_json::from_slice(&bytes).map_err(|_| "update_storage_error")?;
+    let previous_ok = state.previous.as_deref().is_none_or(digest);
+    if !digest(&state.active) || !previous_ok {
+        return Err("update_storage_error");
+    }
+    Ok(Some(state))
+}
+
+/// The active catalog file of an update folder and its digest, for the launcher or the Core to load.
+pub fn active_catalog(dir: &Path) -> Result<Option<(PathBuf, String)>, &'static str> {
+    Ok(update_state(dir)?.map(|s| (dir.join(update_file(&s.active)), s.active)))
+}
+
+/// Checks a candidate catalog against the active one (`current`, with its digest). Refusals are codes:
+/// `update_invalid` (malformed, tampered or forged), `update_unverified` (a plugin is unsigned or its key
+/// is not pinned), `update_repository` (another repository), `update_downgrade` (a plugin's semver would
+/// go down) and `update_unchanged` (the same bytes). Writes nothing.
+pub fn check_update(
+    current: &Path,
+    current_sha256: &str,
+    candidate: &Path,
+    trust: &[PublisherKey],
+) -> Result<UpdateCheck, &'static str> {
+    let bytes = read_bounded(candidate, MAX_CATALOG).map_err(|_| "update_invalid")?;
+    let candidate_sha256 = digest_of(&bytes);
+    let next = load_trusted(candidate, &candidate_sha256, trust).map_err(|_| "update_invalid")?;
+    let active =
+        load_trusted(current, current_sha256, trust).map_err(|_| "update_current_invalid")?;
+    if candidate_sha256 == current_sha256 {
+        return Err("update_unchanged");
+    }
+    if !next.publisher_verified {
+        return Err("update_unverified");
+    }
+    if next.repository != active.repository {
+        return Err("update_repository");
+    }
+    let mut changes = Vec::new();
+    for entry in &next.entries {
+        let before = active
+            .entries
+            .iter()
+            .find(|e| e.plugin_id == entry.plugin_id);
+        if let Some(old) = before {
+            if let (Some(old_v), Some(new_v)) =
+                (semver_parts(&old.semver), semver_parts(&entry.semver))
+            {
+                if new_v < old_v {
+                    return Err("update_downgrade");
+                }
+            }
+        }
+        let from = before.map(|e| e.semver.clone());
+        if from.as_deref() != Some(entry.semver.as_str()) {
+            changes.push(PluginChange {
+                plugin_id: entry.plugin_id.clone(),
+                from,
+                to: entry.semver.clone(),
+            });
+        }
+    }
+    Ok(UpdateCheck {
+        candidate_sha256,
+        changes,
+    })
+}
+
+/// Accepts a candidate after `check_update`: stores the candidate and the current catalog in `dir` by
+/// digest, re-verifies the candidate from disk, and only then records the new active and previous digests.
+pub fn apply_update(
+    dir: &Path,
+    current: &Path,
+    current_sha256: &str,
+    candidate: &Path,
+    trust: &[PublisherKey],
+) -> Result<UpdateState, &'static str> {
+    let check = check_update(current, current_sha256, candidate, trust)?;
+    let bytes = read_bounded(candidate, MAX_CATALOG).map_err(|_| "update_invalid")?;
+    if digest_of(&bytes) != check.candidate_sha256 {
+        return Err("update_invalid");
+    }
+    let current_bytes = read_bounded(current, MAX_CATALOG).map_err(|_| "update_current_invalid")?;
+    if digest_of(&current_bytes) != current_sha256 {
+        return Err("update_current_invalid");
+    }
+    write_private_atomic(dir, &update_file(&check.candidate_sha256), &bytes)?;
+    write_private_atomic(dir, &update_file(current_sha256), &current_bytes)?;
+    load_trusted(
+        &dir.join(update_file(&check.candidate_sha256)),
+        &check.candidate_sha256,
+        trust,
+    )
+    .map_err(|_| "update_storage_error")?;
+    let state = UpdateState {
+        active: check.candidate_sha256,
+        previous: Some(current_sha256.to_owned()),
+    };
+    let encoded = serde_json::to_vec(&state).map_err(|_| "update_storage_error")?;
+    write_private_atomic(dir, UPDATE_STATE_FILE, &encoded)?;
+    Ok(state)
+}
+
+/// Swaps the active and previous catalogs back. The previous catalog is re-verified from disk first.
+pub fn rollback_update(dir: &Path, trust: &[PublisherKey]) -> Result<UpdateState, &'static str> {
+    let state = update_state(dir)?.ok_or("update_no_previous")?;
+    let previous = state.previous.clone().ok_or("update_no_previous")?;
+    load_trusted(&dir.join(update_file(&previous)), &previous, trust)
+        .map_err(|_| "update_storage_error")?;
+    let next = UpdateState {
+        active: previous,
+        previous: Some(state.active),
+    };
+    let encoded = serde_json::to_vec(&next).map_err(|_| "update_storage_error")?;
+    write_private_atomic(dir, UPDATE_STATE_FILE, &encoded)?;
+    Ok(next)
 }
 
 #[cfg(test)]

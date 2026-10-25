@@ -131,7 +131,7 @@ Item {
         GCheckbox {
             id: reviewAck
             objectName: "permReviewAck"
-            text: "Entendo que o publisher não foi autenticado"
+            text: core.hubPublisherVerified ? "Entendo as permissões deste plugin" : "Entendo que o publisher não foi autenticado"
             enabled: core.hubApprovalAvailable
             Accessible.description: core.hubApprovalAvailable ? "" : host.pluginBlockedText()
             Layout.fillWidth: true

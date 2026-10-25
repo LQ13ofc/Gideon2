@@ -98,7 +98,7 @@ PageFrame {
         objectName: "languagesRestartNote"
         visible: page.restartNeeded
         Layout.fillWidth: true
-        text: "Idioma salvo. Reinicie o Core para aplicar."
+        text: "Idioma salvo. A troca vale na próxima fala, sem reiniciar o Core."
         wrapMode: Text.WordWrap
         color: Theme.warning
         font.family: Theme.fontFamily
@@ -195,7 +195,7 @@ PageFrame {
     Text {
         objectName: "installReasonText"
         Layout.fillWidth: true
-        text: core.languageInstallReason + ". Os idiomas que aparecem como não instalados ainda não têm arquivos neste pacote."
+        text: core.languageInstallReason + " Os idiomas incluídos já funcionam; os botões Instalar aparecem só para idiomas extras."
         wrapMode: Text.WordWrap
         color: Theme.textMuted
         font.family: Theme.fontFamily

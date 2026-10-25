@@ -1,0 +1,64 @@
+{
+ "floor": 0.8,
+ "positives": 13,
+ "negatives": 10,
+ "conditions": {
+  "clean": {
+   "hits": 11,
+   "false": 0,
+   "audio_s": 105.3
+  },
+  "mix-fifine-5dB": {
+   "hits": 6,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-fifine-10dB": {
+   "hits": 8,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-fifine-20dB": {
+   "hits": 10,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-webcam-5dB": {
+   "hits": 5,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-webcam-10dB": {
+   "hits": 7,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-webcam-20dB": {
+   "hits": 4,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-onboard-5dB": {
+   "hits": 7,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-onboard-10dB": {
+   "hits": 6,
+   "false": 0,
+   "audio_s": 127.3
+  },
+  "mix-onboard-20dB": {
+   "hits": 7,
+   "false": 0,
+   "audio_s": 127.3
+  }
+ },
+ "summary": {
+  "clean_hit_rate": 0.8462,
+  "mix_hit_rate": 0.5128,
+  "false_triggers_total": 0,
+  "floor_met": true,
+  "wall_s": 171.3
+ }
+}

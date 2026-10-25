@@ -30,6 +30,7 @@ ColumnLayout {
 
     signal selectRequested()
     signal reviewRequested(var plugin)
+    signal importRequested(var plugin)
     signal revokeRequested(var plugin)
     signal removeRequested(var plugin)
     signal clearDataRequested(var plugin)
@@ -155,6 +156,15 @@ ColumnLayout {
                 enabled: row.act.enabled
                 Accessible.name: "Revisar permissões de " + row.pid
                 onClicked: row.reviewRequested({plugin_id: row.pid, semver: row.semver, publisher: row.entry ? row.entry.publisher : "", permissions: row.entry ? row.entry.permissions : [], manifest_sha256: row.entry ? row.entry.manifest_sha256 : ""})
+            }
+            GButton {
+                objectName: "import_" + row.pid
+                visible: row.act.kind === "import"
+                text: row.act.text
+                variant: "secondary"
+                enabled: row.act.enabled
+                Accessible.name: "Importar o pacote de " + row.pid
+                onClicked: row.importRequested({plugin_id: row.pid})
             }
             GButton {
                 objectName: "install_" + row.pid

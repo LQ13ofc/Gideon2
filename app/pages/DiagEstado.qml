@@ -17,6 +17,9 @@ PageFrame {
 
     readonly property var pack: core.snapshotPack
     readonly property bool sessionActive: core.sessionId.length > 0
+    // DIAG-05 formatting: a missing sample reads as a dash, never as zero.
+    function cpuText(value) { return value === null || value === undefined ? "—" : Number(value).toFixed(1).replace(".", ",") + " %" }
+    function mbText(kb) { return Math.round(Number(kb || 0) / 1024) + " MB" }
     readonly property string configCode: core.connected ? core.configurationStatus : "offline"
 
     // Últimos erros (§5.6 R-S1): error events newest first, then plugins that failed, then voice engines that failed
@@ -212,6 +215,36 @@ PageFrame {
                 }
             }
             FNote { visible: page.sessionActive; small: true; text: "Preferências e modo desenvolvedor ficam bloqueados até a sessão terminar." }
+        }
+
+        // DIAG-05: the round trip of the bridge to the Core and the resources of the Core processes (Linux /proc, sampled each second).
+        Section {
+            objectName: "diagPerformance"
+            title: "Desempenho e recursos"
+            Layout.alignment: Qt.AlignTop
+            EValueRow {
+                objectName: "coreLatencyRow"
+                label: "Resposta do Core"
+                value: core.coreLatency.known ? (core.coreLatency.last_ms + " ms agora · média " + core.coreLatency.average_ms + " ms em " + core.coreLatency.samples + " pedidos") : "ainda sem medidas"
+            }
+            EValueRow {
+                objectName: "coreResourcesRow"
+                label: "Processo do Core"
+                value: core.diagResources.known ? (page.cpuText(core.diagResources.core_cpu_percent) + " de CPU · " + page.mbText(core.diagResources.core_rss_kb) + " de memória") : "indisponível neste sistema"
+            }
+            EValueRow {
+                label: "Processos auxiliares"
+                value: core.diagResources.workers_known === true
+                    ? (core.diagResources.workers_count + " processo(s) · " + page.cpuText(core.diagResources.workers_cpu_percent) + " de CPU · " + page.mbText(core.diagResources.workers_rss_kb) + " de memória")
+                    : "não medido"
+                advanced: true
+            }
+            EValueRow {
+                label: "Esta janela"
+                value: core.diagResources.known ? (page.cpuText(core.diagResources.bridge_cpu_percent) + " de CPU · " + page.mbText(core.diagResources.bridge_rss_kb) + " de memória") : "—"
+                advanced: true
+            }
+            FNote { small: true; text: "Medido a cada segundo. CPU é percentual de um núcleo; a primeira leitura ainda não tem CPU." }
         }
 
         Section {

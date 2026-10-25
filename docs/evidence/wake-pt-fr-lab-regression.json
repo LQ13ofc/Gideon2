@@ -1,0 +1,76 @@
+{
+ "floor": 0.8,
+ "positives": 14,
+ "negatives": 18,
+ "conditions": {
+  "clean": {
+   "hits": 11,
+   "false": 0,
+   "audio_s": 141.7
+  },
+  "mix-fifine-5dB": {
+   "hits": 6,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "mix-fifine-10dB": {
+   "hits": 9,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "mix-fifine-20dB": {
+   "hits": 9,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "mix-webcam-5dB": {
+   "hits": 6,
+   "false": 1,
+   "audio_s": 172.7
+  },
+  "mix-webcam-10dB": {
+   "hits": 9,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "mix-webcam-20dB": {
+   "hits": 6,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "mix-onboard-5dB": {
+   "hits": 7,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "mix-onboard-10dB": {
+   "hits": 8,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "mix-onboard-20dB": {
+   "hits": 8,
+   "false": 0,
+   "audio_s": 172.7
+  },
+  "noise-fifine": {
+   "false": 0,
+   "audio_s": 180.0
+  },
+  "noise-webcam": {
+   "false": 0,
+   "audio_s": 180.0
+  },
+  "noise-onboard": {
+   "false": 0,
+   "audio_s": 180.0
+  }
+ },
+ "summary": {
+  "clean_hit_rate": 0.7857,
+  "mix_hit_rate": 0.5397,
+  "false_triggers_total": 1,
+  "floor_met": false,
+  "wall_s": 230.4
+ }
+}

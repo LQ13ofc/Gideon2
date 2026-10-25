@@ -32,27 +32,88 @@ PageFrame {
     readonly property string inputProblem: input.text.length > 0 ? core.commandProblem(input.text) : ""
     readonly property bool canSend: textTypeable && input.text.trim().length > 0 && inputProblem.length === 0
 
-    // The state shown in words and by the orb. Order = the priorities of 10-assistente.md §2.2 (first true wins).
-    readonly property var hud: {
-        if (!core.connected) return {phrase: "Core desconectado", sub: "Tentando reconectar…", mode: "idle", tone: "muted", dim: true, badge: ""}
+    // WakeDetected: the Core's last wake detection (audio.live.last_detection, Core clock in ms) is younger than 2.5 s and
+    // no words of this session are on screen yet. `nowMs` is re-read 4 times a second while the Core captures.
+    property real nowMs: Date.now()
+    Timer {
+        interval: 250
+        repeat: true
+        running: core.state === "capturing"
+        triggeredOnStart: true
+        onTriggered: page.nowMs = Date.now()
+    }
+    readonly property var lastDetection: (core.audioLive && core.audioLive.last_detection) ? core.audioLive.last_detection : null
+    readonly property bool wakeFresh: lastDetection !== null && core.subtitle.length === 0
+        && lastDetection.at_ms > nowMs - 2500 && lastDetection.at_ms <= nowMs + 1000
+    // Acting: the agent step the Core marks as running (its tool name is the Core's own).
+    readonly property var runningStep: {
+        var steps = core.agentSteps
+        for (var i = steps.length - 1; i >= 0; i--) {
+            if (steps[i].state === "running" && steps[i].tool) return steps[i]
+        }
+        return null
+    }
+    // A command that finished without a verified receipt is an error until the next action (10-assistente.md §2.3).
+    readonly property bool commandFailed: core.result.length > 0 && !core.resultVerified
+
+    function hudOf(mode, phrase, sub, tone, opts) {
+        var o = opts || {}
+        return {mode: mode, phrase: phrase, sub: sub, tone: tone, dim: o.dim === true, cancel: o.cancel || "",
+                tool: o.tool || "", progress: o.progress === undefined ? -1 : o.progress, steps: o.steps || "",
+                transcript: o.transcript === true, receipt: o.receipt || null}
+    }
+    // The HUD in one value: a mode for the orb and the words of the state. Order = the priorities of 10-assistente.md §2.2
+    // with the nine Notion states (first true wins). Every field comes from a Core property; nothing is invented.
+    function describeHud() {
+        var budget = core.agentBudget || {}
+        var agentRun = core.agentActive
+        var progress = (agentRun && budget.max_steps > 0) ? Math.min(1, budget.steps / budget.max_steps) : -1
+        var steps = (agentRun && budget.max_steps > 0) ? "Passo " + budget.steps + " de " + budget.max_steps : ""
+        var step = page.runningStep
+        var toolName = step ? String(step.tool) : ""
+        var cancelAgent = agentRun ? "agent" : ""
+        if (!core.connected) return hudOf("idle", "Core desconectado", "Tentando reconectar…", "muted", {dim: true})
         var s = core.state
-        if (s === "safe_mode") return {phrase: "Modo seguro", sub: "Abra Diagnóstico › Recuperação para reparar.", mode: "error", tone: "warning", dim: false, badge: ""}
-        if (s === "restart_required") return {phrase: "Reinício necessário", sub: "Reinicie o Core para aplicar a alteração.", mode: "error", tone: "warning", dim: false, badge: ""}
-        if (s === "capturing") return {phrase: "Ouvindo…", sub: "Fale agora. Cancelar encerra a sessão.", mode: "listening", tone: "info", dim: false, badge: ""}
-        if (s === "transcribing") return {phrase: "Transcrevendo…", sub: core.subtitle.length > 0 ? core.subtitle : "Processando o que você disse.", mode: "listening", tone: "info", dim: false, badge: ""}
-        if (s === "executing") return {phrase: "Executando…", sub: core.agentState === "waiting_tool" ? "Ferramenta do agente em execução." : "Executando o comando.", mode: "thinking", tone: "info", dim: false, badge: ""}
-        if (s === "speaking") return {phrase: "Falando…", sub: "Resposta em voz alta. Cancelar interrompe.", mode: "speaking", tone: "info", dim: false, badge: ""}
-        if (s !== "idle") return {phrase: "Erro", sub: "Estado do Core não reconhecido.", mode: "error", tone: "error", dim: false, badge: ""}
+        if (s === "safe_mode") return hudOf("error", "Modo seguro", "Abra Diagnóstico › Recuperação para reparar.", "warning")
+        if (s === "restart_required") return hudOf("error", "Reinício necessário", "Reinicie o Core para aplicar a alteração.", "warning")
+        if (s === "capturing") {
+            if (page.wakeFresh) return hudOf("wake", "Gideon ativado", "Pode falar. Cancelar encerra a sessão.", "info", {cancel: "session"})
+            return hudOf("listening", "Ouvindo…", "Fale agora. Cancelar encerra a sessão.", "info", {cancel: "session", transcript: true})
+        }
+        if (s === "transcribing") return hudOf("transcribing", "Transcrevendo…", "Processando o que você disse.", "info", {cancel: "session", transcript: true})
+        if (s === "executing") return hudOf("acting", "Executando…", core.agentState === "waiting_tool" ? "Ferramenta do agente em execução." : "Executando o comando.", "info",
+                                            {cancel: "session", tool: toolName, progress: progress, steps: steps, transcript: true})
+        if (s === "speaking") return hudOf("speaking", "Falando…", "Resposta em voz alta. Cancelar interrompe.", "info", {cancel: "session", transcript: true})
+        if (s !== "idle") return hudOf("error", "Erro", "Estado do Core não reconhecido.", "error")
+        if (page.pending.length > 0 || core.agentState === "awaiting_approval") {
+            var asked = page.pending.length > 0 ? "Ferramenta " + (page.oldest.tool || "") + " precisa da sua decisão." : "O agente aguarda a sua decisão."
+            return hudOf("confirm", "Aguardando sua aprovação", asked, "warning", {cancel: cancelAgent})
+        }
+        if (core.agentState === "waiting_tool") return hudOf("acting", "Executando…", "Ferramenta do agente em execução.", "info",
+                                                              {cancel: cancelAgent, tool: toolName, progress: progress, steps: steps})
         if (core.chatState === "waiting" || core.chatState === "streaming" || core.agentState === "thinking") {
             var waiting = core.chatState === "waiting" ? "Aguardando o motor LLM." : core.chatState === "streaming" ? "Recebendo a resposta." : "O agente planeja o próximo passo."
-            return {phrase: "Pensando…", sub: waiting, mode: "thinking", tone: "info", dim: false, badge: ""}
+            return hudOf("thinking", "Pensando…", waiting, "info", {cancel: agentRun ? "agent" : "chat", progress: progress, steps: steps})
         }
-        if (page.pending.length > 0) return {phrase: "Aguardando sua aprovação", sub: "Ferramenta " + (page.oldest.tool || "") + " precisa da sua decisão.", mode: "idle", tone: "warning", dim: false, badge: ""}
-        if (core.chatState === "error") return {phrase: "Erro", sub: core.chatResult.length > 0 ? core.chatResult : "A última resposta falhou.", mode: "error", tone: "error", dim: false, badge: ""}
-        if (core.agentState === "failed" || core.agentState === "blocked") return {phrase: "Erro", sub: core.agentStateLabel, mode: "error", tone: "error", dim: false, badge: ""}
-        return {phrase: "Pronto para ouvir", sub: "Diga 'Hey Gideon' ou digite um comando.", mode: "idle", tone: "normal", dim: false, badge: ""}
+        if (core.chatState === "error") return hudOf("error", "Erro", core.chatResult.length > 0 ? core.chatResult : "A última resposta falhou.", "error",
+                                                    {receipt: {text: "Falhou", ok: false}})
+        if (core.agentState === "failed" || core.agentState === "blocked") return hudOf("error", "Erro", core.agentStateLabel, "error",
+                                                                                        {receipt: {text: "Falhou", ok: false}})
+        if (page.commandFailed) return hudOf("error", "Erro", core.result, "error", {receipt: {text: "Falhou", ok: false}})
+        var receipt = null
+        if (core.resultVerified) receipt = {text: "Concluído · " + core.result, ok: true}
+        else if (core.agentState === "done") receipt = {text: "Concluído", ok: true}
+        return hudOf("idle", "Pronto para ouvir", "Diga 'Hey Gideon' ou digite um comando.", "normal", {receipt: receipt})
     }
+    readonly property var hud: describeHud()
     readonly property color hudColor: hud.tone === "warning" ? Theme.warning : hud.tone === "error" ? Theme.error : hud.tone === "muted" ? Theme.textMuted : Theme.text
+
+    // The Cancel of the HUD: the one live thing the Core can stop in this state (voice session, chat reply or agent run).
+    function cancelActive() {
+        if (hud.cancel === "session") core.cancel()
+        else if (hud.cancel === "agent") core.agentAbort()
+        else if (hud.cancel === "chat") core.cancelChat()
+    }
 
     // Recent activity: the three newest rows of the timeline (same rules as Atividade, filter Tudo).
     readonly property var recent: A.eventRows(cachedEvents).slice(0, 3)
@@ -125,6 +186,7 @@ PageFrame {
         Orb {
             objectName: "hudOrb"
             mode: page.hud.mode
+            progress: page.hud.progress
             size: 72
             opacity: page.hud.dim ? 0.4 : 1
             Accessible.description: core.micActive ? "Microfone ativo" : ""
@@ -135,6 +197,14 @@ PageFrame {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: Theme.space(4)
+            // HUD-02: the microphone notice is visible text in every state while the Core's recorder is on (micActive).
+            Badge {
+                objectName: "hojeMicBadge"
+                visible: core.micActive
+                text: "Microfone ativo"
+                tone: "warning"
+                Accessible.name: "Aviso: microfone ativo"
+            }
             Text {
                 objectName: "heroPhrase"
                 text: page.hud.phrase
@@ -159,12 +229,84 @@ PageFrame {
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
-            // B16: the microphone badge follows the Core's live recorder (micActive), never the state name alone.
-            Badge {
-                objectName: "hojeMicBadge"
-                visible: core.micActive || page.hud.badge.length > 0
-                text: core.micActive ? "Microfone ativo" : page.hud.badge
-                tone: core.micActive ? "warning" : "info"
+            // The words of the session: what the Core heard (partial or final) while a voice session runs.
+            Text {
+                objectName: "hudTranscript"
+                visible: page.hud.transcript && core.subtitle.length > 0
+                text: (core.partial ? "Você (parcial): " : "Você: ") + core.subtitle
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontBody
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: core.partial ? "Transcrição parcial" : "Transcrição final"
+            }
+            // The running tool (Core agent step) and the run's progress (steps used of the Core's limit).
+            Text {
+                objectName: "hudTool"
+                visible: page.hud.tool.length > 0
+                text: "Ferramenta: " + page.hud.tool
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            RowLayout {
+                objectName: "hudProgress"
+                visible: page.hud.progress >= 0
+                Layout.fillWidth: true
+                spacing: Theme.space(10)
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 6
+                    radius: 3
+                    color: Theme.surfaceVariant
+                    Rectangle {
+                        objectName: "hudProgressFill"
+                        width: parent.width * Math.max(0, page.hud.progress)
+                        height: parent.height
+                        radius: 3
+                        color: Theme.accent
+                        Behavior on width {
+                            enabled: Theme.animDuration > 0
+                            NumberAnimation { duration: Theme.animDuration }
+                        }
+                    }
+                }
+                Text {
+                    objectName: "hudProgressText"
+                    text: page.hud.steps
+                    textFormat: Text.PlainText
+                    color: Theme.textMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontHelp
+                }
+            }
+            // Verified success or failure of the last action: the Core's receipt, never a guess.
+            Text {
+                objectName: "hudReceipt"
+                visible: page.hud.receipt !== null
+                text: page.hud.receipt ? page.hud.receipt.text : ""
+                textFormat: Text.PlainText
+                color: page.hud.receipt && page.hud.receipt.ok ? Theme.success : Theme.error
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                font.weight: 600
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: text
+            }
+            GButton {
+                objectName: "hudCancel"
+                visible: page.hud.cancel.length > 0
+                variant: "secondary"
+                text: "Cancelar"
+                Layout.alignment: Qt.AlignLeft
+                Accessible.name: "Cancelar"
+                onClicked: page.cancelActive()
             }
             // A6: while the Core does not listen to the microphone, one quiet line says how to turn it on.
             Text {

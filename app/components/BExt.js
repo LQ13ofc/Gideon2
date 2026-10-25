@@ -90,8 +90,11 @@ function primary(entry, item, ctx) {
             return {kind: "review", text: "Revisar permissões", variant: "secondary", enabled: ctx.hubApprovalAvailable, reason: ctx.hubApprovalAvailable ? "" : blocked}
         var staged = entry.payload_staged === true
         var canInstall = staged && ctx.hubLifecycleAvailable
+        // WP-4: a payload that is not staged yet is imported from a file the user picks (Core hub_begin/hub_chunk/hub_finish).
+        if (!staged) return {kind: "import", text: "Importar pacote…", variant: "secondary", enabled: ctx.hubImportPickable === true,
+            reason: ctx.hubImportPickable === true ? "" : blocked}
         return {kind: "install", text: "Instalar pacote verificado", variant: "primary", enabled: canInstall,
-            reason: !staged ? "Pacote não verificado em staging: importe pela linha de comando." : (canInstall ? "" : blocked)}
+            reason: canInstall ? "" : blocked}
     }
     if (isInstalled(entry, item)) {
         if (!entry) return {kind: "enable", text: "Ativar", variant: "primary", enabled: false, reason: "Indisponível: plugin fora do catálogo."}

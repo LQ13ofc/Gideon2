@@ -22,6 +22,8 @@ PageFrame {
     readonly property bool testing: testState.state === "running"
     property var pickedWeak: null
     property var pickedRemove: null
+    // Frase de despertar: a switch change waits for the confirmation below; {id, text, active} of the change asked.
+    property var pickedChange: null
 
     // B16 sensitivity (global): the saved value, or the value on its way to the Core while "Aplicando…" shows.
     readonly property real sensStored: Number(AppState.uiGet("core.wakeSensitivity", 1.0))
@@ -103,7 +105,9 @@ PageFrame {
                                     page.pickedWeak = row.modelData
                                     weakConfirm.open()
                                 } else {
-                                    core.setWakePhraseActive(id, checked, false)
+                                    // Every other change of the saved wake phrases is asked first: it takes effect after a Core restart.
+                                    page.pickedChange = {id: id, text: row.modelData.text, active: checked}
+                                    wakeChangeConfirm.open()
                                 }
                                 // The switch follows the Core snapshot, not the click: a refused change never sticks.
                                 checked = Qt.binding(function () { return row.modelData.active })
@@ -450,6 +454,47 @@ PageFrame {
             Layout.alignment: Qt.AlignRight
             enabled: core.wakePhraseCheck.ok === true && phraseField.text.trim().split(/\s+/).join(" ") === core.wakePhraseCheck.text && page.canEdit
             onClicked: { core.addWakePhrase(phraseField.text); addDialog.close() }
+        }
+    }
+
+    Modal {
+        id: wakeChangeConfirm
+        objectName: "wakeChangeConfirm"
+        title: page.pickedChange && page.pickedChange.active ? "Salvar a frase de despertar?" : "Desativar a frase de despertar?"
+        Text {
+            text: page.pickedChange
+                ? (page.pickedChange.active ? "A frase “" + page.pickedChange.text + "” fica salva para o próximo início do Core."
+                                             : "A frase “" + page.pickedChange.text + "” deixa de valer no próximo início do Core.")
+                  + " Até o reinício, o Gideon segue com a configuração atual."
+                : ""
+            textFormat: Text.PlainText
+            color: Theme.text
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontBody
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(10)
+            GButton {
+                objectName: "cancelWakeChange"
+                variant: "secondary"
+                text: "Cancelar"
+                Accessible.name: "Cancelar a troca da frase de despertar"
+                onClicked: wakeChangeConfirm.close()
+            }
+            Item { Layout.fillWidth: true }
+            GButton {
+                objectName: "confirmWakeChange"
+                variant: "primary"
+                text: page.pickedChange && page.pickedChange.active ? "Salvar frase" : "Desativar frase"
+                Accessible.name: "Confirmar a troca da frase de despertar"
+                onClicked: {
+                    core.setWakePhraseActive(page.pickedChange.id, page.pickedChange.active, false)
+                    wakeChangeConfirm.close()
+                }
+            }
         }
     }
 

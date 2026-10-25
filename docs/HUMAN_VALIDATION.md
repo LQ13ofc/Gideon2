@@ -199,7 +199,7 @@ depois que o adaptador real for implementado. O dono valida B1 só quando o adap
 
 ## D. Decisões do dono
 
-- [ ] **D1 — `garage_door.*` no Home Assistant**: deve ou não ser perigoso (exige confirmação forte)? Hoje NÃO é. A lista atual: `lock.unlock`, `lock.open`, `alarm_control_panel.*`, `cover.open_cover`, `cover.close_cover`.
+- [ ] **D1 — `garage_door.*` no Home Assistant**: deve continuar perigoso (exige confirmação forte, escopo `services.dangerous`)? O código JÁ trata `garage_door.*` como perigoso (`src/connections.rs:678-679`, função `dangerous_service`; teste `dangerous_services_are_destructive_and_need_their_scope` em `src/connections.rs:4475` com `("garage_door", "open")` em :4494). A lista atual no código: `lock.unlock`, `lock.open`, `cover.open_cover`, `cover.close_cover`, `alarm_control_panel.*` e `garage_door.*`. Decisão do dono pendente: manter (estado atual do código) ou remover `garage_door.*` da lista, ajustando o teste. Até a decisão, o código não muda. (Atualizado no WP8, DOCS-04; ver `docs/WP8.md`.)
 - [ ] **D2 — Commit e identidade do pacote**: o E4 foi executado com árvore não commitada (`package_dirty_flag: true`; ver `e4-integration.json`, campo `identity`). Para release, commitar e reconstruir, depois repetir o gate do pacote.
 - [ ] **D3 — Flatpak**: entra ou não no escopo (B3).
 - [ ] **D4 — Assinatura, canal de update e autostart** de pacote: adiados; decidir antes de distribuir.

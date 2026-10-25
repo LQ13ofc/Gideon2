@@ -1,6 +1,205 @@
 use gideon_base::hub;
+use ring::signature::{Ed25519KeyPair, KeyPair};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs, os::unix::fs::symlink};
+
+const PUBLISHER: &str = "Gideon local test fixture";
+
+fn key(seed: u8) -> Ed25519KeyPair {
+    Ed25519KeyPair::from_seed_unchecked(&[seed; 32]).unwrap()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+fn pinned(kp: &Ed25519KeyPair, key_id: &str, publisher: &str) -> hub::PublisherKey {
+    hub::PublisherKey {
+        key_id: key_id.to_owned(),
+        publisher: publisher.to_owned(),
+        public_key_hex: hex(kp.public_key().as_ref()),
+    }
+}
+
+/// The signing message, written from the spec: SHA-256 of the compact sorted-key JSON of the
+/// plugin with `signature` set to null.
+fn signing_message(plugin: &Value) -> String {
+    let mut unsigned = plugin.clone();
+    unsigned["signature"] = Value::Null;
+    format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&unsigned).unwrap())
+    )
+}
+
+/// Signs every plugin of the fixture with `kp` under `key_id`.
+fn sign_all(kp: &Ed25519KeyPair, key_id: &str) -> Value {
+    let mut source: Value = serde_json::from_str(FIXTURE).unwrap();
+    for index in 0..source["plugins"].as_array().unwrap().len() {
+        let message = signing_message(&source["plugins"][index]);
+        source["plugins"][index]["signature"] = json!({
+            "key_id": key_id,
+            "algorithm": "ed25519",
+            "signature": hex(kp.sign(message.as_bytes()).as_ref()),
+        });
+    }
+    source
+}
+
+fn load_trusted(bytes: &[u8], trust: &[hub::PublisherKey]) -> std::io::Result<hub::Snapshot> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("catalog.json");
+    fs::write(&path, bytes).unwrap();
+    hub::load_trusted(&path, &format!("{:x}", Sha256::digest(bytes)), trust)
+}
+
+#[test]
+fn no_key_is_pinned_until_the_owner_adds_one() {
+    assert!(hub::pinned_publisher_keys().is_empty());
+    let snap = load(FIXTURE.as_bytes()).unwrap();
+    assert!(!snap.publisher_verified);
+}
+
+#[test]
+fn every_plugin_signed_by_a_pinned_key_verifies_the_catalog() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", PUBLISHER)];
+    let bytes = serde_json::to_vec(&sign_all(&kp, "pub-1")).unwrap();
+    let snap = load_trusted(&bytes, &trust).unwrap();
+    assert_eq!(snap.status, "verified");
+    assert!(snap.publisher_verified);
+    // The aggregate is an AND: one unsigned plugin keeps the catalog unverified.
+    let mut partly: Value = serde_json::from_slice(&bytes).unwrap();
+    partly["plugins"][0]["signature"] = Value::Null;
+    let partly_bytes = serde_json::to_vec(&partly).unwrap();
+    assert!(
+        !load_trusted(&partly_bytes, &trust)
+            .unwrap()
+            .publisher_verified
+    );
+}
+
+#[test]
+fn unsigned_catalog_stays_unverified_and_loads() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", PUBLISHER)];
+    let snap = load_trusted(FIXTURE.as_bytes(), &trust).unwrap();
+    assert!(!snap.publisher_verified);
+    assert_eq!(snap.status, "verified");
+}
+
+#[test]
+fn signature_from_an_unpinned_key_is_unverified_not_trusted() {
+    let pinned_kp = key(7);
+    let other = key(9);
+    let trust = [pinned(&pinned_kp, "pub-1", PUBLISHER)];
+    // The key id is unknown to this Core: the signature proves nothing, the catalog still loads.
+    let stranger = sign_all(&other, "pub-unknown");
+    let snap = load_trusted(&serde_json::to_vec(&stranger).unwrap(), &trust).unwrap();
+    assert!(!snap.publisher_verified);
+}
+
+#[test]
+fn forged_signature_under_a_pinned_key_fails_the_whole_catalog() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", PUBLISHER)];
+    // Signed by a different private key but claiming the pinned key id.
+    let forged = sign_all(&key(9), "pub-1");
+    let bytes = serde_json::to_vec(&forged).unwrap();
+    assert!(load_trusted(&bytes, &trust).is_err());
+}
+
+#[test]
+fn tampered_manifest_after_signing_fails_the_catalog() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", PUBLISHER)];
+    let mut source = sign_all(&kp, "pub-1");
+    // The signed content changes; the signature is stale.
+    source["plugins"][0]["semver"] = json!("1.0.1");
+    assert!(load_trusted(&serde_json::to_vec(&source).unwrap(), &trust).is_err());
+}
+
+#[test]
+fn tampered_signature_bytes_fail_the_catalog() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", PUBLISHER)];
+    let mut source = sign_all(&kp, "pub-1");
+    let signature = source["plugins"][1]["signature"]["signature"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let flipped = format!(
+        "{}{}",
+        &signature[..127],
+        if signature.ends_with('0') { "1" } else { "0" }
+    );
+    source["plugins"][1]["signature"]["signature"] = json!(flipped);
+    assert!(load_trusted(&serde_json::to_vec(&source).unwrap(), &trust).is_err());
+}
+
+#[test]
+fn key_pinned_to_another_publisher_is_refused() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", "Someone else")];
+    let bytes = serde_json::to_vec(&sign_all(&kp, "pub-1")).unwrap();
+    assert!(load_trusted(&bytes, &trust).is_err());
+}
+
+#[test]
+fn malformed_signature_fields_fail_closed() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", PUBLISHER)];
+    let good = sign_all(&kp, "pub-1");
+    let mut wrong_algorithm = good.clone();
+    wrong_algorithm["plugins"][0]["signature"]["algorithm"] = json!("rsa");
+    let mut short = good.clone();
+    short["plugins"][0]["signature"]["signature"] = json!("abcd");
+    let mut extra = good.clone();
+    extra["plugins"][0]["signature"]["note"] = json!("x");
+    for source in [wrong_algorithm, short, extra] {
+        assert!(load_trusted(&serde_json::to_vec(&source).unwrap(), &trust).is_err());
+    }
+}
+
+#[test]
+fn publisher_trust_reports_each_state_directly() {
+    let kp = key(7);
+    let trust = [pinned(&kp, "pub-1", PUBLISHER)];
+    let message = "a".repeat(64);
+    let sig = hub::PublisherSignature {
+        key_id: "pub-1".to_owned(),
+        algorithm: "ed25519".to_owned(),
+        signature: hex(kp.sign(message.as_bytes()).as_ref()),
+    };
+    assert_eq!(
+        hub::publisher_trust(&message, None, PUBLISHER, &trust),
+        Ok(hub::Trust::Unsigned)
+    );
+    assert_eq!(
+        hub::publisher_trust(&message, Some(&sig), PUBLISHER, &trust),
+        Ok(hub::Trust::Verified)
+    );
+    assert_eq!(
+        hub::publisher_trust(&"b".repeat(64), Some(&sig), PUBLISHER, &trust),
+        Err("bad_signature")
+    );
+    let unknown = hub::PublisherSignature {
+        key_id: "nobody".to_owned(),
+        ..sig.clone()
+    };
+    assert_eq!(
+        hub::publisher_trust(&message, Some(&unknown), PUBLISHER, &trust),
+        Ok(hub::Trust::Unverified)
+    );
+    assert_eq!(hub::decode_hex("0g"), None);
+    assert_eq!(hub::decode_hex("0a1"), None);
+    assert_eq!(hub::decode_hex("0aFf"), Some(vec![0x0a, 0xff]));
+}
 const FIXTURE: &str = include_str!("fixtures/hub.json");
 fn load(bytes: &[u8]) -> std::io::Result<hub::Snapshot> {
     let dir = tempfile::tempdir().unwrap();
@@ -1031,4 +1230,289 @@ fn verification_cache_rehashes_same_size_same_mtime_replacement() {
     assert_eq!(fs::metadata(&file).unwrap().len(), bytes.len() as u64);
     let tampered = load(FIXTURE.as_bytes()).unwrap().with_approvals(&storage);
     assert_eq!(tampered.installed[0].state, "quarantined");
+}
+
+// ---------------------------------------------------------------------------
+// EXT-03 (WP15): update channel. Positive and negative cases; every refusal is a code.
+// ---------------------------------------------------------------------------
+
+fn sha_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn plugin0_id() -> String {
+    let source: Value = serde_json::from_str(FIXTURE).unwrap();
+    source["plugins"][0]["plugin_id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The fixture with `edit` applied, every plugin signed by `kp` under `key_id` (after the edit, so
+/// the signatures cover what is written).
+fn signed_catalog(kp: &Ed25519KeyPair, key_id: &str, edit: impl FnOnce(&mut Value)) -> Vec<u8> {
+    let mut source: Value = serde_json::from_str(FIXTURE).unwrap();
+    edit(&mut source);
+    for index in 0..source["plugins"].as_array().unwrap().len() {
+        let message = signing_message(&source["plugins"][index]);
+        source["plugins"][index]["signature"] = json!({
+            "key_id": key_id,
+            "algorithm": "ed25519",
+            "signature": hex(kp.sign(message.as_bytes()).as_ref()),
+        });
+    }
+    serde_json::to_vec(&source).unwrap()
+}
+
+fn set_semver(source: &mut Value, semver: &str) {
+    source["plugins"][0]["semver"] = json!(semver);
+}
+
+fn place_bytes(dir: &std::path::Path, name: &str, bytes: &[u8]) -> std::path::PathBuf {
+    let path = dir.join(name);
+    fs::write(&path, bytes).unwrap();
+    path
+}
+
+fn update_key() -> (Ed25519KeyPair, Vec<hub::PublisherKey>) {
+    let kp = key(7);
+    let trust = vec![pinned(&kp, "pub-1", PUBLISHER)];
+    (kp, trust)
+}
+
+#[test]
+fn update_check_apply_and_rollback_on_a_signed_catalog() {
+    let (kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = FIXTURE.as_bytes().to_vec();
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let current_sha = sha_hex(&current_bytes);
+    let candidate_bytes = signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.1.0"));
+    let candidate = place_bytes(dir.path(), "candidate.json", &candidate_bytes);
+
+    let check = hub::check_update(&current, &current_sha, &candidate, &trust).unwrap();
+    assert_eq!(check.candidate_sha256, sha_hex(&candidate_bytes));
+    assert_eq!(check.changes.len(), 1);
+    assert_eq!(check.changes[0].plugin_id, plugin0_id());
+    assert_eq!(check.changes[0].to, "1.1.0");
+
+    let store = dir.path().join("store");
+    let state = hub::apply_update(&store, &current, &current_sha, &candidate, &trust).unwrap();
+    assert_eq!(state.active, check.candidate_sha256);
+    assert_eq!(state.previous.as_deref(), Some(current_sha.as_str()));
+    let (active_path, active_sha) = hub::active_catalog(&store).unwrap().unwrap();
+    assert_eq!(active_sha, state.active);
+    let active = hub::load_trusted(&active_path, &active_sha, &trust).unwrap();
+    assert!(active.publisher_verified);
+    assert_eq!(active.entries[0].semver, "1.1.0");
+
+    // Rollback swaps the digests back and the previous bytes are the original catalog again.
+    let back = hub::rollback_update(&store, &trust).unwrap();
+    assert_eq!(back.active, current_sha);
+    assert_eq!(back.previous.as_deref(), Some(state.active.as_str()));
+    let (_, now) = hub::active_catalog(&store).unwrap().unwrap();
+    assert_eq!(now, current_sha);
+    assert_eq!(
+        fs::read(store.join(format!("catalog-{current_sha}.json"))).unwrap(),
+        current_bytes
+    );
+    // The state file is private (0600).
+    let mode = fs::metadata(store.join("hub-update.json"))
+        .unwrap()
+        .permissions();
+    assert_eq!(
+        std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn an_unsigned_candidate_is_refused_as_unverified_and_nothing_is_written() {
+    let (_kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = FIXTURE.as_bytes().to_vec();
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let mut unsigned: Value = serde_json::from_str(FIXTURE).unwrap();
+    set_semver(&mut unsigned, "1.1.0");
+    let candidate = place_bytes(
+        dir.path(),
+        "candidate.json",
+        &serde_json::to_vec(&unsigned).unwrap(),
+    );
+    let sha = sha_hex(&current_bytes);
+    assert_eq!(
+        hub::check_update(&current, &sha, &candidate, &trust).unwrap_err(),
+        "update_unverified"
+    );
+    let store = dir.path().join("store");
+    assert_eq!(
+        hub::apply_update(&store, &current, &sha, &candidate, &trust).unwrap_err(),
+        "update_unverified"
+    );
+    assert!(!store.join("hub-update.json").exists());
+}
+
+#[test]
+fn a_signature_under_an_unpinned_key_is_unverified_not_trusted() {
+    let (kp, _) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = FIXTURE.as_bytes().to_vec();
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let candidate = place_bytes(
+        dir.path(),
+        "candidate.json",
+        &signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.1.0")),
+    );
+    let sha = sha_hex(&current_bytes);
+    // Empty trust list: the key is not pinned, so the candidate loads but never counts as verified.
+    assert_eq!(
+        hub::check_update(&current, &sha, &candidate, &[]).unwrap_err(),
+        "update_unverified"
+    );
+}
+
+#[test]
+fn a_forged_candidate_is_refused_as_invalid() {
+    let (_kp, trust) = update_key();
+    let forger = key(9);
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = FIXTURE.as_bytes().to_vec();
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    // Signed by another key under the pinned key id: the whole catalog fails closed.
+    let candidate = place_bytes(
+        dir.path(),
+        "candidate.json",
+        &signed_catalog(&forger, "pub-1", |s| set_semver(s, "1.1.0")),
+    );
+    assert_eq!(
+        hub::check_update(&current, &sha_hex(&current_bytes), &candidate, &trust).unwrap_err(),
+        "update_invalid"
+    );
+}
+
+#[test]
+fn a_tampered_signed_candidate_is_refused_as_invalid() {
+    let (kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = FIXTURE.as_bytes().to_vec();
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let mut tampered: Value =
+        serde_json::from_slice(&signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.1.0"))).unwrap();
+    // A signed field changed after signing: the manifest no longer matches its signature.
+    tampered["plugins"][0]["license"] = json!("GPL-3.0-only");
+    let candidate = place_bytes(
+        dir.path(),
+        "candidate.json",
+        &serde_json::to_vec(&tampered).unwrap(),
+    );
+    assert_eq!(
+        hub::check_update(&current, &sha_hex(&current_bytes), &candidate, &trust).unwrap_err(),
+        "update_invalid"
+    );
+}
+
+#[test]
+fn a_candidate_that_lowers_a_plugin_version_is_refused_as_a_downgrade() {
+    let (kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.1.0"));
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let candidate = place_bytes(
+        dir.path(),
+        "candidate.json",
+        &signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.0.0")),
+    );
+    assert_eq!(
+        hub::check_update(&current, &sha_hex(&current_bytes), &candidate, &trust).unwrap_err(),
+        "update_downgrade"
+    );
+}
+
+#[test]
+fn the_same_bytes_are_unchanged_and_another_repository_is_refused() {
+    let (kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.1.0"));
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let sha = sha_hex(&current_bytes);
+    assert_eq!(
+        hub::check_update(&current, &sha, &current, &trust).unwrap_err(),
+        "update_unchanged"
+    );
+    let moved = place_bytes(
+        dir.path(),
+        "moved.json",
+        &signed_catalog(&kp, "pub-1", |s| {
+            set_semver(s, "1.2.0");
+            s["repository"] = json!("https://github.com/other-owner/other-repo");
+        }),
+    );
+    assert_eq!(
+        hub::check_update(&current, &sha, &moved, &trust).unwrap_err(),
+        "update_repository"
+    );
+}
+
+#[test]
+fn a_damaged_active_catalog_blocks_the_check() {
+    let (kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let mut current_bytes = FIXTURE.as_bytes().to_vec();
+    let recorded = sha_hex(&current_bytes);
+    current_bytes.push(b' ');
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let candidate = place_bytes(
+        dir.path(),
+        "candidate.json",
+        &signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.1.0")),
+    );
+    assert_eq!(
+        hub::check_update(&current, &recorded, &candidate, &trust).unwrap_err(),
+        "update_current_invalid"
+    );
+}
+
+#[test]
+fn rollback_without_an_applied_update_and_a_damaged_state_are_refused() {
+    let (_kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    assert_eq!(
+        hub::rollback_update(&store, &trust).unwrap_err(),
+        "update_no_previous"
+    );
+    assert!(hub::update_state(&store).unwrap().is_none());
+    fs::create_dir_all(&store).unwrap();
+    fs::write(store.join("hub-update.json"), br#"{"active":"nothex"}"#).unwrap();
+    assert_eq!(
+        hub::update_state(&store).unwrap_err(),
+        "update_storage_error"
+    );
+    assert_eq!(
+        hub::rollback_update(&store, &trust).unwrap_err(),
+        "update_storage_error"
+    );
+}
+
+#[test]
+fn rollback_reverifies_the_previous_catalog_before_switching() {
+    let (kp, trust) = update_key();
+    let dir = tempfile::tempdir().unwrap();
+    let current_bytes = FIXTURE.as_bytes().to_vec();
+    let current = place_bytes(dir.path(), "active.json", &current_bytes);
+    let current_sha = sha_hex(&current_bytes);
+    let candidate = place_bytes(
+        dir.path(),
+        "candidate.json",
+        &signed_catalog(&kp, "pub-1", |s| set_semver(s, "1.1.0")),
+    );
+    let store = dir.path().join("store");
+    let state = hub::apply_update(&store, &current, &current_sha, &candidate, &trust).unwrap();
+    // The stored previous catalog is damaged on disk: the rollback is refused and the state stays.
+    fs::write(store.join(format!("catalog-{current_sha}.json")), b"{}").unwrap();
+    assert_eq!(
+        hub::rollback_update(&store, &trust).unwrap_err(),
+        "update_storage_error"
+    );
+    assert_eq!(hub::update_state(&store).unwrap().unwrap(), state);
 }

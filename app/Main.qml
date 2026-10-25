@@ -43,22 +43,27 @@ ApplicationWindow {
     readonly property var pageDefs: [
         {id: "hoje", tab: "assistente", label: "Hoje"},
         {id: "conversa", tab: "assistente", label: "Conversa"},
+        {id: "conversas", tab: "assistente", label: "Histórico"},
         {id: "agente", tab: "assistente", label: "Agente"},
         {id: "atividade", tab: "assistente", label: "Atividade"},
+        {id: "automacoes", tab: "assistente", label: "Automações"},
         {id: "plugins", tab: "extensoes", label: "Plugins"},
         {id: "skills", tab: "extensoes", label: "Skills"},
+        {id: "habitos", tab: "extensoes", label: "Hábitos"},
         {id: "conexoes", tab: "extensoes", label: "Conexões"},
         {id: "modelos", tab: "extensoes", label: "Modelos LLM"},
         {id: "percepcao", tab: "extensoes", label: "Percepção e ação"},
         {id: "perm_visao", tab: "permissoes", label: "Visão geral"},
         {id: "perm_concessoes", tab: "permissoes", label: "Concessões"},
         {id: "perm_auditoria", tab: "permissoes", label: "Auditoria"},
+        {id: "memoria", tab: "permissoes", label: "Memória"},
         {id: "cfg_voz", tab: "configuracoes", label: "Voz e Wake"},
         {id: "cfg_idiomas", tab: "configuracoes", label: "Idiomas"},
         {id: "cfg_audio", tab: "configuracoes", label: "Áudio"},
         {id: "cfg_dispositivos", tab: "configuracoes", label: "Dispositivos"},
         {id: "cfg_aparencia", tab: "configuracoes", label: "Aparência"},
         {id: "cfg_privacidade", tab: "configuracoes", label: "Privacidade"},
+        {id: "almas", tab: "configuracoes", label: "Almas"},
         {id: "cfg_geral", tab: "configuracoes", label: "Geral"},
         {id: "diag_estado", tab: "diagnostico", label: "Estado"},
         {id: "diag_motores", tab: "diagnostico", label: "Motores"},
@@ -68,12 +73,15 @@ ApplicationWindow {
     // Conditional sub-tabs: a page is offered only when its plugin or mode is there (docs/UI_IA.md).
     readonly property var availability: ({
         hoje: true, atividade: true, plugins: true, perm_visao: true, perm_concessoes: true, perm_auditoria: true,
-        cfg_voz: true, cfg_audio: true, cfg_dispositivos: true, cfg_aparencia: true, cfg_privacidade: true, cfg_geral: true,
+        cfg_voz: true, cfg_idiomas: true, cfg_audio: true, cfg_dispositivos: true, cfg_aparencia: true, cfg_privacidade: true, cfg_geral: true,
         diag_estado: true, diag_motores: true, diag_recuperacao: true,
+        // WP-10a: the personal pages show "Indisponível" while the Core does not answer, so they need no plugin condition.
+        conversas: true, automacoes: true, habitos: true, memoria: true, almas: true,
         conversa: core.chatAvailable, agente: core.chatAvailable,
         skills: core.skillsAvailable, conexoes: core.connectionsAvailable,
         modelos: core.modelsAvailable || core.llmConfigAvailable, percepcao: core.perceptionAvailable,
-        diag_dev: Theme.devMode
+        // DIAG-02: the developer mode is the Core preference (preferences.developer_mode), not an app-side flag.
+        diag_dev: core.developerMode
     })
 
     function pageDef(id) { for (var i = 0; i < pageDefs.length; i++) if (pageDefs[i].id === id) return pageDefs[i]; return null }
@@ -177,15 +185,17 @@ ApplicationWindow {
     Shortcut { sequences: ["Ctrl+Tab"]; enabled: window.shortcutsEnabled; onActivated: window.cycleSub(1) }
     Shortcut { sequences: ["Ctrl+Shift+Tab"]; enabled: window.shortcutsEnabled; onActivated: window.cycleSub(-1) }
     Shortcut { sequences: ["Ctrl+K"]; enabled: window.shortcutsEnabled; onActivated: palette.open() }
-    // Ctrl+M: the Core has no way to start a capture from the app (its virtual wake is not offered to the client), so
-    // this ends a running capture and says so when there is none. Documented in docs/PENDENCIAS_IMPLEMENTACAO.md B15.
+    // Ctrl+M (HUD-03): starts a listening session through the Core (`listen_start`), or ends the running one. The Core
+    // refuses with a reason when live audio is off or the capture is not running; that reason comes back as a toast.
     Shortcut { sequences: ["Ctrl+M"]; enabled: window.shortcutsEnabled; onActivated: window.toggleListening() }
     function toggleListening() {
-        if (core.connected && core.state === "capturing" && core.sessionId.length > 0) {
+        if (core.connected && core.sessionId.length > 0) {
             core.cancel()
             AppState.toast("Escuta encerrada.")
+        } else if (core.connected) {
+            core.listenStart()
         } else {
-            AppState.toast("Microfone indisponível: sem entrada de áudio neste perfil")
+            AppState.toast("Core desconectado: nada pode ser iniciado agora")
         }
     }
     // Esc cancels a running capture. It is handled by the shell layout, which is the focus chain of the pages: when a
@@ -226,7 +236,8 @@ ApplicationWindow {
             orbOn: Theme.orbVisible && core.visualFeedback
             orbState: L.orbStateOf(core.connected ? core.state : "offline")
             micActive: core.micActive
-            cancellable: window.sessionCancellable
+            // On Hoje the voice session has its own Cancelar (InicioHoje), so the top bar one is held back there (no duplicate).
+            cancellable: window.sessionCancellable && window.pageId !== "hoje"
             onTabPicked: function (id) { window.pickTab(id) }
             onPaletteRequested: palette.open()
             onCancelRequested: core.cancel()
@@ -248,22 +259,27 @@ ApplicationWindow {
 
             InicioHoje {}
             Conversa {}
+            Conversas {}
             Agente {}
             Atividade {}
+            Automacoes {}
             Plugins {}
             Skills {}
+            Habitos {}
             Conexoes {}
             ModelosLlm { id: modelsPage }
             Percepcao {}
             PermVisao {}
             PermConcessoes {}
             PermAuditoria {}
+            Memoria {}
             CfgVoz {}
             CfgIdiomas {}
             CfgAudio {}
             CfgDispositivos {}
             CfgAparencia {}
             CfgPrivacidade {}
+            Almas {}
             CfgGeral {}
             DiagEstado {}
             DiagMotores {}

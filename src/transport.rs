@@ -453,6 +453,46 @@ fn pump_plugins(
         }
     }
 }
+/// WP-7b / CFG-07: the engines of a language selection. English keeps the packaged STT and speech profiles
+/// (`base_stt`, `base_tts`). Portuguese and French use the multilingual Parakeet transcriber (its own venv
+/// python, files read in place) and the Pocket pack for the chosen voice (copied and hash checked under `state`).
+/// Blocking file work: callers run it on a blocking thread.
+fn engines_for(
+    home: &std::path::Path,
+    state: &std::path::Path,
+    selection: &crate::languages::Selection,
+    base_stt: &Option<SttConfig>,
+    base_tts: &Option<std::path::PathBuf>,
+) -> io::Result<(Option<SttConfig>, Option<std::path::PathBuf>)> {
+    let stt = if crate::languages::needs_nemo_stt(&selection.stt) {
+        Some(SttConfig {
+            python: home.join("venvs/a1/bin/python"),
+            manifest: crate::languages::render_nemo_stt(home, state)?,
+        })
+    } else {
+        base_stt.clone()
+    };
+    let tts = if crate::languages::tts_pack(&selection.tts_language).is_some() {
+        Some(crate::languages::install_tts(
+            home,
+            state,
+            &selection.tts_language,
+        )?)
+    } else {
+        base_tts.clone()
+    };
+    Ok((stt, tts))
+}
+
+/// Engine name the worker reports in its `ready` reply (the manifest's `engine`).
+fn stt_engine_name(config: &SttConfig) -> io::Result<String> {
+    let profile: serde_json::Value = serde_json::from_slice(&fs::read(&config.manifest)?)?;
+    profile["engine"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| io::Error::other("STT engine missing"))
+}
+
 /// The STT worker failed (or its backlog overflowed): the session ends, the stderr tail goes to the 0600 diagnostics
 /// file, and a restart is booked while the budget lasts. Returns whether a restart was booked (`starting`); when it
 /// was not, the status is `failed` for the rest of the run.
@@ -629,6 +669,15 @@ pub async fn serve(
     let (live_events_tx, mut live_events_rx) = mpsc::unbounded_channel::<crate::live::LiveEvent>();
     let mut live_wiring: Option<LiveWiring> =
         live_audio.then(|| (live_settings_rx, live_events_tx.clone()));
+    // WP15 / EXT-03: an applied Hub update (hub-update.json next to the launcher catalog) replaces the
+    // launcher catalog. A damaged update state falls back to the launcher catalog, which stays pinned.
+    let hub_catalog = hub_catalog.map(|(path, digest)| {
+        let active = path.parent().map(crate::hub::active_catalog);
+        match active {
+            Some(Ok(Some(active))) => active,
+            _ => (path, digest),
+        }
+    });
     if let Some((path, digest)) = hub_catalog {
         core.configure_hub(
             crate::hub::load(&path, &digest)
@@ -673,7 +722,34 @@ pub async fn serve(
             stt_config = Some(config);
         }
     }
+    // WP-7b / CFG-07: the stored languages choose the engines at boot. English keeps the packaged ones.
+    let base_stt = stt_config.clone();
+    let base_tts = tts.as_ref().map(|c| c.manifest.clone());
+    let mut applied_sel = crate::languages::Selection::from_config(&storage.config);
+    let mut tts_manifest_active = base_tts.clone();
+    let mut boot_stt_failed = false;
+    if crate::languages::needs_nemo_stt(&applied_sel.stt)
+        || crate::languages::tts_pack(&applied_sel.tts_language).is_some()
+    {
+        match engines_for(home(), &storage.root, &applied_sel, &base_stt, &base_tts) {
+            Ok((stt_boot, tts_boot)) => {
+                if let Some(config) = stt_boot.as_ref() {
+                    core.configure_stt(stt_engine_name(config)?);
+                }
+                stt_config = stt_boot;
+                tts_manifest_active = tts_boot;
+            }
+            Err(_) => {
+                boot_stt_failed = crate::languages::needs_nemo_stt(&applied_sel.stt);
+                stt_config = None;
+                tts_manifest_active = None;
+            }
+        }
+    }
     let mut stt = crate::stt::Pipe::new(stt_config, live_audio);
+    if boot_stt_failed {
+        core.stt_failed_with("language_pack_unavailable");
+    }
     stt.start();
     let (wake_sender, mut wake_rx) = mpsc::channel(2);
     let mut wake_tx = Some(wake_sender);
@@ -771,6 +847,13 @@ pub async fn serve(
         u64,
         tokio::task::JoinHandle<io::Result<crate::tts::Summary>>,
     )> = None;
+    // WP-7b / CFG-07: engines for a changed language selection, built on a blocking thread (the first PT/FR
+    // use copies the speech pack into the Core state).
+    type Engines = (Option<SttConfig>, Option<PathBuf>);
+    let mut lang_task: Option<(
+        crate::languages::Selection,
+        tokio::task::JoinHandle<io::Result<Engines>>,
+    )> = None;
     // Synthetic wake measurement of one custom phrase (src/phrases.rs run_test); at most one at a time.
     let mut phrase_task: Option<(
         String,
@@ -806,6 +889,8 @@ pub async fn serve(
     let slots = Arc::new(Semaphore::new(8));
     let mut peers = JoinSet::new();
     let mut restart = false;
+    // WP-10a: due automations are checked every 15 s (the timer is created once, so the loop cannot starve it).
+    let mut personal_timer = tokio::time::interval(std::time::Duration::from_secs(15));
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
         let deadline = core.deadline();
@@ -819,6 +904,10 @@ pub async fn serve(
                 if crate::hub::expire_import(&mut storage, std::time::Instant::now()) { core.hub_import_expired(&storage); storage.audit(core.response(String::new(), "ok").sequence)?; }
             },
             _ = tokio::signal::ctrl_c() => break,
+            _ = personal_timer.tick() => {
+                core.personal_tick();
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
             _ = async { match deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => { core.expire(std::time::Instant::now()); storage.audit(core.response(String::new(), "ok").sequence)?; },
             result = async { (&mut command_task.as_mut().expect("active task").1).await }, if command_task.is_some() => {
                 let (job, _) = command_task.take().expect("active task");
@@ -855,6 +944,40 @@ pub async fn serve(
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             Some((id,samples))=speech_progress_rx.recv() => {core.speech_progress(id,samples);},
+            result = async { (&mut lang_task.as_mut().expect("active language change").1).await }, if lang_task.is_some() => {
+                let (selection, _) = lang_task.take().expect("active language change");
+                match result.ok().and_then(Result::ok) {
+                    Some((stt_next, tts_next)) => {
+                        // Parakeet and Moonshine are not interchangeable mid-stream: restart the worker only when the
+                        // engine family changes. Between voice sessions only (the swap is never started during one).
+                        if crate::languages::needs_nemo_stt(&applied_sel.stt)
+                            != crate::languages::needs_nemo_stt(&selection.stt)
+                        {
+                            match stt_next.as_ref().map(stt_engine_name).transpose() {
+                                Ok(engine) => {
+                                    stt.reconfigure(stt_next).await;
+                                    if let Some(engine) = engine {
+                                        core.configure_stt(engine);
+                                    }
+                                }
+                                Err(_) => core.stt_failed_with("language_pack_unavailable"),
+                            }
+                        }
+                        tts_manifest_active = tts_next;
+                    }
+                    None => {
+                        // Pack unavailable: the speech job of the new language fails with a fixed reason.
+                        tts_manifest_active = None;
+                        if crate::languages::needs_nemo_stt(&selection.stt) {
+                            stt.abort();
+                            core.stt_failed_with("language_pack_unavailable");
+                        }
+                    }
+                }
+                core.languages_applied(selection.clone());
+                applied_sel = selection;
+                storage.audit(core.response(String::new(), "ok").sequence)?;
+            },
             result = async { (&mut probe_task.as_mut().expect("active probe").1).await }, if probe_task.is_some() => {
                 let (id, _) = probe_task.take().expect("active probe");
                 // A task that ended without an outcome is reported as a recorder that gave no audio.
@@ -1039,20 +1162,49 @@ pub async fn serve(
                 phrase_task = Some((id, tokio::spawn(crate::phrases::run_test(job))));
             }
         }
+        // CFG-07: a changed language selection takes effect now, between voice sessions (a session is never cut).
+        // Nothing restarts the Core: the STT worker restarts with the new engine and the next speech job uses the
+        // new voice.
+        if lang_task.is_none() && !core.voice_active() {
+            let desired = crate::languages::Selection::from_config(&storage.config);
+            if desired != applied_sel {
+                let state_dir = storage.root.clone();
+                let (base_stt_now, base_tts_now) = (base_stt.clone(), base_tts.clone());
+                let target = desired.clone();
+                lang_task = Some((
+                    desired,
+                    tokio::task::spawn_blocking(move || {
+                        engines_for(home(), &state_dir, &target, &base_stt_now, &base_tts_now)
+                    }),
+                ));
+            }
+        }
         if let Some(job) = core.take_speech_job() {
-            let config = tts.as_ref().expect("configured TTS").clone();
             let playback = live_audio.then(|| crate::live::Playback {
                 device: storage.config.audio_output_device.clone(),
                 events: live_events_tx.clone(),
             });
+            // The voice of the applied language; a pack that is not installed fails the job (never another voice).
+            let engine = tts
+                .as_ref()
+                .map(|base| (base.python.clone(), tts_manifest_active.clone()));
+            let progress = speech_progress.clone();
             speech_task = Some((
                 job.session_id,
-                tokio::spawn(crate::tts::speak(
-                    config,
-                    job,
-                    speech_progress.clone(),
-                    playback,
-                )),
+                tokio::spawn(async move {
+                    match engine {
+                        Some((python, Some(manifest))) => {
+                            crate::tts::speak(
+                                crate::tts::Config { python, manifest },
+                                job,
+                                progress,
+                                playback,
+                            )
+                            .await
+                        }
+                        _ => Err(io::Error::other("tts_pack_unavailable")),
+                    }
+                }),
             ));
         }
         // A5: a changed device or sensitivity reaches the live input only between voice sessions. A13: and only

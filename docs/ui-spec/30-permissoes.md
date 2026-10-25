@@ -29,7 +29,7 @@ Decisões tomadas nesta spec (cada uma tem motivo; o dono pode mudar):
 |---|---|---|
 | D1 | Aprovação de plugin é por **manifesto**, não por permissão: aprovar ou revogar vale para todas as permissões do plugin de uma vez. | É assim no Core (`hub::approve` e `hub::revoke_approval` em `src/hub.rs`, e `permissions_approved` por entrada). Uma linha por plugin, com as permissões listadas juntas. |
 | D2 | O estado **"Revogada"** do IA não existe no snapshot. Depois de revogar, o plugin volta a **"Não aprovada"**. "Revogada" só aparece na Auditoria (evento `plugin_revoked`). | `permissions_approved` é só booleano. Revogada não se distingue de nunca aprovada. Contar revogadas exige NOVO (§11). |
-| D3 | "Concedido recentemente" vira **"Concessões ativas"** até existir a data de concessão (NOVO §11.3). Sem data, a ordem é a do Core. | Nenhum campo de data existe em `hub.entries`, em `connections` nem nos eventos. |
+| D3 | "Concedido recentemente" vira **"Concessões ativas"** até existir a data de concessão (NOVO §11.3). Sem data, a ordem é a do Core. | Obsoleto (WP8): a data de aprovação de plugin existe (`approved_at_ms` em `hub.entries`, `src/hub.rs`, usada em `app/shell/PermRows.js`) e a de conta existe (`granted_at_ms` em `connections`, usada em `CAccountCard.qml`). Falta só a data de revogação (`revoked_at`), que não existe no Core. |
 | D4 | O contador de pendências conta **só** plugins instalados (ou com atualização) sem aprovação, contas com escopo aguardando consentimento e ferramentas MCP que precisam de confiança. Plugins não instalados e skills ficam de fora. | Plugin não instalado não bloqueia nada. Skill pendente depende do plugin dono: contar os dois duplicaria a mesma decisão (ver §8). |
 | D5 | Propostas de ação do Assistente e do agente **não** entram no contador. | São decididas no Assistente (`UI_IA` §1.1 e §1.3), por ação, na hora. Contar aqui acenderia o badge em toda conversa. |
 | D6 | Na Auditoria, eventos de propostas, passos e agente entram no filtro **Comando** (como ações pedidas por você). | O filtro da IA tem quatro origens: Plugin · Skill · Conexão · Comando. Não há quinta. |
@@ -531,7 +531,7 @@ Skill **não tem botão de revogar**: a permissão de skill vem do plugin dono (
 | Estado | `Concedido` (Sucesso) · `Aguardando consentimento` (Aviso) · `Não concedido` (Neutro, quando o escopo não está em nenhum dos dois). Linha 2 (12 px): status da conta (§6.5.1) |
 | Ação | `Concedido` → `Revogar conta` (D-P4). `Aguardando consentimento` → `Consentir` (D-P3). `Não concedido` → sem ação |
 
-Revogar conta é **por conta**, não por escopo: o Core não tem revogação por escopo (NOVO §11.7). Por isso o botão aparece em todas as linhas concedidas da conta; D-P4 lista todos os escopos que serão retirados.
+Revogar conta é **por conta**, não por escopo: o Core tem revogação por escopo desde o WP8 (§11.7 implementado: `connection_revoke_scope`), mas esta spec mantém "Revogar conta" como ação principal. Por isso o botão aparece em todas as linhas concedidas da conta; D-P4 lista todos os escopos que serão retirados.
 
 **D. Ferramenta MCP** (origem `Conexão`). Uma linha por ferramenta em `needs_reapproval` **e** por ferramenta `trusted` (para visibilidade).
 
@@ -831,6 +831,8 @@ Regras da casca (`docs/ui-spec/00-casca.md`) valem: foco visível com anel de 2 
 ---
 
 ## 11. Itens NOVO (precisa de mudança na ponte ou no Core) e (UI)
+
+**Status verificado no WP8 (`docs/WP8.md`), por item:** 11.1 implementado (`events`); 11.2 implementado com outro nome (`at_ms`, Unix ms, não `at` ISO); 11.3 parcial (datas de aprovação e de concessão existem; `revoked_at` não); 11.4 parcial (`permissions_ok`/`missing` existem; lista `capabilities[]` e contagem não); 11.5 parcial (`outcome` existe no evento, mas o resultado de `connection_call`/`tool_*` nem sempre aparece); 11.6 não implementado (não há caminho do log na ponte; `coreRootPath` é só a pasta); 11.7 implementado (`connection_revoke_scope`, `connectionRevokeScope`, `DPermDialogs.qml`); 11.8 implementado com outro texto (`app/components/BExt.js`); 11.9 não implementado (`display_manipulate` não existe em `src/world.rs`; decisão do dono pendente); 11.10 não implementado (`skill_disable` só emite evento quando há execução ativa).
 
 ### 11.1 NOVO (ponte): expor os eventos
 - O que: o snapshot já tem `events` (lista de 64, validada em `app/bridge.py` linhas 657–665) e a ponte não expõe. Criar propriedade QML, por exemplo `auditEvents` (`QVariantList`), com `NOTIFY` próprio, e preencher com `snapshot['events']`.

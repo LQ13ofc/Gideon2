@@ -103,11 +103,11 @@ Afetam todas as sub-abas. Quando um estado tem faixa de aviso, a faixa ocupa (14
 | Normal | `core.connected` e `configurationStatus == "ready"` e sem sessão | (nenhuma) | Habilitados | Todas |
 | Core desconectado | `core.connected` falso | "Indisponível: Core desconectado. Os valores mostrados são os últimos conhecidos." | Desativados; valores em cinza | Nenhuma de escrita |
 | Sessão de voz em andamento | `core.sessionId` não vazio | "Indisponível agora: sessão de voz em andamento. Tente quando o Gideon estiver em espera." | Desativados (lógica de `preferencesAvailable`) | Leitura |
-| Reinício pendente | `configurationStatus == "restart_required"` | "Configuração salva; reinicie o Core para ativar os recursos" (texto da ponte) | Desativados: "Indisponível: reinício do Core pendente." | Botão "Reiniciar Core" (NOVO, seção 8.5) |
+| Reinício pendente | `configurationStatus == "restart_required"` | "Configuração salva; reinicie o Core para ativar os recursos" (texto da ponte) | Desativados: "Indisponível: reinício do Core pendente." | Botão "Reiniciar Core" (implementado, seção 8.5) |
 | Modo seguro | `configurationStatus == "safe_mode"` | "Modo seguro: configuração inválida preservada; áudio e comandos bloqueados" (texto da ponte, com recuperação). Sem recuperação: "Modo seguro: arquivo excede o limite de recuperação automática; conteúdo preservado" | Desativados: "Indisponível: modo seguro." Só o botão de recuperação de Geral funciona | Recuperação (seção 8.3) |
 | Gravação pendente | `pending` ou `preferences_request` | (nenhuma; o controle mostra "Enviando ao Core") | Desativados até a resposta | Nenhuma |
 
-Observação: a janela Qt não inicia nem desliga o Core (`docs/BASE_UI_MAP.md`). O estado de reinício depende de ação externa, a menos que o item NOVO da seção 8.5 seja implementado.
+Observação: o reinício do Core pela UI existe (seção 8.5: `coreRestart` em `app/bridge.py`, botão em `app/pages/DiagRecuperacao.qml`; verificado no WP8, `docs/WP8.md`). Ele é controlado pela ponte e espera o Core voltar; o launcher inicia o Core de novo.
 
 ---
 
@@ -229,7 +229,7 @@ Cada sub-aba traz o seu wireframe em escala aproximada: 1 coluna = 10 px, 1 linh
 | VW-4 | Tile "Okay Gideon" (512, 306, 336, 96) | Cartão desativado | Linha 1: "Okay Gideon". Linha 2: badge "requer prova de conceito" (tom Aviso). Linha 3: "Bloqueada: sem qualidade aprovada". Linha 4 (12 px): "Pode ser transcrita como 'K Gideon'." Linha 4 mostra o texto da qualificação: "Requer prova de conceito: frase sem qualidade aprovada" | `core.wakeChoices` (`qualification`) | Sem ação. Tooltip: "Indisponível: requer prova de conceito; sem qualidade aprovada". O Core recusaria com `wake_not_qualified`. | Sempre desativado | Básico |
 | VW-5 | Texto honesto (160, 418, 688, 72) | Texto 14 px, 3 linhas | Texto completo na seção 9.2 | Texto fixo (baseado em `docs/A1.md`) | Nenhuma | Sempre | Básico |
 | VW-6 | Faixa de estado do reinício (356, 500, 492, 40) | Texto 14 px | "Configuração salva; reinicie o Core para ativar os recursos" | `core.configurationMessage` | Nenhuma | Só com `configurationStatus == "restart_required"` | Básico |
-| VW-7 | Botão "Reiniciar Core" (160, 500, 180, 40) | Botão secundário | "Reiniciar Core" | **NOVO (precisa de mudança na ponte/Core)**: operação de reinício controlado (seção 8.5). Hoje não existe. | Abre diálogo 8.5. Confirmado → reinício do Core. | Só aparece com reinício pendente. Sem a mudança: desativado com "Indisponível: o app não reinicia o Core ainda." | Básico |
+| VW-7 | Botão "Reiniciar Core" (160, 500, 180, 40) | Botão secundário | "Reiniciar Core" | **IMPLEMENTADO (WP8)**: operação de reinício controlado `core_restart` (seção 8.5). | Abre diálogo 8.5. Confirmado → reinício do Core. | Só aparece com reinício pendente. Sem a mudança: desativado com "Indisponível: o app não reinicia o Core ainda." | Básico |
 | VW-8 | C2 título (904, 256) | Texto | "Sessão e estado" | Texto fixo | Nenhuma | Sempre | Básico |
 | VW-9 | Linha prazo (904, 290, 316, 26) | Texto | "Prazo máximo da sessão: 30 s" (converte ms para segundos, arredonda para segundos inteiros) | `core.sessionTimeout` | Nenhuma (só leitura) | Sempre | Básico |
 | VW-10 | Linha estado do wake (904, 324, 316, 26) | Texto | "Estado do wake: <estado>". Estado = `statusLabels[wakeStatus]`. Sem valor: "Indisponível" | `core.wakeStatus` | Nenhuma | Sempre | Básico |
@@ -376,7 +376,7 @@ Cada linha mostra: nome, estado (**Instalado** / **Não instalado** / **Não sup
 
 ### 7.3 Dispositivos
 
-**Título**: Dispositivos · **Subtítulo**: "Entrada e saída em uso: hoje virtuais. Dispositivos físicos ainda não existem."
+**Título**: Dispositivos · **Subtítulo**: "Microfone e alto-falante usados pelo Gideon. A lista vem do sistema; a troca vale na próxima sessão de voz." (texto real de `app/pages/CfgDispositivos.qml:37`; a lista vem do Core, A4 `src/devices.rs`, e o padrão é "PCM virtual" até o usuário escolher um dispositivo — DOCS-03, WP8)
 **Ação primária**: nenhuma.
 **Faixa de resumo**: "Entrada: PCM virtual · Saída: virtual · Câmera e tela: simuladas".
 
@@ -513,7 +513,7 @@ Cada linha mostra: nome, estado (**Instalado** / **Não instalado** / **Não sup
 | AP-4 | Motivo (160, 356, 502, 24) | Texto 12 px | "Indisponível: tema claro e tema do sistema não existem nesta versão." | Texto fixo | Nenhuma | Sempre | Básico |
 | AP-5 | Rótulo da variante (160, 384, 502, 20) | Texto 14 px bold | "Variante escura" | Texto fixo | Nenhuma | Sempre | Básico |
 | AP-6 | Variantes (160, 406, 502, 40) | Controle segmentado de 3 opções | "Gideon" · "Clássico" · "Minimalista" | `window.themeIndex` (0, 1, 2) | Escolhe a variante; aplica na hora (prévia). Não grava. | Padrão: "Gideon" | Básico |
-| AP-7 | Nota de persistência (160, 458, 502, 24) | Texto 12 px | "Tema e cor se aplicam a esta janela. Não ficam salvos ao reabrir." | Texto fixo (válido enquanto não houver NOVO da seção 10) | Nenhuma | Sempre | Básico |
+| AP-7 | Nota de persistência (160, 458, 502, 24) | Texto 12 px | Obsoleto (WP8): a nota "Não ficam salvos ao reabrir" não existe no código; tema e cor ficam salvos pelo app por perfil. | Não implementar a nota antiga | Nenhuma | Sempre | Básico |
 | AP-8 | C2 título (718, 256) | Texto | "Cor de destaque" | Texto fixo | Nenhuma | Sempre | Básico |
 | AP-9 | Amostra "Azul" (718, 300, 110, 72) | Amostra selecionável | "Azul" + "Selecionada" quando ativa | `window.accentColor` = `#7693ff` | Escolhe; aplica na hora. Não grava. | Selecionada: borda de 2 px | Básico |
 | AP-10 | Amostra "Violeta" (834, 300, 110, 72) | Amostra selecionável | "Violeta" | `#b386ff` | Idem | Idem | Básico |
@@ -720,7 +720,7 @@ Cada linha mostra: nome, estado (**Instalado** / **Não instalado** / **Não sup
 - **Ação**: "Trocar frase" → `core.selectWake(id)` → toast "Preferências salvas pelo Core"; faixa "Configuração salva; reinicie o Core para ativar os recursos"; estado "Reinício necessário".
 - **Esc** equivale a Cancelar.
 
-### 8.2 Restaurar padrões fora do modo seguro (NOVO, precisa de mudança na ponte/Core)
+### 8.2 Restaurar padrões fora do modo seguro (IMPLEMENTADO, WP8: `preferences_restore_defaults`)
 
 - **Abre por**: GE-13. **Título**: "Restaurar padrões do Gideon?"
 - **Campos por linha** (formato "Atual → padrão"; linhas iguais ficam em cinza):
@@ -731,7 +731,7 @@ Cada linha mostra: nome, estado (**Instalado** / **Não instalado** / **Não sup
   5. "Prazo máximo da sessão": `<N> s` → "30 s".
 - **Aviso** (tom Aviso): "Se a frase de despertar mudar, reinicie o Core depois. Até lá, a frase atual continua ativa."
 - **Botões**: [Cancelar] (foco inicial) · [Restaurar padrões].
-- **Ação**: "Restaurar padrões" → operação NOVO `restore_defaults(revision)`. Sucesso: toast "Preferências salvas pelo Core" e, se a frase mudou, faixa de reinício.
+- **Ação**: "Restaurar padrões" → operação `preferences_restore_defaults` com `revision` (Core: `src/protocol.rs` `PreferencesRestoreDefaults`, `src/core.rs`; ponte: `restoreCoreDefaults`, `app/bridge.py`). Recusada com `busy` durante sessão. Sucesso: toast "Preferências salvas pelo Core" e, se a frase mudou, faixa de reinício.
 - **Erro**: texto do código (seção 12).
 
 ### 8.3 Preservar arquivo e restaurar padrões (modo seguro)
@@ -759,14 +759,14 @@ Operação existente: `core.recoverConfiguration()` → Core `recover_configurat
 - **Botões**: [Cancelar] (foco inicial) · [Apagar dados].
 - **Ação**: `core.clearPluginSettings()`.
 
-### 8.5 Reiniciar Core (NOVO, precisa de mudança na ponte/Core)
+### 8.5 Reiniciar Core (IMPLEMENTADO, WP8: `coreRestart`, `app/bridge.py`)
 
 - **Abre por**: VW-7 (somente com reinício pendente).
 - **Título**: "Reiniciar o Core agora?"
 - **Texto**: "Sessões em andamento serão encerradas. A nova frase de despertar passa a valer depois do reinício."
 - **Botões**: [Cancelar] (foco inicial) · [Reiniciar Core].
-- **Ação**: operação NOVO de reinício controlado do Core, com estado "Reiniciando o Core…" e depois "Em espera". Só permitido com estado `idle`.
-- **Sem a mudança**: VW-7 fica desativado com "Indisponível: o app não reinicia o Core ainda." e o texto da faixa de reinício continua.
+- **Ação**: reinício controlado do Core (`core_restart`, `app/bridge.py`), com estado "Reiniciando o Core…" e depois "Core reiniciado e conectado de novo"; se o Core não voltar em 30 s, a faixa mostra o aviso de tempo esgotado. Recusado com `busy` enquanto há sessão ativa (`coreRestartAvailable`).
+- **Estado anterior (obsoleto)**: a frase "Indisponível: o app não reinicia o Core ainda." não existe mais no código; VW-7 fica ativo quando `coreRestartAvailable`.
 
 ---
 
@@ -789,7 +789,7 @@ Fonte dos rótulos: `WAKE_QUALIFICATION_LABELS` em `app/bridge.py` e textos de `
 
 ## 10. Persistência de Aparência
 
-**Comportamento atual (fato verificado).** Tema e cor de destaque são estado da janela Qt. Não são salvos pelo Core nem pelo app. Ao reabrir o Gideon, voltam para "Gideon" e "Azul". Só a esfera é salva (`feedback_preferences`). A nota AP-7 e AP-13 informa isso.
+**Comportamento atual (verificado no WP8, `docs/WP8.md`).** Tema (`theme.mode`, `theme.preset`), cor de destaque (`theme.accent`) e o modo claro/sistema são gravados pelo app, por perfil, em arquivo JSON (`app/uisettings.py`, `app/theme/Theme.qml`); eles persistem ao reabrir. Não são gravados pelo Core: o alvo abaixo (`config.json`) continua aberto. A esfera continua salva pelo Core (`feedback_preferences`).
 
 **Alvo (NOVO, precisa de mudança na ponte/Core).**
 - Campo `theme` em `config.json` com lista fechada: `gideon`, `classico`, `minimalista`. Padrão: `gideon`.
@@ -826,10 +826,10 @@ Fonte dos rótulos: `WAKE_QUALIFICATION_LABELS` em `app/bridge.py` e textos de `
 |---|---|---|
 | `busy` | "Core ocupado; tente novamente em instantes" | Existente (`CODE_MESSAGES`) |
 | `wake_not_qualified` | "Frase de wake sem qualificação aprovada" | Existente |
-| `stale_preferences` | "Configuração mudou no Core; atualize a tela e tente de novo." | **NOVO (precisa de mudança na ponte/Core)**: entrada em `CODE_MESSAGES`. Hoje aparece "Core recusou a ação: stale_preferences". |
-| `invalid_preferences` | "Valor fora do limite permitido; nada foi salvo." | **NOVO (precisa de mudança na ponte/Core)**: entrada em `CODE_MESSAGES`. Hoje o código aparece cru. |
-| `preferences_storage_error` | "Não foi possível gravar a configuração; nada foi alterado." | **NOVO (precisa de mudança na ponte/Core)**: entrada em `CODE_MESSAGES`. |
-| `preferences_unavailable` | "Configuração indisponível no Core agora." | **NOVO (precisa de mudança na ponte/Core)**: entrada em `CODE_MESSAGES`. |
+| `stale_preferences` | "Configuração mudou no Core; atualize a tela e tente de novo." | IMPLEMENTADO com outro texto (WP8): `CODE_MESSAGES` em `app/bridge.py:1067` ("Configurações mudaram no Core; atualize e tente de novo"). Este texto é o da tabela, a ser alinhado. |
+| `invalid_preferences` | "Valor fora do limite permitido; nada foi salvo." | IMPLEMENTADO com outro texto (WP8): `app/bridge.py:1068`. O código não aparece cru. |
+| `preferences_storage_error` | "Não foi possível gravar a configuração; nada foi alterado." | IMPLEMENTADO com outro texto (WP8): `app/bridge.py:1072`. |
+| `preferences_unavailable` | "Configuração indisponível no Core agora." | IMPLEMENTADO com outro texto (WP8): `app/bridge.py:1073`. |
 | Falha de cópia de segurança | "Não foi possível preservar o arquivo; a configuração original não foi alterada." | **NOVO (precisa de mudança na ponte/Core)**: entrada em `CODE_MESSAGES`. |
 | Cópia de segurança diferente | "Já existe uma cópia de segurança diferente; nada foi alterado." | **NOVO (precisa de mudança na ponte/Core)**: entrada em `CODE_MESSAGES`. |
 | Código desconhecido | "Core recusou a ação: <código>" | Existente (fallback de `code_message`) |
@@ -856,7 +856,7 @@ Achado: os códigos de preferências `stale_preferences`, `invalid_preferences`,
 | NT-17 | Privacidade e retenção | seção 7.5, PR-12 |
 | AC-01 | Sessão de voz bloqueia configuração e a tela avisava mal | Faixa de sessão (seção 3) com texto explícito |
 | AC-05 | Ação destrutiva sem confirmação | Confirmação em 8.1 a 8.5 |
-| AC-06 | Tema e cor não persistem | Seção 10 (NOVO) e AP-7 |
+| AC-06 | Tema e cor não persistem | Obsoleto no app (WP8: persistem por perfil em `uisettings.py`); aberto só para gravação no Core (seção 10) |
 | AC-09 | Motor LLM sem plugin | PR-9 e PR-10 (link condicional) |
 | AC-15 / NT-36 | Sem divulgação progressiva | Seção 5 (interruptor) |
 | AC-18 | Textos fixos de hardware | AU-14, DI-2, DI-9 (ficam fixos até existir dado real) |
@@ -868,13 +868,13 @@ Achado: os códigos de preferências `stale_preferences`, `invalid_preferences`,
 
 | # | Item | Tipo | Onde |
 |---|---|---|---|
-| 1 | Propriedade `savedWakeId` (`preferences.wake_phrase`) | NOVO (precisa de mudança na ponte/Core) | `app/bridge.py` |
-| 2 | Reinício controlado do Core (botão "Reiniciar Core") | NOVO (precisa de mudança na ponte/Core) | Core, ponte e launcher |
-| 3 | Restaurar padrões fora do modo seguro (`restore_defaults`) | NOVO (precisa de mudança na ponte/Core) | `src/core.rs`, `src/storage.rs`, `app/bridge.py` |
+| 1 | Propriedade `savedWakeId` (`preferences.wake_phrase`) | Substituída, não implementada com esse nome: a lista é `wakePhraseRows`/`selectWake` (WP8). Pendente: confirmação de 8.1 | `app/bridge.py` |
+| 2 | Reinício controlado do Core (botão "Reiniciar Core") | IMPLEMENTADO (WP8): `coreRestart`, `app/pages/DiagRecuperacao.qml` | Core, ponte e launcher |
+| 3 | Restaurar padrões fora do modo seguro (`preferences_restore_defaults`) | IMPLEMENTADO (WP8): `src/protocol.rs`, `src/core.rs`, `app/bridge.py` | `src/core.rs`, `src/storage.rs`, `app/bridge.py` |
 | 4 | Campo `show_advanced` em `config.json` | NOVO (precisa de mudança na ponte/Core) | `src/storage.rs`, `app/bridge.py` |
 | 5 | Campos `theme` e `accent` em `config.json` e operação de gravação com revisão | NOVO (precisa de mudança na ponte/Core) | `src/storage.rs`, `src/protocol.rs`, `app/bridge.py` |
 | 6 | Textos de código de preferências em `CODE_MESSAGES` (seção 12) | NOVO (precisa de mudança na ponte/Core) | `app/bridge.py` |
-| 7 | Tema claro e tema do sistema | NOVO (só QML, sem ponte/Core) | `app/Main.qml` |
+| 7 | Tema claro e tema do sistema | IMPLEMENTADO (WP8): `app/theme/Theme.qml` (`theme.mode` system/dark/light) | `app/Main.qml` |
 | 8 | Diálogos de confirmação de troca de frase e de restauração fora do modo seguro | NOVO (só QML, sem ponte/Core) | `app/Main.qml` |
 | 9 | Valor salvo × rascunho nos controles de volume e prazo | NOVO (só QML, sem ponte/Core) | `app/Main.qml` |
 | 10 | Estado "Enviando ao Core" nos controles de preferência | Já existe em `PENDING`; a desativação durante gravação é NOVO (só QML, sem ponte/Core) | `app/Main.qml` |

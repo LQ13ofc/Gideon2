@@ -45,6 +45,8 @@ pub struct Core {
     virtual_input: bool,
     wake_status: &'static str,
     capture_enabled: bool,
+    /// WP-7b: end of the last frame the VAD flagged as speech (any state), for the wake grace window.
+    last_speech_us: Option<u64>,
     completed_audio: Option<Capture>,
     capture_summary: Option<CaptureSummary>,
     stt_engine: Option<String>,
@@ -104,6 +106,28 @@ pub struct Core {
     audio_recommend_job: Option<(u64, String)>,
     audio_recommend_running: Option<u64>,
     audio_recommend_seq: u64,
+    /// CFG-04: unix ms of the last audit purge (`None` until the first one).
+    history_purged_at: Option<u64>,
+    /// WP-10a personal areas (memory, souls, habits, automations, conversations). `None` when the private
+    /// store could not be opened; the snapshot then says `unavailable` and personal requests are refused.
+    personal: Option<crate::personal::Personal>,
+    /// Reply of the personal operation handled by the current request (taken into its response only).
+    personal_result: Option<serde_json::Value>,
+    /// N-5: one chat turn or agent goal sent during a voice session, run when the session ends.
+    queued_chat: Option<QueuedChat>,
+}
+
+/// N-5: a chat request waiting for the voice session to end. Only one may wait; a second one is `busy`.
+enum QueuedChat {
+    Text {
+        request_id: String,
+        raw: String,
+    },
+    Agent {
+        request_id: String,
+        goal: String,
+        capability: Option<String>,
+    },
 }
 impl Core {
     pub fn new(timeout: Duration, virtual_input: bool) -> Self {
@@ -128,6 +152,7 @@ impl Core {
             virtual_input,
             wake_status: "unavailable",
             capture_enabled: false,
+            last_speech_us: None,
             completed_audio: None,
             capture_summary: None,
             stt_engine: None,
@@ -170,6 +195,10 @@ impl Core {
             audio_recommend_job: None,
             audio_recommend_running: None,
             audio_recommend_seq: 0,
+            history_purged_at: None,
+            personal: None,
+            personal_result: None,
+            queued_chat: None,
         }
     }
     /// A9: a wake phrase was recognised by the live input (feeds `audio.live.last_detection`).
@@ -529,6 +558,9 @@ impl Core {
             self.finish("audio_error");
             return;
         }
+        if speech == Some(true) {
+            self.last_speech_us = Some(frame.end_us());
+        }
         if !self.capture_enabled {
             if detected {
                 self.audio_wake(now);
@@ -551,7 +583,8 @@ impl Core {
         if self.session.is_none() {
             if detected {
                 self.audio_wake(now);
-                match Capture::new(pre_roll, frame.end_us()) {
+                let grace = self.last_speech_us;
+                match Capture::new(pre_roll, frame.end_us()).map(|c| c.speech_before_wake(grace)) {
                     Ok(c) => {
                         if self.stt_status == "ready" {
                             // audio_wake starts no session while a restart is pending (configuration not Ready, for
@@ -723,6 +756,28 @@ impl Core {
     fn dispatch_command(&mut self, now: Instant) {
         let transcript = self.transcript.as_ref().expect("final transcript");
         let id = transcript.session_id;
+        // WP-10a: a habit's trigger phrase runs that habit (its own Skill, pinned version and every engine check)
+        // before the command grammar is tried. The session ends with the run's answer.
+        let raw = transcript.raw.clone();
+        if let Some(habit_id) = self
+            .personal
+            .as_ref()
+            .and_then(|p| p.habits.id_for_phrase(&raw))
+        {
+            let code = self.run_habit(&habit_id);
+            let kind = if code == "ok" {
+                "command_success"
+            } else {
+                "command_failed"
+            };
+            self.command_outcome = Some(Outcome {
+                session_id: id,
+                code: kind,
+                receipt: None,
+            });
+            self.command_terminal(kind, now);
+            return;
+        }
         // Any active wake phrase may open a command; the first grammar match wins.
         let parsed = match self.command_wake.as_deref() {
             Some(wakes) if !wakes.is_empty() => wakes
@@ -972,6 +1027,7 @@ impl Core {
                 self.finish(kind);
             }
         }
+        self.run_queued_chat(now);
     }
     pub fn shutdown(&mut self) {
         self.completed_audio = None;
@@ -1038,6 +1094,12 @@ impl Core {
         outcome: &'static str,
     ) {
         self.sequence += 1;
+        // CFG-04: `never` keeps no timeline; `days_*` drop events older than the window before adding one.
+        if self.preferences.history_retention == crate::storage::HistoryRetention::Never {
+            self.events.clear();
+            return;
+        }
+        self.prune_events(crate::protocol::unix_ms());
         if self.events.len() == 64 {
             self.events.pop_front();
         }
@@ -1053,6 +1115,238 @@ impl Core {
             outcome,
         });
     }
+    /// CFG-04: drops timeline events outside the retention window (all of them for `never`).
+    pub(crate) fn prune_events(&mut self, now: u64) {
+        let Some(window) = self.preferences.history_retention.window_ms() else {
+            self.events.clear();
+            return;
+        };
+        let cutoff = now.saturating_sub(window);
+        while self.events.front().is_some_and(|e| e.at_ms < cutoff) {
+            self.events.pop_front();
+        }
+    }
+    /// CFG-04: runs the persisted-audit purge at most once a minute while requests arrive.
+    pub(crate) fn purge_history_due(&mut self, storage: &crate::storage::Storage, now: u64) {
+        const EVERY_MS: u64 = 60_000;
+        if self
+            .history_purged_at
+            .is_some_and(|last| now.saturating_sub(last) < EVERY_MS)
+        {
+            return;
+        }
+        self.purge_history_now(storage, now);
+    }
+    /// CFG-04: purge now (boot and every preference commit). Best effort: a failure is retried at the next due
+    /// time and never reaches the client.
+    fn purge_history_now(&mut self, storage: &crate::storage::Storage, now: u64) {
+        self.history_purged_at = Some(now);
+        let _ = storage.purge_history(now);
+        // WP15 / CFG-04: the skill run ledger follows the same retention preference.
+        let days = match self.preferences.history_retention {
+            crate::storage::HistoryRetention::Days7 => Some(7),
+            crate::storage::HistoryRetention::Days30 => Some(30),
+            crate::storage::HistoryRetention::Days90 => Some(90),
+            crate::storage::HistoryRetention::Never => None,
+        };
+        self.skills.purge_runs(days, now);
+        // WP-10a: the personal areas follow the same window; under `never` stored history is erased now.
+        let retention = self.preferences.history_retention.window_ms();
+        if let Some(personal) = self.personal.as_mut() {
+            let _ = personal.purge_now(now, retention);
+        }
+    }
+    /// WP-10a: one versioned personal request. The reply is served in `personal_reply` of this response.
+    fn personal_op(&mut self, area: &str, payload: serde_json::Value) -> &'static str {
+        let now = crate::protocol::unix_ms();
+        let retention = self.preferences.history_retention.window_ms();
+        let Some(mut personal) = self.personal.take() else {
+            return "personal_unavailable";
+        };
+        // The Core is the skill engine of Habits and Automations; the store is taken out while it runs.
+        let result = personal.apply(area, payload, now, retention, self);
+        self.personal = Some(personal);
+        match result {
+            // One IPC reply carries at most 64 KiB, and the bridge drops the Core on a longer line. Replies stay
+            // well under that; a bigger one (a long conversation) is refused and the user is told to export it.
+            Ok(reply) => {
+                const REPLY_MAX: usize = 32 * 1024;
+                let fits = serde_json::to_vec(&reply).is_ok_and(|b| b.len() <= REPLY_MAX);
+                if !fits {
+                    return "reply_too_large";
+                }
+                self.personal_result = Some(serde_json::json!({"area": area, "reply": reply}));
+                "ok"
+            }
+            Err(code) => code,
+        }
+    }
+    /// WP-10a: runs one habit through its personal area; the Skill engine checks grants, pin and busy state.
+    fn run_habit(&mut self, habit_id: &str) -> &'static str {
+        let now = crate::protocol::unix_ms();
+        let retention = self.preferences.history_retention.window_ms();
+        let Some(mut personal) = self.personal.take() else {
+            return "personal_unavailable";
+        };
+        let request = serde_json::json!({"version": 1, "op": "run", "id": habit_id});
+        let result = personal.apply("habits", request, now, retention, self);
+        self.personal = Some(personal);
+        match result {
+            Ok(_) => "ok",
+            Err(code) => code,
+        }
+    }
+    /// WP-10a: everything stored goes to one private file (0600, in `<personal>/exports`), because a full export
+    /// can be far larger than one IPC reply. The reply names the file and its size (`personal_reply.reply`).
+    fn personal_export(&mut self) -> &'static str {
+        let now = crate::protocol::unix_ms();
+        let retention = self.preferences.history_retention.window_ms();
+        let Some(personal) = self.personal.as_ref() else {
+            return "personal_unavailable";
+        };
+        let document = personal.export_all(now, retention);
+        let exports = personal.dir().join("exports");
+        let Ok(bytes) = serde_json::to_vec_pretty(&document) else {
+            return "personal_export_failed";
+        };
+        let path = exports.join(format!("personal-export-{now}.json"));
+        let written = crate::personal::private_dir(&exports)
+            .and_then(|()| crate::personal::write_private_atomic(&path, &bytes));
+        match written {
+            Ok(()) => {
+                self.personal_result = Some(serde_json::json!({
+                    "area": "export",
+                    "reply": {"path": path.to_string_lossy(), "bytes": bytes.len()},
+                }));
+                "ok"
+            }
+            Err(_) => "personal_export_failed",
+        }
+    }
+    /// WP-10a: erases every personal area. Refused unless `confirm` is true.
+    fn personal_erase_all(&mut self, request_id: &str, confirm: bool) -> &'static str {
+        if !confirm {
+            return "confirmation_required";
+        }
+        let Some(personal) = self.personal.as_mut() else {
+            return "personal_unavailable";
+        };
+        match personal.erase_all() {
+            Ok(()) => {
+                self.emit(request_id.to_string(), None, "personal_erased");
+                "ok"
+            }
+            Err(code) => code,
+        }
+    }
+    /// HUD-03: the client (Ctrl+M) asks for a listening session. It is the same session a wake opens, and it
+    /// needs the live microphone on (consent stored in preferences) and a running capture; each missing piece
+    /// has its own refusal code.
+    fn listen_start(&mut self, request_id: String, now: Instant) -> &'static str {
+        if !self.preferences.live_audio {
+            return "live_audio_disabled";
+        }
+        if !self.capture_enabled {
+            return "capture_unavailable";
+        }
+        if self.configuration_status != crate::storage::ConfigurationStatus::Ready {
+            return "configuration_not_ready";
+        }
+        if self.session.is_some() || self.voice_active() {
+            return "busy";
+        }
+        if self.stt_status != "ready" {
+            return "stt_unavailable";
+        }
+        self.start_session(request_id, now);
+        "ok"
+    }
+    /// N-5: one typed turn: a transcript from text, then the command path. Shared by a direct request and by
+    /// the queue that runs after a voice session.
+    fn text_turn(&mut self, request_id: String, raw: String, now: Instant) -> &'static str {
+        self.start_session(request_id.clone(), now);
+        let Some(session_id) = self.session.as_mut().map(|s| {
+            s.stage = State::Transcribing;
+            s.id
+        }) else {
+            return "busy";
+        };
+        self.transcript = Some(Transcript {
+            source: "user_text",
+            session_id,
+            revision: 1,
+            audio_end_us: 0,
+            normalized: raw.split_whitespace().collect::<Vec<_>>().join(" "),
+            raw,
+            is_final: true,
+            confidence: None,
+        });
+        self.emit(request_id, Some(session_id), "transcript_final");
+        self.dispatch_command(now);
+        "ok"
+    }
+    /// WP-10a timer: starts the automations that are due (one engine request per due automation). Each attempt is
+    /// one content-free event: `automation_started` when the engine accepted it, `automation_failed` otherwise.
+    pub fn personal_tick(&mut self) {
+        let now = crate::protocol::unix_ms();
+        let retention = self.preferences.history_retention.window_ms();
+        let Some(mut personal) = self.personal.take() else {
+            return;
+        };
+        let attempts = personal.tick(now, retention, self);
+        self.personal = Some(personal);
+        for attempt in attempts {
+            let accepted = attempt.get("code").and_then(|c| c.as_str()) == Some("ok");
+            let kind = if accepted {
+                "automation_started"
+            } else {
+                "automation_failed"
+            };
+            self.emit(String::new(), None, kind);
+        }
+    }
+    /// N-5: a chat turn or agent goal sent during a voice session waits here (one slot; a second one is `busy`).
+    fn queue_chat(&mut self, chat: QueuedChat) -> &'static str {
+        if let QueuedChat::Agent { goal, .. } = &chat {
+            if goal.is_empty()
+                // Same bound as `agent::GOAL_MAX` (private there).
+                || goal.len() > 1024
+                || goal.chars().any(char::is_control)
+            {
+                return "invalid_input";
+            }
+        }
+        if self.queued_chat.is_some() {
+            return "busy";
+        }
+        self.queued_chat = Some(chat);
+        "queued"
+    }
+    /// N-5: runs the waiting chat once no voice session is active. A refusal is reported as `chat_failed`.
+    fn run_queued_chat(&mut self, now: Instant) {
+        if self.session.is_some() || self.voice_active() {
+            return;
+        }
+        let (request_id, code) = match self.queued_chat.take() {
+            None => return,
+            Some(QueuedChat::Text { request_id, raw }) => {
+                let code = self.text_turn(request_id.clone(), raw, now);
+                (request_id, code)
+            }
+            Some(QueuedChat::Agent {
+                request_id,
+                goal,
+                capability,
+            }) => {
+                let code = self.agent_start(request_id.clone(), &goal, capability, now);
+                (request_id, code)
+            }
+        };
+        if code != "ok" {
+            self.emit(request_id, None, "chat_failed");
+        }
+    }
+
     pub fn response(&self, request_id: String, code: &'static str) -> Response {
         Response {
             base_pack: self.base_pack.clone(),
@@ -1118,7 +1412,19 @@ impl Core {
             skills: self.skills_view(),
             connections: self.connections.view(),
             registry: self.registry_view(),
+            personal: match self.personal.as_ref() {
+                Some(p) => p.snapshot(
+                    crate::protocol::unix_ms(),
+                    self.preferences.history_retention.window_ms(),
+                ),
+                None => serde_json::json!({"status": "unavailable"}),
+            },
+            personal_reply: None,
         }
+    }
+    /// CFG-07: the engines of the stored selection are running now (after a hot swap between sessions).
+    pub fn languages_applied(&mut self, selection: crate::languages::Selection) {
+        self.applied_languages = Some(selection);
     }
     pub fn configure_preferences(&mut self, config: &crate::storage::Config) {
         // The first configuration is what the workers start with; later commits only change the stored choice.
@@ -1126,6 +1432,7 @@ impl Core {
             self.applied_languages = Some(crate::languages::Selection::from_config(config));
         }
         self.preferences = config.clone();
+        self.prune_events(crate::protocol::unix_ms());
         self.timeout = Duration::from_millis(config.session_timeout_ms);
     }
     pub fn hub_import_expired(&mut self, storage: &crate::storage::Storage) {
@@ -1447,6 +1754,9 @@ impl Core {
         self.configure_preferences(&storage.config);
         self.configuration_status = storage.configuration_status;
         self.configuration_recovery_available = storage.recovery_available();
+        // WP-10a: the personal store lives under the same data root; a corrupt ledger leaves it unavailable.
+        self.personal = crate::personal::Personal::open(&storage.root.join("personal")).ok();
+        self.purge_history_now(storage, crate::protocol::unix_ms());
         self.phrase_root = Some(storage.root.clone());
         // An unreadable custom store is empty for the views; add, remove and test re-read it and refuse.
         self.phrase_custom = crate::phrases::read_custom(&storage.root).unwrap_or_default();
@@ -1710,11 +2020,13 @@ impl Core {
         mut storage: Option<&mut crate::storage::Storage>,
     ) -> Response {
         self.expire(now);
+        self.prune_events(crate::protocol::unix_ms());
         if let Some(storage) = storage.as_deref_mut() {
             if crate::hub::expire_import(storage, now) {
                 self.hub_import_expired(storage);
             }
             self.refresh_plugins(storage);
+            self.purge_history_due(storage, crate::protocol::unix_ms());
         }
         self.sweep_tools();
         if req.version != VERSION {
@@ -1750,6 +2062,8 @@ impl Core {
                 | Operation::LanguagePreference { .. }
                 | Operation::LiveAudioPreference { .. }
                 | Operation::RealActionsPreference { .. }
+                | Operation::HistoryRetentionPreference { .. }
+                | Operation::DeveloperModePreference { .. }
                 | Operation::AudioDevices
                 | Operation::AudioProbe { .. }
                 | Operation::AudioRecommendInput
@@ -2297,6 +2611,64 @@ impl Core {
                     "preferences_unavailable"
                 }
             }
+            // CFG-04: the purge runs inside `configure_storage`; `never` also keeps this change out of the timeline.
+            Operation::HistoryRetentionPreference { revision, .. }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::HistoryRetentionPreference { retention, .. }
+                if retention == self.preferences.history_retention =>
+            {
+                "ok"
+            }
+            Operation::HistoryRetentionPreference {
+                revision,
+                retention,
+            } => {
+                if let Some(storage) = storage {
+                    let result = storage.update_history_retention(revision, retention);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        self.emit(req.request_id.clone(), None, "history_retention_changed");
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
+            // DIAG-02 developer mode. Content-free event; no consent and no effect on authority.
+            Operation::DeveloperModePreference { revision, .. }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::DeveloperModePreference { enabled, .. }
+                if enabled == self.preferences.developer_mode =>
+            {
+                "ok"
+            }
+            Operation::DeveloperModePreference { revision, enabled } => {
+                if let Some(storage) = storage {
+                    let result = storage.update_developer_mode(revision, enabled);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        let kind = if enabled {
+                            "developer_mode_enabled"
+                        } else {
+                            "developer_mode_disabled"
+                        };
+                        self.emit(req.request_id.clone(), None, kind);
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
             Operation::SelectWake { revision, .. } if revision != self.preferences.revision => {
                 "stale_preferences"
             }
@@ -2504,34 +2876,19 @@ impl Core {
             Operation::Text { raw } => {
                 if !self.virtual_input || self.command_wake.is_none() {
                     "input_disabled"
-                } else if self.session.is_some() {
-                    "busy"
                 } else if raw.trim().is_empty()
                     || raw.len() > 512
                     || raw.chars().any(char::is_control)
                 {
                     "invalid_text"
-                } else {
-                    self.start_session(req.request_id.clone(), now);
-                    let s = self.session.as_mut().expect("text session");
-                    s.stage = State::Transcribing;
-                    self.transcript = Some(Transcript {
-                        source: "user_text",
-                        session_id: s.id,
-                        revision: 1,
-                        audio_end_us: 0,
-                        normalized: raw.split_whitespace().collect::<Vec<_>>().join(" "),
+                } else if self.session.is_some() {
+                    // N-5: during a voice session the typed turn waits (one at a time) and runs when it ends.
+                    self.queue_chat(QueuedChat::Text {
+                        request_id: req.request_id.clone(),
                         raw,
-                        is_final: true,
-                        confidence: None,
-                    });
-                    self.emit(
-                        req.request_id.clone(),
-                        self.session.as_ref().map(|s| s.id),
-                        "transcript_final",
-                    );
-                    self.dispatch_command(now);
-                    "ok"
+                    })
+                } else {
+                    self.text_turn(req.request_id.clone(), raw, now)
                 }
             }
             Operation::VirtualWake if !self.virtual_input => "virtual_input_disabled",
@@ -2563,6 +2920,14 @@ impl Core {
                 proposal_id,
                 decision,
             } => self.tool_decide(req.request_id.clone(), &proposal_id, decision),
+            // N-5: an agent goal during a voice session waits in the same single slot as a typed turn.
+            Operation::AgentStart { goal, capability } if self.voice_active() => {
+                self.queue_chat(QueuedChat::Agent {
+                    request_id: req.request_id.clone(),
+                    goal,
+                    capability,
+                })
+            }
             Operation::AgentStart { goal, capability } => {
                 self.agent_start(req.request_id.clone(), &goal, capability, now)
             }
@@ -2609,6 +2974,12 @@ impl Core {
                 crate::skills::wire_op(self.skill_export(&id, &version))
             }
             Operation::Refused { code } => code,
+            Operation::Personal { area, payload } => self.personal_op(&area, payload),
+            Operation::PersonalExport => self.personal_export(),
+            Operation::PersonalEraseAll { confirm } => {
+                self.personal_erase_all(&req.request_id, confirm)
+            }
+            Operation::ListenStart => self.listen_start(req.request_id.clone(), now),
             Operation::SkillImport { name } => crate::skills::wire_op(self.skill_import(&name)),
             Operation::ConnectionCall { .. } if self.session.is_some() => "busy",
             Operation::ConnectionCall {
@@ -2708,7 +3079,9 @@ impl Core {
             }
         };
         self.sweep_tools();
-        self.response(req.request_id, code)
+        let mut response = self.response(req.request_id, code);
+        response.personal_reply = self.personal_result.take();
+        response
     }
 }
 
@@ -2760,6 +3133,7 @@ mod tests {
         let pack = crate::pack::Snapshot {
             version: 1,
             id: "test-pack".into(),
+            pack_sha256: String::new(),
             scope: "dev_virtual_en",
             preflight: "verified",
             engines: Default::default(),
@@ -3363,6 +3737,103 @@ mod tests {
         );
     }
     #[test]
+    fn history_retention_bounds_the_timeline_and_developer_mode_is_a_plain_cas() {
+        use crate::storage::HistoryRetention;
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), true);
+        c.emit(String::new(), None, "wake_failed");
+        assert_eq!(c.events.len(), 1);
+        // `never`: the change itself and later events stay out of the timeline.
+        c.preferences.history_retention = HistoryRetention::Never;
+        c.emit(String::new(), None, "wake_failed");
+        assert!(c.events.is_empty());
+        assert!(c.response(String::new(), "ok").events.is_empty());
+        // `days_7`: an event older than the window is pruned, a fresh one is kept.
+        c.preferences.history_retention = HistoryRetention::Days7;
+        let fresh = crate::protocol::unix_ms();
+        let event = |at_ms: u64| Event {
+            sequence: 0,
+            at_ms,
+            request_id: String::new(),
+            session_id: None,
+            kind: "wake_failed",
+            origin: "speech",
+            outcome: "failed",
+        };
+        c.events.push_back(event(1));
+        c.events.push_back(event(fresh));
+        c.prune_events(fresh);
+        assert_eq!(c.events.len(), 1);
+        assert_eq!(c.events[0].at_ms, fresh);
+        // Developer mode: CAS on the revision, strict on the value, no consent, and the same value is a no-op.
+        let stale = c.handle(
+            request(
+                "dev-stale",
+                Operation::DeveloperModePreference {
+                    revision: 7,
+                    enabled: true,
+                },
+            ),
+            now,
+        );
+        assert_eq!(stale.code, "stale_preferences");
+        let same = c.handle(
+            request(
+                "dev-same",
+                Operation::DeveloperModePreference {
+                    revision: 0,
+                    enabled: false,
+                },
+            ),
+            now,
+        );
+        assert_eq!(same.code, "ok");
+        let no_storage = c.handle(
+            request(
+                "dev-on",
+                Operation::DeveloperModePreference {
+                    revision: 0,
+                    enabled: true,
+                },
+            ),
+            now,
+        );
+        assert_eq!(no_storage.code, "preferences_unavailable");
+        assert!(!c.preferences.developer_mode);
+    }
+
+    #[test]
+    fn configure_storage_runs_the_audit_purge_for_the_stored_retention() {
+        use crate::storage::HistoryRetention;
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        let mut store = crate::storage::Storage::open(&root).unwrap();
+        store.audit(1).unwrap();
+        let log = root.join("audit.log");
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&log)
+            .unwrap()
+            .write_all(b"{\"version\":1,\"sequence\":0,\"at_ms\":1}\n")
+            .unwrap();
+        store
+            .update_history_retention(0, HistoryRetention::Days7)
+            .unwrap();
+        let mut c = Core::new(Duration::from_secs(30), true);
+        c.configure_storage(&store);
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(!text.contains("\"sequence\":0"), "old line purged: {text}");
+        assert!(text.contains("\"sequence\":1"));
+        // `never` through the same path removes the trail on the next configuration.
+        store
+            .update_history_retention(1, HistoryRetention::Never)
+            .unwrap();
+        c.configure_storage(&store);
+        assert!(!log.exists());
+    }
+
+    #[test]
     fn real_actions_switch_grammar_authority_and_receipts() {
         let now = Instant::now();
         let mut c = Core::new(Duration::from_secs(30), true);
@@ -3679,8 +4150,14 @@ mod tests {
         );
         assert_eq!(c.transcript.as_ref().unwrap().source, "user_text");
         assert!(c.take_command_job().is_some());
+        // N-5: a typed turn during the session waits in the queue (one slot); a second one is refused.
         assert_eq!(
             c.handle(request("t5", Operation::Text { raw: "mute".into() }), now)
+                .code,
+            "queued"
+        );
+        assert_eq!(
+            c.handle(request("t6", Operation::Text { raw: "mute".into() }), now)
                 .code,
             "busy"
         );

@@ -3,13 +3,20 @@
 import hashlib,importlib.metadata,json,sys
 from pathlib import Path
 
+# Approved Pocket TTS profiles: English (provision_tts.py) and Portuguese/French (provision_pt_fr_tts.py, WP-7).
+# The engine string names the language and the pinned library version; the voice file is the profile's own default.
+PROFILES={'english':('pocket-tts-3.3.0/english_2026-09/cpu','alba'),'portuguese':('pocket-tts-3.3.0/portuguese/cpu','rafael'),'french':('pocket-tts-3.3.0/french/cpu','estelle')}
+
 def load_profile(path):
     profile=json.loads(Path(path).read_text());root=Path(profile['root'])
-    required={'model.safetensors','tokenizer.json','alba.safetensors','config.yaml'}
+    language=profile.get('language','english')
+    if language not in PROFILES or profile['engine']!=PROFILES[language][0] or not root.is_absolute():raise ValueError('TTS profile')
+    voice_name=PROFILES[language][1]
+    if profile.get('voice_name',voice_name)!=voice_name:raise ValueError('TTS voice')
+    required={'model.safetensors','tokenizer.json',f'{voice_name}.safetensors','config.yaml'}
     artifacts=profile['artifacts']
-    if profile['engine']!='pocket-tts-3.3.0/english_2026-09/cpu' or not root.is_absolute():raise ValueError('TTS profile')
     if not isinstance(artifacts,list) or len(artifacts)!=4 or {a['name'] for a in artifacts}!=required:raise ValueError('TTS hash catalog')
-    if profile['config']!=str(root/'config.yaml') or profile['voice']!=str(root/'alba.safetensors'):raise ValueError('TTS path mismatch')
+    if profile['config']!=str(root/'config.yaml') or profile['voice']!=str(root/f'{voice_name}.safetensors'):raise ValueError('TTS path mismatch')
     for artifact in artifacts:
         file=root/artifact['name']
         if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest()!=artifact['sha256']:raise ValueError('TTS hash mismatch')

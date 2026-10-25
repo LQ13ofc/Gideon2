@@ -14,9 +14,11 @@ from bridge import REG_MESSAGES,REG_PURPOSES,REG_STATUSES,REG_VISUAL_WARNING,val
 from bridge import RESTART_BACK_TEXT,RESTART_TIMEOUT_MS,RESTART_TIMEOUT_TEXT,RESTART_WAIT_TEXT
 from bridge import display_effect,display_risk,grant_rows,pending_count
 from bridge import PHRASE_MESSAGES,WAKE_QUALIFICATION_LABELS,display_wake_entry,phrase_check_ok,wake_phrases_block_ok,wake_setting_list_ok
+from bridge import PERSONAL_AREAS,PERSONAL_MESSAGES,valid_personal,valid_skill_export,valid_skill_index
 from bridge import CAP_DEADLINE_MS,CAP_RESULT_LIMIT,CAPABILITY_MESSAGES,capability_code_message,capability_request,clip_bytes,hub_storage,package_info
 from bridge import LIVE_WARNING_TEXTS,level_view,live_hint_view,probe_ok,probe_view
 from bridge import COMMAND_CODE_MESSAGES,COMMAND_KINDS,REAL_ACTION_MESSAGES,real_action_code_message,real_action_line,real_actions_state
+from bridge import HUB_UPLOAD_MESSAGES,RESTORE_BACKUP_TEXT,valid_skill_import
 # A9 level block (src/levels.rs): silent while the recorder is not capturing, and a room at about -41 dBFS while it is.
 LEVEL_SILENT={'rms_dbfs':-90.0,'peak_dbfs':-90.0,'floor_dbfs':-90.0,'speech_active':False,'speech_ms':0,'speech_unmatched':False,'frames':0,'last_frame_age_ms':None,'clipping':False}
 LEVEL_LIVE={'rms_dbfs':-40.0,'peak_dbfs':-30.0,'floor_dbfs':-41.5,'speech_active':False,'speech_ms':0,'speech_unmatched':False,'frames':200,'last_frame_age_ms':20,'clipping':False}
@@ -119,7 +121,7 @@ class Tests(unittest.TestCase):
                 with self.subTest(status=status,key=key),self.assertRaises(ValueError):validate_snapshot({**valid,key:value},'r',0)
         with self.assertRaises(ValueError):validate_snapshot({**BASE,'configuration_status':'ready','configuration_recovery_available':True},'r',0)
     def test_pack_presentation_is_bounded_and_has_no_fake_phrases(self):
-        pack={'version':1,'id':'pack','scope':'dev_virtual_en','preflight':'verified','engines':{'wake':'kws','stt':'stt','tts':'tts'},'wake_phrases':[{'id':'opaque','text':'Explicit words','qualification':'dev_qualified'}],'active_phrase':'opaque','default_phrase':'opaque','voice':'Alba','language':'en','audio_input':'virtual_pcm','audio_output':'virtual'}
+        pack={'version':1,'id':'pack','scope':'dev_virtual_en','preflight':'verified','engines':{'wake':'kws','stt':'stt','tts':'tts'},'wake_phrases':[{'id':'opaque','text':'Explicit words','qualification':'dev_qualified'}],'active_phrase':'opaque','default_phrase':'opaque','voice':'Alba','language':'en','audio_input':'virtual_pcm','audio_output':'virtual','pack_sha256':'a'*64}
         validate_snapshot({**BASE,'base_pack':pack},'r',0)
         for key,value in [('version',True),('wake_phrases',[]),('wake_phrases',[{'id':'x','text':'no grant','qualification':'certified'}]),('active_phrase',[]),('default_phrase','missing'),('audio_input','microphone')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot({**BASE,'base_pack':{**pack,key:value}},'r',0)
@@ -173,7 +175,7 @@ class Tests(unittest.TestCase):
             ('bad digest',{**hub,'installed':[{**record,'manifest_sha256':'A'*64}]}),
             ('bad previous digest',{**hub,'installed':[{**record,'previous':{'semver':'0.9.0','manifest_sha256':'short'}}]}),
             ('extra key',{**hub,'installed':[{**record,'payload_path':'/tmp/x'}]}),
-            ('publisher verified',{**hub,'publisher_verified':True}),
+            ('publisher verified without plugins',{**hub,'publisher_verified':True,'entries':[]}),
             ('quarantined with installed',{**hub,'status':'quarantined','repository':None,'catalog_sha256':None,'entries':[],'installed':[record]}),
             ('missing install_revision',{k:v for k,v in hub.items() if k!='install_revision'}),
             ('install_revision bool',{**hub,'install_revision':True}),
@@ -1424,7 +1426,8 @@ def _shell_checks(bridge,engine,window,check,checks):
     sent.clear();key(Qt.Key.Key_M,ctrl)
     check('Ctrl+M ends the running capture',sent.count('cancel')==1 and any(t=='Escuta encerrada.' for t in texts()))
     push(BASE);sent.clear();key(Qt.Key.Key_M,ctrl)
-    check('Ctrl+M without a capture says the microphone is unavailable',sent==[] and any(t=='Microfone indisponível: sem entrada de áudio neste perfil' for t in texts()))
+    # HUD-03: without a session Ctrl+M asks the Core to listen (listen_start); the Core answers with the reason when it cannot.
+    check('Ctrl+M without a capture asks the Core to start listening',sent==['listen_start'])
     sent.clear();key(Qt.Key.Key_Escape)
     check('Esc without a capture sends nothing',sent==[])
     # behavior.shortcuts off: every shortcut stops; Esc stops cancelling too.
@@ -2014,7 +2017,7 @@ class SkillContract(unittest.TestCase):
             'history too long':{'history':[HISTORY_ITEM]*(SKILL_HISTORY_LIMIT+1)},
             'history unknown code':{'history':[{**HISTORY_ITEM,'codes':['Boom']}]},
             'history empty run id':{'history':[{**HISTORY_ITEM,'run_id':''}]},
-            'import not unverified':{'import':{**PREVIEW,'unverified':False}},
+            'import unverified not bool':{'import':{**PREVIEW,'unverified':'no'}},
             'import name with path':{'import':{**PREVIEW,'name':'../x'}},
             'import finding unknown':{'import':{**PREVIEW,'findings':[{'code':'Boom'}]}},
             'import extra key':{'import':{**PREVIEW,'signature':'abc'}},
@@ -3012,7 +3015,9 @@ class LanguagesBridge(unittest.TestCase):
         self.assertEqual((bridge.languageTtsSelected,bridge.languageTtsVoice),('en','alba'))
         self.assertTrue(bridge.languageRestartStt);self.assertFalse(bridge.languageRestartTts)
         self.assertEqual(len(bridge.languageSttItems),3);self.assertEqual(len(bridge.languageTtsItems),3)
-        self.assertEqual(bridge.languageInstallReason,'Aguardando aprovação do download pelo dono')
+        # CFG-03: no install operation exists, so the text says so (not the old "awaiting approval").
+        self.assertEqual(bridge.languageInstallReason,'Não incluído neste pacote: a instalação de idiomas extras ainda não existe.')
+        self.assertNotIn('aprovação',bridge.languageInstallReason)
         self.assertTrue(bridge.languagesAvailable)
         self.assertIn('não instalado',CODE_MESSAGES['language_not_installed'])
     def test_malformed_languages_blocks_are_rejected(self):
@@ -3528,6 +3533,175 @@ class WakePhrases(unittest.TestCase):
         self.assertEqual(display_wake_entry(unmeasured,block['settings'],set())['qualification_label'],'personalizada · não testada')
         # The pack-level wake choices keep working for the legacy picker.
         self.assertEqual(WAKE_QUALIFICATION_LABELS['dev_qualified'],'em desenvolvimento')
+
+class Wp12Diagnostics(unittest.TestCase):
+    """WP-12 (docs/WP12.md): CFG-04 retention and DIAG-02 developer mode ops, DIAG-01..05 fields, and the message tables."""
+    def test_retention_and_developer_mode_send_the_core_ops_and_read_back(self):
+        from bridge import HISTORY_RETENTION_VALUES
+        self.assertEqual(HISTORY_RETENTION_VALUES,('days_7','days_30','days_90','never'))
+        bridge,peer=connect_bridge(self,audio_snapshot(prefs={'history_retention':'days_30','developer_mode':False}))
+        self.assertEqual(bridge.historyRetention,'days_30');self.assertFalse(bridge.developerMode)
+        bridge.setHistoryRetention('never');request=next_request(peer)
+        self.assertEqual((request['op'],request['revision'],request['retention']),('history_retention_preference',0,'never'))
+        answer(peer,request,audio_snapshot(prefs={'history_retention':'never'}));settle(bridge)
+        self.assertEqual(bridge.historyRetention,'never')
+        self.assertEqual(bridge.preferencesResult,OPS['history_retention_preference'][1])
+        bridge.setHistoryRetention('forever');self.assertIsNone(bridge.pending)
+        self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['invalid_preferences'])
+        bridge.setDeveloperMode(True);request=next_request(peer)
+        self.assertEqual((request['op'],request['revision'],request['enabled']),('developer_mode_preference',0,True))
+        self.assertNotIn('confirmed',request)
+        answer(peer,request,audio_snapshot(prefs={'developer_mode':True}));settle(bridge)
+        self.assertTrue(bridge.developerMode)
+        bridge.setDeveloperMode('yes');self.assertIsNone(bridge.pending)
+    def test_strict_validator_for_retention_and_developer_mode_when_present(self):
+        validate_snapshot(audio_snapshot(prefs={'history_retention':'days_90','developer_mode':True}),'r',0)
+        validate_snapshot(audio_snapshot(),'r',0)
+        for bad in ({'history_retention':'forever'},{'history_retention':'Never'},{'history_retention':None},{'developer_mode':'yes'},{'developer_mode':1}):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):validate_snapshot(audio_snapshot(prefs=bad),'r',0)
+    def test_diagnostic_fields_are_read_from_the_snapshot_without_invented_values(self):
+        bridge=Bridge('/nonexistent-gideon-root')
+        bridge.snapshot={'version':1,'base_pack':{'engines':{'wake':'kws','stt':'moonshine','tts':'pocket'},'audio_input':'virtual_pcm','audio_output':'virtual'},
+            'hub':{'catalog_sha256':'ab'*32},'speech':{'elapsed_ms':1200,'samples':24000,'chunks':3,'peak':0.5,'rms':0.1,'first_pcm_ms':80},
+            'events':[{'kind':'plugin_started'},{'kind':'llm_fallback_used'}]}
+        self.assertEqual(bridge.protocolVersion,1);self.assertEqual(bridge.catalogSha256,'ab'*32)
+        self.assertEqual(bridge.packEngines,{'wake':'kws','stt':'moonshine','tts':'pocket'})
+        self.assertEqual((bridge.packAudioInput,bridge.packAudioOutput),('virtual_pcm','virtual'))
+        self.assertEqual(bridge.lastSpeech,{'elapsed_ms':1200,'samples':24000,'chunks':3,'peak':0.5,'rms':0.1,'first_pcm_ms':80})
+        self.assertTrue(bridge.llmFallbackUsed)
+        bridge.snapshot={}
+        self.assertEqual((bridge.protocolVersion,bridge.catalogSha256,bridge.packEngines,bridge.lastSpeech),(0,'',{},{}))
+        self.assertEqual((bridge.packAudioInput,bridge.packAudioOutput,bridge.historyRetention),('','',''))
+        self.assertFalse(bridge.llmFallbackUsed)
+    def test_core_latency_is_the_measured_round_trip_window(self):
+        bridge=Bridge('/nonexistent-gideon-root')
+        self.assertEqual(bridge.coreLatency,{'known':False,'samples':0,'last_ms':0,'average_ms':0,'last_op':''})
+        bridge._latency=[('snapshot',12),('audio_devices',30)]
+        self.assertEqual(bridge.coreLatency,{'known':True,'samples':2,'last_ms':30,'average_ms':21,'last_op':'audio_devices'})
+        bridge.snapshot={'speech':{'first_pcm_ms':80,'elapsed_ms':1200}}
+        self.assertEqual(bridge.speechLatency,{'known':True,'first_pcm_ms':80,'elapsed_ms':1200})
+    def test_resources_come_from_proc_for_the_core_pid_and_stay_unknown_without_it(self):
+        bridge=Bridge('/nonexistent-gideon-root')
+        bridge._sample_resources(time.monotonic())
+        self.assertEqual(bridge.diagResources,{'known':False})
+        if not os.path.isdir('/proc/self'):self.skipTest('no /proc')
+        bridge._core_pid=os.getpid();bridge._sample_resources(time.monotonic())
+        first=bridge.diagResources
+        self.assertTrue(first['known']);self.assertGreater(first['core_rss_kb'],0);self.assertIsNone(first['core_cpu_percent'])
+        self.assertTrue(first['workers_known']);self.assertEqual(first['workers_count'],0)
+        bridge._sample_resources(time.monotonic()+1.0)
+        self.assertIsInstance(bridge.diagResources['core_cpu_percent'],float)
+    def test_core_pid_comes_from_the_peer_credentials_of_the_socket(self):
+        bridge,_peer=connect_bridge(self,audio_snapshot())
+        self.assertEqual(bridge._core_pid,os.getpid())
+    def test_developer_mode_and_retention_messages_are_portuguese(self):
+        for code in ('hub_storage_error','plugin_storage_error','hub_import_timeout'):
+            with self.subTest(code=code):
+                self.assertIn(code,CODE_MESSAGES);self.assertNotEqual(CODE_MESSAGES[code],code);self.assertNotIn('_',CODE_MESSAGES[code])
+        self.assertEqual(CODE_MESSAGES['hub_import_timeout'],'Importação expirou antes de terminar.')
+        self.assertEqual(CODE_MESSAGES['hub_storage_error'],'Falha ao gravar o registro do catálogo.')
+        for op in ('history_retention_preference','developer_mode_preference'):
+            with self.subTest(op=op):self.assertEqual(OPS[op][0],'prefs');self.assertNotIn('_',PENDING[op])
+
+def wp4_hub_snapshot(size=2500,staged=False,transfer=None,sequence=2):
+    """A verified catalog with one approved plugin whose payload is not staged yet (WP-4 Hub import)."""
+    digest='c'*64
+    entry={'plugin_id':'wp4_note','semver':'1.0.0','publisher':'fixture','api_version':1,'targets':['linux_x86_64'],'license':'MIT','permissions':[],'dependencies':[],'conflicts':[],'download_size':size,'support_policy':'fixture','status':'not_installed','reason':'none','manifest_sha256':digest,'permissions_approved':True,'payload_staged':staged,'runtime':'python3_script','capabilities':['wp4_note.echo']}
+    hub={'version':1,'status':'verified','repository':'https://github.com/a/b','catalog_sha256':'d'*64,'publisher_verified':False,'orphans':0,'import':transfer,'approval_revision':1,'install_revision':0,'entries':[entry],'installed':[]}
+    return ready({**BASE,'sequence':sequence,'hub':hub,'plugins':{'revision':0,'status':'ok','items':[]}})
+SKILL_PREVIEW_OK={'name':'fixture-note','id':'fixture_note','version':'1.0.0','publisher':'fixture','unverified':True,'permissions_required':[],'missing_deps':[],'permission_delta':[],'permissions_escalated':False,'duplicate':False,'findings':[]}
+class Wp4Bridge(unittest.TestCase):
+    """WP-4: publisher flags are read from the Core, and the Hub payload upload follows the Core protocol one request at a time."""
+    def test_publisher_flags_come_from_the_core_snapshot(self):
+        self.assertTrue(valid_skill_import({**SKILL_PREVIEW_OK,'unverified':False}))
+        self.assertTrue(valid_skill_import({**SKILL_PREVIEW_OK,'unverified':True}))
+        self.assertFalse(valid_skill_import({**SKILL_PREVIEW_OK,'unverified':'no'}))
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True
+        self.assertFalse(bridge.hubPublisherVerified)
+        bridge.snapshot={'hub':{'status':'verified','publisher_verified':True,'entries':[]}}
+        self.assertTrue(bridge.hubPublisherVerified)
+        self.assertIn('verificado por assinatura',bridge.hubDescription)
+        bridge.snapshot={'hub':{'status':'verified','publisher_verified':False,'entries':[]}}
+        self.assertIn('não autenticado',bridge.hubDescription)
+    def test_audit_log_path_is_the_core_root_file(self):
+        self.assertEqual(Bridge('/nonexistent-gideon-root').auditLogPath,str(Path('/nonexistent-gideon-root')/'audit.log'))
+    def test_chat_stays_visible_during_a_voice_session_but_its_input_waits(self):
+        snap=ready({**BASE,'plugins':{'revision':1,'status':'ok','items':[{'plugin_id':'llm_engine','semver':'1.0.0','capabilities':['llm_engine.chat'],'state':'running','enabled':True,'restarts':0,'last_error':None}]}})
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True;bridge.snapshot=snap
+        self.assertTrue(bridge.chatAvailable);self.assertTrue(bridge.chatInputAvailable);self.assertEqual(bridge.chatBlockedText,'')
+        # N-5: during a voice session the input stays open; the Core queues the turn and says so.
+        bridge.snapshot={**snap,'session_id':7}
+        self.assertTrue(bridge.chatAvailable);self.assertTrue(bridge.chatInputAvailable)
+        self.assertEqual(bridge.chatBlockedText,'Durante a voz, o texto entra na fila e é enviado quando a sessão terminar.')
+    def test_queued_turn_is_reported_as_queued_and_counts_as_sent(self):
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True;bridge.snapshot=ready(BASE);bridge.text_inflight='olá'
+        sent=[];bridge.textSent.connect(sent.append)
+        bridge._settle('text',{'code':'queued'})
+        self.assertEqual(sent,['olá'])
+        self.assertEqual(bridge.results['text'],'Na fila: o pedido segue quando a sessão de voz terminar.')
+    def test_personal_reply_keeps_the_area_code_and_reply(self):
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True;bridge.personal_area='memory'
+        bridge._settle('personal',{'code':'stale_revision','personal_reply':{'area':'memory','reply':{}}})
+        self.assertEqual(bridge.personalReply,{'area':'memory','code':'stale_revision','reply':{}})
+        bridge.personalOp('memory','not json')
+        self.assertEqual(bridge.personalReply['code'],'invalid_request')
+        bridge.personalOp('nope','{}')
+        self.assertEqual(bridge.personalReply['code'],'unknown_area')
+        bridge.personalEraseAll(False)
+        self.assertEqual(bridge.personalReply['code'],'confirmation_required')
+    def test_personal_block_must_have_every_area_or_say_unavailable(self):
+        self.assertTrue(valid_personal({'status':'unavailable'}))
+        self.assertFalse(valid_personal({'status':'unavailable','memory':{}}))
+        good={'retention':'on',**{a:{} for a in PERSONAL_AREAS}}
+        self.assertTrue(valid_personal(good))
+        self.assertFalse(valid_personal({**good,'retention':'forever'}))
+        self.assertFalse(valid_personal({k:v for k,v in good.items() if k!='habits'}))
+    def test_listen_start_reports_the_core_refusal(self):
+        bridge=Bridge('/nonexistent-gideon-root');bridge.online=True;bridge._settle('listen_start',{'code':'live_audio_disabled'})
+        self.assertEqual(bridge.results['listen'],'Escuta do microfone desligada: ative o microfone em Configurações › Dispositivos.')
+    def test_restore_defaults_backup_failure_says_the_values_stayed(self):
+        bridge=Bridge('/nonexistent-gideon-root');bridge._settle('preferences_restore_defaults',{'code':'preferences_storage_error'})
+        self.assertIn('config.json.bak',bridge.preferencesResult)
+        self.assertEqual(bridge.preferencesResult,RESTORE_BACKUP_TEXT)
+    def test_hub_payload_refusals_send_nothing(self):
+        bridge,peer=connect_bridge(self,wp4_hub_snapshot())
+        with tempfile.TemporaryDirectory(prefix='gideon-wp4-') as td:
+            good=Path(td)/'payload.bin';good.write_bytes(b'x'*2500)
+            wrong=Path(td)/'short.bin';wrong.write_bytes(b'x'*10)
+            link=Path(td)/'link.bin';os.symlink(good,link)
+            self.assertEqual(bridge.importHubPayload('wp4_note','relative.bin'),HUB_UPLOAD_MESSAGES['path'])
+            self.assertEqual(bridge.importHubPayload('wp4_note',str(link)),HUB_UPLOAD_MESSAGES['unreadable'])
+            self.assertEqual(bridge.importHubPayload('wp4_note',str(wrong)),HUB_UPLOAD_MESSAGES['size'])
+            self.assertEqual(bridge.importHubPayload('unknown_plugin',str(good)),HUB_UPLOAD_MESSAGES['entry'])
+            self.assertIsNone(bridge.hub_upload);self.assertFalse(peer.canReadLine())
+    def test_hub_payload_upload_follows_the_core_protocol_and_reports_staged(self):
+        bridge,peer=connect_bridge(self,wp4_hub_snapshot())
+        payload=(bytes(range(256))*10)[:2500]
+        with tempfile.TemporaryDirectory(prefix='gideon-wp4-') as td:
+            path=Path(td)/'note.gpkg';path.write_bytes(payload)
+            self.assertEqual(bridge.importHubPayload('wp4_note','file://'+str(path)),'')
+            begin=next_request(peer);self.assertEqual(begin['op'],'hub_begin')
+            self.assertEqual((begin['revision'],begin['plugin_id'],begin['manifest_sha256']),(1,'wp4_note','c'*64))
+            # The bridge sends the next request as soon as the answer is applied: the next line is the next step.
+            answer(peer,begin,wp4_hub_snapshot(transfer={'import_id':'imp_wp4','plugin_id':'wp4_note','received':0,'expected':2500},sequence=3))
+            offset=0;sequence=4
+            while offset<2500:
+                chunk=next_request(peer);self.assertEqual(chunk['op'],'hub_chunk');self.assertEqual(chunk['offset'],offset)
+                self.assertEqual(chunk['import_id'],'imp_wp4');data=bytes.fromhex(chunk['hex'])
+                self.assertEqual(data,payload[offset:offset+len(data)]);self.assertLessEqual(len(data),1024)
+                offset+=len(data)
+                answer(peer,chunk,wp4_hub_snapshot(transfer={'import_id':'imp_wp4','plugin_id':'wp4_note','received':offset,'expected':2500},sequence=sequence));sequence+=1
+            finish=next_request(peer);self.assertEqual(finish['op'],'hub_finish')
+            answer(peer,finish,wp4_hub_snapshot(staged=True,sequence=sequence));settle(bridge)
+            self.assertEqual(bridge.hubApprovalResult,HUB_UPLOAD_MESSAGES['staged']);self.assertIsNone(bridge.hub_upload)
+    def test_hub_payload_core_refusal_stops_the_upload_and_names_the_code(self):
+        bridge,peer=connect_bridge(self,wp4_hub_snapshot())
+        with tempfile.TemporaryDirectory(prefix='gideon-wp4-') as td:
+            path=Path(td)/'note.gpkg';path.write_bytes(b'y'*2500)
+            self.assertEqual(bridge.importHubPayload('wp4_note',str(path)),'')
+            begin=next_request(peer);answer(peer,begin,wp4_hub_snapshot(),code='stale_hub_revision');settle(bridge)
+            self.assertEqual(bridge.hubApprovalResult,CODE_MESSAGES['stale_hub_revision'])
+            self.assertIsNone(bridge.hub_upload);self.assertFalse(peer.canReadLine())
 
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())

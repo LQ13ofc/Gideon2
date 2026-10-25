@@ -25,7 +25,7 @@ from PySide6.QtQuick import QQuickItem  # noqa: E402
 from bridge import Bridge  # noqa: E402
 
 LABELS = {'en': 'Inglês', 'fr': 'Francês', 'pt-BR': 'Português (Brasil)'}
-INSTALL_REASON = 'Aguardando aprovação do download pelo dono'
+INSTALL_REASON = 'Não incluído neste pacote: a instalação de idiomas extras ainda não existe.'
 
 
 def item(ident, kind, state, **kw):

@@ -56,11 +56,7 @@ Rectangle {
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
-                RowLayout {
-                    spacing: Theme.space(8)
-                    GButton { variant: "primary"; text: "Salvar"; enabled: false }
-                    GButton { variant: "secondary"; text: "Cancelar"; enabled: false }
-                }
+                // CFG-05: no Salvar/Cancelar here. Every choice of Aparência is saved as it is made, so the preview has nothing to confirm.
             }
         }
         RowLayout {

@@ -77,7 +77,7 @@ function queueRows(ctx) {
         var sub = "Pede: " + (e.permissions || []).map(function (p) { return ctx.labelOf(p) }).join(", ")
         if (e.status === "update_available") sub += "\nAtualização: a aprovação anterior não vale para esta versão."
         out.push({key: "queue_plugin_" + e.plugin_id, kind: "plugin", origin: "Plugin", originTone: "info",
-                  item: e.plugin_id + " " + e.semver + " · publisher não autenticado", sub: sub, ref: e})
+                  item: e.plugin_id + " " + e.semver + (ctx.publisherVerified === true ? " · publisher verificado" : " · publisher não autenticado"), sub: sub, ref: e})
     }
     var accounts = sortedByKey(ctx.conns.filter(function (c) { return (c.pending_scopes || []).length > 0 }), function (c) { return c.label })
     for (var j = 0; j < accounts.length; j++) {

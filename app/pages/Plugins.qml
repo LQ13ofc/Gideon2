@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import QtQuick.Dialogs
 import "../theme"
 import "../components"
 import "../components/BExt.js" as X
@@ -25,6 +26,7 @@ PageFrame {
         pluginsAvailable: core.pluginsAvailable,
         hubApprovalAvailable: core.hubApprovalAvailable,
         hubLifecycleAvailable: core.hubLifecycleAvailable,
+        hubImportPickable: core.hubImportPickable,
         blockedText: core.connected ? (core.sessionId ? "Indisponível durante a sessão de voz." : "Indisponível: ação não permitida agora.") : "Core desconectado: nada pode ser alterado agora."
     })
     // One row per plugin: the catalog entry (when there is one), the Core item and the installed record.
@@ -66,6 +68,9 @@ PageFrame {
     function askRemove(plugin) { removeConfirm.plugin = plugin; removeConfirm.revision = core.hubInstallRevision; removeConfirm.open() }
     function askRevoke(plugin) { revokeConfirm.plugin = plugin; revokeConfirm.revision = core.pluginsRevision; revokeConfirm.open() }
     function askClearData(plugin) { clearDataConfirm.plugin = plugin; clearDataConfirm.open() }
+    // WP-4 Hub import: the plugin whose payload the file dialog is choosing. The Core verifies and stages the file; nothing installs.
+    property string importPid: ""
+    function askImport(plugin) { importPid = plugin.plugin_id; importDialog.open() }
 
     PageHeader {
         title: "Plugins"
@@ -222,6 +227,7 @@ PageFrame {
                     visible: X.inFilter(modelData, page.filter)
                     onSelectRequested: page.selectedId = modelData.plugin_id
                     onReviewRequested: function (plugin) { page.openReview(plugin) }
+                    onImportRequested: function (plugin) { page.askImport(plugin) }
                     onRevokeRequested: function (plugin) { page.askRevoke(plugin) }
                     onRemoveRequested: function (plugin) { page.askRemove(plugin) }
                     onClearDataRequested: function (plugin) { page.askClearData(plugin) }
@@ -235,7 +241,20 @@ PageFrame {
             item: page.selectedRow ? page.selectedRow.item : null
             ctx: page.ctx
             onReviewRequested: function (plugin) { page.openReview(plugin) }
+            onImportRequested: function (plugin) { page.askImport(plugin) }
             onCloseRequested: page.selectedId = ""
+        }
+    }
+
+    // WP-4: pick the package file of an approved plugin. The bridge reads it in chunks and refuses a size that differs from the catalog.
+    FileDialog {
+        id: importDialog
+        objectName: "hubImportDialog"
+        title: "Pacote do plugin " + page.importPid
+        fileMode: FileDialog.OpenFile
+        onAccepted: {
+            var message = core.importHubPayload(page.importPid, String(selectedFile))
+            if (message.length > 0) AppState.toast(message)
         }
     }
 
@@ -247,7 +266,7 @@ PageFrame {
         title: "Revisar permissões"
         onOpened: { core.beginHubReview(); AppState.reviewRevision = core.hubApprovalRevision }
         Text {
-            text: AppState.reviewPlugin ? AppState.reviewPlugin.plugin_id + " " + AppState.reviewPlugin.semver + " · " + AppState.reviewPlugin.publisher + " · não verificado" : ""
+            text: AppState.reviewPlugin ? AppState.reviewPlugin.plugin_id + " " + AppState.reviewPlugin.semver + " · " + AppState.reviewPlugin.publisher + (core.hubPublisherVerified ? " · publisher verificado" : " · não verificado") : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
@@ -270,7 +289,7 @@ PageFrame {
         GCheckbox {
             id: reviewAck
             objectName: "publisherAcknowledgement"
-            text: "Entendo que o publisher não foi autenticado"
+            text: core.hubPublisherVerified ? "Entendo as permissões deste plugin" : "Entendo que o publisher não foi autenticado"
             enabled: core.hubApprovalAvailable
         }
         Text {

@@ -6,6 +6,7 @@
 //! and test tools.
 use crate::{
     core::Core,
+    hub::{self, PublisherKey, PublisherSignature, Trust},
     protocol::ToolDecision,
     tools::{self, Risk},
     world,
@@ -64,6 +65,9 @@ const PACKAGE_FORMAT: u64 = 1;
 const PACKAGE_MAX: u64 = 64 * 1024;
 const EXPORT_DIR: &str = "skill-exports";
 const IMPORT_DIR: &str = "skill-imports";
+const INDEX_FILE: &str = "index.json";
+const INDEX_FORMAT: u64 = 1;
+const INDEX_MAX_ENTRIES: usize = 64;
 const MANIFEST_FILE: &str = "skill.json";
 
 // Validator reasons. Each one is a complete static code, so responses never allocate.
@@ -97,6 +101,7 @@ const E_SKILL_LIMIT: &str = "skill_invalid:skill_limit";
 const E_VERSION_LIMIT: &str = "skill_invalid:version_limit";
 const E_LOCKED: &str = "skill_invalid:version_locked";
 const E_DUPLICATE: &str = "skill_invalid:duplicate_id";
+const E_TARGET: &str = "skill_invalid:target_mismatch";
 // Package scan findings (D4). Each one is a bridge validator reason.
 const F_HASH: &str = "skill_invalid:hash_mismatch";
 const F_CORRUPT: &str = "skill_invalid:corrupt_package";
@@ -227,6 +232,25 @@ pub struct RunRecord {
     state: String,
     step: Option<String>,
     codes: Vec<String>,
+    /// WP15: when the run ended (Unix ms). Records written before WP15 read as 0 and are dropped by a
+    /// finite history retention (see `retain_runs`).
+    #[serde(default)]
+    at_ms: u64,
+}
+
+/// CFG-04 / WP15: applies the Core history retention to run records. `days` is the window (`None` is
+/// `never`: nothing is kept). Records without a time are dropped under a window. Returns true when
+/// the list changed.
+pub fn retain_runs(runs: &mut Vec<RunRecord>, days: Option<u64>, now_ms: u64) -> bool {
+    let before = runs.len();
+    match days {
+        None => runs.clear(),
+        Some(days) => {
+            let cutoff = now_ms.saturating_sub(days.saturating_mul(86_400_000));
+            runs.retain(|r| r.at_ms != 0 && r.at_ms >= cutoff);
+        }
+    }
+    runs.len() != before
 }
 
 /// `skill-runs.json`: outcome of the last 32 runs. No content, no arguments, no outputs.
@@ -323,6 +347,11 @@ pub struct Undo {
 pub struct Step {
     pub id: String,
     pub call: String,
+    /// WP15: the capability or tool the step acts on, shown as "Alvo" before approval. Optional; when
+    /// present it must name the same capability or tool as `call`, so the approval screen never shows a
+    /// different target from the one that runs.
+    #[serde(default)]
+    pub target: Option<String>,
     #[serde(default)]
     pub args: Option<Value>,
     #[serde(default)]
@@ -857,6 +886,18 @@ fn cond_ok(cond: &Cond, m: &Manifest, allowed: &[String]) -> Result<(), &'static
     }
 }
 
+/// WP15 `target`: must equal the step's `call` and name a capability or a registry tool. A skill call
+/// runs its own steps and a connection call is already named by its operation, so neither is a target.
+fn step_target_ok(declared: &str, call: &str) -> Result<(), &'static str> {
+    if declared != call {
+        return Err(E_TARGET);
+    }
+    match parse_target(declared) {
+        Ok(Target::Capability(_) | Target::Tool(_)) => Ok(()),
+        _ => Err(E_TARGET),
+    }
+}
+
 fn steps(m: &Manifest, env: &Env) -> Result<(), &'static str> {
     if m.steps.is_empty() || m.steps.len() > STEPS_MAX {
         return Err(E_TOO_MANY_STEPS);
@@ -872,6 +913,9 @@ fn steps(m: &Manifest, env: &Env) -> Result<(), &'static str> {
             return Err(E_DUP_STEP);
         }
         let target = call_target(&step.call, m, env)?;
+        if let Some(declared) = &step.target {
+            step_target_ok(declared, &step.call)?;
+        }
         let args = step.args.clone().unwrap_or_else(|| json!({}));
         args_ok(&args, m, &earlier)?;
         for cond in [&step.when, &step.unless].into_iter().flatten() {
@@ -1166,6 +1210,9 @@ pub struct StepView {
     pub state: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<&'static str>,
+    /// WP15 `target` of the step (the capability or tool it acts on), when the manifest declares one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub risk: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1256,6 +1303,56 @@ pub struct Paths {
     pub exports: String,
 }
 
+/// Snapshot `skills.last_export` (WP15): the package the last successful export wrote. The export
+/// response is only a code, so the path reaches the UI here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExportView {
+    pub id: String,
+    pub version: String,
+    pub path: String,
+}
+
+/// One entry of the GitHub index (SKILL-03), listed for the UI. The Core never fetches `url`;
+/// `present` says whether `<name>.gskill` is already in the import folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IndexItem {
+    pub name: String,
+    pub version: String,
+    pub sha256: String,
+    pub url: String,
+    pub signed: bool,
+    pub present: bool,
+}
+
+/// Snapshot `skills.index`: the listed `index.json`, or `error` when the file exists and is refused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IndexView {
+    pub repository: String,
+    pub entries: Vec<IndexItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<&'static str>,
+}
+
+/// Lists a parsed index against the import folder. Pure: the caller supplies the folder.
+pub fn index_view(index: &SkillIndex, folder: &Path) -> IndexView {
+    IndexView {
+        repository: index.repository.clone(),
+        entries: index
+            .skills
+            .iter()
+            .map(|entry| IndexItem {
+                name: entry.name.clone(),
+                version: entry.version.clone(),
+                sha256: entry.sha256.clone(),
+                url: entry.url.clone(),
+                signed: entry.signature.is_some(),
+                present: folder.join(format!("{}.gskill", entry.name)).is_file(),
+            })
+            .collect(),
+        error: None,
+    }
+}
+
 /// Snapshot `skills`: items, the active run (or null) and the outcome history.
 #[derive(Debug, Clone, Serialize)]
 pub struct View {
@@ -1266,6 +1363,11 @@ pub struct View {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub import: Option<ImportView>,
     pub paths: Paths,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_export: Option<ExportView>,
+    /// SKILL-03: the GitHub index, when `skill-imports/index.json` exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<IndexView>,
 }
 
 /// One scan finding: a validator reason (`skill_invalid:<reason>`) and the part it refers to.
@@ -1311,11 +1413,32 @@ pub(crate) struct Engine {
     epoch: u64,
     /// Last import preview (D4). Memory only: a restart drops it, and confirm rescans the file.
     import: Option<ImportState>,
+    /// WP15: the package the last successful export wrote (memory only, shown in the snapshot).
+    last_export: Option<ExportView>,
 }
 
 impl Engine {
     pub(crate) fn set_boot_seed(&mut self, seed: u64) {
         self.epoch = seed;
+    }
+    /// CFG-04 / WP15: applies the history retention to `skill-runs.json`. Rewrites the ledger only when
+    /// a record is dropped; a failed write keeps the in-memory list and the next purge retries.
+    pub(crate) fn purge_runs(&mut self, days: Option<u64>, now_ms: u64) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let mut next = self.runs.clone();
+        if !retain_runs(&mut next.runs, days, now_ms) {
+            return;
+        }
+        next.revision = next.revision.saturating_add(1);
+        let Ok(bytes) = serde_json::to_vec(&next) else {
+            return;
+        };
+        if bytes.len() <= LEDGER_MAX && write_private(&root.join("skill-runs.json"), &bytes).is_ok()
+        {
+            self.runs = next;
+        }
     }
     pub(crate) fn is_active(&self) -> bool {
         self.run.is_some()
@@ -1920,6 +2043,8 @@ impl Core {
         if let Err(code) = self.skills_commit(next) {
             return code;
         }
+        // WP15 (CFG/SKILL audit 11.10): every successful disable is an event, with or without an active run.
+        self.emit(String::new(), None, "skill_disabled");
         if self.skills.run.as_ref().is_some_and(|r| r.skill == id) {
             self.skill_start_rollback("skill_disabled");
         }
@@ -2117,6 +2242,11 @@ impl Core {
     }
 
     fn push_view(&mut self, id: String, state: &'static str) -> usize {
+        // WP15: the step being driven is the one this view reports (nested steps use their own view).
+        let target = self
+            .current_step()
+            .filter(|step| step.id == id)
+            .and_then(|step| step.target);
         let Some(run) = self.skills.run.as_mut() else {
             return 0;
         };
@@ -2124,6 +2254,7 @@ impl Core {
             id,
             state,
             code: None,
+            target,
             risk: None,
             effect_id: None,
             effect: None,
@@ -2821,6 +2952,7 @@ impl Core {
             state: state.to_owned(),
             step: run.failed_step,
             codes: codes.into_iter().map(|c| wire_code(c).to_owned()).collect(),
+            at_ms: crate::protocol::unix_ms(),
         });
     }
 
@@ -2953,6 +3085,7 @@ impl Core {
                         id: s.id.clone(),
                         state: wire_step(s.state, s.code),
                         code: s.code.map(wire_code),
+                        target: s.target.clone(),
                         risk: s.risk,
                         effect_id: s.effect_id,
                         effect: s.effect.clone(),
@@ -2979,6 +3112,19 @@ impl Core {
                     .join(EXPORT_DIR)
                     .to_string_lossy()
                     .into_owned(),
+            },
+            last_export: self.skills.last_export.clone(),
+            index: match read_index() {
+                Ok(Some(index)) => Some(index_view(
+                    &index,
+                    &crate::transport::data_dir().join(IMPORT_DIR),
+                )),
+                Ok(None) => None,
+                Err(code) => Some(IndexView {
+                    repository: String::new(),
+                    entries: Vec::new(),
+                    error: Some(code),
+                }),
             },
         })
     }
@@ -3271,8 +3417,9 @@ impl Core {
 // `<data>/skill-imports/<name>.gskill`, previews it, and installs a confirmed preview as `draft`.
 // ---------------------------------------------------------------------------
 
-/// The package file. `package_sha256` covers the whole package with that field set to "".
-/// `signature` must stay null: publisher signatures are not implemented.
+/// The package file. `package_sha256` covers the whole package with that field and `signature` set
+/// to "" / null. `signature` is an Ed25519 publisher signature over `package_sha256` (hub.rs);
+/// export writes null because the Core holds no private key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Package {
@@ -3285,7 +3432,68 @@ struct Package {
     files: Vec<PackageFile>,
     package_sha256: String,
     publisher_id: String,
-    signature: Option<Value>,
+    signature: Option<PublisherSignature>,
+}
+
+/// `<data>/skill-imports/index.json`: the GitHub-indexed catalog of shareable skill packages.
+/// Format 1 (documented in docs/WP5.md). The Core never fetches `url`; the index and the package
+/// files are placed in the import folder, and each entry must match its package exactly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillIndex {
+    pub format: u64,
+    pub repository: String,
+    pub skills: Vec<IndexEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexEntry {
+    /// Import name: the package is `<name>.gskill` in the same folder.
+    pub name: String,
+    pub version: String,
+    /// The package hash (`package_sha256` of the .gskill), lowercase hex.
+    pub sha256: String,
+    /// `https://github.com/<owner>/<repo>/...` where the package is published.
+    pub url: String,
+    pub signature: Option<PublisherSignature>,
+}
+
+/// Parses and validates an index. Any malformed field refuses the whole index.
+pub fn parse_index(bytes: &[u8]) -> Result<SkillIndex, &'static str> {
+    if bytes.len() as u64 > PACKAGE_MAX {
+        return Err(F_TOO_LARGE);
+    }
+    let index: SkillIndex = serde_json::from_slice(bytes).map_err(|_| E_IMPORT_INVALID)?;
+    if index.format != INDEX_FORMAT
+        || index.skills.len() > INDEX_MAX_ENTRIES
+        || !github_url(&index.repository)
+    {
+        return Err(E_IMPORT_INVALID);
+    }
+    let mut names = HashSet::new();
+    for entry in &index.skills {
+        if !import_name_ok(&entry.name)
+            || !names.insert(entry.name.as_str())
+            || !semver_ok(&entry.version)
+            || !sha_ok(&entry.sha256)
+            || !github_url(&entry.url)
+        {
+            return Err(E_IMPORT_INVALID);
+        }
+    }
+    Ok(index)
+}
+
+/// `https://github.com/<owner>/<repo>[/...]`, at most 512 bytes, no spaces or control characters.
+fn github_url(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("https://github.com/") else {
+        return false;
+    };
+    value.len() <= 512
+        && !value.chars().any(|c| c.is_control() || c.is_whitespace())
+        && rest.split('/').take(2).filter(|p| !p.is_empty()).count() == 2
+        && !rest.contains("..")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3295,10 +3503,79 @@ struct PackageFile {
     sha256: String,
 }
 
+/// Hash the signature covers: the package with `package_sha256` and `signature` blanked, so a
+/// signature never signs itself and the hash never depends on who signed it.
 fn package_digest(package: &Package) -> String {
     let mut copy = package.clone();
     copy.package_sha256 = String::new();
+    copy.signature = None;
     serde_json::to_vec(&copy).map_or_else(|_| String::new(), |bytes| sha256_hex(&bytes))
+}
+
+/// Publisher verification of one package, as a pure function of the parsed package, the optional
+/// index entry for its name and the trust list. Returns the blocking findings and whether a valid
+/// signature covers exactly this package. Unsigned or unknown-key packages are unverified, never
+/// blocked; a signature that is malformed, forged or from another publisher blocks the import.
+fn publisher_checks(
+    package: &Package,
+    publisher: &str,
+    version: &str,
+    index_entry: Option<&IndexEntry>,
+    trust: &[PublisherKey],
+) -> (Vec<Finding>, bool) {
+    let mut findings = Vec::new();
+    let mut verified = false;
+    let recomputed = package_digest(package);
+    let hash_ok = package.package_sha256 == recomputed;
+    // The embedded signature signs the package hash; it counts only when that hash is the real one.
+    match hub::publisher_trust(
+        &package.package_sha256,
+        package.signature.as_ref(),
+        publisher,
+        trust,
+    ) {
+        Ok(Trust::Verified) => verified = hash_ok,
+        Ok(_) => {}
+        Err(_) => findings.push(signature_finding(package.signature.as_ref(), "signature")),
+    }
+    if let Some(entry) = index_entry {
+        if entry.sha256 != recomputed {
+            findings.push(Finding {
+                code: F_HASH,
+                field: Some("index"),
+            });
+        }
+        if entry.version != version {
+            findings.push(Finding {
+                code: F_CORRUPT,
+                field: Some("index"),
+            });
+        }
+        match hub::publisher_trust(&entry.sha256, entry.signature.as_ref(), publisher, trust) {
+            Ok(Trust::Verified) => verified = verified || (hash_ok && entry.sha256 == recomputed),
+            Ok(_) => {}
+            Err(_) => findings.push(signature_finding(entry.signature.as_ref(), "index")),
+        }
+    }
+    (findings, verified)
+}
+
+/// Malformed signature fields read as a corrupt package; a well-formed one that does not verify
+/// (or belongs to another publisher) reads as a tampered package.
+fn signature_finding(signature: Option<&PublisherSignature>, field: &'static str) -> Finding {
+    let malformed = signature.is_some_and(|s| {
+        s.algorithm != "ed25519"
+            || s.signature.len() != 128
+            || !s
+                .signature
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !crate::protocol::valid_id(&s.key_id)
+    });
+    Finding {
+        code: if malformed { F_CORRUPT } else { F_HASH },
+        field: Some(field),
+    }
 }
 
 /// Private directory for packages: created 0700 when missing; a symlink or non-directory is refused.
@@ -3327,6 +3604,11 @@ fn import_name_ok(name: &str) -> bool {
 /// Reads `<data>/skill-imports/<name>.gskill`: a regular file, never through a symlink, at most
 /// 64 KiB. Any other path, file type or size is refused before its content is parsed.
 fn read_package(name: &str) -> Result<Vec<u8>, &'static str> {
+    read_import_file(&format!("{name}.gskill"))
+}
+
+/// Reads one file of the import folder (a package or the index) under the same rules.
+fn read_import_file(file: &str) -> Result<Vec<u8>, &'static str> {
     let dir = crate::transport::data_dir().join(IMPORT_DIR);
     match fs::symlink_metadata(&dir) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => return Err(F_PATH),
@@ -3334,7 +3616,7 @@ fn read_package(name: &str) -> Result<Vec<u8>, &'static str> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(E_IMPORT_NOT_FOUND),
         Err(_) => return Err(E_IMPORT_INVALID),
     }
-    let path = dir.join(format!("{name}.gskill"));
+    let path = dir.join(file);
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -3359,6 +3641,15 @@ fn read_package(name: &str) -> Result<Vec<u8>, &'static str> {
         return Err(F_TOO_LARGE);
     }
     Ok(bytes)
+}
+
+/// `<data>/skill-imports/index.json` when present. Absent means no index; malformed or unsafe refuses.
+fn read_index() -> Result<Option<SkillIndex>, &'static str> {
+    match read_import_file(INDEX_FILE) {
+        Ok(bytes) => parse_index(&bytes).map(Some),
+        Err(E_IMPORT_NOT_FOUND) => Ok(None),
+        Err(code) => Err(code),
+    }
 }
 
 /// Prose fields (description, readme, triggers, prerequisites, attestations) must not carry a
@@ -3448,6 +3739,11 @@ impl Core {
         if write_private(&path, &out).is_err() {
             return "skills_storage_error";
         }
+        self.skills.last_export = Some(ExportView {
+            id: id.to_owned(),
+            version: version.to_owned(),
+            path: path.to_string_lossy().into_owned(),
+        });
         self.emit(String::new(), None, "skill_exported");
         "ok"
     }
@@ -3457,11 +3753,15 @@ impl Core {
     fn scan_package(&self, name: &str) -> Result<Scan, &'static str> {
         let bytes = read_package(name)?;
         let package: Package = serde_json::from_slice(&bytes).map_err(|_| E_IMPORT_INVALID)?;
-        if package.format != PACKAGE_FORMAT || package.signature.is_some() {
+        if package.format != PACKAGE_FORMAT {
             return Err(E_IMPORT_INVALID);
         }
         let checked = self.skill_checked(&package.manifest)?;
         let manifest = &checked.manifest;
+        let index = read_index()?;
+        let index_entry = index
+            .as_ref()
+            .and_then(|i| i.skills.iter().find(|e| e.name == name));
         let mut findings: Vec<Finding> = Vec::new();
         if package.package_sha256 != package_digest(&package) {
             findings.push(Finding {
@@ -3542,12 +3842,20 @@ impl Core {
                 field: Some("permissions_required"),
             });
         }
+        let (signature_findings, verified) = publisher_checks(
+            &package,
+            &manifest.publisher.id,
+            &manifest.version,
+            index_entry,
+            &hub::pinned_publisher_keys(),
+        );
+        findings.extend(signature_findings);
         let view = ImportView {
             name: name.to_owned(),
             id: manifest.id.clone(),
             version: manifest.version.clone(),
             publisher: manifest.publisher.name.clone(),
-            unverified: true,
+            unverified: !verified,
             permissions_required: manifest.permissions_required.clone(),
             missing_deps: self.missing_for(manifest),
             permission_delta,
@@ -3752,5 +4060,277 @@ mod tests {
         }
         assert_eq!(wire_code("stale_screen"), "plugin_error");
         assert_eq!(wire_op("unknown_run"), "unknown_skill_run");
+    }
+}
+
+#[cfg(test)]
+mod publisher_tests {
+    use super::*;
+    use ring::signature::{Ed25519KeyPair, KeyPair};
+
+    const PUBLISHER: &str = "acme";
+
+    fn key(seed: u8) -> Ed25519KeyPair {
+        Ed25519KeyPair::from_seed_unchecked(&[seed; 32]).unwrap()
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .concat()
+    }
+
+    fn trust_for(kp: &Ed25519KeyPair, publisher: &str) -> Vec<PublisherKey> {
+        vec![PublisherKey {
+            key_id: "pub-1".to_owned(),
+            publisher: publisher.to_owned(),
+            public_key_hex: hex(kp.public_key().as_ref()),
+        }]
+    }
+
+    fn signature(kp: &Ed25519KeyPair, message: &str) -> PublisherSignature {
+        PublisherSignature {
+            key_id: "pub-1".to_owned(),
+            algorithm: "ed25519".to_owned(),
+            signature: hex(kp.sign(message.as_bytes()).as_ref()),
+        }
+    }
+
+    /// A package whose hash is correct for its fields (publisher checks read only these).
+    fn package() -> Package {
+        let mut package = Package {
+            format: PACKAGE_FORMAT,
+            manifest: json!({"id": "skill_note"}),
+            readme: None,
+            license: "MIT".to_owned(),
+            author: "Acme".to_owned(),
+            version: "1.0.0".to_owned(),
+            files: vec![],
+            package_sha256: String::new(),
+            publisher_id: PUBLISHER.to_owned(),
+            signature: None,
+        };
+        package.package_sha256 = package_digest(&package);
+        package
+    }
+
+    fn signed(kp: &Ed25519KeyPair) -> Package {
+        let mut package = package();
+        package.signature = Some(signature(kp, &package.package_sha256));
+        package
+    }
+
+    fn codes(findings: &[Finding]) -> Vec<(&'static str, Option<&'static str>)> {
+        findings.iter().map(|f| (f.code, f.field)).collect()
+    }
+
+    #[test]
+    fn unsigned_package_is_unverified_without_a_finding() {
+        let kp = key(3);
+        let (findings, verified) = publisher_checks(
+            &package(),
+            PUBLISHER,
+            "1.0.0",
+            None,
+            &trust_for(&kp, PUBLISHER),
+        );
+        assert!(findings.is_empty());
+        assert!(!verified);
+    }
+
+    #[test]
+    fn package_signed_by_a_pinned_key_verifies() {
+        let kp = key(3);
+        let (findings, verified) = publisher_checks(
+            &signed(&kp),
+            PUBLISHER,
+            "1.0.0",
+            None,
+            &trust_for(&kp, PUBLISHER),
+        );
+        assert!(findings.is_empty());
+        assert!(verified);
+    }
+
+    #[test]
+    fn tampered_package_is_never_verified_even_with_an_old_signature() {
+        let kp = key(3);
+        let mut package = signed(&kp);
+        // Content changes after signing: the stored hash no longer matches the package.
+        package.version = "1.0.1".to_owned();
+        let (_, verified) = publisher_checks(
+            &package,
+            PUBLISHER,
+            "1.0.1",
+            None,
+            &trust_for(&kp, PUBLISHER),
+        );
+        assert!(!verified);
+    }
+
+    #[test]
+    fn forged_signature_blocks_the_import() {
+        let kp = key(3);
+        let mut package = package();
+        package.signature = Some(signature(&key(4), &package.package_sha256));
+        let (findings, verified) = publisher_checks(
+            &package,
+            PUBLISHER,
+            "1.0.0",
+            None,
+            &trust_for(&kp, PUBLISHER),
+        );
+        assert_eq!(codes(&findings), vec![(F_HASH, Some("signature"))]);
+        assert!(!verified);
+    }
+
+    #[test]
+    fn corrupted_signature_field_reads_as_a_corrupt_package() {
+        let kp = key(3);
+        let mut package = signed(&kp);
+        package.signature.as_mut().unwrap().algorithm = "rsa".to_owned();
+        let (findings, verified) = publisher_checks(
+            &package,
+            PUBLISHER,
+            "1.0.0",
+            None,
+            &trust_for(&kp, PUBLISHER),
+        );
+        assert_eq!(codes(&findings), vec![(F_CORRUPT, Some("signature"))]);
+        assert!(!verified);
+    }
+
+    #[test]
+    fn unknown_key_is_unverified_and_key_of_another_publisher_blocks() {
+        let kp = key(3);
+        let mut unknown = signed(&kp);
+        unknown.signature.as_mut().unwrap().key_id = "nobody".to_owned();
+        let (findings, verified) = publisher_checks(
+            &unknown,
+            PUBLISHER,
+            "1.0.0",
+            None,
+            &trust_for(&kp, PUBLISHER),
+        );
+        assert!(findings.is_empty() && !verified);
+        let (findings, verified) = publisher_checks(
+            &signed(&kp),
+            PUBLISHER,
+            "1.0.0",
+            None,
+            &trust_for(&kp, "other-publisher"),
+        );
+        assert_eq!(codes(&findings), vec![(F_HASH, Some("signature"))]);
+        assert!(!verified);
+    }
+
+    #[test]
+    fn index_entry_must_match_the_package_and_can_carry_the_signature() {
+        let kp = key(3);
+        let package = package();
+        let good = IndexEntry {
+            name: "fixture-note".to_owned(),
+            version: "1.0.0".to_owned(),
+            sha256: package.package_sha256.clone(),
+            url: "https://github.com/acme/skills/releases/download/v1/fixture-note.gskill"
+                .to_owned(),
+            signature: Some(signature(&kp, &package.package_sha256)),
+        };
+        let trust = trust_for(&kp, PUBLISHER);
+        let (findings, verified) =
+            publisher_checks(&package, PUBLISHER, "1.0.0", Some(&good), &trust);
+        assert!(findings.is_empty());
+        assert!(verified);
+
+        let wrong_hash = IndexEntry {
+            sha256: "0".repeat(64),
+            ..good.clone()
+        };
+        let (findings, verified) =
+            publisher_checks(&package, PUBLISHER, "1.0.0", Some(&wrong_hash), &trust);
+        assert!(codes(&findings).contains(&(F_HASH, Some("index"))));
+        assert!(!verified);
+
+        let wrong_version = IndexEntry {
+            version: "2.0.0".to_owned(),
+            ..good.clone()
+        };
+        let (findings, _) =
+            publisher_checks(&package, PUBLISHER, "1.0.0", Some(&wrong_version), &trust);
+        assert!(codes(&findings).contains(&(F_CORRUPT, Some("index"))));
+
+        let forged = IndexEntry {
+            signature: Some(signature(&key(9), &package.package_sha256)),
+            ..good
+        };
+        let (findings, verified) =
+            publisher_checks(&package, PUBLISHER, "1.0.0", Some(&forged), &trust);
+        assert_eq!(codes(&findings), vec![(F_HASH, Some("index"))]);
+        assert!(!verified);
+    }
+
+    fn index_json(entries: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "format": 1,
+            "repository": "https://github.com/acme/skills",
+            "skills": entries,
+        }))
+        .unwrap()
+    }
+
+    fn entry(name: &str) -> serde_json::Value {
+        json!({
+            "name": name,
+            "version": "1.0.0",
+            "sha256": "a".repeat(64),
+            "url": "https://github.com/acme/skills/releases/download/v1/x.gskill",
+            "signature": null,
+        })
+    }
+
+    #[test]
+    fn well_formed_index_parses_and_malformed_ones_are_refused() {
+        let index = parse_index(&index_json(json!([entry("fixture-note")]))).unwrap();
+        assert_eq!(index.skills[0].name, "fixture-note");
+        assert_eq!(index.skills[0].signature, None);
+
+        let refused = |bytes: Vec<u8>| parse_index(&bytes).is_err();
+        assert!(refused(index_json(json!([entry("a"), entry("a")]))));
+        assert!(refused(index_json(json!([entry("../escape")]))));
+        let mut bad_hash = entry("ok");
+        bad_hash["sha256"] = json!("A".repeat(64));
+        assert!(refused(index_json(json!([bad_hash]))));
+        let mut http = entry("ok");
+        http["url"] = json!("http://github.com/acme/skills/x.gskill");
+        assert!(refused(index_json(json!([http]))));
+        let mut elsewhere = entry("ok");
+        elsewhere["url"] = json!("https://evil.test/x.gskill");
+        assert!(refused(index_json(json!([elsewhere]))));
+        let mut extra = entry("ok");
+        extra["mirror"] = json!("https://evil.test");
+        assert!(refused(index_json(json!([extra]))));
+        let mut bad_version = entry("ok");
+        bad_version["version"] = json!("1.0");
+        assert!(refused(index_json(json!([bad_version]))));
+        let too_many: Vec<_> = (0..=INDEX_MAX_ENTRIES)
+            .map(|i| entry(&format!("s{i}")))
+            .collect();
+        assert!(refused(index_json(json!(too_many))));
+        let wrong_format = serde_json::to_vec(&json!({
+            "format": 2,
+            "repository": "https://github.com/acme/skills",
+            "skills": [],
+        }))
+        .unwrap();
+        assert!(refused(wrong_format));
+        let not_github = serde_json::to_vec(&json!({
+            "format": 1,
+            "repository": "https://example.test/acme/skills",
+            "skills": [],
+        }))
+        .unwrap();
+        assert!(refused(not_github));
     }
 }

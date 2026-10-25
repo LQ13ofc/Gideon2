@@ -1,7 +1,8 @@
 """Thin, bounded Qt IPC adapter. Core owns all parsing, sessions and authority."""
-import datetime,hashlib,json,math,os,re,stat,unicodedata,uuid
+import datetime,hashlib,json,math,os,re,stat,struct,time,unicodedata,uuid
+import socket as _sock
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote,urlsplit
 from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtNetwork import QLocalSocket
@@ -27,18 +28,60 @@ CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_
 # Tool proposal reasons (src/tools.rs and src/core.rs tool_denied/tool_failed).
 TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_failed','executor_unavailable','user_denied','invalid_args','unknown_tool','busy'})
 HUB_REASONS=('ledger_missing','ledger_invalid')
+# WP-4 Hub import: the Core takes at most 2048 hex characters per hub_chunk (src/hub.rs chunk_import), so 1 KiB per request.
+HUB_CHUNK_BYTES=1024
+HUB_UPLOAD_MESSAGES={'busy':'Importação indisponível agora: o Core precisa estar conectado, sem sessão de voz e com o catálogo verificado',
+    'entry':'Importe só o pacote de um plugin com permissões aprovadas e sem pacote guardado; nada foi enviado',
+    'path':'Escolha um arquivo comum, por caminho absoluto; links simbólicos não são aceitos; nada foi enviado',
+    'unreadable':'Não consegui abrir o arquivo do pacote; nada foi enviado',
+    'size':'O tamanho do arquivo não bate com o tamanho do catálogo; nada foi enviado',
+    'sending':'Enviando pacote ao Core…',
+    'progress':'Enviando pacote: {done} de {total} bytes',
+    'staged':'Pacote verificado e guardado pelo Core; ainda não instalado.',
+    'hub_import_missing':'O Core não abriu a importação; nada foi guardado',
+    'cancelled':'Importação cancelada; nada foi guardado',
+    'core_offline':'Core desconectado durante a importação; nada foi guardado'}
 STAGED_ERRORS=('staged_payload_invalid',)
 # Finish reasons of the capture session (src/core.rs finish), recorded in capture.reason.
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'unmute':(),'volume_up':(),'volume_down':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','stt_last_error','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','actions','command','speech','transcript','capture','agent','skills','connections','registry','audio','languages','wake_phrases','phrase_check'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','stt_last_error','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','actions','command','speech','transcript','capture','agent','skills','connections','registry','audio','languages','wake_phrases','phrase_check','personal','personal_reply'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
 ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','approved_at_ms','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
 ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities','approved_at_ms'}
-PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','input_conditioning','audio_input_device','audio_output_device','live_audio','real_actions','stt_languages','tts_language','tts_voice','wake_phrases'})
+PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','input_conditioning','audio_input_device','audio_output_device','live_audio','real_actions','stt_languages','tts_language','tts_voice','wake_phrases','history_retention','developer_mode'})
+# CFG-04 retention (src/storage.rs HistoryRetention): exactly these four wire values. DIAG-02 developer mode is a strict bool.
+HISTORY_RETENTION_VALUES=('days_7','days_30','days_90','never')
+# DIAG-05 resource sampling: CPU ticks per second is read from the system (SC_CLK_TCK); the sample keeps the previous reading per pid.
+CLOCK_TICKS=os.sysconf('SC_CLK_TCK') if hasattr(os,'sysconf') else 100
+LATENCY_SAMPLES=20
+def _peer_pid(sock):
+    """Core process id: SO_PEERCRED on the connected local socket (Linux). None when the kernel or the socket cannot tell."""
+    try:
+        fd=int(sock.socketDescriptor())
+        if fd<0:return None
+        with _sock.socket(fileno=os.dup(fd)) as peer:
+            pid,_uid,_gid=struct.unpack('3i',peer.getsockopt(_sock.SOL_SOCKET,_sock.SO_PEERCRED,struct.calcsize('3i')))
+        return pid if pid>0 else None
+    except (OSError,ValueError,struct.error,AttributeError):return None
+def _proc_sample(pid):
+    """(cpu ticks, rss kB, ppid) of one process from /proc, or None when it is gone or /proc is missing."""
+    try:
+        with open(f'/proc/{pid}/stat','rb') as handle:raw=handle.read().decode('ascii','replace')
+        fields=raw[raw.rindex(')')+2:].split()
+        ticks=int(fields[11])+int(fields[12])  # utime (field 14) + stime (field 15)
+        with open(f'/proc/{pid}/status','rb') as handle:
+            rss=next((int(line.split()[1]) for line in handle.read().decode('ascii','replace').splitlines() if line.startswith('VmRSS:')),0)
+        return ticks,rss,int(fields[1])
+    except (OSError,ValueError,IndexError):return None
+def _children(pid):
+    """Direct children from the kernel's task children list. None when the kernel does not expose it."""
+    try:
+        with open(f'/proc/{pid}/task/{pid}/children','rb') as handle:return [int(p) for p in handle.read().split()]
+    except (OSError,ValueError):return None
 # Frases de ativação (src/phrases.rs): the Core owns the catalog, tokens and measurements; these checks shape the wire.
 WAKE_PHRASE_BLOCK_KEYS=frozenset({'max_active','max_custom','custom_revision','lexicon','settings','active','phrases','test'})
 WAKE_PHRASE_ENTRY_KEYS=frozenset({'id','text','tokens','label','language','qualification','custom','selectable','boost','threshold','measurement'})
@@ -182,6 +225,7 @@ AUDIO_REASON_MESSAGES={'no_audio_tool':'Nenhuma ferramenta de áudio encontrada:
 AUDIO_SOURCE_LABELS={'pactl':'PipeWire/Pulse (pactl)','pw-dump':'PipeWire (pw-dump)'}
 LIVE_ERROR_MESSAGES={'recorder_unavailable':'gravador de áudio indisponível (instale pipewire-pulse)','recorder_exited':'o gravador de áudio parou','sandbox_unavailable':'isolamento do gravador indisponível (bwrap ausente)','wake_worker_unavailable':'worker de wake indisponível','wake_worker_failed':'worker de wake falhou','restart_limit':'limite de reinícios atingido','invalid_device':'dispositivo de entrada inválido','player_unavailable':'reprodutor de áudio indisponível','player_write_failed':'falha ao enviar áudio ao reprodutor','player_failed':'o reprodutor de áudio falhou','player_timeout':'o reprodutor de áudio não respondeu','worker_crashed':'o worker de wake parou com erro (veja o diagnóstico)','worker_import_error':'faltam bibliotecas do worker de wake (veja o diagnóstico)','device_unavailable':'o microfone escolhido não está disponível','model_missing':'arquivo do modelo de wake ausente ou alterado'}
 RESTORE_BUSY_TEXT='Indisponível durante a sessão de voz; tente quando o Gideon estiver em espera'
+RESTORE_BACKUP_TEXT='Padrões não restaurados: não foi possível gravar a cópia config.json.bak nem trocar a configuração; os valores atuais continuam'
 SENSITIVITY_RANGE_TEXT='Sensibilidade fora de 0,5 a 1,5; nada foi enviado'
 DEVICE_INVALID_TEXT='Dispositivo inválido; nada foi enviado'
 # Choices for one Select: "Padrão do sistema", the listed devices (default one marked), and the saved name when the Core no longer lists it.
@@ -301,7 +345,7 @@ def probe_view(probe):
     return {'id':probe['id'],'device':probe['device'],'running':not done,'done':done,'verdict':probe.get('verdict') or '','verdictText':PROBE_VERDICT_TEXTS.get(probe.get('verdict'),''),
             'zone':PROBE_VERDICT_ZONES.get(probe.get('verdict'),'bad'),'hint':probe.get('hint') or '','rms':probe.get('rms_dbfs'),'peak':probe.get('peak_dbfs'),'floor':probe.get('floor_dbfs'),
             'frames':probe.get('frames',0),'reason':probe.get('reason') or ''}
-PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output'})
+PACK_KEYS=frozenset({'version','id','scope','preflight','engines','wake_phrases','active_phrase','default_phrase','voice','language','audio_input','audio_output','pack_sha256'})
 TRANSCRIPT_KEYS=frozenset({'source','session_id','revision','audio_end_us','raw','normalized','is_final','confidence'})
 CAPTURE_KEYS=frozenset({'session_id','start_us','end_us','samples','pcm_sha256','reason'})
 SPEECH_KEYS=frozenset({'output_volume_percent','session_id','sample_rate','samples','chunks','pcm_sha256','peak','rms','first_pcm_ms','elapsed_ms','sink'})
@@ -874,6 +918,9 @@ def validate_snapshot(data,request_id,min_sequence):
         require(type(prefs.get('live_audio')) is bool)
         # A11 consent for host actions: the Core always reports it; strict bool.
         require(type(prefs.get('real_actions')) is bool)
+        # CFG-04 retention and DIAG-02 developer mode: the Core always reports them; checked when present (older fixtures omit them).
+        if 'history_retention' in prefs:require(prefs['history_retention'] in HISTORY_RETENTION_VALUES)
+        if 'developer_mode' in prefs:require(type(prefs['developer_mode']) is bool)
         if 'wake_phrases' in prefs:require(wake_setting_list_ok(prefs['wake_phrases']))
         if 'wake_sensitivity' in prefs:require(wake_sensitivity_ok(prefs['wake_sensitivity']))
         if 'input_conditioning' in prefs:require(prefs['input_conditioning'] in INPUT_CONDITIONING_VALUES)
@@ -901,7 +948,8 @@ def validate_snapshot(data,request_id,min_sequence):
     if hub is not None:
         require(isinstance(hub,dict) and type(hub.get('version')) is int and hub['version']==1)
         require(set(hub)<=HUB_KEYS and HUB_REQUIRED<=set(hub))
-        require(hub.get('status') in ('verified','quarantined') and hub.get('publisher_verified') is False)
+        require(hub.get('status') in ('verified','quarantined') and type(hub.get('publisher_verified')) is bool)
+        require(hub.get('publisher_verified') is False or (hub.get('status')=='verified' and len(hub.get('entries') or [])>0))
         require(integer(hub['approval_revision']) and integer(hub['orphans']))
         if 'reason' in hub:require(hub['status']=='quarantined' and hub['reason'] in HUB_REASONS)
         if hub.get('import') is not None:
@@ -989,13 +1037,18 @@ def validate_snapshot(data,request_id,min_sequence):
     if 'connections' in data:require(valid_connections(data['connections']))
     # S5 E3: the registry block is optional (absent or null while the registry is not published); when present it is the exact view of docs/S5.md E3.
     if 'registry' in data:require(valid_registry(data['registry']))
+    # WP-10a: the personal block is always present once the Core runs; its reply is only on the answer to a personal request.
+    if 'personal' in data:require(valid_personal(data['personal']))
+    if 'personal_reply' in data:require(isinstance(data['personal_reply'],dict))
     partial=data.get('partial')
     require(partial is None or (isinstance(partial,str) and utf8_len(partial)<=PARTIAL_LIMIT))
     pack=data.get('base_pack')
     if pack is not None:
         require(isinstance(pack,dict) and type(pack.get('version')) is int and pack['version']==1)
         require(short(pack.get('id')) and pack.get('scope')=='dev_virtual_en' and pack.get('preflight')=='verified')
+        # DIAG-01 / WP-15: pack_sha256 is the SHA-256 of the pack definition (src/pack.rs), always present in the Core block.
         require(set(pack)==PACK_KEYS and isinstance(pack.get('engines'),dict) and set(pack['engines'])=={'wake','stt','tts'} and all(short(v,160) for v in pack['engines'].values()))
+        require(digest(pack['pack_sha256']))
         choices=pack.get('wake_phrases');require(isinstance(choices,list) and 1<=len(choices)<=8)
         ids=set()
         for choice in choices:
@@ -1175,6 +1228,61 @@ PHRASE_MESSAGES={
     # U1: only a safe-mode configuration needs recovery; a pending restart just needs the Core restarted.
     'configuration_not_ready':'Esta ação espera o reinício do Core. Reinicie o Core para continuar; a mudança salva já vale.',
 }
+# WP-10a personal areas (Memória, Almas, Hábitos, Automações, Histórico). The Core answers with these codes; the texts are Portuguese.
+PERSONAL_AREAS=('memory','souls','habits','automations','conversations')
+PERSONAL_MESSAGES={
+    'personal_unavailable':'Dados pessoais indisponíveis: o armazenamento não abriu. Reinicie o Core.',
+    'stale_revision':'Esta tela estava desatualizada: os dados mudaram. Atualize e tente de novo.',
+    'consent_required':'Ative a fonte antes de salvar fatos dela.',
+    'retention_never':'Histórico desligado (não guardar): nada de conversa é guardado.',
+    'invalid_text':'Texto inválido ou vazio.',
+    'memory_full':'Limite de fatos atingido: apague um antes.',
+    'invalid_ttl':'Prazo inválido: use de 1 a 365 dias.',
+    'unknown_fact':'Fato não encontrado.',
+    'confirmation_required':'Confirme a ação antes de apagar.',
+    'unknown_soul':'Alma não encontrada.',
+    'soul_capacity':'Limite de almas atingido: apague uma antes.',
+    'invalid_provenance':'Origem da alma inválida para este modo.',
+    'invalid_confidence':'Confiança inválida.',
+    'invalid_evidence':'Evidência inválida: informe trechos válidos.',
+    'invalid_skill_id':'Skill inválida.',
+    'skill_not_enabled':'A Skill precisa estar habilitada.',
+    'habit_capacity':'Limite de hábitos atingido: remova um antes.',
+    'habit_paused':'Hábito pausado: revise antes de executar.',
+    'skill_version_changed':'A versão da Skill mudou: revise antes de executar.',
+    'no_previous_version':'Não há versão anterior para voltar.',
+    'invalid_inputs':'Entradas inválidas para a Skill.',
+    'unknown_habit':'Hábito não encontrado.',
+    'unknown_automation':'Automação não encontrada.',
+    'automation_capacity':'Limite de automações atingido.',
+    'schedule_in_past':'O horário já passou: escolha um horário futuro.',
+    'invalid_schedule':'Agenda inválida.',
+    'invalid_status':'Status inválido.',
+    'automation_done':'Automação já concluída.',
+    'automation_paused':'Automação pausada: revise antes de retomar.',
+    'unknown_session':'Conversa não encontrada.',
+    'conversation_capacity':'Limite de conversas atingido: apague uma antes.',
+    'invalid_request':'Pedido inválido; nada foi alterado.',
+    'unsupported_version':'Versão de pedido não suportada.',
+    'unknown_area':'Área desconhecida.',
+    'ledger_invalid':'Arquivo pessoal corrompido: a área ficou indisponível.',
+    'ledger_unreadable':'Não foi possível ler o arquivo pessoal (permissões ou link). Nada foi alterado.',
+    'ledger_write_failed':'Não foi possível gravar o arquivo pessoal. Nada foi alterado.',
+    'ledger_full':'Arquivo pessoal cheio: apague dados antes.',
+    'personal_dir_unavailable':'Pasta de dados pessoais indisponível.',
+    'core_unavailable':'Core indisponível agora.',
+    'deferred':'Adiado: o motor de Skills está ocupado. Tente de novo.',
+    'needs_review':'Revise o hábito ou a automação antes de executar.',
+    'reply_too_large':'Resultado grande demais para a tela. Use Exportar para guardar os dados em arquivo.',
+    'personal_export_failed':'Não foi possível gravar a exportação. Nada foi apagado.',
+    'live_audio_disabled':'Escuta do microfone desligada: ative o microfone em Configurações › Dispositivos.',
+    'capture_unavailable':'Captura do microfone não está ativa neste Core.',
+    'queued':'Na fila: o pedido segue quando a sessão de voz terminar.',
+    'chat_failed':'O pedido da fila não pôde ser executado.',
+    'stt_unavailable':'Transcrição indisponível agora.',
+    'busy':'Ocupado: aguarde o término da ação atual.',
+}
+PERSONAL_OPS=frozenset({'personal','personal_export','personal_erase_all'})
 LLM_PROVIDER_LABELS={'openrouter':'OpenRouter','opencode':'OpenCode','google':'Google','custom':'personalizado'}
 LANGUAGE_LABELS={'EN':'inglês'}
 RECEIPT_PREFIXES=(('Sandbox app process verified: ','Processo do app verificado no sandbox: '),)
@@ -1307,6 +1415,8 @@ CODE_MESSAGES.update({f'skill_invalid:{reason}':text for reason,text in SKILL_RE
 CODE_MESSAGES.update({code:text for code,text in SKILL_OP_MESSAGES.items() if code not in CODE_MESSAGES})
 CODE_MESSAGES.update({'skill_invalid':'Skill recusada pela validação do Core; nada foi gravado','model_output_invalid':'O modelo não devolveu um manifest JSON válido'}) 
 CODE_MESSAGES.update(PHRASE_MESSAGES)
+# setdefault: a code that already has a text (shared with other channels) keeps it.
+for _code,_text in PERSONAL_MESSAGES.items():CODE_MESSAGES.setdefault(_code,_text)
 CODE_MESSAGES.update(CONN_MESSAGES)
 CODE_MESSAGES.update(REG_MESSAGES)
 SKILL_ID=re.compile(r'[a-z][a-z0-9_]{2,40}');SKILL_STEP_ID=re.compile(r'[a-z][a-z0-9_]{0,23}');SKILL_IMPORT_NAME=re.compile(r'[A-Za-z0-9._-]{1,64}')
@@ -1317,7 +1427,7 @@ SKILL_DRAFT_CAPABILITY='llm_engine.skill_draft';SKILL_DRAFT_PLUGIN='llm_engine';
 PENDING_SKILL_DRAFT='Gerando skill com o LLM…';SKILL_ARM=object()
 SKILL_OPS=frozenset({'skill_validate','skill_save_draft','skill_dry_run','skill_approve','skill_enable','skill_disable','skill_rollback','skill_remove','skill_run','skill_decide','skill_cancel','skill_export','skill_import','skill_import_confirm'})
 SKILL_ITEM_KEYS=frozenset({'id','name','version','state','source','active','deps_ok','permissions_ok','missing'});SKILL_ITEM_OPTIONAL=frozenset({'permissions_required'})
-SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code','risk','effect_id','effect'});SKILL_RISKS=('read','state_changing','destructive');SKILL_EFFECT=re.compile(r'[a-z_]{1,32}')
+SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code','risk','effect_id','effect','target'});SKILL_RISKS=('read','state_changing','destructive');SKILL_EFFECT=re.compile(r'[a-z_]{1,32}')
 SKILL_HISTORY_KEYS=frozenset({'run_id','skill','version','state','step','codes'})
 SKILL_IMPORT_KEYS=frozenset({'name','id','version','publisher','unverified','permissions_required','missing_deps','permission_delta','permissions_escalated','duplicate','findings'})
 SKILL_FINDING_KEYS=frozenset({'code','field'})
@@ -1371,6 +1481,8 @@ def valid_skill_run(run):
         if 'code' in step and not skill_code_ok(step['code']):return False
         # Decision steps only: the call's risk class (tool-proposal vocabulary) and the registry effect id.
         if 'risk' in step and step['risk'] not in SKILL_RISKS:return False
+        # WP-15: the step's target (the capability or tool it acts on) when the manifest declares one.
+        if 'target' in step and not text_ok(step['target'],128):return False
         if 'effect_id' in step and not (isinstance(step['effect_id'],str) and SKILL_EFFECT.fullmatch(step['effect_id'])):return False
         # The same closed effect object as a tool proposal (src/skills.rs StepView.effect); it must agree with effect_id.
         if 'effect' in step and not (valid_effect(step['effect']) and step.get('effect_id')==step['effect']['id']):return False
@@ -1384,19 +1496,21 @@ def valid_skill_run(run):
 def valid_skill_history(entries):
     if not (isinstance(entries,list) and len(entries)<=SKILL_HISTORY_LIMIT):return False
     for entry in entries:
-        if not (isinstance(entry,dict) and set(entry)==SKILL_HISTORY_KEYS and run_id_ok(entry['run_id'])):return False
+        # WP-15: history entries carry `at_ms` (unix ms); older records loaded from disk may not have it.
+        if not (isinstance(entry,dict) and SKILL_HISTORY_KEYS<=set(entry)<=SKILL_HISTORY_KEYS|{'at_ms'} and run_id_ok(entry['run_id'])):return False
+        if 'at_ms' in entry and not is_int(entry['at_ms']):return False
         if not (isinstance(entry['skill'],str) and SKILL_ID.fullmatch(entry['skill']) and isinstance(entry['version'],str) and SKILL_SEMVER.fullmatch(entry['version'])):return False
         if entry['state'] not in SKILL_RUN_STATES or (entry['step'] is not None and not (isinstance(entry['step'],str) and SKILL_STEP_ID.fullmatch(entry['step']))):return False
         codes=entry['codes']
         if not (isinstance(codes,list) and len(codes)<=SKILL_CODES_LIMIT and all(skill_code_ok(c) for c in codes)):return False
     return True
 def valid_skill_import(preview):
-    """Import preview (docs/S4.md D4): always unverified; findings carry validator codes only."""
+    """Import preview (docs/S4.md D4). `unverified` is False only for a package whose publisher signature checked out (WP-5)."""
     if preview is None:return True
     if not (isinstance(preview,dict) and set(preview)==SKILL_IMPORT_KEYS):return False
     if not (isinstance(preview['name'],str) and SKILL_IMPORT_NAME.fullmatch(preview['name']) and isinstance(preview['id'],str) and SKILL_ID.fullmatch(preview['id'])):return False
     if not (isinstance(preview['version'],str) and SKILL_SEMVER.fullmatch(preview['version']) and text_ok(preview['publisher'],64)):return False
-    if preview['unverified'] is not True or type(preview['duplicate']) is not bool or type(preview['permissions_escalated']) is not bool:return False
+    if type(preview['unverified']) is not bool or type(preview['duplicate']) is not bool or type(preview['permissions_escalated']) is not bool:return False
     for key,limit,size in (('permissions_required',SKILL_CODES_LIMIT,64),('missing_deps',SKILL_DEPS_LIMIT,128),('permission_delta',SKILL_CODES_LIMIT,64)):
         value=preview[key]
         if not (isinstance(value,list) and len(value)<=limit and all(isinstance(v,str) and text_ok(v,size) for v in value)):return False
@@ -1406,12 +1520,32 @@ def valid_skill_import(preview):
 def valid_skill_paths(paths):
     """skills.paths: exactly the import and export folders, absolute display paths (never read by the UI)."""
     return isinstance(paths,dict) and set(paths)=={'imports','exports'} and all(isinstance(paths[k],str) and paths[k].startswith('/') and len(paths[k])<=1024 and '\n' not in paths[k] for k in ('imports','exports'))
+def valid_skill_export(item):
+    """skills.last_export (WP-15): the package the last successful export wrote: id, version and absolute path."""
+    return isinstance(item,dict) and set(item)=={'id','version','path'} and isinstance(item['id'],str) and SKILL_ID.fullmatch(item['id']) is not None and isinstance(item['version'],str) and SKILL_SEMVER.fullmatch(item['version']) is not None and isinstance(item['path'],str) and item['path'].startswith('/') and len(item['path'])<=1024 and '\n' not in item['path']
+def valid_skill_index(index):
+    """skills.index (SKILL-03): the listed GitHub index, or the refusal `error`. The UI never fetches `url`."""
+    if not (isinstance(index,dict) and {'repository','entries'}<=set(index)<=frozenset({'repository','entries','error'})):return False
+    if not (text_ok(index['repository'],128) and isinstance(index['entries'],list) and len(index['entries'])<=SKILL_ITEMS_LIMIT):return False
+    if 'error' in index and not (isinstance(index['error'],str) and len(index['error'])<=64):return False
+    for item in index['entries']:
+        if not (isinstance(item,dict) and set(item)=={'name','version','sha256','url','signed','present'}):return False
+        if not (isinstance(item['name'],str) and SKILL_IMPORT_NAME.fullmatch(item['name']) and isinstance(item['version'],str) and SKILL_SEMVER.fullmatch(item['version'])):return False
+        if not (digest(item['sha256']) and isinstance(item['url'],str) and len(item['url'])<=512 and type(item['signed']) is bool and type(item['present']) is bool):return False
+    return True
+def valid_personal(block):
+    """Snapshot block personal (WP-10a): `{"status":"unavailable"}` when the store did not open; otherwise the retention and one summary per area."""
+    if not isinstance(block,dict):return False
+    if block.get('status')=='unavailable':return set(block)=={'status'}
+    return set(block)==set(PERSONAL_AREAS)|{'retention'} and block['retention'] in ('on','never') and all(isinstance(block[a],dict) for a in PERSONAL_AREAS)
 def valid_skills(block):
     """Snapshot block skills: null, or revision, items (unique id+version), run, history and paths (docs/S4.md D2); import preview optional."""
     if block is None:return True
-    if not (isinstance(block,dict) and {'revision','items','run','history'}<=set(block)<=frozenset({'revision','items','run','history','import','paths'})):return False
+    if not (isinstance(block,dict) and {'revision','items','run','history'}<=set(block)<=frozenset({'revision','items','run','history','import','paths','last_export','index'})):return False
     if not is_int(block['revision']):return False
     if 'paths' in block and not valid_skill_paths(block['paths']):return False
+    if 'last_export' in block and not valid_skill_export(block['last_export']):return False
+    if 'index' in block and not valid_skill_index(block['index']):return False
     items=block['items']
     if not (isinstance(items,list) and len(items)<=SKILL_ITEMS_LIMIT and all(valid_skill_item(i) for i in items)):return False
     keys=[(i['id'],i['version']) for i in items]
@@ -1601,7 +1735,7 @@ OPS={
     'hub_install':('hub','Plugin instalado (desativado)'),'hub_rollback':('hub','Versão revertida'),'hub_remove':('hub','Plugin removido'),
     'plugin_enable':('plugin','Plugin ativado'),'plugin_disable':('plugin','Plugin desativado'),'plugin_revoke':('plugin','Permissões revogadas; plugin desativado'),
     'capability_invoke':('plugin',None),'capability_cancel':('plugin','Cancelamento enviado'),
-    'text':('text','Texto enviado'),
+    'text':('text','Texto enviado'),'listen_start':('listen','Escuta iniciada: fale agora'),
     'secret_set':('llm','Chave salva pelo Core'),'secret_clear':('llm','Chave removida pelo Core'),'llm_configure':('llm','Configuração salva pelo Core'),
     'tool_decide':('tools','Decisão enviada ao Core'),
     'agent_start':('agent','Objetivo enviado ao Core'),'agent_abort':('agent','Aborto enviado ao Core'),
@@ -1611,7 +1745,7 @@ OPS={
     'skill_run':('skills','Execução iniciada'),'skill_decide':('skills','Decisão enviada ao Core'),'skill_cancel':('skills','Cancelamento enviado'),
     'skill_export':('skills','Pacote exportado; publisher não verificado'),'skill_import':('skills','Pré-visualização de importação pronta'),'skill_import_confirm':('skills','Skill importada como rascunho; aprove antes de usar'),
 }
-PENDING={'agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao Core…','hub_approve':'Enviando aprovação ao Core','hub_abort':'Enviando cancelamento ao Core','hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core','plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…','text':'Enviando texto ao Core',
+PENDING={'listen_start':'Pedindo escuta ao Core…','agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao Core…','hub_approve':'Enviando aprovação ao Core','hub_abort':'Enviando cancelamento ao Core','hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core','plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…','text':'Enviando texto ao Core',
     'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…',
     'skill_validate':'Validando manifest no Core…','skill_save_draft':'Salvando rascunho no Core…','skill_dry_run':'Simulando skill no Core…','skill_approve':'Aprovando skill no Core…','skill_enable':'Habilitando skill no Core…','skill_disable':'Desabilitando skill no Core…','skill_rollback':'Revertendo versão no Core…','skill_remove':'Removendo skill no Core…','skill_run':'Iniciando skill no Core…','skill_decide':'Enviando decisão do passo ao Core…','skill_cancel':'Cancelando skill no Core…','skill_export':'Exportando pacote pelo Core…','skill_import':'Lendo pacote pelo Core…','skill_import_confirm':'Importando como rascunho pelo Core…'}
 # S5 connection ops: the Core's ack code is the result; refusals of accounts and consent arrive as codes from CONN_MESSAGES.
@@ -1658,17 +1792,24 @@ PENDING.update({'real_actions_preference':'Salvando as ações no computador no 
 # Idiomas (Frente 2): one op for the STT list and the TTS language/voice; applied at the next Core start.
 OPS.update({'language_preference':('prefs','Idiomas salvos no Core; reinicie o Core para aplicar')})
 PENDING.update({'language_preference':'Salvando idiomas no Core…'})
+# CFG-04 retention: applies at once; `never` also removes the audit trail (purge on commit). DIAG-02 developer mode: a plain switch.
+OPS.update({'history_retention_preference':('prefs','Retenção do histórico salva no Core; vale já')})
+PENDING.update({'history_retention_preference':'Salvando a retenção do histórico no Core…'})
+OPS.update({'developer_mode_preference':('prefs','Modo desenvolvedor salvo no Core')})
+PENDING.update({'developer_mode_preference':'Salvando o modo desenvolvedor no Core…'})
+# DIAG-04 (docs/ui-spec/50-diagnostico.md §3.4): codes the Core emits that had no Portuguese text.
+CODE_MESSAGES.update({'hub_storage_error':'Falha ao gravar o registro do catálogo.','plugin_storage_error':'Falha ao gravar o registro dos plugins.','hub_import_timeout':'Importação expirou antes de terminar.'})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
-SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged','languages':'languagesChanged','actions':'actionsChanged'}
-SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio','languages','actions')
+SECTION_SIGNALS={'personal':'personalChanged','entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged','languages':'languagesChanged','actions':'actionsChanged'}
+SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio','languages','actions','personal','personal_reply')
 
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
     preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal();actionsChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
-    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal()
+    prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal();personalChanged=Signal()
     def __init__(self,root):
         super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':'','wake':'','audio':''};self.hub_target='';self.capability_pending=False;self.plugin_capability='';self._package=package_info(Path(__file__).resolve().parent);self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
@@ -1679,12 +1820,18 @@ class Bridge(QObject):
         # models_marker is the response count when the awaited capability invoke was acknowledged; only a later response can carry its answer.
         self.models_req=None;self.models_wait=None;self.models_marker=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_message=''
         self._responses=0
+        # WP-10a: area of the personal request in flight, and the last reply ({area, code, reply}) shown by the pages.
+        self.personal_area='';self.personal_reply={}
+        # DIAG-05: send time of the request awaiting an answer, the last LATENCY_SAMPLES round trips, the Core pid and the per-pid CPU readings.
+        self._sent_at=None;self._sent_op=None;self._latency=[];self._core_pid=None;self._cpu_prev={};self._sampled_at=None;self.resource_view={}
         # Paging (list is paginated per tab): models_page_req=(tab,offset) awaits the page answer; models_page[tab]={'total','next'} is where the next page starts.
         self.models_page_req=None;self.models_page=fresh_model_pages()
         # C4 perception: one allowlisted capability at a time. perception_req awaits the Core ack; perception_inflight awaits the plugin result; perception_before is the capability_result seen at ack, so a stale answer is never taken for the new one.
         self.perception_req=None;self.perception_inflight=None;self.perception_before=None;self.perception_indicators={'mic':None,'camera':None}
         # S4 skills: skill_req awaits the Core ack of the LLM draft; skill_inflight awaits the plugin result; skill_before is the capability_result seen at ack (same rule as perception).
         self.skill_req=None;self.skill_inflight=None;self.skill_before=None;self.skill_draft={}
+        # WP-4 Hub import: the open payload file and the step in flight (see importHubPayload). None when no upload runs.
+        self.hub_upload=None
         # Core restart: waiting from the ack until the first snapshot of the new Core; the timer turns a silent Core into a message.
         self.restart_state=None;self.restart_dropped=False;self.restart_timer=QTimer(self);self.restart_timer.setSingleShot(True);self.restart_timer.setInterval(RESTART_TIMEOUT_MS);self.restart_timer.timeout.connect(self._restart_timeout)
         self.socket=QLocalSocket(self);self.socket.connected.connect(self._connected);self.socket.readyRead.connect(self._read);self.socket.disconnected.connect(self._offline);self.socket.errorOccurred.connect(self._offline)
@@ -1703,14 +1850,17 @@ class Bridge(QObject):
         except (OSError,ValueError):self._offline();return
         self.socket.connectToServer(str(self.root/'core.sock'))
     def _connected(self):
-        self.retry.stop();self.error='';self._backoff=500;self.refresh()
+        self.retry.stop();self.error='';self._backoff=500;self._core_pid=_peer_pid(self.socket);self.refresh()
     def _offline(self,*args):
         old=self.snapshot
         if self.restart_state is not None:self.restart_dropped=True
         self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=dict.fromkeys(self.results,'');self.hub_target='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
+        # DIAG-05: a new Core starts with empty latency and resource samples.
+        self._sent_at=None;self._latency=[];self._core_pid=None;self._cpu_prev={};self._sampled_at=None;self.resource_view={}
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
         # After abort(): it re-enters _offline synchronously, which clears results; the chat message must survive that.
         self._chat_reset();self._models_reset();self._perception_reset();self._skill_reset()
+        self._hub_upload_drop()
         self._publish(old,self.snapshot)
         self.changed.emit()
         if not self.retry.isActive():self.retry.start(self._backoff);self._backoff=min(5000,self._backoff*2)
@@ -1719,6 +1869,7 @@ class Bridge(QObject):
         self._counter+=1;rid=f'{self._prefix}_{self._counter}';self.pending=rid;self.pending_op=op
         if op=='hub_approve':self.hub_target=kw['plugin_id']
         if op=='text':self.text_inflight=kw['raw']
+        self._sent_at=time.monotonic();self._sent_op=op
         self.socket.write((json.dumps({'version':1,'request_id':rid,'op':op,**kw})+'\n').encode());self.timeout.start();return True
     @Slot()
     def refresh(self):self._request('snapshot')
@@ -1726,7 +1877,7 @@ class Bridge(QObject):
         hub=s.get('hub') or {}
         return {'entries':hub.get('entries'),'installed':hub.get('installed'),'hub':{k:v for k,v in hub.items() if k not in('entries','installed')},
                 'plugins':s.get('plugins'),'capability':s.get('capability_result'),'preferences':s.get('preferences'),'pack':s.get('base_pack'),
-                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),'audio':s.get('audio'),'languages':s.get('languages'),'actions':s.get('actions'),
+                'llm':s.get('llm'),'partial':s.get('partial'),'tools':s.get('tool_proposals'),'agent':s.get('agent'),'skills':s.get('skills'),'connections':s.get('connections'),'registry':s.get('registry'),'events':s.get('events'),'audio':s.get('audio'),'languages':s.get('languages'),'actions':s.get('actions'),'personal':s.get('personal'),
                 'session':{k:v for k,v in s.items() if k not in SNAPSHOT_SECTION_KEYS}}
     def _publish(self,old,new):
         before,after=self._sections(old),self._sections(new)
@@ -1736,9 +1887,13 @@ class Bridge(QObject):
         """Map the Core answer of a finished request to one UI message through the OPS table."""
         code=data.get('code','invalid_message')
         if op=='core_restart':return self._restart_ack(code)
+        if op in PERSONAL_OPS:self._personal_settled(op,code,data);return
         # B16: the Core refuses the defaults restore with busy during a voice session; the message says so and the toast follows.
         if op=='preferences_restore_defaults' and code=='busy':
             self.results['prefs']=RESTORE_BUSY_TEXT;self.prefsSettled.emit(RESTORE_BUSY_TEXT);return
+        # WP-4 backup copy: the Core writes config.json.bak before it resets anything; a failure there (or in the commit) keeps the values.
+        if op=='preferences_restore_defaults' and code=='preferences_storage_error':
+            self.results['prefs']=RESTORE_BACKUP_TEXT;self.prefsSettled.emit(RESTORE_BACKUP_TEXT);return
         if self.models_req is not None and self.models_req[1]==op:
             kind=self.models_req[0];self.models_req=None;self._models_ack(kind,code);return
         if op=='capability_invoke' and self.pending_chat:
@@ -1761,14 +1916,17 @@ class Bridge(QObject):
         if op=='text':
             sent,self.text_inflight=self.text_inflight,None
             self.results['text']=done if code=='ok' else code_message(code)
-            if code=='ok':self.textSent.emit(sent or '')
+            # N-5: a turn sent during a voice session is queued by the Core (`queued`); it counts as sent.
+            if code in ('ok','queued'):self.textSent.emit(sent or '')
             return
         if code!='ok':
             self.results[channel]=capability_code_message(code) if op=='capability_invoke' else real_action_code_message(op,code)
             if op=='capability_invoke':self.capability_pending=False
         elif op=='capability_invoke':self.capability_pending=True;self.results[channel]=PENDING[op]
         else:self.results[channel]=done(self.hub_target) if callable(done) else done
+        # The shell shows prefsSettled as a toast: the listen answer (HUD-03) reaches the user the same way.
         if channel=='prefs':self.prefsSettled.emit(self.results['prefs'])
+        if channel=='listen':self.prefsSettled.emit(self.results['listen'])
     def _apply(self,data,settled=False):
         """Publish one validated snapshot; per-section signals fire only for sections that changed."""
         # Python retains u64 precisely; QML never receives numeric session IDs.
@@ -1788,6 +1946,9 @@ class Bridge(QObject):
             except Exception:self._offline();return
             sid=data['session_id'];self._sequence=data['sequence'];self._responses+=1
             pending_op=self.pending_op
+            # DIAG-05: the round trip of the request this answer settles (measured here, content-free).
+            if self._sent_at is not None:
+                self._latency.append((self._sent_op,round((time.monotonic()-self._sent_at)*1000)));del self._latency[:-LATENCY_SAMPLES];self._sent_at=None
             self.timeout.stop();self.pending=None;self.pending_op=None;self.online=True;self.poll.start()
             data.pop('request_id',None)
             self._settle(pending_op,data)
@@ -1797,6 +1958,7 @@ class Bridge(QObject):
             # The ack itself is a snapshot of the old Core; only a snapshot after the socket dropped comes from the restarted one.
             if self.restart_dropped and self.restart_state is not None:self._restart_done()
             self._chat_observe();self._models_observe();self._perception_observe();self._skill_observe()
+            self._maybe_sample()
             self.poll.setInterval(150 if sid is not None else 1000)
             if self.cancel_id is not None:
                 old_id=self.cancel_id;self.cancel_id=None;self._request('cancel',session_id=int(old_id))
@@ -1811,13 +1973,16 @@ class Bridge(QObject):
                 else:self.results['text']=problem;self.changed.emit()
             # Model steps go last: one request in flight at a time, so they never displace a queued request above.
             if not self.pending:self._models_next()
+            # WP-4: the Hub upload goes last too; it waits while another request holds the socket, and the next answer resumes it.
+            self._hub_upload_pump(pending_op,data)
     @Slot()
     def cancel(self):
         if self.online and self.sessionId:
             self.text_request=None
             if self.pending:self.cancel_id=self.sessionId
             else:self._request('cancel',session_id=int(self.sessionId))
-    def _text_ready(self):return self.online and bool(self.snapshot.get('text_input_available')) and not self.sessionId
+    # N-5: the Core queues a typed turn during a voice session, so the input stays open while one runs.
+    def _text_ready(self):return self.online and bool(self.snapshot.get('text_input_available'))
     @Slot(str)
     def submitText(self,text):
         problem=text_problem(text)
@@ -1845,8 +2010,14 @@ class Bridge(QObject):
         if self.chat_inflight is not None or self.chat_request is not None:self.chat_state='error';self.results['chat']='Core indisponível; resposta interrompida'
         self.chat_inflight=None;self.chat_request=None;self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         self.chatChanged.emit()
+    # N-5: the chat and the agent stay on screen during a voice session (history and state are visible); only the input is
+    # held back by chatInputAvailable. This used to depend on preferencesAvailable, which hides everything while a session runs.
     @Property(bool,notify=changed)
-    def chatAvailable(self):return self.pluginsAvailable and self._chat_target() is not None
+    def chatAvailable(self):return self.online and 'plugins' in self.snapshot and self._chat_target() is not None
+    @Property(bool,notify=changed)
+    def chatInputAvailable(self):return self.chatAvailable
+    @Property(str,notify=changed)
+    def chatBlockedText(self):return 'Durante a voz, o texto entra na fila e é enviado quando a sessão terminar.' if self.sessionId else ''
     @Slot(str,result=str)
     def chatTextProblem(self,text):return chat_problem(text) or ''
     # B13: the command line rule (1..512 UTF-8 bytes, no control characters). '' means the text may be sent.
@@ -2505,6 +2676,129 @@ class Bridge(QObject):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
         if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
         self._preferences('real_actions_preference',revision=int(self.preferencesRevision),enabled=enabled,confirmed=enabled)
+    # ---- CFG-04 retention of the history (timeline and audit trail) and DIAG-02 developer mode. Both are Core preferences.
+    @Property(str,notify=preferencesChanged)
+    def historyRetention(self):
+        value=(self.snapshot.get('preferences') or {}).get('history_retention')
+        return value if value in HISTORY_RETENTION_VALUES else ''
+    @Slot(str)
+    def setHistoryRetention(self,value):
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if value not in HISTORY_RETENTION_VALUES:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        self._preferences('history_retention_preference',revision=int(self.preferencesRevision),retention=value)
+    @Property(bool,notify=preferencesChanged)
+    def developerMode(self):return (self.snapshot.get('preferences') or {}).get('developer_mode') is True
+    @Slot(bool)
+    def setDeveloperMode(self,enabled):
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        self._preferences('developer_mode_preference',revision=int(self.preferencesRevision),enabled=enabled)
+    # ---- DIAG-01 fields the diagnostics describe. All come from the snapshot; empty or 0 when the Core does not report them.
+    @Property(int,notify=changed)
+    def protocolVersion(self):return int(self.snapshot.get('version') or 0)
+    @Property(str,notify=changed)
+    def catalogSha256(self):return str((self.snapshot.get('hub') or {}).get('catalog_sha256') or '')
+    # DIAG-01 (WP-15): the Core's pack digest, shown in Diagnóstico as packHash.
+    @Property(str,notify=packChanged)
+    def packHash(self):return str((self.snapshot.get('base_pack') or {}).get('pack_sha256') or '')
+    @Property('QVariantMap',notify=packChanged)
+    def packEngines(self):return dict((self.snapshot.get('base_pack') or {}).get('engines') or {})
+    @Property(str,notify=packChanged)
+    def packAudioInput(self):return str((self.snapshot.get('base_pack') or {}).get('audio_input') or '')
+    @Property(str,notify=packChanged)
+    def packAudioOutput(self):return str((self.snapshot.get('base_pack') or {}).get('audio_output') or '')
+    @Property('QVariantMap',notify=changed)
+    def lastSpeech(self):
+        """Last spoken answer of the session (Core `speech` summary). Empty map when there is none."""
+        speech=self.snapshot.get('speech')
+        if not speech:return {}
+        return {'elapsed_ms':int(speech.get('elapsed_ms') or 0),'samples':int(speech.get('samples') or 0),'chunks':int(speech.get('chunks') or 0),'peak':float(speech.get('peak') or 0.0),'rms':float(speech.get('rms') or 0.0),'first_pcm_ms':int(speech.get('first_pcm_ms') or 0)}
+    # ---- WP-10a personal areas. One Core request per call; the reply is kept as {area, code, reply} for the pages.
+    def _personal_refuse(self,area,code):self.personal_reply={'area':area,'code':code,'reply':{}};self.personalChanged.emit()
+    def _personal_settled(self,op,code,data):
+        reply=data.get('personal_reply');reply=reply.get('reply') if isinstance(reply,dict) else None
+        area={'personal':self.personal_area,'personal_export':'export','personal_erase_all':'erase'}[op]
+        self.personal_reply={'area':area,'code':code,'reply':reply if isinstance(reply,dict) else {}};self.personalChanged.emit()
+    @Slot(str,str)
+    def personalOp(self,area,payload):
+        if area not in PERSONAL_AREAS:self._personal_refuse(area,'unknown_area');return
+        if not isinstance(payload,str) or len(payload)>8192:self._personal_refuse(area,'invalid_request');return
+        try:body=json.loads(payload)
+        except ValueError:self._personal_refuse(area,'invalid_request');return
+        if not isinstance(body,dict):self._personal_refuse(area,'invalid_request');return
+        self.personal_area=area
+        if not self._request('personal',area=area,payload=body):self._personal_refuse(area,'busy' if self.pending else 'core_unavailable')
+    @Slot()
+    def personalExport(self):
+        self.personal_area='export'
+        if not self._request('personal_export'):self._personal_refuse('export','busy' if self.pending else 'core_unavailable')
+    @Slot(bool)
+    def personalEraseAll(self,confirmed):
+        # Only a confirmed request leaves the bridge; the page shows its own confirmation first.
+        if confirmed is not True:self._personal_refuse('erase','confirmation_required');return
+        self.personal_area='erase'
+        if not self._request('personal_erase_all',confirm=True):self._personal_refuse('erase','busy' if self.pending else 'core_unavailable')
+    @Property('QVariantMap',notify=personalChanged)
+    def personal(self):return dict(self.snapshot.get('personal') or {})
+    @Property(bool,notify=changed)
+    def personalAvailable(self):return self.online and isinstance((self.snapshot.get('personal') or {}).get('memory'),dict)
+    @Property('QVariantMap',notify=personalChanged)
+    def personalReply(self):return dict(self.personal_reply)
+    # ---- HUD-03: Ctrl+M asks the Core for a listening session; the Core refuses with a reason when live audio or the capture is off.
+    @Slot()
+    def listenStart(self):self._send('listen','listen_start')
+    # ---- DIAG-03: the Core's timeline holds llm_fallback_used (the fallback answer was used) in this session.
+    @Property(bool,notify=eventsChanged)
+    def llmFallbackUsed(self):return any(e.get('kind')=='llm_fallback_used' for e in (self.snapshot.get('events') or []))
+    # ---- DIAG-05 latency and resources. Latency is the round trip measured here; resources are read from /proc (Linux only).
+    def _maybe_sample(self):
+        now=time.monotonic()
+        if self._sampled_at is not None and now-self._sampled_at<1.0:return
+        self._sampled_at=now
+        self._sample_resources(now)
+    def _sample_resources(self,now):
+        pid=self._core_pid
+        if pid is None:
+            self.resource_view={'known':False};self.changed.emit();return
+        seen=[];queue=[pid];children_known=True
+        while queue and len(seen)<256:
+            current=queue.pop()
+            if current in seen:continue
+            seen.append(current)
+            kids=_children(current)
+            if kids is None:children_known=False
+            else:queue.extend(kids)
+        rows={};previous={}
+        for process in dict.fromkeys(seen+[os.getpid()]):
+            sample=_proc_sample(process)
+            if sample is None:continue
+            ticks,rss,_ppid=sample
+            before=self._cpu_prev.get(process)
+            cpu=None if before is None or now<=before[1] else round(max(0.0,(ticks-before[0])/CLOCK_TICKS/(now-before[1])*100),1)
+            previous[process]=(ticks,now);rows[process]=(cpu,rss)
+        self._cpu_prev=previous
+        core=rows.get(pid);workers=[rows[p] for p in seen[1:] if p in rows];own=rows.get(os.getpid())
+        def total(values):
+            cpus=[c for c,_r in values if c is not None]
+            return (round(sum(cpus),1) if cpus else None),sum(r for _c,r in values)
+        workers_cpu,workers_rss=total(workers)
+        self.resource_view={'known':core is not None,'core_cpu_percent':core[0] if core else None,'core_rss_kb':core[1] if core else 0,
+            'workers_known':children_known,'workers_count':len(workers),'workers_cpu_percent':workers_cpu,'workers_rss_kb':workers_rss,
+            'bridge_cpu_percent':own[0] if own else None,'bridge_rss_kb':own[1] if own else 0}
+        self.changed.emit()
+    @Property('QVariantMap',notify=changed)
+    def coreLatency(self):
+        samples=list(self._latency)
+        if not samples:return {'known':False,'samples':0,'last_ms':0,'average_ms':0,'last_op':''}
+        values=[ms for _op,ms in samples]
+        return {'known':True,'samples':len(values),'last_ms':int(values[-1]),'average_ms':int(sum(values)/len(values)),'last_op':samples[-1][0] or ''}
+    @Property('QVariantMap',notify=changed)
+    def speechLatency(self):
+        speech=self.snapshot.get('speech')
+        if not speech:return {'known':False,'first_pcm_ms':0,'elapsed_ms':0}
+        return {'known':True,'first_pcm_ms':int(speech.get('first_pcm_ms') or 0),'elapsed_ms':int(speech.get('elapsed_ms') or 0)}
+    @Property('QVariantMap',notify=changed)
+    def diagResources(self):return dict(self.resource_view)
     # ---- Idiomas (Frente 2). The view comes from snapshot 'languages'; the Core refuses non-installed languages.
     def _languages(self):return dict(self.snapshot.get('languages') or {})
     def _language_items(self,kind):return [dict(item) for item in ((self._languages().get('engines') or {}).get(kind) or [])]
@@ -2523,7 +2817,10 @@ class Bridge(QObject):
     @Property(bool,notify=languagesChanged)
     def languageRestartTts(self):return (self._languages().get('restart_required') or {}).get('tts') is True
     @Property(str,notify=languagesChanged)
-    def languageInstallReason(self):return str((self._languages().get('install') or {}).get('reason') or '')
+    def languageInstallReason(self):
+        # CFG-03: PT and FR ship inside the package now (bundled), so the old "awaiting approval" text no longer applies.
+        # Languages that are not bundled cannot be installed yet: there is no install operation in the Core.
+        return 'Não incluído neste pacote: a instalação de idiomas extras ainda não existe.' if (self._languages().get('install') or {}).get('available') is not True else ''
     @Property(bool,notify=languagesChanged)
     def languagesAvailable(self):return self.preferencesAvailable and 'languages' in self.snapshot
     @Slot(str,str,str)
@@ -2705,7 +3002,71 @@ class Bridge(QObject):
         return f"Preparando {transfer['plugin_id']}: {transfer['received']}/{transfer['expected']} bytes" if transfer else ''
     @Slot()
     def abortHubImport(self):
+        if self.hub_upload is not None:self.hub_upload['cancel']=True
         if self.hubImportActive:self._preferences('hub_abort',import_id=self.snapshot['hub']['import']['import_id'])
+    # ---- Hub payload import (WP-4, Gideon Hub). The Core has the staged-payload protocol (hub_begin, hub_chunk, hub_finish,
+    # hub_abort); this slot reads the file the user picked and sends it in 1 KiB chunks, one request in flight on this socket.
+    # The Core verifies the bytes and stages them. Nothing is installed here: installing stays a separate, confirmed action.
+    @Property(bool,notify=changed)
+    def hubImportPickable(self):return self.hubLifecycleAvailable and not self.hubImportActive and self.hub_upload is None
+    @Slot(str,str,result=str)
+    def importHubPayload(self,plugin_id,location):
+        """Starts the upload of the payload for an approved catalog entry. Returns '' when it started, else the refusal text."""
+        hub=self.snapshot.get('hub') or {}
+        entry=next((e for e in hub.get('entries',[]) if e.get('plugin_id')==plugin_id),None)
+        if not self.hubImportPickable:return self._hub_refuse(self._prefs_unavailable_text() if not self.hubLifecycleAvailable else HUB_UPLOAD_MESSAGES['busy'])
+        if entry is None or entry.get('status') not in ('not_installed','update_available') or entry.get('permissions_approved') is not True or entry.get('payload_staged') is True:
+            return self._hub_refuse(HUB_UPLOAD_MESSAGES['entry'])
+        path=unquote(urlsplit(location).path) if isinstance(location,str) and location.startswith('file://') else location
+        if not isinstance(path,str) or not os.path.isabs(path) or '\x00' in path:return self._hub_refuse(HUB_UPLOAD_MESSAGES['path'])
+        try:handle=os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK),'rb')
+        except OSError:return self._hub_refuse(HUB_UPLOAD_MESSAGES['unreadable'])
+        meta=os.fstat(handle.fileno())
+        if not stat.S_ISREG(meta.st_mode):handle.close();return self._hub_refuse(HUB_UPLOAD_MESSAGES['path'])
+        if meta.st_size!=entry.get('download_size'):handle.close();return self._hub_refuse(HUB_UPLOAD_MESSAGES['size'])
+        self.hub_upload={'plugin_id':plugin_id,'handle':handle,'size':meta.st_size,'offset':0,'sent':0,'import_id':None,'inflight':None,'failure':None,'cancel':False,'revision':int(hub.get('approval_revision',0)),'manifest':entry.get('manifest_sha256')}
+        self.results['hub']=HUB_UPLOAD_MESSAGES['sending']
+        self._hub_upload_pump(None,None)
+        self.changed.emit()
+        return ''
+    def _hub_refuse(self,message):
+        self.results['hub']=message;self.changed.emit();return message
+    def _hub_upload_drop(self):
+        if self.hub_upload is not None:
+            try:self.hub_upload['handle'].close()
+            except OSError:pass
+        self.hub_upload=None
+    def _hub_upload_done(self,code):
+        self.results['hub']=HUB_UPLOAD_MESSAGES['staged'] if code=='ok' else (HUB_UPLOAD_MESSAGES.get(code) or code_message(code))
+        self._hub_upload_drop();self.changed.emit()
+    def _hub_upload_pump(self,op,data):
+        """Called after every Core answer and on start. Settles the request in flight, then sends the next step."""
+        up=self.hub_upload
+        if up is None:return
+        if up['inflight'] is not None and op==up['inflight']:
+            up['inflight']=None;code=(data or {}).get('code','invalid_message')
+            if op=='hub_begin' and code=='ok':
+                up['import_id']=((data.get('hub') or {}).get('import') or {}).get('import_id')
+                if not up['import_id']:code='hub_import_missing'
+            if op=='hub_chunk' and code=='ok':up['offset']+=up['sent']
+            if op=='hub_finish':
+                if code=='ok':return self._hub_upload_done('ok')
+                up['failure']=code
+            elif op=='hub_abort':return self._hub_upload_done(up['failure'] or code)
+            elif code!='ok':up['failure']=code
+        if self.pending or up['inflight'] is not None:return
+        if up['failure'] is not None or up['cancel']:
+            if up['import_id'] is None:return self._hub_upload_done(up['failure'] or 'cancelled')
+            return self._hub_upload_send('hub_abort',import_id=up['import_id'])
+        if up['import_id'] is None:return self._hub_upload_send('hub_begin',revision=up['revision'],plugin_id=up['plugin_id'],manifest_sha256=up['manifest'])
+        chunk=up['handle'].read(HUB_CHUNK_BYTES)
+        if chunk:
+            up['sent']=len(chunk);self.results['hub']=HUB_UPLOAD_MESSAGES['progress'].format(done=min(up['size'],up['offset']+len(chunk)),total=up['size'])
+            return self._hub_upload_send('hub_chunk',import_id=up['import_id'],offset=up['offset'],hex=chunk.hex())
+        return self._hub_upload_send('hub_finish',import_id=up['import_id'])
+    def _hub_upload_send(self,op,**kw):
+        self.hub_upload['inflight']=op
+        if not self._request(op,**kw):self.hub_upload['inflight']=None;self._hub_upload_done('core_offline')
     @Property('QVariantList',notify=hubEntriesChanged)
     def hubEntries(self):return (self.snapshot.get('hub') or {}).get('entries',[])
     @Property(str,notify=changed)
@@ -2714,7 +3075,11 @@ class Bridge(QObject):
         if not self.online:return 'Core offline'
         if not hub:return 'Catálogo não configurado'
         if hub['status']=='quarantined':return 'Catálogo em quarentena; Base continua disponível'
+        if hub.get('publisher_verified') is True:return 'Catálogo local com checksum verificado; publisher verificado por assinatura. Plugins instalados ficam desativados até ativação explícita; ativos rodam em sandbox sem rede.'
         return 'Catálogo local com checksum verificado; publisher não autenticado. Plugins instalados ficam desativados até ativação explícita; ativos rodam em sandbox sem rede.'
+    # EXT-01 / SKILL-02: the publisher state is the Core flag, never a constant. The Core sets it only when every plugin of the catalog verifies.
+    @Property(bool,notify=changed)
+    def hubPublisherVerified(self):return (self.snapshot.get('hub') or {}).get('publisher_verified') is True
     @Property(bool,notify=changed)
     def connected(self):return self.online
     @Property(str,notify=changed)
@@ -2917,6 +3282,13 @@ class Bridge(QObject):
     def skillsResult(self):return self.results['skills']
     @Property('QVariantList',notify=skillsChanged)
     def skillsItems(self):return [{**i,'permissionsRequired':list(i.get('permissions_required') or [])} for i in self._skill_block().get('items',[])]
+    # WP-15 / SKILL-03: the last export (package path, shown to the user) and the listed GitHub index (never fetched here).
+    @Property('QVariantMap',notify=skillsChanged)
+    def skillLastExport(self):return dict(self._skill_block().get('last_export') or {})
+    @Property('QVariantMap',notify=skillsChanged)
+    def skillIndex(self):return dict(self._skill_block().get('index') or {})
+    @Property(str,notify=changed)
+    def listenResult(self):return self.results.get('listen','')
     @Property('QVariantMap',notify=skillsChanged)
     def skillPaths(self):return dict(self._skill_block().get('paths') or {})
     # Named skillCurrentRun, not skillRun: the Qt property and the skillRun slot would share one name in QML.
@@ -3064,6 +3436,9 @@ class Bridge(QObject):
     def packageInfo(self):return dict(self._package)
     @Property(str,constant=True)
     def coreRootPath(self):return str(self.root)
+    # Permissões › Auditoria (docs/ui-spec/30 §11.6): the Core writes audit.log (and audit.log.1) in its root folder (src/storage.rs).
+    @Property(str,constant=True)
+    def auditLogPath(self):return str(self.root/'audit.log')
     @Property(bool,notify=changed)
     def virtualWakeAvailable(self):return self.online and self.configurationStatus=='ready' and not self.sessionId
     @Property(str,notify=changed)

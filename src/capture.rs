@@ -19,7 +19,23 @@ pub struct Capture {
     end_us: u64,
     last_speech_us: Option<u64>,
 }
+/// WP-7b grace window: speech that ended up to this long before the wake fired belongs to the wake phrase
+/// itself (the wake detector fires after the phrase ends; measured on the lab clips, `hey_plain`, 0.1 to 0.5 s).
+pub const WAKE_GRACE_US: u64 = 1_500_000;
+/// Silence after the last speech that ends a capture (unchanged).
+pub const END_SILENCE_US: u64 = 600_000;
 impl Capture {
+    /// Counts the wake as speech when the last speech flag seen before the wake is inside the grace window.
+    /// The phrase then ends the capture after `END_SILENCE_US` of silence (command_rejected for a bare
+    /// "Hey Gideon") instead of `no_speech` after 3 s. Speech older than the window changes nothing.
+    pub fn speech_before_wake(mut self, last_speech_us: Option<u64>) -> Self {
+        if let Some(t) = last_speech_us {
+            if t <= self.wake_end_us && self.wake_end_us - t <= WAKE_GRACE_US {
+                self.last_speech_us = Some(self.wake_end_us);
+            }
+        }
+        self
+    }
     pub fn new(pre_roll: Vec<f32>, end_us: u64) -> Result<Self, AudioError> {
         let duration = pre_roll.len() as u64 * 1_000_000 / 16000;
         if pre_roll.is_empty()
@@ -56,7 +72,7 @@ impl Capture {
         }
         if self
             .last_speech_us
-            .is_some_and(|t| self.end_us - t >= 600_000)
+            .is_some_and(|t| self.end_us - t >= END_SILENCE_US)
         {
             return Ok(Some("capture_completed"));
         }
@@ -64,6 +80,11 @@ impl Capture {
             return Ok(Some("no_speech"));
         }
         Ok(None)
+    }
+    /// Test-only accessor: the end of the last speech the capture counted.
+    #[cfg(test)]
+    pub fn last_speech(&self) -> Option<u64> {
+        self.last_speech_us
     }
     pub fn summary(&self, session_id: u64, reason: &'static str) -> CaptureSummary {
         let mut digest = Sha256::new();
@@ -118,6 +139,39 @@ mod tests {
             silent.push(frame(3000000, 0.), false).unwrap(),
             Some("no_speech")
         );
+    }
+    #[test]
+    fn wake_grace_window_turns_a_bare_wake_phrase_into_a_short_capture() {
+        // Speech ended 200 ms before the wake fired (the hey_plain case): the wake counts as speech.
+        let mut c = Capture::new(vec![0.; 16000], 1_500_000)
+            .unwrap()
+            .speech_before_wake(Some(1_300_000));
+        assert_eq!(c.last_speech(), Some(1_500_000));
+        assert_eq!(c.push(frame(1_500_000, 0.), false).unwrap(), None);
+        // 600 ms of silence after the wake ends the capture; no_speech is not reached.
+        let mut ended = None;
+        for i in 1..=6 {
+            ended = c
+                .push(frame(1_500_000 + i * 100_000, 0.), false)
+                .unwrap()
+                .or(ended);
+        }
+        assert_eq!(ended, Some("capture_completed"));
+        // Speech older than the grace window changes nothing: the 3 s no_speech rule still applies.
+        let mut stale = Capture::new(vec![0.; 16000], 2_000_000)
+            .unwrap()
+            .speech_before_wake(Some(0));
+        assert_eq!(stale.last_speech(), None);
+        let mut last = None;
+        for i in 1..=30 {
+            last = stale
+                .push(frame(2_000_000 + (i - 1) * 100_000, 0.), false)
+                .unwrap();
+            if last.is_some() {
+                break;
+            }
+        }
+        assert_eq!(last, Some("no_speech"));
     }
     #[test]
     fn long_speech_is_bounded_and_invalid_pcm_does_not_advance() {

@@ -1,0 +1,154 @@
+clip                                      expect    started  final  command           result 
+---------------------------------------------------------------------------------------------
+pos-hey_olagideon-pt01-clean.wav          positive  False    False  None              FAIL   
+pos-hey_olagideon-pt02-clean.wav          positive  False    False  None              FAIL   
+pos-hey_olagideon-pt03-clean.wav          positive  False    False  None              FAIL   
+pos-hey_olagideon-pt04-clean.wav          positive  False    False  None              FAIL   
+pos-hey_olagideon-pt05-clean.wav          positive  False    False  None              FAIL   
+pos-hey_olagideon-pt06-clean.wav          positive  False    False  None              FAIL   
+pos-hey_olagideon-pt16-clean.wav          positive  False    False  None              FAIL   
+neg-pt07.wav                              negative  False    False  None              PASS   
+neg-pt08.wav                              negative  False    False  None              PASS   
+neg-pt09.wav                              negative  False    False  None              PASS   
+neg-pt10.wav                              negative  False    False  None              PASS   
+{
+  "install_root": "/home/lucas/GideonWp7",
+  "profile": "wp7pt",
+  "wake_sensitivity": 1.0,
+  "language": "pt-BR",
+  "rows": [
+    {
+      "clip": "pos-hey_olagideon-pt01-clean.wav",
+      "expected": "positive",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": false
+    },
+    {
+      "clip": "pos-hey_olagideon-pt02-clean.wav",
+      "expected": "positive",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": false
+    },
+    {
+      "clip": "pos-hey_olagideon-pt03-clean.wav",
+      "expected": "positive",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": false
+    },
+    {
+      "clip": "pos-hey_olagideon-pt04-clean.wav",
+      "expected": "positive",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": false
+    },
+    {
+      "clip": "pos-hey_olagideon-pt05-clean.wav",
+      "expected": "positive",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": false
+    },
+    {
+      "clip": "pos-hey_olagideon-pt06-clean.wav",
+      "expected": "positive",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": false
+    },
+    {
+      "clip": "pos-hey_olagideon-pt16-clean.wav",
+      "expected": "positive",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": false
+    },
+    {
+      "clip": "neg-pt07.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    },
+    {
+      "clip": "neg-pt08.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    },
+    {
+      "clip": "neg-pt09.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    },
+    {
+      "clip": "neg-pt10.wav",
+      "expected": "negative",
+      "session_started": false,
+      "transcript_final": false,
+      "command": null,
+      "false_session": false,
+      "events": [],
+      "passed": true
+    }
+  ],
+  "checks": {
+    "preferences_ok": true,
+    "live_preference_ok": true,
+    "language_preference_ok": true,
+    "language_hot_swap_ready": true,
+    "stt_ready_at_end": true,
+    "live-last-error.txt_absent": true,
+    "stt-last-error.txt_absent": true,
+    "positives_pass": false,
+    "negatives_pass": true,
+    "lab_modules_unloaded": true
+  },
+  "lab_modules": [
+    "536870916",
+    "536870918"
+  ],
+  "stt_ready": true,
+  "final_stt_status": "ready",
+  "final_stt_last_error": null,
+  "lab_modules_left": 0,
+  "launcher_tail": "gideon-verify: OK 31053 entries, 3053272629 bytes regular files\ngideon-launch: core restarted on request\ngideon-verify: OK 31053 entries, 3053272629 bytes regular files\n",
+  "passed": false
+}
+EXIT 1

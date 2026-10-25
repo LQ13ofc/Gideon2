@@ -414,6 +414,13 @@ impl Pipe {
         self.backlog.clear();
         self.backlog_samples = 0;
     }
+    /// CFG-07: stops the worker and starts it again with another engine configuration. Only called between
+    /// voice sessions (the queue is empty then); the restart budget is not spent by a deliberate change.
+    pub async fn reconfigure(&mut self, config: Option<SttConfig>) {
+        self.stop().await;
+        self.config = config;
+        self.start();
+    }
     /// Shutdown: aborts and reaps the worker.
     pub async fn stop(&mut self) {
         if let Some(run) = self.run.take() {

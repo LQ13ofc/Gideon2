@@ -19,8 +19,9 @@ PageFrame {
     readonly property var agentProposals: core.toolProposals.filter(function (p) { return p.run_id !== undefined })
     readonly property int agentPending: agentProposals.filter(function (p) { return p.state === "pending" }).length
     readonly property string goalProblem: agentGoal.text.length > 0 ? core.agentGoalProblem(agentGoal.text) : ""
-    readonly property bool canStart: core.chatAvailable && !core.agentActive && !page.chatInFlight && core.agentGoalProblem(agentGoal.text) === ""
+    readonly property bool canStart: core.chatInputAvailable && !core.agentActive && !page.chatInFlight && core.agentGoalProblem(agentGoal.text) === ""
     readonly property string startReason: {
+        if (core.sessionId.length > 0) return core.chatBlockedText
         if (page.goalProblem.length > 0) return page.goalProblem
         if (core.agentActive) return "Já existe um agente em execução; aguarde ou aborte."
         if (page.chatInFlight) return "Aguarde a conversa terminar."

@@ -1,0 +1,236 @@
+{
+ "set": "lab",
+ "recording_s": 165.0,
+ "lab_modules_left": 0,
+ "positives": 14,
+ "positive_hits": 6,
+ "negatives": 18,
+ "negative_false_triggers": 0,
+ "detections_outside_clips": 0,
+ "rows": [
+  {
+   "file": "pt/positive/pos-hey_olagideon-pt01-clean.wav",
+   "label": 1,
+   "start_s": 0.0,
+   "end_s": 1.216,
+   "detected": false
+  },
+  {
+   "file": "pt/positive/pos-hey_olagideon-pt02-clean.wav",
+   "label": 1,
+   "start_s": 4.216,
+   "end_s": 5.983,
+   "detected": true
+  },
+  {
+   "file": "pt/positive/pos-hey_olagideon-pt03-clean.wav",
+   "label": 1,
+   "start_s": 8.983,
+   "end_s": 11.852,
+   "detected": false
+  },
+  {
+   "file": "pt/positive/pos-hey_olagideon-pt04-clean.wav",
+   "label": 1,
+   "start_s": 14.852,
+   "end_s": 16.819,
+   "detected": false
+  },
+  {
+   "file": "pt/positive/pos-hey_olagideon-pt05-clean.wav",
+   "label": 1,
+   "start_s": 19.82,
+   "end_s": 21.887,
+   "detected": false
+  },
+  {
+   "file": "pt/positive/pos-hey_olagideon-pt06-clean.wav",
+   "label": 1,
+   "start_s": 24.887,
+   "end_s": 26.855,
+   "detected": true
+  },
+  {
+   "file": "pt/positive/pos-hey_olagideon-pt16-clean.wav",
+   "label": 1,
+   "start_s": 29.855,
+   "end_s": 32.173,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt07.wav",
+   "label": 0,
+   "start_s": 35.173,
+   "end_s": 37.49,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt08.wav",
+   "label": 0,
+   "start_s": 40.49,
+   "end_s": 42.908,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt09.wav",
+   "label": 0,
+   "start_s": 45.908,
+   "end_s": 48.376,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt10.wav",
+   "label": 0,
+   "start_s": 51.376,
+   "end_s": 54.045,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt11.wav",
+   "label": 0,
+   "start_s": 57.045,
+   "end_s": 59.513,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt12.wav",
+   "label": 0,
+   "start_s": 62.513,
+   "end_s": 64.28,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt13.wav",
+   "label": 0,
+   "start_s": 67.28,
+   "end_s": 69.548,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt14.wav",
+   "label": 0,
+   "start_s": 72.548,
+   "end_s": 75.02,
+   "detected": false
+  },
+  {
+   "file": "pt/negative/neg-pt15.wav",
+   "label": 0,
+   "start_s": 78.02,
+   "end_s": 80.488,
+   "detected": false
+  },
+  {
+   "file": "fr/positive/pos-hey_bonjourgideon-fr01-clean.wav",
+   "label": 1,
+   "start_s": 83.488,
+   "end_s": 85.405,
+   "detected": true
+  },
+  {
+   "file": "fr/positive/pos-hey_bonjourgideon-fr02-clean.wav",
+   "label": 1,
+   "start_s": 88.405,
+   "end_s": 90.373,
+   "detected": true
+  },
+  {
+   "file": "fr/positive/pos-hey_bonjourgideon-fr03-clean.wav",
+   "label": 1,
+   "start_s": 93.373,
+   "end_s": 96.993,
+   "detected": true
+  },
+  {
+   "file": "fr/positive/pos-hey_bonjourgideon-fr04-clean.wav",
+   "label": 1,
+   "start_s": 99.993,
+   "end_s": 101.96,
+   "detected": false
+  },
+  {
+   "file": "fr/positive/pos-hey_bonjourgideon-fr05-clean.wav",
+   "label": 1,
+   "start_s": 104.96,
+   "end_s": 106.727,
+   "detected": false
+  },
+  {
+   "file": "fr/positive/pos-hey_bonjourgideon-fr06-clean.wav",
+   "label": 1,
+   "start_s": 109.727,
+   "end_s": 111.544,
+   "detected": true
+  },
+  {
+   "file": "fr/positive/pos-hey_bonjourgideon-fr16-clean.wav",
+   "label": 1,
+   "start_s": 114.544,
+   "end_s": 116.662,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr07.wav",
+   "label": 0,
+   "start_s": 119.662,
+   "end_s": 121.98,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr08.wav",
+   "label": 0,
+   "start_s": 124.98,
+   "end_s": 126.947,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr09.wav",
+   "label": 0,
+   "start_s": 129.947,
+   "end_s": 132.565,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr10.wav",
+   "label": 0,
+   "start_s": 135.566,
+   "end_s": 137.933,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr11.wav",
+   "label": 0,
+   "start_s": 140.933,
+   "end_s": 143.151,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr12.wav",
+   "label": 0,
+   "start_s": 146.151,
+   "end_s": 147.667,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr13.wav",
+   "label": 0,
+   "start_s": 150.667,
+   "end_s": 151.983,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr14.wav",
+   "label": 0,
+   "start_s": 154.984,
+   "end_s": 157.402,
+   "detected": false
+  },
+  {
+   "file": "fr/negative/neg-fr15.wav",
+   "label": 0,
+   "start_s": 160.402,
+   "end_s": 162.327,
+   "detected": false
+  }
+ ]
+}

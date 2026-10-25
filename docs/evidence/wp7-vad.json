@@ -1,0 +1,115 @@
+{
+ "positives": [
+  {
+   "clip": "pos-hey_brave-af_bella-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.62,
+    1.16,
+    1.38,
+    2.16
+   ]
+  },
+  {
+   "clip": "pos-hey_brave-am_michael-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.58,
+    2.02
+   ]
+  },
+  {
+   "clip": "pos-hey_brave-bf_emma-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.46,
+    2.02
+   ]
+  },
+  {
+   "clip": "pos-hey_brave-bm_george-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.42,
+    1.2,
+    1.42,
+    2.38
+   ]
+  },
+  {
+   "clip": "pos-hey_plain-af_bella-clean.wav",
+   "kws_wake_s": 1.46,
+   "vad_edges_s": [
+    0.62,
+    1.22
+   ]
+  },
+  {
+   "clip": "pos-hey_plain-am_michael-clean.wav",
+   "kws_wake_s": 1.46,
+   "vad_edges_s": [
+    0.58,
+    1.3
+   ]
+  },
+  {
+   "clip": "pos-hey_plain-bf_emma-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.46,
+    1.26
+   ]
+  },
+  {
+   "clip": "pos-hey_plain-bm_george-clean.wav",
+   "kws_wake_s": 1.46,
+   "vad_edges_s": [
+    0.42,
+    1.36
+   ]
+  },
+  {
+   "clip": "pos-hey_time-af_bella-clean.wav",
+   "kws_wake_s": 1.46,
+   "vad_edges_s": [
+    0.58,
+    1.2,
+    1.42,
+    2.16
+   ]
+  },
+  {
+   "clip": "pos-hey_time-am_michael-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.58,
+    1.96
+   ]
+  },
+  {
+   "clip": "pos-hey_time-bf_emma-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.46,
+    1.96
+   ]
+  },
+  {
+   "clip": "pos-hey_time-bm_george-clean.wav",
+   "kws_wake_s": 1.3,
+   "vad_edges_s": [
+    0.42,
+    2.32
+   ]
+  }
+ ],
+ "negatives_speech_flagged_share": {
+  "thr=0.3,min_silence=0.1": 0.5028,
+  "thr=0.3,min_silence=0.3": 0.5732,
+  "thr=0.4,min_silence=0.1": 0.4989,
+  "thr=0.4,min_silence=0.3": 0.5693,
+  "thr=0.5,min_silence=0.1": 0.4959,
+  "thr=0.5,min_silence=0.3": 0.5668
+ },
+ "negative_clips": 48
+}

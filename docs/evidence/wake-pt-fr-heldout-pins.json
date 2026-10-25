@@ -1,0 +1,147 @@
+{
+ "set": "heldout",
+ "clips": [
+  {
+   "lang": "pt",
+   "label": 1,
+   "file": "pt/positive/pt-pos01.wav",
+   "sha256": "2285e9cef46b3f3e1a97f370c437d2c7be56f8fcd10b14f532e020c506d2de81"
+  },
+  {
+   "lang": "pt",
+   "label": 1,
+   "file": "pt/positive/pt-pos02.wav",
+   "sha256": "dc30e05003ef55edae8b7e37ff8b78cc0c8ae8c57964abe98763985119531b17"
+  },
+  {
+   "lang": "pt",
+   "label": 1,
+   "file": "pt/positive/pt-pos03.wav",
+   "sha256": "4c19eeb376c3300295d20424c61c137fc7485aa278c54bbed5812eb6ad54ca1b"
+  },
+  {
+   "lang": "pt",
+   "label": 1,
+   "file": "pt/positive/pt-pos04.wav",
+   "sha256": "a7b5f99a2e0dea1ee9e89549982dad1b0757527f744760a75b3aa37d914e5be9"
+  },
+  {
+   "lang": "pt",
+   "label": 1,
+   "file": "pt/positive/pt-pos05.wav",
+   "sha256": "dcd3c83f98c95f4235b1380904175d55ea72b3738d1cc0abca8844e85818273e"
+  },
+  {
+   "lang": "pt",
+   "label": 1,
+   "file": "pt/positive/pt-pos06.wav",
+   "sha256": "03724658ec0803dadad19d62de80b981ab3fe8ec9ac4715eac0006d2d508877e"
+  },
+  {
+   "lang": "pt",
+   "label": 1,
+   "file": "pt/positive/pt-pos07.wav",
+   "sha256": "eff908cc89051817e93bda444f8925571eb7acba24ebac74a39080a7cee731d7"
+  },
+  {
+   "lang": "pt",
+   "label": 0,
+   "file": "pt/negative/pt-neg01.wav",
+   "sha256": "3e385469726d1879c1e937ae7f699d1acc5f5f90157a376732d238ba3d787375"
+  },
+  {
+   "lang": "pt",
+   "label": 0,
+   "file": "pt/negative/pt-neg02.wav",
+   "sha256": "5f3d4e526063791fbd691fa1f65c88716f807b58512d99be16f629d37cd36dbe"
+  },
+  {
+   "lang": "pt",
+   "label": 0,
+   "file": "pt/negative/pt-neg03.wav",
+   "sha256": "38117a9d454b1ae095777c72d05a36362b825238305397a184cd377a856c79de"
+  },
+  {
+   "lang": "pt",
+   "label": 0,
+   "file": "pt/negative/pt-neg04.wav",
+   "sha256": "164c20d7b620c4ee2eb31013fdf8f45ba57815ed7d48f1704fc535c46f89ca18"
+  },
+  {
+   "lang": "pt",
+   "label": 0,
+   "file": "pt/negative/pt-neg05.wav",
+   "sha256": "2f8d2d36d4695f79d9e4291e71aeba4f9fdbd4c5e31d302b12c8c7fb7600ff96"
+  },
+  {
+   "lang": "fr",
+   "label": 1,
+   "file": "fr/positive/fr-pos01.wav",
+   "sha256": "0957c24806d32d0bb396cbd5e7f7706481adda19d73feb659ad2f9f5517fe91f"
+  },
+  {
+   "lang": "fr",
+   "label": 1,
+   "file": "fr/positive/fr-pos02.wav",
+   "sha256": "2c275c3f30344b772bfee9f3c046fb86be72a8a70f501c6d23e81ed2544bc9e2"
+  },
+  {
+   "lang": "fr",
+   "label": 1,
+   "file": "fr/positive/fr-pos03.wav",
+   "sha256": "71d0424b72cb146b0d53620bad4c54b041c1f439c59995b0b80fb69b9bbc1793"
+  },
+  {
+   "lang": "fr",
+   "label": 1,
+   "file": "fr/positive/fr-pos04.wav",
+   "sha256": "a9f7237febbc8504df758d10c0912731a37852274150f67f8b4527a5c62271b7"
+  },
+  {
+   "lang": "fr",
+   "label": 1,
+   "file": "fr/positive/fr-pos05.wav",
+   "sha256": "12b243ae508bac0a9622b26a20ee891215db836b63864ebc967bec31c7d38096"
+  },
+  {
+   "lang": "fr",
+   "label": 1,
+   "file": "fr/positive/fr-pos06.wav",
+   "sha256": "b939967a4bd07886639fd552368ebe37ecb95b846b90fa95f4708b11919208cc"
+  },
+  {
+   "lang": "fr",
+   "label": 0,
+   "file": "fr/negative/fr-neg01.wav",
+   "sha256": "3f1b411ad87ff161627b3f2b351b1a746a8d9ff3757cd91997d24092bb7e4cd6"
+  },
+  {
+   "lang": "fr",
+   "label": 0,
+   "file": "fr/negative/fr-neg02.wav",
+   "sha256": "f4d5aeb092f4bf0d482aa16e733ede539e8effe4f16c1bcc1cad43eaa60c5dc7"
+  },
+  {
+   "lang": "fr",
+   "label": 0,
+   "file": "fr/negative/fr-neg03.wav",
+   "sha256": "efe0db95209c045153ed6e9ba0c0c88996400374f0d291c83db4b6ebed139f9a"
+  },
+  {
+   "lang": "fr",
+   "label": 0,
+   "file": "fr/negative/fr-neg04.wav",
+   "sha256": "86a04f22c2a7ea8cfc671782a109b5e63c784a5425a029ffde52b024d77d16b0"
+  },
+  {
+   "lang": "fr",
+   "label": 0,
+   "file": "fr/negative/fr-neg05.wav",
+   "sha256": "0b81e45e38e44ecfdb61e37adc82940343fb8c966efbbebd771798f5f6d297a5"
+  }
+ ],
+ "positives": 13,
+ "negatives": 10,
+ "stt_manifest_sha256": "9970c3a7a2ad6e9261ce62e9844dacc9061d79b96da50f53f49ce2d00cf7c4b3",
+ "vad_manifest_sha256": "0177dde741a4c831c0000b20ec16900703420cdd27a8b86699ed1ae7a50096e8"
+}

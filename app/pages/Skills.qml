@@ -436,9 +436,10 @@ PageFrame {
             Layout.fillWidth: true
             title: visible ? "Pacote " + core.skillImportPreview.name + ": " + core.skillImportPreview.id + " v" + core.skillImportPreview.version : ""
             Text {
-                text: "Publisher: " + core.skillImportPreview.publisher + " · não verificado"
-                textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
-                Accessible.name: "Publisher " + core.skillImportPreview.publisher + ", não verificado"
+                // SKILL-02: the flag is the Core's signature check (src/skills.rs publisher_checks), never a fixed text.
+                text: "Publisher: " + core.skillImportPreview.publisher + (core.skillImportPreview.unverified === false ? " · assinatura verificada" : " · não verificado")
+                textFormat: Text.PlainText; color: core.skillImportPreview.unverified === false ? Theme.success : Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
+                Accessible.name: "Publisher " + core.skillImportPreview.publisher + (core.skillImportPreview.unverified === false ? ", assinatura verificada" : ", não verificado")
             }
             Text {
                 text: "Permissões exigidas: " + page.labelsOf(core.skillImportPreview.permissions_required)

@@ -127,6 +127,31 @@ fn unify_wake_comma(text: &str, prefix: &str) -> String {
     text.to_string()
 }
 
+/// Spellings STT writes for the wake name (WP-7b, measured on the PT/FR and EN lab clips: "Gedon", "Lagdon",
+/// "Gidon", "Gidéon"). Only a listed spelling is accepted, and only in the name slot of the wake phrase.
+pub const WAKE_NAME_VARIANTS: [&str; 6] =
+    ["gideon", "gedon", "gidon", "lagdon", "gidéon", "gédéon"];
+
+/// Replaces a listed spelling of the wake name with the canonical name, when it sits in the name slot of
+/// the wake phrase ("hey lagdon, mute" -> "hey gideon, mute"). Any other word ("Gideonish") is left as is.
+fn unify_wake_name(text: &str, prefix: &str) -> String {
+    let (head, name) = match prefix.rsplit_once(' ') {
+        Some((head, name)) => (format!("{head} "), name),
+        None => (String::new(), prefix),
+    };
+    if name != "gideon" {
+        return text.to_string();
+    }
+    let Some(rest) = text.strip_prefix(head.as_str()) else {
+        return text.to_string();
+    };
+    let end = rest.find([' ', ',', '.', '?']).unwrap_or(rest.len());
+    if WAKE_NAME_VARIANTS.contains(&&rest[..end]) {
+        return format!("{head}{name}{}", &rest[end..]);
+    }
+    text.to_string()
+}
+
 /// Full-string grammar: no substring extraction, fuzzy names, or chained commands.
 pub fn parse(raw: &str, wake: &str) -> Option<Command> {
     let normalized = raw
@@ -135,7 +160,7 @@ pub fn parse(raw: &str, wake: &str) -> Option<Command> {
         .join(" ")
         .to_lowercase();
     let prefix = wake.to_lowercase();
-    let unified = unify_wake_comma(&normalized, &prefix);
+    let unified = unify_wake_name(&unify_wake_comma(&normalized, &prefix), &prefix);
     let mut text = unified.as_str();
     if !prefix.is_empty() {
         if let Some(tail) = text.strip_prefix(&prefix) {
@@ -373,6 +398,43 @@ mod tests {
         assert_eq!(parse("Hey, Gideonish open brave", "Hey Gideon"), None);
         assert_eq!(parse("Okay, Gideon, open brave", "Hey Gideon"), None);
         assert_eq!(parse("hey, gideon, open brave, mute", "Hey Gideon"), None);
+    }
+    #[test]
+    fn wake_name_spellings_from_stt_are_accepted_only_in_the_name_slot() {
+        // WP-7b: listed mis-transcriptions of the name (positive).
+        for spelling in ["Gedon", "Lagdon", "Gidon", "Gidéon", "gédéon"] {
+            assert_eq!(
+                parse(&format!("Hey {spelling}, mute."), "Hey Gideon"),
+                Some(Command::Mute),
+                "{spelling}"
+            );
+            assert_eq!(
+                parse(&format!("hey, {spelling}, open brave"), "Hey Gideon"),
+                Some(Command::OpenApp {
+                    desktop_id: BRAVE.into()
+                }),
+                "{spelling} with comma"
+            );
+        }
+        assert_eq!(
+            parse("Olá Gidon, abra o brave", "Olá Gideon"),
+            Some(Command::OpenApp {
+                desktop_id: BRAVE.into()
+            })
+        );
+        // Negatives: an unlisted word, a spelling outside the name slot, and a changed head word.
+        assert_eq!(parse("Hey Gideonish, mute", "Hey Gideon"), None);
+        assert_eq!(parse("Hey Dom, mute", "Hey Gideon"), None);
+        assert_eq!(parse("Hey Gidonx, mute", "Hey Gideon"), None);
+        assert_eq!(parse("open Gidon, mute", "Hey Gideon"), None);
+        assert_eq!(parse("Okay Gidon, mute", "Hey Gideon"), None);
+        // Without a comma the canonical wake is accepted too, so the spelling is accepted the same way.
+        assert_eq!(
+            parse("Hey Gidon open brave", "Hey Gideon"),
+            Some(Command::OpenApp {
+                desktop_id: BRAVE.into()
+            })
+        );
     }
     #[test]
     fn receipt_requires_effect_and_exact_correlation() {

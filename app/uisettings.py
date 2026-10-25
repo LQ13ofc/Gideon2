@@ -102,7 +102,8 @@ SCHEMA=(
     _entry('behavior.tips','Ajuda','Geral','bool',True,'Mostrar dicas','Exibe dicas curtas nas telas.',keywords=('dica','ajuda')),
     _entry('behavior.shortcuts','Ajuda','Geral','bool',True,'Atalhos de teclado','Liga os atalhos de teclado neste app.',keywords=('atalho','teclado','ctrl')),
     _entry('behavior.advanced','Opções','Geral','bool',False,'Mostrar opções avançadas','Revela opções avançadas em todas as telas. Não altera valores.',keywords=('avancado','opcoes','avancadas','detalhe')),
-    _entry('behavior.devMode','Opções','Geral','bool',False,'Modo desenvolvedor','Mostra ferramentas de desenvolvimento em Diagnóstico.',level='dev',keywords=('desenvolvedor','dev','debug','teste')),
+    # DIAG-02: the developer mode is the Core preference preferences.developer_mode (src/storage.rs); every page reads it from there.
+    _entry('behavior.devMode','Opções','Geral','bool',False,'Modo desenvolvedor','Mostra ferramentas de desenvolvimento em Diagnóstico.',level='dev',keywords=('desenvolvedor','dev','debug','teste'),source='core'),
     _entry('behavior.onboardingDone','Introdução','Geral','bool',False,'Introdução concluída','Marca que a primeira execução guiada já foi vista neste perfil. Refazer fica em Geral.',level='advanced',keywords=('introducao','onboarding','primeira','execucao','guia','boas-vindas')),
     _entry('behavior.toastSeconds','Avisos','Geral','int',4,'Duração dos avisos','Tempo, em segundos, que um aviso fica na tela.',mn=2,mx=10,keywords=('aviso','toast','mensagem','segundos')),
     _entry('behavior.confirmWrites','Avisos','Geral','bool',True,'Confirmar ações que gravam','Pede confirmação antes de ações que gravam dados.',keywords=('confirmar','gravar','salvar','confirmacao')),
@@ -121,6 +122,15 @@ SCHEMA=(
     _entry('core.audioOutput','Saída',_DISPOSITIVOS,'enum','default','Alto-falante (saída)','Dispositivo de reprodução da resposta por voz. Vale na próxima sessão de voz.',options=_opts(('default','Padrão do sistema')),keywords=('alto-falante','saida','reproducao','dispositivo','output','speaker','som'),source='core'),
     _entry('audio.cues','Sinais',_AUDIO,'bool',True,'Sons de início e fim','Toca um sinal ao começar e terminar a escuta.',keywords=('som','sinal','bip','cues','escuta')),
     _entry('core.visualFeedback','Indicadores',_APARENCIA,'bool',True,'Indicador visual de atividade','Mostra o estado do Gideon na tela. Vale a partir da próxima sessão.',keywords=('indicador','visual','atividade','estado'),source='core'),
+)
+# CFG-06: the Idiomas sub-tab (app/pages/CfgIdiomas.qml) is Core-backed and has no schema row, so search could not reach it.
+# These entries are search-only: no value, no default, no QML row and never in SPECS. A result opens the sub-tab
+# (CfgSettings.js maps the subtab label 'Idiomas' to cfg_idiomas).
+NAV_ENTRIES=(
+    {'key':'lang.stt','label':'Idiomas de transcrição (STT)','section':'Idioma','subtab':'Idiomas','help':'Idiomas que o Gideon entende ao ouvir. Só idiomas instalados podem ser escolhidos.','keywords':['idioma','idiomas','transcricao','reconhecimento','stt','ouvir','fala','lingua']},
+    {'key':'lang.tts','label':'Idioma da resposta em voz (TTS)','section':'Idioma','subtab':'Idiomas','help':'Idioma em que o Gideon fala. Vale no próximo início do Core.','keywords':['idioma','idiomas','voz','resposta','tts','falar','lingua']},
+    {'key':'lang.voice','label':'Voz da resposta em idioma','section':'Idioma','subtab':'Idiomas','help':'Voz usada na resposta em voz. Só vozes instaladas podem ser escolhidas.','keywords':['voz','voice','idioma','tts']},
+    {'key':'lang.install','label':'Instalar idioma','section':'Idioma','subtab':'Idiomas','help':'A instalação depende da aprovação do download pelo dono; hoje fica indisponível.','keywords':['instalar','download','baixar','idioma','pacote']},
 )
 SPECS={spec['key']:spec for spec in SCHEMA}
 APP_KEYS=tuple(k for k,spec in SPECS.items() if spec['source']=='app')
@@ -559,7 +569,7 @@ class UiSettings(QObject):
             pack=getattr(bridge,'snapshot',{}).get('base_pack') or {}
             return prefs.get('wake_phrase') or pack.get('default_phrase') or ''
         if key in DEVICE_PREF:return prefs.get(DEVICE_PREF[key]) or default
-        readers={'core.responseGain':'outputVolume','core.audibleFeedback':'audibleFeedback','core.visualFeedback':'visualFeedback','core.sessionTimeoutMs':'sessionTimeout','core.wakeSensitivity':'wakeSensitivity','core.inputConditioning':'inputConditioningOn'}
+        readers={'behavior.devMode':'developerMode','core.responseGain':'outputVolume','core.audibleFeedback':'audibleFeedback','core.visualFeedback':'visualFeedback','core.sessionTimeoutMs':'sessionTimeout','core.wakeSensitivity':'wakeSensitivity','core.inputConditioning':'inputConditioningOn'}
         return getattr(bridge,readers[key],default)
 
     def _core_snapshot(self):
@@ -592,6 +602,7 @@ class UiSettings(QObject):
         elif key=='core.visualFeedback':bridge.saveFeedback(bool(coerced),int(bridge.outputVolume))
         elif key=='core.audibleFeedback':bridge.savePreferences(bool(coerced),int(bridge.sessionTimeout))
         elif key=='core.sessionTimeoutMs':bridge.savePreferences(bool(bridge.audibleFeedback),int(coerced))
+        elif key=='behavior.devMode':bridge.setDeveloperMode(bool(coerced))
         elif key=='core.wakeSensitivity':bridge.setWakeSensitivity(float(coerced))
         elif key=='core.inputConditioning':bridge.setInputConditioning(bool(coerced))
         elif key in DEVICE_PREF:
@@ -711,7 +722,7 @@ class UiSettings(QObject):
         tokens=phrase.split()
         if not tokens:return []
         results=[]
-        for spec in SCHEMA:
+        for spec in SCHEMA+NAV_ENTRIES:
             label=_fold(spec['label']);keywords=_fold(' '.join(spec['keywords']));help_text=_fold(spec['help'])
             group=_fold(spec['section']+' '+spec['subtab']);key=_fold(spec['key'])
             score=0;matched=True

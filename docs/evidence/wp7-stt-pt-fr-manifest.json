@@ -1,0 +1,58 @@
+{
+  "engine": "sherpa-onnx-1.13.8/nemo-parakeet-tdt-0.6b-v3-int8",
+  "languages": [
+    "pt",
+    "fr"
+  ],
+  "model_type": "nemo_transducer",
+  "model_root": "/home/lucas/Documentos/Gideon/base/target/stt-pt-fr-assets",
+  "encoder": "encoder.int8.onnx",
+  "decoder": "decoder.int8.onnx",
+  "joiner": "joiner.int8.onnx",
+  "tokens": "tokens.txt",
+  "provider": "CPU",
+  "hashes": {
+    "encoder.int8.onnx": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247",
+    "decoder.int8.onnx": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e",
+    "joiner.int8.onnx": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3",
+    "tokens.txt": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+  },
+  "artifacts": [
+    {
+      "name": "encoder.int8.onnx",
+      "sha256": "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247",
+      "size": 652184281,
+      "verified": "lfs_sha256",
+      "source": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/encoder.int8.onnx",
+      "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
+    },
+    {
+      "name": "decoder.int8.onnx",
+      "sha256": "179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e",
+      "size": 11845275,
+      "verified": "lfs_sha256",
+      "source": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/decoder.int8.onnx",
+      "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
+    },
+    {
+      "name": "joiner.int8.onnx",
+      "sha256": "3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3",
+      "size": 6355277,
+      "verified": "lfs_sha256",
+      "source": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/joiner.int8.onnx",
+      "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
+    },
+    {
+      "name": "tokens.txt",
+      "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
+      "size": 93939,
+      "verified": "git_blob_id",
+      "source": "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/2bda32ec70b097a55adaa07d9a7173915b43cc78/tokens.txt",
+      "revision": "2bda32ec70b097a55adaa07d9a7173915b43cc78"
+    }
+  ],
+  "license": {
+    "weights": "CC-BY-4.0 (cartao de nvidia/parakeet-tdt-0.6b-v3); export ONNX de csukuangfj: licenca do repositorio nao publicada, herdada",
+    "origin": "nvidia/parakeet-tdt-0.6b-v3 (NeMo) convertido para ONNX pelo projeto sherpa-onnx"
+  }
+}

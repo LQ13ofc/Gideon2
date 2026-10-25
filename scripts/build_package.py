@@ -35,6 +35,9 @@ STT_MODEL = REPO / "target/a3-assets/model"
 TTS = REPO / "target/a5-assets/manifest.json"
 TTS_ROOT = REPO / "target/a5-assets"
 VAD = REPO / "target/a2-assets/silero_vad-v5.onnx"
+# WP-7b: Portuguese and French packs, hash-pinned by their provisioning manifests (scripts/provision_pt_fr_*.py).
+PT_FR_TTS = {"pt": REPO / "target/tts-pt-assets", "fr": REPO / "target/tts-fr-assets"}
+PT_FR_STT_ROOT = REPO / "target/stt-pt-fr-assets"
 # Pronunciation lexicon of the KWS asset: custom wake phrases are tokenized with it (src/phrases.rs).
 LEXICON = REPO / "target/a1-assets/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/en.phone"
 LEXICON_REL = "assets/wake/en.phone"
@@ -353,6 +356,27 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
         die("VAD does not match pin")
     copy_pinned(STT_MODEL, list(stt["hashes"]), pkg / "assets/stt", stt["hashes"])
     dropped.append("target/a3-assets/model/decoder_kv_with_attention.ort (not in STT pin set)")
+    # WP-7b: Parakeet (pt+fr, read in place by the STT worker) and the Pocket packs (copied by the Core on first use).
+    pt_fr_stt = load(PT_FR_STT_ROOT / "manifest.json")
+    copy_pinned(PT_FR_STT_ROOT, list(pt_fr_stt["hashes"]), pkg / "assets/stt-pt-fr", pt_fr_stt["hashes"])
+    for pack, pack_root in PT_FR_TTS.items():
+        pack_manifest = load(pack_root / "manifest.json")
+        binaries = [a for a in pack_manifest["artifacts"] if a["name"] != "config.yaml"]
+        copy_pinned(pack_root, [a["name"] for a in binaries], pkg / f"assets/tts-{pack}",
+                    {a["name"]: a["sha256"] for a in binaries})
+        # The config names its files by absolute path; the Core renders @ROOT@ for the state directory it installs to.
+        config_text = (pack_root / "config.yaml").read_text(encoding="utf-8")
+        if config_text.count(str(pack_root)) != 2:
+            die(f"unexpected {pack} config.yaml layout")
+        (pkg / f"assets/tts-{pack}/config.yaml").write_text(config_text.replace(str(pack_root), "@ROOT@"), encoding="utf-8")
+        write_json(pkg / f"templates/tts-{pack}-manifest.json", {
+            "engine": pack_manifest["engine"], "language": pack_manifest["language"],
+            "voice_name": pack_manifest["voice_name"],
+            "artifacts": [{"name": a["name"], "sha256": a["sha256"], "size": a["size"]} for a in binaries],
+        })
+    write_json(pkg / "templates/stt-nemo-manifest.json", {**pt_fr_stt, "model_root": "@PREFIX@/assets/stt-pt-fr"})
+    dropped.append("target/stt-pt-fr-assets: encoder/decoder/joiner/tokens are copied; manifest paths rewritten")
+    dropped.append("target/tts-pt-assets, target/tts-fr-assets: model, tokenizer and voice copied; config rewritten with @ROOT@")
     tts_binaries = [a for a in tts["artifacts"] if a["name"] != "config.yaml"]
     copy_pinned(TTS_ROOT, [a["name"] for a in tts_binaries], pkg / "assets/tts",
                 {a["name"]: a["sha256"] for a in tts_binaries})

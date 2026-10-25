@@ -17,6 +17,15 @@ PageFrame {
     readonly property bool cloudConsent: core.llmConfig.cloud_consent === true
     readonly property bool clearAvailable: core.modelsAvailable && String(core.sessionId || "").length === 0
     readonly property bool advancedOn: AppState.uiGet("behavior.advanced", false) === true
+    // CFG-04: the four wire values of src/storage.rs HistoryRetention. The Core default is days_30.
+    readonly property var retentionOptions: [
+        {value: "days_7", label: "7 dias"}, {value: "days_30", label: "30 dias"},
+        {value: "days_90", label: "90 dias"}, {value: "never", label: "Não guardar"}
+    ]
+    function retentionIndex(value) {
+        for (var i = 0; i < retentionOptions.length; i++) if (retentionOptions[i].value === value) return i
+        return -1
+    }
 
     PageHeader {
         title: "Privacidade"
@@ -31,7 +40,7 @@ PageFrame {
             model: [
                 { tag: "EM MEMÓRIA", tone: "info", text: "Áudio capturado: só em memória durante a captura. Nenhum arquivo de voz é gravado." },
                 { tag: "EM MEMÓRIA", tone: "info", text: "Legendas: só em memória, sem histórico." },
-                { tag: "NÃO GUARDADO", tone: "success", text: "Histórico de conversas: não há histórico salvo." },
+                { tag: "PRIVADO", tone: "success", text: "Histórico de conversas: texto, pelo prazo da Retenção (página Histórico). Áudio nunca é guardado." },
                 { tag: "PRIVADO", tone: "neutral", text: "Configurações: guardadas pelo Core em área privada. O caminho não é exibido." }
             ]
             delegate: RowLayout {
@@ -195,10 +204,27 @@ PageFrame {
 
     Section {
         title: "Retenção e dados de plugins"
+        // CFG-04: the Core keeps the timeline and the audit trail for this many days (preferences.history_retention).
+        // The Core purges what is older at each save and once a minute; "never" keeps nothing on disk.
         SettingRow {
             label: "Retenção do histórico"
-            help: "Quanto tempo a linha do tempo guarda os eventos."
-            disabledReason: "não há controle de retenção; dados em memória deixam de existir quando o Core encerra"
+            help: "Quanto tempo a linha do tempo e a trilha de auditoria guardam os eventos. Dados mais antigos são apagados pelo Core."
+            disabledReason: core.preferencesAvailable ? "" : (core.connected ? "Core ocupado: tente quando o Gideon estiver em espera" : "Core desconectado")
+            Select {
+                id: retentionBox
+                objectName: "historyRetentionSelect"
+                implicitWidth: 240
+                textRole: "label"
+                model: page.retentionOptions
+                enabled: core.preferencesAvailable
+                currentIndex: page.retentionIndex(core.historyRetention)
+                Accessible.name: "Retenção do histórico: " + displayText
+                // The box follows the Core value again: a refused or pending save never leaves a choice that Core did not keep.
+                onActivated: function (index) {
+                    core.setHistoryRetention(page.retentionOptions[index].value)
+                    retentionBox.currentIndex = Qt.binding(function () { return page.retentionIndex(core.historyRetention) })
+                }
+            }
         }
         Text {
             text: "Dados de plugins: configurações guardadas pelo plugin de LLM. O Core e as chaves não são afetados."
@@ -241,6 +267,69 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
+    }
+
+    // WP-10a: export and erase of the personal areas (Memória, Almas, Hábitos, Automações, Histórico). The export is a
+    // private file written by the Core; the erase needs the confirmation below and the Core also checks it.
+    readonly property var personalReply: core.personalReply || ({})
+    readonly property bool personalBusy: String(core.sessionId || "").length > 0
+    readonly property string personalResultText: {
+        var r = page.personalReply
+        if (!r.area || r.area === "") return ""
+        if (r.code !== "ok") return core.codeMessage(r.code)
+        if (r.area === "export") return "Exportação salva em " + (r.reply.path || "") + " (" + (r.reply.bytes || 0) + " bytes). O arquivo é privado: só o seu usuário pode lê-lo."
+        if (r.area === "erase") return "Dados pessoais apagados. Memória, Almas, Hábitos, Automações e Histórico estão vazios."
+        return ""
+    }
+    Section {
+        title: "Meus dados pessoais"
+        caption: "Memória, Almas, Hábitos, Automações e Histórico ficam no computador, em arquivos privados."
+        Text {
+            text: "Exportar cria um arquivo com tudo o que está guardado. Apagar remove as cinco áreas de uma vez e não pode ser desfeito."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.space(12)
+            GButton {
+                objectName: "personalExportButton"
+                text: "Exportar meus dados"
+                Accessible.name: "Exportar meus dados pessoais para um arquivo"
+                enabled: core.connected && !page.personalBusy
+                onClicked: core.personalExport()
+            }
+            GButton {
+                objectName: "personalEraseButton"
+                variant: "danger"
+                text: "Apagar meus dados pessoais"
+                Accessible.name: "Apagar todos os dados pessoais"
+                enabled: core.connected && !page.personalBusy
+                onClicked: personalEraseConfirm.open()
+            }
+            Text {
+                objectName: "personalStatusText"
+                text: page.personalBusy ? "Indisponível agora: sessão de voz em andamento." : page.personalResultText
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontCaption
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+    }
+    PConfirm {
+        id: personalEraseConfirm
+        objectName: "personalEraseConfirm"
+        title: "Apagar todos os dados pessoais?"
+        message: "Apaga Memória, Almas, Hábitos, Automações e Histórico. Não pode ser desfeito: exporte antes se quiser guardar uma cópia."
+        actionText: "Apagar tudo"
+        onConfirmed: core.personalEraseAll(true)
     }
 
     EAdvancedNote { subtab: "Privacidade" }

@@ -10,7 +10,7 @@ from uisettings import APP_KEYS,CORE_KEYS,PRESETS,SCHEMA,SPECS,UiSettings,_legac
 
 # docs/ui-spec/01-ajustes-minimalismo.md 3.1 (minimum set) plus the Core-backed entries of docs/ui-spec/40-configuracoes.md.
 MINIMUM_KEYS={'theme.mode','theme.preset','theme.accent','theme.density','theme.radius','theme.fontSize','theme.fontFamily','theme.contrast','theme.animation','theme.translucency','theme.shadow','theme.titleWeight','theme.lineHeight','theme.colors','theme.orb','theme.orbSize','behavior.startTab','behavior.rememberWindow','behavior.tips','behavior.shortcuts','behavior.advanced','behavior.devMode','behavior.toastSeconds','behavior.confirmWrites','behavior.reduceMotionFollowSystem','voice.partials','voice.showConfidence','audio.cues'}
-CORE_EXPECTED={'core.wakePhrase','core.sessionTimeoutMs','core.responseGain','core.audibleFeedback','core.visualFeedback','core.wakeSensitivity','core.inputConditioning','core.audioInput','core.audioOutput'}
+CORE_EXPECTED={'core.wakePhrase','core.sessionTimeoutMs','core.responseGain','core.audibleFeedback','core.visualFeedback','core.wakeSensitivity','core.inputConditioning','core.audioInput','core.audioOutput','behavior.devMode'}
 
 
 class FakeBridge:
@@ -178,6 +178,12 @@ class UiSettingsTests(unittest.TestCase):
         self.assertEqual(keys[0],'theme.preset')
         self.assertTrue(all({'key','label','section','subtab','score'} <= set(row) for row in self.ui.search('volume')))
         self.assertEqual(self.ui.search('zzzqqq'),[])
+        # CFG-06: the Idiomas sub-tab is findable; its entries are search-only and never become settings.
+        found=self.ui.search('idioma')
+        self.assertIn('lang.stt',[row['key'] for row in found])
+        self.assertTrue(all(row['subtab']=='Idiomas' for row in found if row['key'].startswith('lang.')))
+        self.assertEqual(self.ui.search('transcricao')[0]['key'],'lang.stt')
+        self.assertFalse(any(key.startswith('lang.') for key in SPECS))
 
     def test_schema_is_complete(self):
         keys=[entry['key'] for entry in self.ui.schema]

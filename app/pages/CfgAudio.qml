@@ -22,6 +22,15 @@ PageFrame {
     readonly property bool dirty: draft >= 0 && draft !== saved
     readonly property bool gainBlocked: AppState.blockReason("core.responseGain") !== ""
     readonly property bool visualOn: AppState.uiGet("core.visualFeedback", true) === true
+    // CFG-01: the voices of the speech language the Core has installed (catalog voices of a selectable language only).
+    readonly property var voiceOptions: {
+        var items = core.languageTtsItems
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].id === core.languageTtsSelected && items[i].selectable === true) return items[i].voices.slice()
+        }
+        return []
+    }
+    readonly property int voiceIndex: voiceOptions.indexOf(core.languageTtsVoice)
 
     onSavedChanged: draft = -1
 
@@ -140,17 +149,25 @@ PageFrame {
             EToggleSetting { settingKey: "audio.cues" }
         }
         EValueRow {
-            label: "Voz da Base: Pocket TTS · Alba · inglês · saída virtual"
+            label: "Voz em uso: " + (core.languageTtsVoice || "padrão do pacote") + " · " + (core.languageTtsSelected || "idioma do pacote")
         }
+        // CFG-01: the voice of the speech language. Saved in the Core (language_preference); a voice that is not installed is not listed.
         SettingRow {
             label: "Escolha de voz"
-            help: "Voz usada nas respostas."
-            disabledReason: "escolha de voz não implementada; só a voz do pacote existe"
+            help: "Voz usada nas respostas. Só vozes instaladas aparecem. Vale no próximo início do Core."
+            disabledReason: page.voiceOptions.length > 0 ? "" : "nenhuma outra voz instalada neste idioma"
             Select {
-                model: ["Alba"]
-                enabled: false
+                id: voiceBox
+                objectName: "voiceSelect"
                 implicitWidth: 240
-                Accessible.name: "Escolha de voz (indisponível)"
+                model: page.voiceOptions
+                enabled: page.voiceOptions.length > 0 && core.preferencesAvailable
+                currentIndex: page.voiceIndex
+                Accessible.name: "Escolha de voz: " + displayText
+                onActivated: function (index) {
+                    core.setLanguages(JSON.stringify(core.languageSttSelected), core.languageTtsSelected, page.voiceOptions[index])
+                    voiceBox.currentIndex = Qt.binding(function () { return page.voiceIndex })
+                }
             }
         }
         EValueRow {

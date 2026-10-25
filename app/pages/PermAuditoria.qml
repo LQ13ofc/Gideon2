@@ -176,7 +176,7 @@ PageFrame {
     }
 
     // B9: the log is <diretório do Core>/audit.log (src/storage.rs). Copiar escreve o caminho na área de transferência.
-    readonly property string logPath: core.coreRootPath.length > 0 ? core.coreRootPath + "/audit.log" : ""
+    readonly property string logPath: core.auditLogPath.length > 0 ? core.auditLogPath : ""
 
     Collapsible {
         objectName: "auditAdvanced"

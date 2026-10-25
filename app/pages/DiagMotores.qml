@@ -324,6 +324,35 @@ PageFrame {
             }
             FNote { visible: Theme.advanced; small: true; text: "Confiança da transcrição: desconhecida (o motor não informa)." }
         }
+
+        // DIAG-05: latency of the speech answer (Core timing of the last answer of this session).
+        Section {
+            objectName: "diagSpeechLatency"
+            title: "Latência da resposta em voz"
+            Layout.alignment: Qt.AlignTop
+            EValueRow {
+                objectName: "speechFirstAudio"
+                label: "Primeiro áudio"
+                value: core.speechLatency.known ? (core.speechLatency.first_pcm_ms + " ms") : "sem resposta falada nesta sessão"
+            }
+            EValueRow {
+                label: "Resposta completa"
+                value: core.speechLatency.known ? (core.speechLatency.elapsed_ms + " ms") : "—"
+            }
+        }
+
+        // DIAG-03 (M27): the answer came from the fallback model. Core event llm_fallback_used; no content is shown.
+        Section {
+            objectName: "diagFallback"
+            title: "Motor LLM"
+            Layout.alignment: Qt.AlignTop
+            EValueRow {
+                objectName: "fallbackUsedRow"
+                label: "Resposta de reserva"
+                value: core.llmFallbackUsed ? "usada nesta sessão" : "não usada nesta sessão"
+            }
+            FNote { small: true; text: "Quando o modelo principal falha, o Gideon usa o modelo de reserva e avisa na Conversa." }
+        }
     }
 
     Collapsible {

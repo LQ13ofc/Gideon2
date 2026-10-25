@@ -126,6 +126,16 @@ pub enum Operation {
         enabled: bool,
         confirmed: bool,
     },
+    /// CFG-04 retention of the timeline and audit trail (`preferences.history_retention`). CAS on `revision`.
+    HistoryRetentionPreference {
+        revision: u64,
+        retention: crate::storage::HistoryRetention,
+    },
+    /// DIAG-02 developer mode (`preferences.developer_mode`). CAS on `revision`; no consent is needed.
+    DeveloperModePreference {
+        revision: u64,
+        enabled: bool,
+    },
     RecoverConfiguration {
         revision: u64,
     },
@@ -345,6 +355,21 @@ pub enum Operation {
         enabled: bool,
         revision: Option<u64>,
     },
+    /// WP-10a personal areas: one versioned request for `area` (`memory`, `souls`, `habits`, `automations`,
+    /// `conversations`). The result (`{area, reply}`) is served in `personal_reply` of this response.
+    Personal {
+        area: String,
+        payload: serde_json::Value,
+    },
+    /// WP-10a: everything the user stored, in one document (`personal_reply.reply`).
+    PersonalExport,
+    /// WP-10a: erases every personal area. Refused with `confirmation_required` unless `confirm` is true.
+    PersonalEraseAll {
+        confirm: bool,
+    },
+    /// HUD-03: the client (Ctrl+M) starts a listening session. Needs live audio on (with the mic consent
+    /// stored in preferences) and a running capture; otherwise it is refused with a specific code.
+    ListenStart,
     /// Transport-only: a skill manifest line over the frame bound is answered with `code`.
     Refused {
         code: &'static str,
@@ -401,9 +426,11 @@ pub fn unix_ms() -> u64 {
 /// Origin of an event kind. Closed set: core, plugin, hub, skill, connection, tool, agent, llm,
 /// speech, config, registry.
 pub fn origin_of(kind: &str) -> &'static str {
-    const PREFIXES: [(&str, &str); 16] = [
+    const PREFIXES: [(&str, &str); 18] = [
         ("live_audio_", "config"),
         ("real_actions_", "config"),
+        ("developer_mode_", "config"),
+        ("history_retention_", "config"),
         ("connection_", "connection"),
         ("tool_", "tool"),
         ("agent_", "agent"),
@@ -480,6 +507,12 @@ pub struct Response {
     pub skills: Option<crate::skills::View>,
     pub connections: crate::connections::View,
     pub registry: crate::registry::View,
+    /// WP-10a snapshot block `personal`: retention and every area's summary (`{"status":"unavailable"}` when the
+    /// personal store could not be opened).
+    pub personal: serde_json::Value,
+    /// Reply of this request's personal operation (`{area, reply}`); present only on that response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal_reply: Option<serde_json::Value>,
     pub text_input_available: bool,
     pub speech_samples: usize,
     pub speech_status: &'static str,
@@ -641,6 +674,18 @@ enum WireRequest {
         revision: u64,
         enabled: bool,
         confirmed: bool,
+    },
+    HistoryRetentionPreference {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        retention: crate::storage::HistoryRetention,
+    },
+    DeveloperModePreference {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        enabled: bool,
     },
     RecoverConfiguration {
         version: u16,
@@ -987,6 +1032,25 @@ enum WireRequest {
         #[serde(default)]
         revision: Option<u64>,
     },
+    Personal {
+        version: u16,
+        request_id: String,
+        area: String,
+        payload: serde_json::Value,
+    },
+    PersonalExport {
+        version: u16,
+        request_id: String,
+    },
+    PersonalEraseAll {
+        version: u16,
+        request_id: String,
+        confirm: bool,
+    },
+    ListenStart {
+        version: u16,
+        request_id: String,
+    },
 }
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -1223,6 +1287,29 @@ impl<'de> Deserialize<'de> for Request {
                     enabled,
                     confirmed,
                 },
+            ),
+            WireRequest::HistoryRetentionPreference {
+                version,
+                request_id,
+                revision,
+                retention,
+            } => (
+                version,
+                request_id,
+                Operation::HistoryRetentionPreference {
+                    revision,
+                    retention,
+                },
+            ),
+            WireRequest::DeveloperModePreference {
+                version,
+                request_id,
+                revision,
+                enabled,
+            } => (
+                version,
+                request_id,
+                Operation::DeveloperModePreference { revision, enabled },
             ),
             WireRequest::RecoverConfiguration {
                 version,
@@ -1760,6 +1847,25 @@ impl<'de> Deserialize<'de> for Request {
                     revision,
                 },
             ),
+            WireRequest::Personal {
+                version,
+                request_id,
+                area,
+                payload,
+            } => (version, request_id, Operation::Personal { area, payload }),
+            WireRequest::PersonalExport {
+                version,
+                request_id,
+            } => (version, request_id, Operation::PersonalExport),
+            WireRequest::PersonalEraseAll {
+                version,
+                request_id,
+                confirm,
+            } => (version, request_id, Operation::PersonalEraseAll { confirm }),
+            WireRequest::ListenStart {
+                version,
+                request_id,
+            } => (version, request_id, Operation::ListenStart),
         };
         Ok(Self {
             version,
@@ -1792,6 +1898,53 @@ mod tests {
             let json = format!(r#"{{"version":1,"request_id":"r1","op":"core_restart"{extra}}}"#);
             assert!(serde_json::from_str::<Request>(&json).is_err(), "{json}");
         }
+    }
+
+    #[test]
+    fn history_retention_wire_values_are_exactly_four() {
+        use crate::storage::HistoryRetention;
+        for (wire, expected) in [
+            ("days_7", HistoryRetention::Days7),
+            ("days_30", HistoryRetention::Days30),
+            ("days_90", HistoryRetention::Days90),
+            ("never", HistoryRetention::Never),
+        ] {
+            let json = format!(
+                r#"{{"version":1,"request_id":"h1","op":"history_retention_preference","revision":0,"retention":"{wire}"}}"#
+            );
+            let req = serde_json::from_str::<Request>(&json).expect("known value parses");
+            assert!(matches!(
+                req.operation,
+                Operation::HistoryRetentionPreference { revision: 0, retention } if retention == expected
+            ));
+            assert_eq!(expected.as_str(), wire);
+        }
+        for bad in ["days_1", "forever", "", "Never", "days_30 "] {
+            let json = format!(
+                r#"{{"version":1,"request_id":"h2","op":"history_retention_preference","revision":0,"retention":"{bad}"}}"#
+            );
+            assert!(serde_json::from_str::<Request>(&json).is_err(), "{bad}");
+        }
+        let missing =
+            r#"{"version":1,"request_id":"h3","op":"history_retention_preference","revision":0}"#;
+        assert!(serde_json::from_str::<Request>(missing).is_err());
+    }
+
+    #[test]
+    fn developer_mode_wire_format_is_strict_bool_without_consent() {
+        let json = r#"{"version":1,"request_id":"d1","op":"developer_mode_preference","revision":2,"enabled":true}"#;
+        let req = serde_json::from_str::<Request>(json).expect("parses");
+        assert!(matches!(
+            req.operation,
+            Operation::DeveloperModePreference {
+                revision: 2,
+                enabled: true
+            }
+        ));
+        let text = r#"{"version":1,"request_id":"d2","op":"developer_mode_preference","revision":2,"enabled":"yes"}"#;
+        assert!(serde_json::from_str::<Request>(text).is_err());
+        let confirmed = r#"{"version":1,"request_id":"d3","op":"developer_mode_preference","revision":2,"enabled":true,"confirmed":true}"#;
+        assert!(serde_json::from_str::<Request>(confirmed).is_err());
     }
 
     #[test]

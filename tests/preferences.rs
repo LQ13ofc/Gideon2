@@ -420,20 +420,34 @@ fn languages_are_installed_only_cas_checked_and_rollback_refuses_uninstalled_pre
             tts_language: tts.into(),
             tts_voice: voice.into(),
         };
-    // Not installed in this build: refused, nothing written.
-    let refused = core.handle_with_storage(
+    // WP-7b: French is bundled now, so the selection is accepted and written (CAS revision 0 -> 1).
+    let accepted = core.handle_with_storage(
         request("l0", language(0, &["fr"], "en", "alba")),
         now,
         Some(&mut storage),
     );
-    assert_eq!(refused.code, "language_not_installed");
-    assert_eq!(storage.config.revision, 0);
+    assert_eq!(accepted.code, "ok");
+    assert_eq!(storage.config.revision, 1);
+    let back = core.handle_with_storage(
+        request("l0b", language(1, &["en"], "en", "alba")),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(back.code, "ok");
+    assert_eq!(storage.config.revision, 2);
+    // A language outside the catalog and a voice that the pack does not have are refused, nothing written.
     let unknown = core.handle_with_storage(
-        request("l1", language(0, &["de"], "en", "alba")),
+        request("l1", language(2, &["de"], "en", "alba")),
         now,
         Some(&mut storage),
     );
     assert_eq!(unknown.code, "invalid_languages");
+    let wrong_voice = core.handle_with_storage(
+        request("l1b", language(2, &["en"], "fr", "alba")),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(wrong_voice.code, "invalid_languages");
     let stale = core.handle_with_storage(
         request("l2", language(9, &["en"], "en", "alba")),
         now,
@@ -442,24 +456,24 @@ fn languages_are_installed_only_cas_checked_and_rollback_refuses_uninstalled_pre
     assert_eq!(stale.code, "stale_preferences");
     // Same values: ok, and no revision is written.
     let same = core.handle_with_storage(
-        request("l3", language(0, &["en"], "en", "alba")),
+        request("l3", language(2, &["en"], "en", "alba")),
         now,
         Some(&mut storage),
     );
     assert_eq!(same.code, "ok");
-    assert_eq!(storage.config.revision, 0);
+    assert_eq!(storage.config.revision, 2);
 
-    // A previous choice that is no longer installed cannot be restored by rollback.
+    // A previous choice that is no longer installed cannot be restored by rollback ("de" is outside the catalog).
     storage
-        .update_languages(0, vec!["fr".into()], "en".into(), "alba".into())
+        .update_languages(2, vec!["de".into()], "en".into(), "alba".into())
         .unwrap();
     storage
-        .update_languages(1, vec!["en".into()], "en".into(), "alba".into())
+        .update_languages(3, vec!["en".into()], "en".into(), "alba".into())
         .unwrap();
     core.configure_storage(&storage);
     let before = storage.config.clone();
     let rollback = core.handle_with_storage(
-        request("l4", Operation::RollbackPreferences { revision: 2 }),
+        request("l4", Operation::RollbackPreferences { revision: 4 }),
         now,
         Some(&mut storage),
     );

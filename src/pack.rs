@@ -59,6 +59,8 @@ pub struct WakeChoice {
 pub struct Snapshot {
     pub version: u16,
     pub id: String,
+    /// DIAG-01: SHA-256 (lowercase hex) of the pack definition file this snapshot was loaded from.
+    pub pack_sha256: String,
     pub scope: &'static str,
     pub preflight: &'static str,
     pub engines: BTreeMap<String, String>,
@@ -122,7 +124,8 @@ fn verified(path: &Path, expected: &str) -> io::Result<()> {
     }
     Ok(())
 }
-fn json(path: &Path) -> io::Result<serde_json::Value> {
+/// Raw bytes of a JSON pack file: absolute, regular, never a symlink, at most 1 MiB.
+fn json_bytes(path: &Path) -> io::Result<Vec<u8>> {
     let file = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -135,7 +138,14 @@ fn json(path: &Path) -> io::Result<serde_json::Value> {
     if data.len() > 1_048_576 {
         return Err(invalid());
     }
-    serde_json::from_slice(&data).map_err(|_| invalid())
+    Ok(data)
+}
+fn json(path: &Path) -> io::Result<serde_json::Value> {
+    serde_json::from_slice(&json_bytes(path)?).map_err(|_| invalid())
+}
+/// DIAG-01: SHA-256 (lowercase hex) of the pack definition file, over the same bytes `load` reads.
+pub fn definition_sha256(path: &Path) -> io::Result<String> {
+    Ok(format!("{:x}", Sha256::digest(json_bytes(path)?)))
 }
 fn text(value: &serde_json::Value) -> io::Result<&str> {
     value.as_str().ok_or_else(invalid)
@@ -176,7 +186,9 @@ fn artifacts(root: &str, hashes: &serde_json::Value) -> io::Result<()> {
     Ok(())
 }
 pub fn load(path: &Path, wake_path: &Path, tts_path: &Path) -> io::Result<Snapshot> {
-    let raw = json(path)?;
+    let raw_bytes = json_bytes(path)?;
+    let pack_sha256 = format!("{:x}", Sha256::digest(&raw_bytes));
+    let raw: serde_json::Value = serde_json::from_slice(&raw_bytes).map_err(|_| invalid())?;
     let def: Definition = serde_json::from_value(raw).map_err(|_| invalid())?;
     if def.version != 1
         || !crate::protocol::valid_id(&def.id)
@@ -376,6 +388,7 @@ pub fn load(path: &Path, wake_path: &Path, tts_path: &Path) -> io::Result<Snapsh
     let snapshot = Snapshot {
         version: 1,
         id: def.id,
+        pack_sha256,
         scope: "dev_virtual_en",
         preflight: "verified",
         engines: BTreeMap::from([

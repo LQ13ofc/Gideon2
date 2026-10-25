@@ -1,0 +1,233 @@
+{
+ "threshold": 0.25,
+ "positives": 14,
+ "positives_detected": 0,
+ "negatives": 18,
+ "false_hits": 0,
+ "rows": [
+  {
+   "id": "pt01",
+   "lang": "pt",
+   "text": "Olá Gideon.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "pt02",
+   "lang": "pt",
+   "text": "Oi Gideon, que horas são?",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "pt03",
+   "lang": "pt",
+   "text": "Olá Gideon, abra o navegador Brave.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "pt04",
+   "lang": "pt",
+   "text": "Gideon, aumente o volume.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "pt05",
+   "lang": "pt",
+   "text": "Gideon, desative o som.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "pt06",
+   "lang": "pt",
+   "text": "Oi Gideon, tudo bem com você?",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "pt07",
+   "lang": "pt",
+   "text": "Eu gosto de café com leite pela manhã.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt08",
+   "lang": "pt",
+   "text": "A reunião começa às três horas da tarde.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt09",
+   "lang": "pt",
+   "text": "Posso ajudar você com alguma coisa hoje?",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt10",
+   "lang": "pt",
+   "text": "Vamos ao mercado comprar pão e leite.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt11",
+   "lang": "pt",
+   "text": "O tempo está bonito para caminhar no parque.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt12",
+   "lang": "pt",
+   "text": "Feche a janela, por favor.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt13",
+   "lang": "pt",
+   "text": "Qual é a previsão do tempo para amanhã?",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt14",
+   "lang": "pt",
+   "text": "Ligue o computador e abra o calendário.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt15",
+   "lang": "pt",
+   "text": "Meu irmão mora em São Paulo há cinco anos.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "pt16",
+   "lang": "pt",
+   "text": "Gideon, pare a música agora.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "fr01",
+   "lang": "fr",
+   "text": "Bonjour Gideon.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "fr02",
+   "lang": "fr",
+   "text": "Salut Gideon, quelle heure est-il ?",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "fr03",
+   "lang": "fr",
+   "text": "Bonjour Gideon, ouvre le navigateur Brave.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "fr04",
+   "lang": "fr",
+   "text": "Gideon, augmente le volume.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "fr05",
+   "lang": "fr",
+   "text": "Gideon, coupe le son.",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "fr06",
+   "lang": "fr",
+   "text": "Salut Gideon, comment ça va aujourd'hui ?",
+   "wake_word": true,
+   "hits": []
+  },
+  {
+   "id": "fr07",
+   "lang": "fr",
+   "text": "J'aime boire un café au lait le matin.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr08",
+   "lang": "fr",
+   "text": "La réunion commence à trois heures de l'après-midi.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr09",
+   "lang": "fr",
+   "text": "Puis-je vous aider avec quelque chose aujourd'hui ?",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr10",
+   "lang": "fr",
+   "text": "Allons au marché acheter du pain et du lait.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr11",
+   "lang": "fr",
+   "text": "Le temps est agréable pour une promenade dans le parc.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr12",
+   "lang": "fr",
+   "text": "Ferme la fenêtre, s'il te plaît.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr13",
+   "lang": "fr",
+   "text": "Quel temps fera-t-il demain ?",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr14",
+   "lang": "fr",
+   "text": "Allume l'ordinateur et ouvre le calendrier.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr15",
+   "lang": "fr",
+   "text": "Mon frère habite à Paris depuis cinq ans.",
+   "wake_word": false,
+   "hits": []
+  },
+  {
+   "id": "fr16",
+   "lang": "fr",
+   "text": "Gideon, arrête la musique maintenant.",
+   "wake_word": true,
+   "hits": []
+  }
+ ]
+}

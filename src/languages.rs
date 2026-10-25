@@ -5,7 +5,11 @@
 //! Português e francês ficam `available_not_installed` (sem arquivos baixados) até o dono aprovar downloads.
 use crate::storage::Config;
 use serde::{Deserialize, Serialize};
-use std::io;
+use sha2::{Digest, Sha256};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 pub const CATALOG_JSON: &str = include_str!("languages_catalog.json");
 pub const MAX_STT_LANGUAGES: usize = 3;
@@ -232,6 +236,190 @@ impl LanguageCatalog {
     }
 }
 
+/// WP-7b engine packs for Portuguese and French. The package ships the verified files under `assets/` and
+/// their manifests under `templates/` (`@PREFIX@` = package root). Transcription uses one multilingual
+/// Parakeet model in place; speech needs a root that holds the rendered config, so the Core copies those
+/// files into its private state (hash checked) before the first use.
+pub const NEMO_STT_TEMPLATE: &str = "stt-nemo-manifest.json";
+const PACK_DIR: &str = "languages";
+const MAX_TEMPLATE: u64 = 65_536;
+
+#[derive(Deserialize)]
+struct PackArtifact {
+    name: String,
+    sha256: String,
+    size: u64,
+}
+
+#[derive(Deserialize)]
+struct TtsTemplate {
+    engine: String,
+    language: String,
+    voice_name: String,
+    artifacts: Vec<PackArtifact>,
+}
+
+/// The Pocket TTS pack for a speech language tag; English keeps the package's own profile.
+pub fn tts_pack(language: &str) -> Option<&'static str> {
+    match language {
+        "pt-BR" => Some("pt"),
+        "fr" => Some("fr"),
+        _ => None,
+    }
+}
+
+/// Transcription uses the multilingual Parakeet engine as soon as one selected language is not English.
+pub fn needs_nemo_stt(stt: &[String]) -> bool {
+    stt.iter().any(|l| l != DEFAULT_STT_LANGUAGE)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn file_sha256(path: &Path) -> io::Result<String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut chunk = vec![0u8; 1 << 20];
+    loop {
+        let read = file.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&chunk[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn safe_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && !name.starts_with('.')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+fn read_template(home: &Path, name: &str) -> io::Result<Vec<u8>> {
+    let path = home.join("templates").join(name);
+    let meta = fs::symlink_metadata(&path)?;
+    if !meta.is_file() || meta.len() > MAX_TEMPLATE {
+        return Err(invalid("modelo de idioma inválido"));
+    }
+    fs::read(path)
+}
+
+fn json_error(error: serde_json::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+/// Renders the packaged Parakeet manifest into `state` (the STT worker reads its model files in place, hash
+/// checked by the worker). The package templates are never written.
+pub fn render_nemo_stt(home: &Path, state: &Path) -> io::Result<PathBuf> {
+    let text = read_template(home, NEMO_STT_TEMPLATE)?;
+    let root = home
+        .to_str()
+        .ok_or_else(|| invalid("caminho do pacote inválido"))?;
+    let rendered = String::from_utf8(text)
+        .map_err(|_| invalid("modelo de idioma inválido"))?
+        .replace("@PREFIX@", root);
+    if rendered.contains('@') {
+        return Err(invalid("modelo de idioma inválido"));
+    }
+    let value: serde_json::Value = serde_json::from_str(&rendered).map_err(json_error)?;
+    if value["languages"] != serde_json::json!(["pt", "fr"])
+        || value["model_type"] != "nemo_transducer"
+    {
+        return Err(invalid("modelo de idioma inválido"));
+    }
+    fs::create_dir_all(state.join(PACK_DIR))?;
+    let path = state.join(PACK_DIR).join(NEMO_STT_TEMPLATE);
+    crate::live::write_private_file(&path, rendered.as_bytes())?;
+    Ok(path)
+}
+
+/// Copies one pack file into `dst` (mode 0600) unless `dst` already has the pinned digest, and verifies the copy.
+fn copy_verified(src: &Path, dst: &Path, sha256: &str) -> io::Result<()> {
+    if dst.is_file() && file_sha256(dst)? == sha256 {
+        return Ok(());
+    }
+    let meta = fs::symlink_metadata(src)?;
+    if !meta.is_file() {
+        return Err(invalid("arquivo de idioma ausente"));
+    }
+    let tmp = dst.with_extension("partial");
+    let _ = fs::remove_file(&tmp);
+    fs::copy(src, &tmp)?;
+    if file_sha256(&tmp)? != sha256 {
+        let _ = fs::remove_file(&tmp);
+        return Err(invalid("arquivo de idioma diferente do fixado"));
+    }
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    fs::rename(&tmp, dst)
+}
+
+/// Installs one TTS pack under `state` and returns the profile manifest path for `tts::Config`.
+/// The profile has the same shape as the packaged English profile (`root`, `config`, `voice`, four artifacts).
+pub fn install_tts(home: &Path, state: &Path, language: &str) -> io::Result<PathBuf> {
+    let pack = tts_pack(language).ok_or_else(|| invalid("idioma sem voz de fala"))?;
+    let template: TtsTemplate =
+        serde_json::from_slice(&read_template(home, &format!("tts-{pack}-manifest.json"))?)
+            .map_err(json_error)?;
+    if template.artifacts.len() != 3
+        || template
+            .artifacts
+            .iter()
+            .any(|a| !safe_name(&a.name) || a.sha256.len() != 64)
+        || !safe_name(&template.voice_name)
+        || !template
+            .artifacts
+            .iter()
+            .any(|a| a.name == format!("{}.safetensors", template.voice_name))
+    {
+        return Err(invalid("modelo de idioma inválido"));
+    }
+    let source = home.join("assets").join(format!("tts-{pack}"));
+    let root = state.join(PACK_DIR).join(format!("tts-{pack}"));
+    fs::create_dir_all(&root)?;
+    let mut artifacts = Vec::new();
+    for artifact in &template.artifacts {
+        copy_verified(
+            &source.join(&artifact.name),
+            &root.join(&artifact.name),
+            &artifact.sha256,
+        )?;
+        artifacts.push(serde_json::json!({"name": artifact.name, "sha256": artifact.sha256, "size": artifact.size}));
+    }
+    // The config names the files it loads, so it is rendered for this root and pinned by its own digest.
+    let raw = fs::read_to_string(source.join("config.yaml"))?;
+    let root_text = root
+        .to_str()
+        .ok_or_else(|| invalid("caminho de idioma inválido"))?;
+    if raw.matches("@ROOT@").count() != 2 {
+        return Err(invalid("configuração de idioma inválida"));
+    }
+    let config = raw.replace("@ROOT@", root_text);
+    crate::live::write_private_file(&root.join("config.yaml"), config.as_bytes())?;
+    artifacts.push(serde_json::json!({"name": "config.yaml", "sha256": sha256_hex(config.as_bytes()), "size": config.len()}));
+    let manifest = serde_json::json!({
+        "engine": template.engine,
+        "language": template.language,
+        "voice_name": template.voice_name,
+        "root": root_text,
+        "config": root.join("config.yaml").to_string_lossy(),
+        "voice": root.join(format!("{}.safetensors", template.voice_name)).to_string_lossy(),
+        "artifacts": artifacts,
+    });
+    let path = state
+        .join(PACK_DIR)
+        .join(format!("tts-{pack}-manifest.json"));
+    let bytes = serde_json::to_vec_pretty(&manifest).map_err(json_error)?;
+    crate::live::write_private_file(&path, &bytes)?;
+    Ok(path)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ItemView {
     pub id: String,
@@ -376,13 +564,14 @@ mod tests {
     }
 
     #[test]
-    fn builtin_catalog_parses_and_keeps_pt_and_fr_uninstalled() {
+    fn builtin_catalog_parses_and_bundles_pt_and_fr_speech_and_transcription() {
         let catalog = LanguageCatalog::builtin().expect("catálogo embutido válido");
         assert_eq!(catalog.entry("stt", "en").unwrap().state, State::Bundled);
         assert_eq!(
             catalog.entry("tts", "en").unwrap().voices,
             vec!["alba".to_string()]
         );
+        // WP-7b: PT and FR ship in the package (hash-verified assets); the licenses are on the entries.
         for (kind, lang) in [
             ("stt", "fr"),
             ("stt", "pt-BR"),
@@ -391,10 +580,19 @@ mod tests {
         ] {
             assert_eq!(
                 catalog.entry(kind, lang).unwrap().state,
-                State::AvailableNotInstalled,
+                State::Bundled,
                 "{kind} {lang}"
             );
+            assert!(catalog.entry(kind, lang).unwrap().license.is_some());
         }
+        assert_eq!(
+            catalog.entry("tts", "pt-BR").unwrap().voices,
+            vec!["rafael".to_string()]
+        );
+        assert_eq!(
+            catalog.entry("tts", "fr").unwrap().voices,
+            vec!["estelle".to_string()]
+        );
         for lang in ["fr", "pt-BR"] {
             assert_eq!(
                 catalog.entry("wake", lang).unwrap().state,
@@ -516,11 +714,8 @@ mod tests {
         assert!(!shown.install.available);
         assert_eq!(shown.install.reason, INSTALL_REASON);
         let stt_fr = shown.engines.stt.iter().find(|i| i.id == "fr").unwrap();
-        assert!(!stt_fr.selectable && !stt_fr.selected);
-        assert_eq!(
-            stt_fr.reason.as_deref(),
-            Some("Não instalado: Aguardando aprovação do download pelo dono")
-        );
+        assert!(stt_fr.selectable && !stt_fr.selected);
+        assert_eq!(stt_fr.reason, None);
         assert!(shown.engines.wake.iter().all(|i| !i.selected));
 
         // A stored change that the running workers did not start with asks for a restart.
@@ -529,5 +724,96 @@ mod tests {
         let pending = view(&catalog, &changed, Some(&applied));
         assert!(pending.restart_required.stt && !pending.restart_required.tts);
         assert!(!view(&catalog, &changed, None).restart_required.stt);
+    }
+
+    #[test]
+    fn engine_selection_follows_the_language_tags() {
+        assert!(!needs_nemo_stt(&["en".to_string()]));
+        assert!(needs_nemo_stt(&["pt-BR".to_string()]));
+        assert!(needs_nemo_stt(&["en".to_string(), "fr".to_string()]));
+        assert_eq!(tts_pack("pt-BR"), Some("pt"));
+        assert_eq!(tts_pack("fr"), Some("fr"));
+        assert_eq!(tts_pack("en"), None);
+    }
+
+    /// A fake package with one pack file set; `bad` corrupts the first asset to prove the digest check.
+    fn fake_package(bad: bool) -> tempfile::TempDir {
+        let home = tempfile::tempdir().unwrap();
+        let templates = home.path().join("templates");
+        let assets = home.path().join("assets/tts-pt");
+        fs::create_dir_all(&templates).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        let files: [(&str, &[u8]); 3] = [
+            ("model.safetensors", b"model"),
+            ("tokenizer.json", b"tok"),
+            ("rafael.safetensors", b"voice"),
+        ];
+        let mut artifacts = Vec::new();
+        for (name, bytes) in files {
+            fs::write(
+                assets.join(name),
+                if bad && name == "model.safetensors" {
+                    b"tampered".as_slice()
+                } else {
+                    bytes
+                },
+            )
+            .unwrap();
+            artifacts.push(format!(
+                r#"{{"name":"{name}","sha256":"{}","size":{}}}"#,
+                sha256_hex(bytes),
+                bytes.len()
+            ));
+        }
+        fs::write(
+            assets.join("config.yaml"),
+            "weights_path: @ROOT@/model.safetensors\ntokenizer_path: @ROOT@/tokenizer.json\n",
+        )
+        .unwrap();
+        fs::write(
+            templates.join("tts-pt-manifest.json"),
+            format!(
+                r#"{{"engine":"pocket-tts-3.3.0/portuguese/cpu","language":"portuguese","voice_name":"rafael","artifacts":[{}]}}"#,
+                artifacts.join(",")
+            ),
+        )
+        .unwrap();
+        home
+    }
+
+    #[test]
+    fn tts_pack_installs_pinned_files_and_refuses_a_tampered_one() {
+        let state = tempfile::tempdir().unwrap();
+        let home = fake_package(false);
+        let manifest = install_tts(home.path(), state.path(), "pt-BR").unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        assert_eq!(value["voice_name"], "rafael");
+        assert_eq!(value["artifacts"].as_array().unwrap().len(), 4);
+        let root = state.path().join("languages/tts-pt");
+        assert!(fs::read_to_string(root.join("config.yaml"))
+            .unwrap()
+            .contains(root.to_str().unwrap()));
+        // The installed config digest is the one the manifest pins.
+        let config = value["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"] == "config.yaml")
+            .unwrap();
+        assert_eq!(
+            config["sha256"],
+            sha256_hex(&fs::read(root.join("config.yaml")).unwrap())
+        );
+        // A package whose asset does not match its pin is refused, and nothing is installed under the name.
+        let bad_state = tempfile::tempdir().unwrap();
+        let bad_home = fake_package(true);
+        assert!(install_tts(bad_home.path(), bad_state.path(), "pt-BR").is_err());
+        assert!(!bad_state
+            .path()
+            .join("languages/tts-pt/model.safetensors")
+            .exists());
+        // English and unknown tags have no pack.
+        assert!(install_tts(home.path(), state.path(), "en").is_err());
     }
 }

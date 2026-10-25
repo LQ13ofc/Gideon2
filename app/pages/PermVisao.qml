@@ -17,6 +17,7 @@ PageFrame {
 
     function makeCtx() {
         return {hub: core.hubEntries, conns: core.connectionsItems, providers: core.connectionsProviders,
+                publisherVerified: core.hubPublisherVerified,
                 labelOf: function (p) { return core.permissionLabel(p) }}
     }
     readonly property var queue: P.queueRows(makeCtx())

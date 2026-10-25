@@ -1,8 +1,74 @@
-use gideon_base::storage::{Config, Storage};
+use gideon_base::storage::{Config, HistoryRetention, Storage};
 use std::{
     fs,
     os::unix::fs::{symlink, PermissionsExt},
 };
+
+#[test]
+fn history_retention_purge_keeps_only_lines_inside_the_window() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let mut store = Storage::open(&root).unwrap();
+    assert_eq!(store.config.history_retention, HistoryRetention::Days30);
+    store.audit(1).unwrap();
+    // A line from long before the window, and one from the older format without any timestamp.
+    let log = root.join("audit.log");
+    let mut text = fs::read_to_string(&log).unwrap();
+    text.push_str("{\"version\":1,\"sequence\":0,\"at_ms\":1}\n{\"version\":1,\"sequence\":0}\n");
+    fs::write(&log, text).unwrap();
+    let now = gideon_base::protocol::unix_ms();
+    assert_eq!(store.purge_history(now).unwrap(), 2);
+    let kept = fs::read_to_string(&log).unwrap();
+    assert_eq!(kept.lines().count(), 1);
+    assert!(kept.contains("\"sequence\":1"));
+    assert_eq!(
+        fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    // CAS on the revision; a stale write is refused and leaves the value unchanged.
+    assert!(store
+        .update_history_retention(9, HistoryRetention::Days7)
+        .is_err());
+    store
+        .update_history_retention(0, HistoryRetention::Days7)
+        .unwrap();
+    assert_eq!(store.config.history_retention, HistoryRetention::Days7);
+    // `never`: no further audit lines, and the purge removes what is left.
+    store
+        .update_history_retention(1, HistoryRetention::Never)
+        .unwrap();
+    store.audit(2).unwrap();
+    assert_eq!(store.purge_history(now).unwrap(), 1);
+    assert!(!log.exists());
+    assert!(!root.join("audit.log.1").exists());
+    drop(store);
+    let reopened = Storage::open(&root).unwrap();
+    assert_eq!(reopened.config.history_retention, HistoryRetention::Never);
+    assert!(!reopened.config.developer_mode);
+}
+
+#[test]
+fn developer_mode_persists_and_legacy_ledgers_load_with_defaults() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let mut store = Storage::open(&root).unwrap();
+    store.update_developer_mode(0, true).unwrap();
+    drop(store);
+    let reopened = Storage::open(&root).unwrap();
+    assert!(reopened.config.developer_mode);
+    assert_eq!(reopened.config.revision, 1);
+    drop(reopened);
+    // A ledger written before CFG-04 and DIAG-02 has neither key and must still load with the defaults.
+    let config = fs::read_to_string(root.join("config.json")).unwrap();
+    let legacy = config
+        .replace(",\"history_retention\":\"days_30\"", "")
+        .replace(",\"developer_mode\":true", "");
+    assert!(!legacy.contains("history_retention") && !legacy.contains("developer_mode"));
+    fs::write(root.join("config.json"), legacy).unwrap();
+    let loaded = Storage::open(&root).unwrap();
+    assert_eq!(loaded.config.history_retention, HistoryRetention::Days30);
+    assert!(!loaded.config.developer_mode);
+}
 #[test]
 fn storage_lock_permissions_and_corruption() {
     let temp = tempfile::tempdir().unwrap();

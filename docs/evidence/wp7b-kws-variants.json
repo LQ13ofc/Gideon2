@@ -1,0 +1,38 @@
+{
+ "gideon_only@0.25": {
+  "positives": 14,
+  "positives_hit": 0,
+  "negatives": 18,
+  "false_hits": 0
+ },
+ "gideon_only@0.1": {
+  "positives": 14,
+  "positives_hit": 0,
+  "negatives": 18,
+  "false_hits": 0
+ },
+ "phonetic_pt_fr@0.25": {
+  "positives": 14,
+  "positives_hit": 0,
+  "negatives": 18,
+  "false_hits": 0
+ },
+ "phonetic_pt_fr@0.1": {
+  "positives": 14,
+  "positives_hit": 0,
+  "negatives": 18,
+  "false_hits": 0
+ },
+ "phonetic_plus_hey@0.25": {
+  "positives": 14,
+  "positives_hit": 0,
+  "negatives": 18,
+  "false_hits": 0
+ },
+ "phonetic_plus_hey@0.1": {
+  "positives": 14,
+  "positives_hit": 0,
+  "negatives": 18,
+  "false_hits": 0
+ }
+}

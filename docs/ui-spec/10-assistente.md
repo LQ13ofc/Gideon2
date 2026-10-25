@@ -298,7 +298,7 @@ Campo de comando (H-21), motivo mostrado em H-23 quando desabilitado:
 
 Mensagens que o slot devolve (aparecem em H-23 após o envio): "Texto vazio" · "Texto acima de 512 bytes" · "Texto com quebra de linha ou controle não é aceito" · "Entrada de texto indisponível agora" · "Aguarde o envio anterior" · "Texto na fila para envio" · "Enviando texto ao Core" (`bridge.py:1078`, `PENDING['text']`). Todas são **texto exato** de `bridge.py:48-56` e `bridge.py:1245-1256`.
 
-Validação ao digitar: **NOVO (ponte/Core)** — expor um slot `commandProblem(texto)` igual a `chatTextProblem` (`bridge.py:1275`) que chame `text_problem`. Até lá, o erro só aparece após o envio.
+Validação ao digitar: **IMPLEMENTADO (WP8)** — o slot `commandProblem(texto)` existe em `app/bridge.py:1854` (chama `text_problem`) e é usado em `app/pages/InicioHoje.qml`. O erro aparece ao digitar, não só após o envio.
 
 Erro de envio do Core (`textResult`): texto cru não é mostrado; vale o mapeamento de `CODE_MESSAGES` (`bridge.py:670`). Código desconhecido vira: "Core recusou a ação: {código}" (`bridge.py:780`) — **isso mostra código cru**; ver AC-19.
 
@@ -882,6 +882,8 @@ Não existe atalho para **Autorizar** nem **Negar**: aprovação exige foco no b
 | `core.sessionCancellable` (QML) | `Main.qml:41` | S-03 |
 
 ### 9.2 Não existe — NOVO (ponte/Core)
+
+**Status verificado no WP8 (`docs/WP8.md`):** N-1 implementado (o Core envia `risk` e `effect` nas propostas de ferramentas de registro; propostas locais não têm os campos, e a UI mostra o texto de ausência); N-2 implementado (`at_ms` em cada evento, Unix ms); N-3 implementado (`events` em `app/bridge.py:1880`); N-4 implementado (`agentBudget`, `agentSteps`); N-6 implementado (`used_fallback` em `llmLastChat`, `Conversa.qml`); N-7 implementado (`commandProblem`); N-8 implementado (`COMMAND_CODE_MESSAGES` usado na propriedade `result`, `app/bridge.py:2729-2731`); N-9 implementado (`transcriptSummary.confidence`, exibido em `DiagMotores.qml`, aviso "Confiança da transcrição: desconhecida"). **N-5 não implementado**: `chatAvailable` continua dependendo de `preferencesAvailable`, que exige nenhuma sessão de voz (`app/bridge.py:1849`, `2424`).
 
 | # | O que falta | Onde | Por que | Usado em |
 |---|---|---|---|---|

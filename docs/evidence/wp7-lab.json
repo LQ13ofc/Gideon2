@@ -1,0 +1,341 @@
+{
+ "summary": {
+  "pt": {
+   "utterances": 16,
+   "errors": 14,
+   "words": 99,
+   "wer": 0.1414,
+   "empty_hypotheses": 0
+  },
+  "fr": {
+   "utterances": 16,
+   "errors": 8,
+   "words": 103,
+   "wer": 0.0777,
+   "empty_hypotheses": 0
+  }
+ },
+ "rows": [
+  {
+   "id": "pt01",
+   "lang": "pt",
+   "ref": "Olá Gideon.",
+   "hyp": "Falar de Deus.",
+   "errors": 3,
+   "words": 2,
+   "recorded_s": 2.96,
+   "clip_s": 1.12
+  },
+  {
+   "id": "pt02",
+   "lang": "pt",
+   "ref": "Oi Gideon, que horas são?",
+   "hyp": "Oi, Dom. Que horas são?",
+   "errors": 1,
+   "words": 5,
+   "recorded_s": 3.54,
+   "clip_s": 1.68
+  },
+  {
+   "id": "pt03",
+   "lang": "pt",
+   "ref": "Olá Gideon, abra o navegador Brave.",
+   "hyp": "Lagdon. Abra o navegador Brave.",
+   "errors": 2,
+   "words": 6,
+   "recorded_s": 4.63,
+   "clip_s": 2.8
+  },
+  {
+   "id": "pt04",
+   "lang": "pt",
+   "ref": "Gideon, aumente o volume.",
+   "hyp": "E deu. Aumente o volume.",
+   "errors": 2,
+   "words": 4,
+   "recorded_s": 3.73,
+   "clip_s": 1.92
+  },
+  {
+   "id": "pt05",
+   "lang": "pt",
+   "ref": "Gideon, desative o som.",
+   "hyp": "Me deu. Desative o som.",
+   "errors": 2,
+   "words": 4,
+   "recorded_s": 3.84,
+   "clip_s": 2.0
+  },
+  {
+   "id": "pt06",
+   "lang": "pt",
+   "ref": "Oi Gideon, tudo bem com você?",
+   "hyp": "Oi, Gedom. Tudo bem com você?",
+   "errors": 1,
+   "words": 6,
+   "recorded_s": 3.73,
+   "clip_s": 1.92
+  },
+  {
+   "id": "pt07",
+   "lang": "pt",
+   "ref": "Eu gosto de café com leite pela manhã.",
+   "hyp": "Eu gosto de café com leite pela manhã.",
+   "errors": 0,
+   "words": 8,
+   "recorded_s": 4.14,
+   "clip_s": 2.24
+  },
+  {
+   "id": "pt08",
+   "lang": "pt",
+   "ref": "A reunião começa às três horas da tarde.",
+   "hyp": "A reunião começa às 3 horas da tarde.",
+   "errors": 1,
+   "words": 8,
+   "recorded_s": 4.14,
+   "clip_s": 2.32
+  },
+  {
+   "id": "pt09",
+   "lang": "pt",
+   "ref": "Posso ajudar você com alguma coisa hoje?",
+   "hyp": "Posso ajudar você com alguma coisa hoje?",
+   "errors": 0,
+   "words": 7,
+   "recorded_s": 4.29,
+   "clip_s": 2.4
+  },
+  {
+   "id": "pt10",
+   "lang": "pt",
+   "ref": "Vamos ao mercado comprar pão e leite.",
+   "hyp": "Vamos ao mercado comprar pão e leite.",
+   "errors": 0,
+   "words": 7,
+   "recorded_s": 4.44,
+   "clip_s": 2.64
+  },
+  {
+   "id": "pt11",
+   "lang": "pt",
+   "ref": "O tempo está bonito para caminhar no parque.",
+   "hyp": "O tempo está bonito para caminhar no parque.",
+   "errors": 0,
+   "words": 8,
+   "recorded_s": 4.22,
+   "clip_s": 2.4
+  },
+  {
+   "id": "pt12",
+   "lang": "pt",
+   "ref": "Feche a janela, por favor.",
+   "hyp": "Feche a janela, por favor.",
+   "errors": 0,
+   "words": 5,
+   "recorded_s": 3.54,
+   "clip_s": 1.68
+  },
+  {
+   "id": "pt13",
+   "lang": "pt",
+   "ref": "Qual é a previsão do tempo para amanhã?",
+   "hyp": "Qual é a previsão do tempo para amanhã?",
+   "errors": 0,
+   "words": 8,
+   "recorded_s": 3.99,
+   "clip_s": 2.16
+  },
+  {
+   "id": "pt14",
+   "lang": "pt",
+   "ref": "Ligue o computador e abra o calendário.",
+   "hyp": "Ligue o computador e abra o calendário.",
+   "errors": 0,
+   "words": 7,
+   "recorded_s": 4.24,
+   "clip_s": 2.4
+  },
+  {
+   "id": "pt15",
+   "lang": "pt",
+   "ref": "Meu irmão mora em São Paulo há cinco anos.",
+   "hyp": "Meu irmão mora em São Paulo há cinco anos.",
+   "errors": 0,
+   "words": 9,
+   "recorded_s": 4.24,
+   "clip_s": 2.4
+  },
+  {
+   "id": "pt16",
+   "lang": "pt",
+   "ref": "Gideon, pare a música agora.",
+   "hyp": "Pide um. Pare a música agora.",
+   "errors": 2,
+   "words": 5,
+   "recorded_s": 4.09,
+   "clip_s": 2.24
+  },
+  {
+   "id": "fr01",
+   "lang": "fr",
+   "ref": "Bonjour Gideon.",
+   "hyp": "Bonjour J'idéo.",
+   "errors": 1,
+   "words": 2,
+   "recorded_s": 3.69,
+   "clip_s": 1.84
+  },
+  {
+   "id": "fr02",
+   "lang": "fr",
+   "ref": "Salut Gideon, quelle heure est-il ?",
+   "hyp": "Salut Gidon! Quelle heure est-il?",
+   "errors": 1,
+   "words": 6,
+   "recorded_s": 3.73,
+   "clip_s": 1.92
+  },
+  {
+   "id": "fr03",
+   "lang": "fr",
+   "ref": "Bonjour Gideon, ouvre le navigateur Brave.",
+   "hyp": "Bonjour Gidéon. Ouvre le navigateur Brave.",
+   "errors": 0,
+   "words": 6,
+   "recorded_s": 5.37,
+   "clip_s": 3.52
+  },
+  {
+   "id": "fr04",
+   "lang": "fr",
+   "ref": "Gideon, augmente le volume.",
+   "hyp": "Bidon. Augmente le volume.",
+   "errors": 1,
+   "words": 4,
+   "recorded_s": 3.75,
+   "clip_s": 1.92
+  },
+  {
+   "id": "fr05",
+   "lang": "fr",
+   "ref": "Gideon, coupe le son.",
+   "hyp": "Bidon. Couple son.",
+   "errors": 3,
+   "words": 4,
+   "recorded_s": 3.54,
+   "clip_s": 1.68
+  },
+  {
+   "id": "fr06",
+   "lang": "fr",
+   "ref": "Salut Gideon, comment ça va aujourd'hui ?",
+   "hyp": "Salut Gidon, comment ça va aujourd'hui?",
+   "errors": 1,
+   "words": 6,
+   "recorded_s": 3.65,
+   "clip_s": 1.76
+  },
+  {
+   "id": "fr07",
+   "lang": "fr",
+   "ref": "J'aime boire un café au lait le matin.",
+   "hyp": "J'aime boire un café au lait le matin.",
+   "errors": 0,
+   "words": 8,
+   "recorded_s": 4.09,
+   "clip_s": 2.24
+  },
+  {
+   "id": "fr08",
+   "lang": "fr",
+   "ref": "La réunion commence à trois heures de l'après-midi.",
+   "hyp": "La réunion commence à trois heures de l'après-midi.",
+   "errors": 0,
+   "words": 9,
+   "recorded_s": 3.75,
+   "clip_s": 1.92
+  },
+  {
+   "id": "fr09",
+   "lang": "fr",
+   "ref": "Puis-je vous aider avec quelque chose aujourd'hui ?",
+   "hyp": "Puis-je vous aider avec quelque chose aujourd'hui?",
+   "errors": 0,
+   "words": 8,
+   "recorded_s": 4.39,
+   "clip_s": 2.56
+  },
+  {
+   "id": "fr10",
+   "lang": "fr",
+   "ref": "Allons au marché acheter du pain et du lait.",
+   "hyp": "Allons au marché acheter du pain et du lait.",
+   "errors": 0,
+   "words": 9,
+   "recorded_s": 4.2,
+   "clip_s": 2.32
+  },
+  {
+   "id": "fr11",
+   "lang": "fr",
+   "ref": "Le temps est agréable pour une promenade dans le parc.",
+   "hyp": "Le temps est agréable pour une promenade dans le parc.",
+   "errors": 0,
+   "words": 10,
+   "recorded_s": 3.99,
+   "clip_s": 2.16
+  },
+  {
+   "id": "fr12",
+   "lang": "fr",
+   "ref": "Ferme la fenêtre, s'il te plaît.",
+   "hyp": "Ferme la fenêtre, s'il te plaît.",
+   "errors": 0,
+   "words": 6,
+   "recorded_s": 3.28,
+   "clip_s": 1.44
+  },
+  {
+   "id": "fr13",
+   "lang": "fr",
+   "ref": "Quel temps fera-t-il demain ?",
+   "hyp": "Quel temps fera-t-il demain?",
+   "errors": 0,
+   "words": 6,
+   "recorded_s": 3.09,
+   "clip_s": 1.28
+  },
+  {
+   "id": "fr14",
+   "lang": "fr",
+   "ref": "Allume l'ordinateur et ouvre le calendrier.",
+   "hyp": "Allume l'ordinateur et ouvre le calendrier.",
+   "errors": 0,
+   "words": 6,
+   "recorded_s": 4.2,
+   "clip_s": 2.32
+  },
+  {
+   "id": "fr15",
+   "lang": "fr",
+   "ref": "Mon frère habite à Paris depuis cinq ans.",
+   "hyp": "Mon frère habite à Paris depuis cinq ans.",
+   "errors": 0,
+   "words": 8,
+   "recorded_s": 3.69,
+   "clip_s": 1.84
+  },
+  {
+   "id": "fr16",
+   "lang": "fr",
+   "ref": "Gideon, arrête la musique maintenant.",
+   "hyp": "Bidon. Arrête la musique maintenant.",
+   "errors": 1,
+   "words": 5,
+   "recorded_s": 3.94,
+   "clip_s": 2.08
+  }
+ ],
+ "lab_modules_left": 0
+}

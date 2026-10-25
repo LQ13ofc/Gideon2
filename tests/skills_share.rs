@@ -847,3 +847,180 @@ fn an_import_never_survives_a_restart_as_a_grant() {
     assert_eq!(row["active"], false);
     assert!(core.snap()["skills"]["import"].is_null());
 }
+
+// ---------------------------------------------------------------------------
+// WP15 (docs/WP15.md): export path in the snapshot, disable event, step target, index listing and
+// the run-history retention. Each feature has a positive and a negative case.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn export_returns_its_path_in_the_snapshot_and_a_refused_export_changes_nothing() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("wp15_export");
+    let mut core = Core::start(&dir, "core");
+    assert!(core.snap()["skills"]["last_export"].is_null());
+    core.promote(manifest("skill_exp", "1.0.0", &[]));
+    let path = core.export("skill_exp", "1.0.0");
+    let snap = core.snap();
+    assert_eq!(snap["skills"]["last_export"]["id"], "skill_exp");
+    assert_eq!(snap["skills"]["last_export"]["version"], "1.0.0");
+    assert_eq!(
+        snap["skills"]["last_export"]["path"].as_str().unwrap(),
+        path.to_str().unwrap()
+    );
+    assert!(path.is_file());
+    // A refused export keeps the last successful one.
+    assert_eq!(
+        core.code(json!({"op": "skill_export", "id": "skill_exp", "skill_version": "9.9.9"})),
+        "unknown_version"
+    );
+    assert_eq!(core.snap()["skills"]["last_export"]["version"], "1.0.0");
+}
+
+#[test]
+fn disabling_a_skill_emits_skill_disabled_even_without_an_active_run() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("wp15_disable");
+    let mut core = Core::start(&dir, "core");
+    core.promote(manifest("skill_off", "1.0.0", &[]));
+    let revision = core.revision();
+    ok(&core.call(json!({"op": "skill_disable", "id": "skill_off", "revision": revision})));
+    let kinds = |snap: &Value| -> usize {
+        snap["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"] == "skill_disabled")
+            .count()
+    };
+    assert_eq!(kinds(&core.snap()), 1);
+    // Negative: a disable that is refused (not enabled any more) emits nothing.
+    let revision = core.revision();
+    assert_eq!(
+        core.code(json!({"op": "skill_disable", "id": "skill_off", "revision": revision})),
+        "skill_not_enabled"
+    );
+    assert_eq!(kinds(&core.snap()), 1);
+}
+
+#[test]
+fn a_step_target_must_name_the_call_and_a_capability_or_tool() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("wp15_target");
+    let mut core = Core::start(&dir, "core");
+    let mut matching = manifest("skill_tgt", "1.0.0", &[]);
+    matching["steps"][0]["target"] = json!("skillauthor.call");
+    assert_eq!(
+        core.code(json!({"op": "skill_save_draft", "manifest": matching})),
+        "ok"
+    );
+    let mut other = manifest("skill_tgt", "1.1.0", &[]);
+    other["steps"][0]["target"] = json!("skillauthor.other");
+    assert_eq!(
+        core.code(json!({"op": "skill_save_draft", "manifest": other})),
+        "skill_invalid:target_mismatch"
+    );
+    // A target on a step whose call is a skill is refused too (a skill runs its own steps).
+    let mut skill_call = manifest("skill_tgt", "1.2.0", &[]);
+    skill_call["steps"][0]["call"] = json!("skill:skill_tgt");
+    skill_call["steps"][0]["args"] = json!({});
+    skill_call["steps"][0]["target"] = json!("skill:skill_tgt");
+    assert_ne!(
+        core.code(json!({"op": "skill_save_draft", "manifest": skill_call})),
+        "ok"
+    );
+}
+
+#[test]
+fn the_github_index_is_listed_with_presence_and_a_malformed_index_is_reported() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = setup("wp15_index");
+    let mut core = Core::start(&dir, "core");
+    let folder = core.home.join("skill-imports");
+    fs::create_dir_all(&folder).unwrap();
+    let index = |entries: Value| {
+        json!({
+            "format": 1,
+            "repository": "https://github.com/owner/repo",
+            "skills": entries,
+        })
+    };
+    let entry = json!({
+        "name": "fixture-note",
+        "version": "1.0.0",
+        "sha256": "a".repeat(64),
+        "url": "https://github.com/owner/repo/releases/download/v1/fixture-note.gskill",
+        "signature": null,
+    });
+    fs::write(
+        folder.join("index.json"),
+        serde_json::to_vec(&index(json!([entry.clone()]))).unwrap(),
+    )
+    .unwrap();
+    let listed = core.snap()["skills"]["index"].clone();
+    assert_eq!(listed["repository"], "https://github.com/owner/repo");
+    assert_eq!(listed["entries"][0]["name"], "fixture-note");
+    assert_eq!(listed["entries"][0]["url"], entry["url"]);
+    assert_eq!(listed["entries"][0]["signed"], false);
+    assert_eq!(listed["entries"][0]["present"], false);
+    assert!(listed["error"].is_null());
+    // The package appears in the folder: the entry reads as present. Nothing was fetched.
+    fs::write(folder.join("fixture-note.gskill"), b"not fetched").unwrap();
+    assert_eq!(
+        core.snap()["skills"]["index"]["entries"][0]["present"],
+        true
+    );
+    // A duplicate name refuses the whole index and the snapshot says why.
+    fs::write(
+        folder.join("index.json"),
+        serde_json::to_vec(&index(json!([entry.clone(), entry]))).unwrap(),
+    )
+    .unwrap();
+    let refused = core.snap()["skills"]["index"].clone();
+    assert_eq!(refused["error"], "invalid_import");
+    assert!(refused["entries"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn retention_keeps_only_runs_inside_the_window_and_never_clears_nothing_silently() {
+    use gideon_base::skills::{retain_runs, RunRecord};
+    let day = 86_400_000u64;
+    let now = 100 * day;
+    let run = |id: &str, at_ms: Option<u64>| -> RunRecord {
+        let mut value = json!({
+            "run_id": id,
+            "skill": "skill_ret",
+            "version": "1.0.0",
+            "state": "done",
+            "step": null,
+            "codes": [],
+        });
+        if let Some(at) = at_ms {
+            value["at_ms"] = json!(at);
+        }
+        serde_json::from_value(value).unwrap()
+    };
+    let mut runs = vec![
+        run("recent", Some(now - day)),
+        run("old", Some(now - 40 * day)),
+        run("legacy", None),
+    ];
+    // 30-day window: the old and the time-less records go.
+    assert!(retain_runs(&mut runs, Some(30), now));
+    let kept: Vec<String> = runs
+        .iter()
+        .map(|r| {
+            serde_json::to_value(r).unwrap()["run_id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(kept, ["recent"]);
+    // Nothing left to drop: no change reported.
+    assert!(!retain_runs(&mut runs, Some(30), now));
+    // `never` keeps nothing.
+    assert!(retain_runs(&mut runs, None, now));
+    assert!(runs.is_empty());
+    assert!(!retain_runs(&mut runs, None, now));
+}

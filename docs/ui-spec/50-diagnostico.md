@@ -747,7 +747,7 @@ Todos com **Cancelar** focado por padrão (00-casca). Esc fecha.
 Existentes: `core.configurationStatus`, `core.configurationRecoveryAvailable`, `core.recoveryAvailable`, `core.rollbackAvailable`, `core.recoverConfiguration()`, `core.rollbackPreferences()`, `core.preferencesResult`, `core.sessionId`, `core.connected`, `core.llmRevision`, `core.modelsBusy`. NOVOS: `llmLastKnownGood`, `rollbackLlm()`, `hubOrphans`, `hubStorageError`, `restartCore()` (seção 11).
 
 ### 7.11 Regras
-- **R-R1** Reiniciar Core: NOVO (ver seção 11, N2). Hoje não existe ação de reinício em `app/bridge.py` nem em `app/Main.qml` (a mensagem atual é só texto: "reinicie o Core"). Enquanto N2 não existir, R07 aparece desabilitado com o motivo `Indisponível: reinício do Core ainda não existe nesta versão`. Quando N2 existir, R07 segue as regras da tabela (conectado e sem sessão).
+- **R-R1** Reiniciar Core: IMPLEMENTADO (WP8, DOCS-02). Existe `coreRestart` em `app/bridge.py` (op `core_restart`, espera o Core voltar, tempo limite de 30 s) e o botão `restartCoreButton` em `app/pages/DiagRecuperacao.qml`. R07 segue as regras da tabela (conectado e sem sessão, `coreRestartAvailable`). A frase "reinício do Core ainda não existe nesta versão" está obsoleta.
 - **R-R2** Nenhum botão desta sub-aba aprova, concede ou revoga permissão.
 - **R-R3** Restauração de configuração (R11, R12) não apaga o arquivo: o arquivo inválido é preservado (R-D2 diz isso).
 
@@ -760,7 +760,7 @@ Dar, só para desenvolvimento e teste, as ferramentas que hoje estão espalhadas
 
 ### 8.2 Condição de aparecimento e interruptor (NOVO)
 - Aparece só quando `core.developerMode` é verdadeiro. Interruptor em **Estado › Base e privacidade** (S20).
-- **NOVO (precisa de mudança na ponte/Core):** o valor é guardado pelo Core (não pela ponte, porque a ponte não escreve em disco). Campo `developer_mode` (booleano, padrão `false`) em `storage::Config`, com revisão de compare-and-set, operação `developer_mode` {`revision`, `enabled`} idle-only (mesma regra de `preferences`), e slot de ponte `setDeveloperMode(bool)`. Propriedade de ponte `developerMode` (bool). Mínimo alternativo se o Core não puder ser mudado agora: booleano só em memória da ponte, que volta a `false` ao reabrir, e a legenda S20 deve dizer "Vale só nesta sessão do aplicativo."
+- **Estado atual (WP8):** o interruptor existe em `app/pages/CfgGeral.qml` (`behavior.devMode`, `devModeConfirm`) e `app/pages/DiagEstado.qml`, gravado pelo app por perfil (`app/uisettings.py`). Não há campo `developer_mode` no Core (`src/storage.rs`) nem `developerMode` na ponte, então a versão do Core continua **NOVO (precisa de mudança na ponte/Core):** o valor deve ser guardado pelo Core (não pela ponte, porque a ponte não escreve em disco). Campo `developer_mode` (booleano, padrão `false`) em `storage::Config`, com revisão de compare-and-set, operação `developer_mode` {`revision`, `enabled`} idle-only (mesma regra de `preferences`), e slot de ponte `setDeveloperMode(bool)`. Propriedade de ponte `developerMode` (bool). Mínimo alternativo se o Core não puder ser mudado agora: booleano só em memória da ponte, que volta a `false` ao reabrir, e a legenda S20 deve dizer "Vale só nesta sessão do aplicativo."
 - Bloqueio em sessão de voz: S20 desabilitado com o motivo de S13.
 
 ### 8.3 Nível
@@ -966,7 +966,7 @@ Itens que **não** precisam de mudança: Ferramenta de linha de comando (`gideon
 | NF-17 | Hub: órfãos, repositório, hash do catálogo, erro de armazenamento | R19 (órfãos e erro de armazenamento), V06 (hash do catálogo). `repository` e `retry_after` ficam fora (repositório fica em Conexões e `retry_after` é de conexões) | Coberto em parte |
 | NF-18 | Eventos e sequência (anel de 64) | Seção 4 (tabela de tipos, fonte única), S23 (Últimos erros) | Coberto; sub-aba Eventos removida por decisão do dono |
 | NF-21 | Atualização e reversão do pacote (`gideon-install update|rollback`) | R24, R25 (comandos copiáveis) | Coberto como comando de terminal (nenhum botão) |
-| NF-22 | Reinício do Core | R03, R07, R-D1, N2 | Coberto; NOVO (N2) |
+| NF-22 | Reinício do Core | R03, R07, R-D1, N2 | Coberto; N2 IMPLEMENTADO (WP8: `coreRestart`) |
 | NF-23 | Reparo de instalação (`gideon-install repair`) | R26, R30 | Coberto como comando de terminal |
 | DU-01 | Estado de wake, STT e TTS em quatro lugares | Estado sem estados de motor (R-S5); detalhe só em Motores | Resolvido nesta aba |
 | DU-02 | Diagnóstico em texto (rodapé, `DIAG_LABELS` minúsculas, texto da aba) | R-04, N11; rodapé removido (decisão 5) | Resolvido nesta aba (depende de N11) |

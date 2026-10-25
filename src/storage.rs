@@ -93,6 +93,12 @@ pub struct Config {
     pub tts_language: String,
     #[serde(default = "default_tts_voice")]
     pub tts_voice: String,
+    /// CFG-04 retention of the timeline and of the persisted audit trail. Applies at once (`purge_history`).
+    #[serde(default)]
+    pub history_retention: HistoryRetention,
+    /// DIAG-02 developer mode of the diagnostics. Strict bool; no consent and no authority is attached to it.
+    #[serde(default)]
+    pub developer_mode: bool,
 }
 fn default_stt_languages() -> Vec<String> {
     vec![crate::languages::DEFAULT_STT_LANGUAGE.into()]
@@ -147,6 +153,41 @@ impl InputConditioning {
         }
     }
 }
+/// Preference `history_retention` (CFG-04): how long the timeline events and the persisted audit trail are kept.
+/// `never` keeps neither: no timeline ring is filled and no audit line is written, and the purge removes the
+/// existing audit files. Wire values are exactly these four strings; anything else fails to parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+pub enum HistoryRetention {
+    #[serde(rename = "days_7")]
+    Days7,
+    #[default]
+    #[serde(rename = "days_30")]
+    Days30,
+    #[serde(rename = "days_90")]
+    Days90,
+    #[serde(rename = "never")]
+    Never,
+}
+impl HistoryRetention {
+    pub const DAY_MS: u64 = 86_400_000;
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Days7 => "days_7",
+            Self::Days30 => "days_30",
+            Self::Days90 => "days_90",
+            Self::Never => "never",
+        }
+    }
+    /// Retention window in milliseconds; `None` for `never`.
+    pub fn window_ms(self) -> Option<u64> {
+        match self {
+            Self::Days7 => Some(7 * Self::DAY_MS),
+            Self::Days30 => Some(30 * Self::DAY_MS),
+            Self::Days90 => Some(90 * Self::DAY_MS),
+            Self::Never => None,
+        }
+    }
+}
 /// Strict range check; NaN and infinities are outside every range and therefore rejected.
 pub fn valid_wake_sensitivity(value: f32) -> bool {
     (WAKE_SENSITIVITY_MIN..=WAKE_SENSITIVITY_MAX).contains(&value)
@@ -188,6 +229,8 @@ impl Default for Config {
             stt_languages: default_stt_languages(),
             tts_language: default_tts_language(),
             tts_voice: default_tts_voice(),
+            history_retention: HistoryRetention::default(),
+            developer_mode: false,
         }
     }
 }
@@ -286,6 +329,8 @@ impl Default for Generations {
 }
 /// Size caps of the private ledgers. `secrets.json` also holds S5 connection tokens (<= 8 accounts).
 const SECRETS_LIMIT: u64 = 16384;
+/// Audit generations: rotation starts at 64 KiB, so one line can pass the rotation check by a little.
+const AUDIT_LIMIT: u64 = 131_072;
 const CONNECTIONS_LIMIT: u64 = 131_072;
 const REGISTRY_LIMIT: u64 = 4096;
 /// Private C1 ledgers: bounded, strict and 0600, read through the same guards as plugin state.
@@ -957,6 +1002,34 @@ impl Storage {
             .ok_or_else(|| io::Error::other("revision exhausted"))?;
         self.commit_preferences(next)
     }
+    /// CFG-04 retention switch (CAS on `revision`); only `history_retention` changes. A purge runs on commit.
+    pub fn update_history_retention(
+        &mut self,
+        revision: u64,
+        retention: HistoryRetention,
+    ) -> io::Result<()> {
+        if !self.writes_open() || revision != self.config.revision {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.history_retention = retention;
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
+    /// DIAG-02 developer mode switch (CAS on `revision`); only `developer_mode` changes.
+    pub fn update_developer_mode(&mut self, revision: u64, enabled: bool) -> io::Result<()> {
+        if !self.writes_open() || revision != self.config.revision {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.developer_mode = enabled;
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
     /// Language switch (CAS on `revision`). Only the three language fields change; the choice takes
     /// effect at the next Core start (the view reports `restart_required` per engine kind).
     pub fn update_languages(
@@ -1109,14 +1182,85 @@ impl Storage {
             return Err(io::Error::other("audit vocabulary"));
         }
         self.append_audit(&format!(
-            "{{\"version\":1,\"sequence\":{sequence},\"event\":\"{kind}\",\"operation\":\"{operation}\",\"risk\":\"{risk}\",\"outcome\":\"{outcome}\"}}"
+            "{{\"version\":1,\"sequence\":{sequence},\"event\":\"{kind}\",\"operation\":\"{operation}\",\"risk\":\"{risk}\",\"outcome\":\"{outcome}\",\"at_ms\":{}}}",
+            crate::protocol::unix_ms()
         ))
     }
     /// Metadata only: no PCM, transcript, arbitrary client ID or arguments in logs.
     pub fn audit(&self, sequence: u64) -> io::Result<()> {
-        self.append_audit(&format!("{{\"version\":1,\"sequence\":{sequence}}}"))
+        self.append_audit(&format!(
+            "{{\"version\":1,\"sequence\":{sequence},\"at_ms\":{}}}",
+            crate::protocol::unix_ms()
+        ))
+    }
+    /// CFG-04 purge of the persisted audit trail. Keeps only lines whose `at_ms` is inside the retention window;
+    /// lines without a timestamp (older format) are dropped. `never` removes both generations. Each rewrite is
+    /// a private temporary file renamed over the original. Returns the number of lines removed.
+    pub fn purge_history(&self, now_ms: u64) -> io::Result<usize> {
+        let mut removed = 0;
+        for name in ["audit.log", "audit.log.1"] {
+            removed += self.purge_audit_file(name, now_ms)?;
+        }
+        Ok(removed)
+    }
+    fn purge_audit_file(&self, name: &str, now_ms: u64) -> io::Result<usize> {
+        let retention = self.config.history_retention;
+        let Some(bytes) = read_private_bounded(&self.root, name, AUDIT_LIMIT)? else {
+            return Ok(0);
+        };
+        let cutoff = retention
+            .window_ms()
+            .map(|window| now_ms.saturating_sub(window));
+        let text = String::from_utf8_lossy(&bytes);
+        let mut kept = String::new();
+        let mut removed = 0;
+        for line in text.lines() {
+            let at = serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| value["at_ms"].as_u64());
+            let inside = match (cutoff, at) {
+                (Some(cutoff), Some(at)) => at >= cutoff,
+                _ => false,
+            };
+            if inside {
+                kept.push_str(line);
+                kept.push('\n');
+            } else {
+                removed += 1;
+            }
+        }
+        let path = self.root.join(name);
+        if removed == 0 {
+            return Ok(0);
+        }
+        if kept.is_empty() {
+            return match fs::remove_file(&path) {
+                Ok(()) => Ok(removed),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(removed),
+                Err(error) => Err(error),
+            };
+        }
+        // Same-directory temporary name: a crash leaves a `.pending` file that the startup sweep quarantines.
+        let temporary = self.root.join(format!(".{name}.pending"));
+        let _ = fs::remove_file(&temporary);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temporary)?;
+        file.write_all(kept.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, &path)?;
+        File::open(&self.root)?.sync_all()?;
+        Ok(removed)
     }
     fn append_audit(&self, line: &str) -> io::Result<()> {
+        // CFG-04 `never`: nothing is written to the audit trail.
+        if self.config.history_retention == HistoryRetention::Never {
+            return Ok(());
+        }
         let path = self.root.join("audit.log");
         let mut f = open_private(&path)?;
         private_metadata(&path, false)?;

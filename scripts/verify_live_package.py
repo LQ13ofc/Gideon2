@@ -41,6 +41,8 @@ CLIP_GAP_S = 5.0
 POSITIVE_WAIT_S = 20.0
 NEGATIVE_WAIT_S = 6.0
 DIAGNOSTIC_FILES = ('live-last-error.txt', 'stt-last-error.txt')
+# Speech voice of each language tag (the Pocket packs of the package; English is the packaged default).
+VOICES = {'en': 'alba', 'pt-BR': 'rafael', 'fr': 'estelle'}
 
 
 def spread(paths, count):
@@ -197,6 +199,8 @@ def main():
     parser.add_argument('--negatives', type=int, default=4)
     # Test-profile experiment only: the owner's wake_sensitivity default is never changed by this tool.
     parser.add_argument('--wake-sensitivity', type=float, default=1.0)
+    # WP-7b: the transcription and speech language of the test profile (changed live through language_preference).
+    parser.add_argument('--language', choices=sorted(VOICES), default='en')
     args = parser.parse_args()
     if not 0.5 <= args.wake_sensitivity <= 1.5:
         parser.error('--wake-sensitivity must be between 0.5 and 1.5')
@@ -225,6 +229,7 @@ def main():
     launch = None
     log = None
     result = {'install_root': str(root), 'profile': args.profile, 'wake_sensitivity': args.wake_sensitivity,
+              'language': args.language,
               'rows': [], 'checks': {}}
     try:
         loaded.append(pactl('load-module', 'module-null-sink', f'sink_name={LAB_SINK}',
@@ -255,6 +260,24 @@ def main():
                    lambda: core.snapshot()['audio']['live']['input_state'] == 'capturing')
         wait_until('STT ready', 180, lambda: core.snapshot()['stt_status'] == 'ready')
         result['stt_ready'] = True
+        if args.language != 'en':
+            # WP-7b / CFG-07: the language changes while the Core runs (no restart). The STT worker restarts with the
+            # Parakeet engine and the speech pack is installed on first use; `restart_required` must be clear after.
+            prefs = core.snapshot()['preferences']
+            reply = core.call('language_preference', revision=prefs['revision'], stt_languages=[args.language],
+                              tts_language=args.language, tts_voice=VOICES[args.language])
+            result['checks']['language_preference_ok'] = reply.get('code') == 'ok'
+
+            def swapped():
+                snap = core.snapshot()
+                langs = snap.get('languages') or {}
+                return (snap['stt_status'] == 'ready' and langs.get('stt_selected') == [args.language]
+                        and not langs['restart_required']['stt'] and not langs['restart_required']['tts'])
+            try:
+                wait_until('language hot swap', 600, swapped)
+                result['checks']['language_hot_swap_ready'] = True
+            except TimeoutError:
+                result['checks']['language_hot_swap_ready'] = False
         for path in chosen_pos:
             found = run_clip(core, path, True)
             result['rows'].append(row_of(path, True, found))

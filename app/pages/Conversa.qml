@@ -49,6 +49,13 @@ PageFrame {
         actionText: "Ver em Extensões › Plugins"
         onActionRequested: Window.window.goPage("plugins")
     }
+    // N-5: during a voice session the conversation stays on screen (history and state); only the input waits.
+    Banner {
+        objectName: "chatVoiceSessionNotice"
+        kind: "info"
+        visible: core.chatAvailable && core.sessionId.length > 0
+        text: core.chatBlockedText
+    }
     Banner {
         objectName: "chatConsentHint"
         kind: "warn"
@@ -284,7 +291,7 @@ PageFrame {
                 maximumLength: 4096
                 placeholderText: "Mensagem para o motor LLM"
                 Accessible.name: "Mensagem para o motor LLM"
-                enabled: core.chatAvailable && !page.inFlight
+                enabled: core.chatInputAvailable && !page.inFlight
                 Component.onCompleted: text = AppState.draftValue("#chat", "text")
                 onTextEdited: AppState.setDraft("#chat", "text", text)
                 onAccepted: page.sendDraft()
@@ -295,7 +302,7 @@ PageFrame {
                 variant: "primary"
                 text: "Enviar"
                 Accessible.name: "Enviar mensagem ao motor LLM"
-                enabled: core.chatAvailable && chatInput.enabled && core.chatTextProblem(chatInput.text) === ""
+                enabled: chatInput.enabled && core.chatTextProblem(chatInput.text) === ""
                 onClicked: page.sendDraft()
             }
             GButton {

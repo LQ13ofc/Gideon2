@@ -1089,16 +1089,91 @@ class SnapshotContract(unittest.TestCase):
         self.assertEqual(snap['languages']['restart_required'], {'stt': False, 'tts': False})
         self.assertFalse(snap['languages']['install']['available'])
         revision = snap['preferences']['revision']
-        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['fr'], tts_language='en', tts_voice='alba')['code'], 'language_not_installed')
-        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['en'], tts_language='pt-BR', tts_voice='alba')['code'], 'language_not_installed')
+        # WP-7b: PT (TTS, STT) and FR (STT, TTS) are packaged, so they are accepted now; the refusals left are
+        # an unknown language, an unknown voice and a stale revision, and a refusal writes nothing.
         self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['de'], tts_language='en', tts_voice='alba')['code'], 'invalid_languages')
+        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['en'], tts_language='en', tts_voice='estelle')['code'], 'invalid_languages')
         self.assertEqual(c.req('language_preference', revision=revision + 5, stt_languages=['en'], tts_language='en', tts_voice='alba')['code'], 'stale_preferences')
         after = c.snap('after refusals')
         self.assertEqual(after['preferences']['revision'], revision)
         self.assertEqual(after['languages']['stt_selected'], ['en'])
+        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['en'], tts_language='fr', tts_voice='estelle')['code'], 'ok')
+        self.assertEqual(c.snap('fr accepted')['languages']['tts_selected'], 'fr')
+        revision = c.snap('fr accepted again')['preferences']['revision']
+        self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['en'], tts_language='en', tts_voice='alba')['code'], 'ok')
         # The same selection is accepted as a no-op: nothing is written.
+        revision = c.snap('back to en')['preferences']['revision']
         self.assertEqual(c.req('language_preference', revision=revision, stt_languages=['en'], tts_language='en', tts_voice='alba')['code'], 'ok')
         self.assertEqual(c.snap('no-op')['preferences']['revision'], revision)
+        c.stop()
+
+    def test_personal_areas_round_trip_through_the_real_core(self):
+        """WP-10a: the personal areas answer over the wire. A consent and a fact are stored (CAS on revision), a stale
+        revision is refused, the export is a private file, the erase needs confirm, and the listen refusal names live audio."""
+        c = self.core.start()
+        before = c.snap('personal before')
+        self.assertEqual(set(before['personal']) - {'retention'}, {'memory', 'souls', 'habits', 'automations', 'conversations'})
+        rev = before['personal']['memory']['revision']
+        r = c.req('personal', area='memory', payload={'version': 1, 'op': 'consent', 'revision': rev, 'source': 'user_typed', 'granted': True})
+        self.assertEqual(r['code'], 'ok')
+        self.assertEqual(r['personal_reply']['area'], 'memory')
+        rev = c.snap('consent stored')['personal']['memory']['revision']
+        self.assertEqual(c.req('personal', area='memory', payload={'version': 1, 'op': 'add', 'revision': rev - 1, 'text': 'Gosto de café', 'kind': 'preference', 'source': 'user_typed'})['code'], 'stale_revision')
+        added = c.req('personal', area='memory', payload={'version': 1, 'op': 'add', 'revision': rev, 'text': 'Gosto de café', 'kind': 'preference', 'source': 'user_typed'})
+        self.assertEqual(added['code'], 'ok')
+        self.assertEqual(c.req('personal', area='memory', payload={'version': 1, 'op': 'add', 'revision': rev + 1, 'text': 'x', 'kind': 'fact', 'source': 'user_typed', 'surprise': 1})['code'], 'invalid_request')
+        self.assertEqual(c.req('personal', area='nope', payload={'version': 1})['code'], 'unknown_area')
+        self.assertEqual(c.req('personal', area='memory', payload={'op': 'list'})['code'], 'unsupported_version')
+        exported = c.req('personal_export')
+        self.assertEqual(exported['code'], 'ok')
+        path = Path(exported['personal_reply']['reply']['path'])
+        self.assertTrue(path.name.startswith('personal-export-') and path.suffix == '.json')
+        self.assertEqual(path.stat().st_mode & 0o077, 0)
+        self.assertIn('Gosto de café', path.read_text(encoding='utf-8'))
+        self.assertEqual(c.req('personal_erase_all', confirm=False)['code'], 'confirmation_required')
+        self.assertEqual(c.snap('not erased yet')['personal']['memory']['count'], 1)
+        self.assertEqual(c.req('personal_erase_all', confirm=True)['code'], 'ok')
+        after = c.snap('erased')
+        self.assertEqual(after['personal']['memory']['count'], 0)
+        self.assertEqual(c.req('listen_start')['code'], 'live_audio_disabled')
+        c.stop()
+
+    def test_hub_payload_import_through_the_bridge_reaches_the_real_core(self):
+        """WP-4: Bridge.importHubPayload runs hub_begin, hub_chunk and hub_finish on the real Core. The entry ends staged and not installed."""
+        from PySide6.QtCore import QCoreApplication
+        from bridge import Bridge, HUB_UPLOAD_MESSAGES
+        c = self.core.start()
+        hub = c.req()['hub']
+        entry = next(e for e in hub['entries'] if e['plugin_id'] == PLUGIN)
+        ack = c.req('hub_approve', revision=hub['approval_revision'], plugin_id=PLUGIN,
+                    manifest_sha256=entry['manifest_sha256'], permissions=entry['permissions'], publisher_unverified_ack=True)
+        self.assertEqual(ack['code'], 'ok')
+        app = QCoreApplication.instance() or QCoreApplication([])
+        bridge = Bridge(self.root)
+
+        def pump(condition, label):
+            until = time.monotonic() + 30
+            while not condition():
+                app.processEvents()
+                time.sleep(0.005)
+                if time.monotonic() > until:
+                    self.fail('timed out: ' + label)
+        try:
+            pump(lambda: bridge.online and bridge.pending is None and bool(bridge.hubEntries), 'bridge snapshot')
+            pump(lambda: bridge.hubLifecycleAvailable, 'hub lifecycle available')
+            self.assertEqual(bridge.importHubPayload(PLUGIN, str(PLUGIN_SRC)), '')
+            pump(lambda: bridge.hub_upload is None, 'upload finished')
+            self.assertEqual(bridge.hubApprovalResult, HUB_UPLOAD_MESSAGES['staged'])
+            final = next(e for e in c.req()['hub']['entries'] if e['plugin_id'] == PLUGIN)
+            self.assertTrue(final['payload_staged'])
+            self.assertEqual(final['status'], 'not_installed')
+            # A second import of the same staged entry is refused by the bridge before anything is sent.
+            self.assertEqual(bridge.importHubPayload(PLUGIN, str(PLUGIN_SRC)), HUB_UPLOAD_MESSAGES['entry'])
+        finally:
+            bridge.poll.stop()
+            bridge.timeout.stop()
+            bridge.retry.stop()
+            bridge.socket.abort()
         c.stop()
 
 if __name__ == '__main__':

@@ -285,7 +285,7 @@ Rótulo de acessibilidade: "Mais ações de <plugin_id>". Ordem fixa:
 | 2 | Reverter versão | "Reverter versão" (D2-C4) | Avançado | Há versão anterior e estado `installed` | "Indisponível: não há versão anterior" [novo texto] | `core.rollbackHub(plugin_id)` |
 | 3 | Revogar permissões | "Revogar permissões" (D2-C8) | Avançado | `core.pluginsAvailable` e não quarentena | "Indisponível: plugin em quarentena" [novo texto] | Confirmação D6 (ver 8.7), depois `core.revokePlugin(plugin_id, revisão)` |
 | 4 | Remover plugin | "Remover plugin" (D2-C5) | Avançado | `core.hubLifecycleAvailable` | "Indisponível durante a sessão de voz" (8.6) | Confirmação D5 (8.7), depois `core.removeHub(plugin_id, revisão)` |
-| 5 | Apagar dados do plugin | "Apagar dados do plugin" [novo texto] | Avançado | Plugin instalado | "Indisponível: plugin não instalado" [novo texto] | NOVO (precisa de mudança na ponte/Core): `core.clearPluginSettings()` hoje não recebe `plugin_id` e só limpa o plugin `llm_engine` (P8-C20, NF-24). Precisa de slot `clearPluginSettings(plugin_id)`. Confirmação D8 adaptada (8.7). |
+| 5 | Apagar dados do plugin | "Apagar dados do plugin" [novo texto] | Avançado | Plugin instalado | "Indisponível: plugin não instalado" [novo texto] | IMPLEMENTADO (WP8): `core.clearPluginSettingsOf(pluginId)` (`app/bridge.py:2245`, `plugin_settings_clear {plugin_id}`), usado em `app/pages/Plugins.qml:340`. `core.clearPluginSettings()` continua só para `llm_engine` (P8-C20, NF-24). Confirmação D8 adaptada (8.7). |
 
 Itens 2 a 5 aparecem com "Mostrar opções avançadas" ligado. Com a opção desligada, o menu tem só "Ver detalhes".
 
@@ -443,7 +443,7 @@ Cartões de skill: largura total (1100), altura 176, linhas: L1 y 20–40, L2 y 
 |---|---|---|
 | Título | "Permissões de <id> v<versão>" | P10-T1 |
 | Aprovadas | "Aprovadas no Core: sim" ou "Aprovadas no Core: não" + " · Faltando: <lista>" | P10-I6 |
-| Necessárias | "Necessárias: <lista de rótulos>" [NOVO: `skillsItems` não traz `permissions_required`; precisa do campo no snapshot; sem ele, esta linha não é mostrada] | NOVO (precisa de mudança na ponte/Core, S4 D1) |
+| Necessárias | "Necessárias: <lista de rótulos>" [Obsoleto (WP8): `skillsItems` já traz `permissionsRequired` a partir de `permissions_required` do snapshot (`app/bridge.py:2919`, `app/components/BSkillDetail.qml:130`)] | IMPLEMENTADO (WP8, S4 D1) |
 | Nota | "Aprovar permissões não concede nada à skill: ela só usa capacidades já instaladas e aprovadas." | P10-I7 |
 | Ação | "Fechar" | UI apenas |
 
@@ -577,8 +577,8 @@ Trazer um pacote `.gskill` de `<home>/skill-imports`, ver a prévia com achados 
 | # | ID | Texto exato | Tipo | Fonte de dados (origem) | Ação → resultado | Estados | Nível |
 |---|---|---|---|---|---|---|---|
 | 1 | EX-SK-IE-01 | "Importar pacote" (título do painel) [novo] | Título | — | — | — | Avançado |
-| 2 | EX-SK-IE-02 | "Coloque o arquivo .gskill na pasta de importação e informe o nome, sem caminho e sem extensão." [novo texto] | Texto | Pasta: NOVO (precisa de mudança na ponte/Core: expor o caminho `<home>/skill-imports`, NF-20) | — | — | Avançado |
-| 3 | EX-SK-IE-03 | Pasta: "<home>/skill-imports" [novo texto; caminho ainda não exposto] | Texto | NOVO (ponte) | — | Até a ponte expor o caminho, mostrar "pasta de importação não informada" [novo] | Avançado |
+| 2 | EX-SK-IE-02 | "Coloque o arquivo .gskill na pasta de importação e informe o nome, sem caminho e sem extensão." [novo texto] | Texto | Pasta: IMPLEMENTADO (WP8): caminho exposto em `paths` do snapshot e `skillPaths` (`app/pages/Skills.qml`), NF-20 | — | — | Avançado |
+| 3 | EX-SK-IE-03 | Pasta: "<home>/skill-imports" [novo texto] | Texto | IMPLEMENTADO (WP8): `skillPaths` (`app/bridge.py:2921`) | — | Até a ponte expor o caminho, mostrar "pasta de importação não informada" [novo] | Avançado |
 | 4 | EX-SK-IE-04 | "Nome do pacote, sem caminho" | Rótulo | P10-C16 (texto existente) | — | — | Avançado |
 | 5 | EX-SK-IE-05 | Campo de nome (1 a 64 caracteres, `[A-Za-z0-9._-]`) | Campo | `core.skillImport(nome)` (P10-C16) | Valor local | Inválido: "Nome inválido: use letras, números, ponto, traço ou sublinhado (até 64)." [novo texto] | Avançado |
 | 6 | EX-SK-IE-06 | "Pré-visualizar" | Botão primário | `core.skillImport(nome)` → `skill_import`: lê só `<home>/skill-imports/<nome>.gskill`, faz scan, gera prévia. Não instala. (P10-C17) | Preenche a prévia 3.6.4 | Desabilitado se nome inválido ou ocupado | Avançado |
@@ -967,9 +967,9 @@ Segmentos y 236. Corpo a partir de y 284. Barra de progresso (`core.modelsBusy`,
 |---|---|---|---|---|---|---|---|
 | 1 | EX-MD-AT-01 | "Configurado: <provedor> · <modelo>" ou "Nenhum modelo configurado" | Texto | `core.modelsSelected` (P8-I2) | — | Dois textos | Básico |
 | 2 | EX-MD-AT-02 | "Estado do modelo atual: <texto>" + badge (5.2) | Texto + badge | `core.modelsStatus` (P8-I1) | — | Ver 5.2 | Básico |
-| 3 | EX-MD-AT-03 | "Último bom: <provedor> · <modelo>" ou "Nenhum modelo marcado como bom ainda." [novo] | Texto | NOVO (precisa de mudança na ponte/Core): expor `llm.config.lkg` (NF-06, C2 item 2) | — | Sem LKG: texto acima | Avançado |
-| 4 | EX-MD-AT-04 | "Testar" | Botão secundário | NOVO (precisa de mudança na ponte/Core): slot de selftest isolado sobre a configuração atual, sem trocar o modelo (NF-09; `llm_engine.models` `selftest {}`) | Executa o teste; mostra "Modelo testado: funciona." [novo] ou o código de erro traduzido (`model_selftest_failed`) | Desabilitado se `core.modelsBusy` ou sem configuração: "Configure um modelo antes de testar." [novo] | Básico |
-| 5 | EX-MD-AT-05 | "Voltar ao último bom" | Botão secundário | NOVO (precisa de mudança na ponte/Core): slot `rollbackLkg(revisão)` → `llm_rollback` (NF-06) | Restaura o último bom | Desabilitado sem LKG: "Nenhum modelo marcado como bom ainda." [novo] | Básico |
+| 3 | EX-MD-AT-03 | "Último bom: <provedor> · <modelo>" ou "Nenhum modelo marcado como bom ainda." [novo] | Texto | IMPLEMENTADO (WP8): `llm.config.lkg` vai em `core.llmConfig` e aparece em `app/pages/ModelosLlm.qml:49` | — | Sem LKG: texto acima | Avançado |
+| 4 | EX-MD-AT-04 | "Testar" | Botão secundário | IMPLEMENTADO (WP8): `core.llmSelftest()` (`app/bridge.py:2023`, `manual_selftest` via `llm_engine.models` `selftest {}`), sem trocar o modelo | Executa o teste; mostra "Modelo testado: funciona." [novo] ou o código de erro traduzido (`model_selftest_failed`) | Desabilitado se `core.modelsBusy` ou sem configuração: "Configure um modelo antes de testar." [novo] | Básico |
+| 5 | EX-MD-AT-05 | "Voltar ao último bom" | Botão secundário | IMPLEMENTADO (WP8): `core.llmRollback()` (`app/bridge.py:2032`, op `llm_rollback` com a revisão atual), `ModelosLlm.qml` | Restaura o último bom | Desabilitado sem LKG: "Nenhum modelo marcado como bom ainda." [novo] | Básico |
 | 6 | EX-MD-AT-06 | "Usar outro modelo" | Link/botão secundário | UI apenas | Vai para o segmento Catálogo | — | Básico |
 | 7 | EX-MD-AT-07 | "Funciona offline" ou "Requer rede" | Texto | `selectedModel.offline` (P8-I16) | — | Só com modelo carregado | Básico |
 | 8 | EX-MD-AT-08 | Progresso | Barra | `core.modelsBusy` (P8-I3) | — | Visível se ocupado | Básico |
@@ -1502,6 +1502,8 @@ Todo controle desabilitado mostra:
 | P-PC-1 | Botões de escrita de percepção (NF-11) | Não criar agora. | Criar com confirmação, depois de decisão. |
 
 ### 10.2 Lacunas que exigem mudança na ponte ou no Core (NOVO)
+
+**Status verificado no WP8 (`docs/WP8.md`):** implementados: NOVO-04, NOVO-06, NOVO-07, NOVO-10, NOVO-11, NOVO-12, NOVO-15, NOVO-16 (textos diferentes em `app/components/BExt.js`). Parciais: NOVO-02 (Core tem `HubDiscardStaged`, a ponte e a UI não expõem), NOVO-01 (Core tem `HubBegin`, `HubChunk`, `HubFinish`; a ponte não tem slots e a UI não tem seletor de arquivo), NOVO-05 (rótulos incompletos, não auditado a fundo), NOVO-08 (`skill_export` grava o arquivo mas devolve só `ok`, sem caminho), NOVO-09 (`risk` e `effect` existem; falta `target`), NOVO-14 (`llm_fallback_used` existe no Core, e o último chat expõe `used_fallback`; sem o texto de último uso). Não implementados: NOVO-03 (o catálogo não traz `name` nem `description`), NOVO-13 (não há slot `describe`), NOVO-17 (não verificado). Implementado também: NOVO-07 (`skillPaths`).
 
 | ID | Lacuna | Onde aparece | O que falta | Referência |
 |---|---|---|---|---|

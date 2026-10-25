@@ -217,6 +217,10 @@ class VadEngine:
 def make_engine(manifest, threshold, start_us=0):
     if manifest.get('test_only') is True and manifest.get('engine') == TEST_ENGINE:
         return EnergyOnsetEngine(manifest, dev_threshold=threshold, start_us=start_us)
+    # WP-7c: PT/FR transcript wake (scripts/wake_transcript.py). It owns its VAD; the keyword threshold does not apply.
+    if str(manifest.get('engine', '')).startswith('transcript-'):
+        from wake_transcript import TranscriptEngine
+        return TranscriptEngine(manifest, start_us=start_us)
     return WakeEngine(manifest, dev_threshold=threshold, start_us=start_us)
 
 
@@ -314,11 +318,13 @@ if __name__ == '__main__':
         print(json.dumps({'check': 'ok', 'engine': manifest['engine'], 'active_phrases': list(getattr(engine, 'active_phrases', ()))}), flush=True)
         sys.exit(0)
     # The test-only detector names a `vad` block so the Core captures, but it has no VAD model: it sets speech itself.
-    vad = VadEngine(manifest['vad']) if 'vad' in manifest and manifest.get('test_only') is not True else None
+    owns_vad = getattr(engine, 'owns_vad', False)
+    vad = None if owns_vad else (VadEngine(manifest['vad']) if 'vad' in manifest and manifest.get('test_only') is not True else None)
     if arguments.live:
         conditioner = None
         # The test-only detector stays numpy-free (no conditioning there); production manifests never carry test_only.
-        if arguments.conditioning == 'auto' and manifest.get('test_only') is not True:
+        # The transcript engine takes raw frames (its VAD and decoder were measured without conditioning).
+        if arguments.conditioning == 'auto' and manifest.get('test_only') is not True and not owns_vad:
             from audio_conditioning import AUTO_CHAIN, Conditioner
             conditioner = Conditioner(AUTO_CHAIN)
         live(engine, vad, sys.stdin.buffer, sys.stdout, conditioner)
