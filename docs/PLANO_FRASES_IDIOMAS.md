@@ -22,9 +22,9 @@ Objetivo: o usuário escolhe uma ou mais frases; cada uma com qualificação hon
 5. Core: ledger de preferências `wake_phrases: [{id, active, sensitivity?}]` (+ frases custom em arquivo próprio com hash), snapshot, ops estritas, auditoria sem conteúdo sensível; testes de replay/medição; gates A1/A4/A5 e os de UI continuam verdes.
 6. Segurança: frase custom é dado do usuário, nunca vai ao LLM nem ao Hub; limites de tamanho; nada de execução.
 
-## Frente 2 — Idiomas (agente W-IDIOMAS)
+## Frente 2 — Idiomas (agente W-IDIOMAS) — escopo fechado: EN, PT, FR
 Objetivo: escolher (a) em que idiomas a IA **fala** e (b) em que idiomas ela **transcreve**, de forma honesta com o que existe.
-1. **Pesquisa (somente leitura, com fontes)**: modelos abertos viáveis em CPU local, com licença, tamanho, qualidade e suporte de streaming, para STT (família Moonshine, Whisper/faster-whisper, sherpa-onnx streaming zipformer multilíngue, Parakeet, etc.) e TTS (Piper, Kokoro, Pocket e outros) em **português do Brasil, espanhol, francês, alemão, italiano, japonês e chinês** (e os que forem realmente viáveis). Entregar tabela com recomendação e custos.
+1. **Pesquisa (somente leitura, com fontes)**: modelos abertos viáveis em CPU local, com licença, tamanho, qualidade e suporte de streaming, para STT (família Moonshine, Whisper/faster-whisper, sherpa-onnx streaming zipformer multilíngue, Parakeet, etc.) e TTS (Piper, Kokoro, Pocket e outros) em **inglês, português e francês** (decisão do dono, 2026-10-24: estes são os três idiomas que devem ser compatíveis; português = pt-BR como alvo principal, verificar também pt-PT). Entregar tabela com recomendação e custos.
 2. **Arquitetura de idiomas** (independe de baixar modelos): `LanguageCatalog` no pack: idiomas por motor (stt/tts/wake), estado (`bundled`, `available_not_installed`, `unsupported`), hash/tamanho/licença, avaliação medida; preferências `stt_languages: [..]` (lista, 1..N, com "detectar automaticamente" só se o motor suportar), `tts_language` + voz; troca segura com reinício do worker e rollback; o Core recusa idioma não instalado; snapshot e UI refletem.
 3. **UI**: Configurações › Idiomas (nova sub-aba) com duas seções: "A IA fala em…" e "A IA entende em…"; cada idioma mostra estado (instalado / disponível para instalar / não suportado), tamanho, licença, qualidade medida e selo "validação humana pendente" quando só medido por áudio sintético. Idiomas não instalados aparecem desativados com o motivo. Idioma da interface continua separado (hoje só português).
 4. **Instalação de idiomas**: pelo Hub/pack verificado por hash (mesmo fluxo de plugins), **sem baixar nada sem autorização explícita do dono** — o agente prepara a lista exata (URL, tamanho, hash, licença) e o dono aprova antes de qualquer download.
@@ -40,5 +40,10 @@ Objetivo: escolher (a) em que idiomas a IA **fala** e (b) em que idiomas ela **t
 
 ## Decisões que dependem do dono
 - Aprovar downloads de modelos de STT/TTS de outros idiomas (lista exata virá do agente de pesquisa).
-- Quais idiomas realmente importam primeiro (sugestão: português do Brasil e espanhol).
+- ~~Quais idiomas~~ DECIDIDO: inglês, português e francês. Falta confirmar se português = pt-BR (alvo assumido) ou também pt-PT.
 - Se frases personalizadas podem ser ativadas sem medição prévia (recomendado: não).
+
+## Escopo de idiomas decidido (2026-10-24)
+- Compatíveis: **inglês (já empacotado), português e francês**. Outros idiomas ficam fora de escopo.
+- Cada um precisa de três coisas: wake (frase "Hey Gideon" e equivalentes naquele idioma, testada), STT e TTS. O KWS atual é zh-en: para português e francês a frase será tokenizada pelo vocabulário disponível ou exigirá outro modelo de KWS — o agente deve medir e reportar, sem prometer.
+- A pesquisa de modelos cobre só EN/PT/FR (STT streaming em CPU e TTS), com a lista exata de downloads para aprovação do dono.

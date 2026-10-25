@@ -168,11 +168,15 @@ pub fn device_ok(device: &str) -> bool {
     device == "default" || valid_audio_device(device)
 }
 
-/// Arguments of the recorder: raw s16le mono 16 kHz on stdout.
+/// Arguments of the recorder: raw s16le mono 16 kHz on stdout. `--raw` is required for pw-record:
+/// without it, writing to `-` produces an AU container (24-byte header, big-endian samples), which
+/// the worker would read as little-endian PCM (byte-swapped noise, no wake).
 pub fn recorder_args(tool: &str, device: &str) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if tool == "pw-record" {
-        args.extend(["--rate", "16000", "--channels", "1", "--format", "s16"].map(String::from));
+        args.extend(
+            ["--raw", "--rate", "16000", "--channels", "1", "--format", "s16"].map(String::from),
+        );
         if device != "default" {
             args.extend(["--target".into(), device.into()]);
         }
@@ -283,6 +287,30 @@ fn spawn_recorder(device: &str) -> Result<Child, &'static str> {
     command.spawn().map_err(|_| "recorder_unavailable")
 }
 
+/// Paths the live worker must read, bound read-only in its namespace next to the manifest: the asset
+/// root and the VAD model's directory when the manifest names them (the replay profile binds the
+/// same paths). Without them the worker cannot load its model and exits at start.
+pub fn worker_mounts(manifest: &Path) -> io::Result<Vec<PathBuf>> {
+    let bytes = std::fs::read(manifest)?;
+    if bytes.len() > 1_048_576 {
+        return Err(io::Error::other("wake manifest too large"));
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let mut mounts = vec![manifest.to_path_buf()];
+    if let Some(root) = value["asset_root"].as_str() {
+        mounts.push(PathBuf::from(root));
+    }
+    if let Some(vad) = value["vad"]["path"].as_str() {
+        if let Some(dir) = Path::new(vad).parent() {
+            mounts.push(dir.to_path_buf());
+        }
+    }
+    if mounts.iter().any(|p| !p.is_absolute()) {
+        return Err(io::Error::other("absolute mount required"));
+    }
+    Ok(mounts)
+}
+
 fn spawn_worker(wake: &WakeSpec, settings: &Settings, start_us: u64) -> io::Result<Child> {
     let manifest = wake
         .manifest
@@ -294,11 +322,12 @@ fn spawn_worker(wake: &WakeSpec, settings: &Settings, start_us: u64) -> io::Resu
         wake.active_phrase.as_deref(),
         settings.keywords_threshold,
     );
+    let mounts = worker_mounts(&wake.manifest)?;
     let mut command = crate::transport::namespace_command(
         &wake.python,
         "scripts/wake_worker.py",
         &args,
-        std::slice::from_ref(&wake.manifest),
+        &mounts,
     )?;
     command.stdin(Stdio::piped());
     command.spawn()
@@ -625,6 +654,7 @@ mod tests {
         assert_eq!(
             recorder_args("pw-record", "alsa_input.x"),
             [
+                "--raw",
                 "--rate",
                 "16000",
                 "--channels",
@@ -665,6 +695,30 @@ mod tests {
         let view = state.view();
         assert!(!view.mic_active);
         assert_eq!(view.last_error, Some("recorder_exited"));
+    }
+
+    #[test]
+    fn worker_mounts_include_assets_and_vad_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = dir.path().join("manifest.json");
+        std::fs::write(
+            &manifest,
+            r#"{"asset_root":"/opt/assets/wake","vad":{"path":"/opt/assets/vad/silero.onnx"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            worker_mounts(&manifest).unwrap(),
+            [
+                manifest.clone(),
+                PathBuf::from("/opt/assets/wake"),
+                PathBuf::from("/opt/assets/vad"),
+            ]
+        );
+        // The test-only energy manifest names no assets: only the manifest itself is mounted.
+        std::fs::write(&manifest, r#"{"test_only":true}"#).unwrap();
+        assert_eq!(worker_mounts(&manifest).unwrap(), [manifest.clone()]);
+        std::fs::write(&manifest, r#"{"asset_root":"relative/assets"}"#).unwrap();
+        assert!(worker_mounts(&manifest).is_err());
     }
 
     #[test]
