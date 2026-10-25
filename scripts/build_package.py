@@ -35,6 +35,9 @@ STT_MODEL = REPO / "target/a3-assets/model"
 TTS = REPO / "target/a5-assets/manifest.json"
 TTS_ROOT = REPO / "target/a5-assets"
 VAD = REPO / "target/a2-assets/silero_vad-v5.onnx"
+# Pronunciation lexicon of the KWS asset: custom wake phrases are tokenized with it (src/phrases.rs).
+LEXICON = REPO / "target/a1-assets/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/en.phone"
+LEXICON_REL = "assets/wake/en.phone"
 FIXTURE_ID = "wake-hey-brave__bf_emma__clean"
 EVIDENCE = {"evidence-hey.json": "wake-hey-b12t22.json", "evidence-okay.json": "wake-okay-b0.json"}
 DEV_TTS_ROOT = str(REPO / "target/a5-assets")
@@ -198,6 +201,20 @@ def supports_home(binary):
     return UNSUPPORTED not in (proc.stderr + proc.stdout)
 
 
+def lexicon_template(pkg, src):
+    """Copy the pronunciation lexicon to LEXICON_REL in pkg and return templates/lexicon.json (path + sha256).
+
+    gideon-configure declares this path and digest to the Core, so custom phrases work in an installed package.
+    """
+    if not src.is_file() or src.is_symlink():
+        die(f"missing pronunciation lexicon {src}")
+    copy_file(src, checked_join(pkg, LEXICON_REL))
+    digest = sha256(checked_join(pkg, LEXICON_REL))
+    if digest != sha256(src):
+        die(f"lexicon copy does not match its source: {src}")
+    return {"path": f"@PREFIX@/{LEXICON_REL}", "sha256": digest}
+
+
 def copy_pinned(src_dir, names, dst_dir, hashes):
     for name in names:
         src = checked_join(src_dir, name)
@@ -324,6 +341,7 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     if sha256(fixture_src) != replay["fixtures"][fixture_index]["sha256"]:
         die("fixture bytes do not match pin")
     copy_pinned(WAKE_ASSETS, list(qual["hashes"]), pkg / "assets/wake", qual["hashes"])
+    lexicon = lexicon_template(pkg, LEXICON)
     copy_file(VAD, pkg / "assets/vad/silero_vad-v5.onnx")
     if sha256(VAD) != replay["vad"]["sha256"]:
         die("VAD does not match pin")
@@ -337,10 +355,11 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     dropped.append(f"QA fixture rows: {len(replay['fixtures']) - 1} of {len(replay['fixtures'])} "
                    f"(~/.cache/gideon corpus; only '{FIXTURE_ID}' kept)")
     dropped.append("target/a2-assets/replay-manifest.json (superseded by templates)")
-    dropped.append("target/a1-assets/* (only the 5 pinned wake files are copied)")
+    dropped.append("target/a1-assets/* (only the 5 pinned wake files and en.phone, the lexicon, are copied)")
 
     # templates (manifests with @PREFIX@ / @PROFILE@ placeholders)
     tdir = pkg / "templates"
+    write_json(tdir / "lexicon.json", lexicon)
     write_json(tdir / "replay-manifest.json", {**replay, **{
         "asset_root": "@PREFIX@/assets/wake",
         "fixtures": [fixture_row],

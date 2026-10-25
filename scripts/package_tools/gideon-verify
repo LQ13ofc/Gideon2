@@ -101,6 +101,33 @@ def on_walk_error(err):
     fail(f"cannot list directory {where}: {err.strerror}")
 
 
+LEXICON_TEMPLATE = "templates/lexicon.json"
+PREFIX_TOKEN = "@PREFIX@/"
+
+
+def check_lexicon(expected):
+    """When the package carries templates/lexicon.json, the lexicon it pins must be a listed regular file
+    whose PACKAGE.json sha256 equals the pin (gideon-configure declares it to the Core for custom phrases)."""
+    if LEXICON_TEMPLATE not in expected:
+        return
+    handle, _ = open_regular(os.path.join(PREFIX, LEXICON_TEMPLATE), LEXICON_TEMPLATE)
+    with handle:
+        try:
+            template = json.loads(handle.read(65536).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            fail("templates/lexicon.json is not valid JSON")
+    path = template.get("path") if isinstance(template, dict) else None
+    pin = template.get("sha256") if isinstance(template, dict) else None
+    if not isinstance(path, str) or not path.startswith(PREFIX_TOKEN) or not isinstance(pin, str):
+        fail("templates/lexicon.json needs a path under @PREFIX@/ and a sha256")
+    rel = path[len(PREFIX_TOKEN):]
+    listed = expected.get(rel)
+    if listed is None or listed.get("type", "file") != "file":
+        fail(f"lexicon not listed in PACKAGE.json: {rel}")
+    if listed.get("sha256") != pin:
+        fail(f"lexicon pin differs from PACKAGE.json: {rel}")
+
+
 def verify():
     manifest_path = os.path.join(PREFIX, MANIFEST)
     handle, _ = open_regular(manifest_path, MANIFEST)
@@ -197,6 +224,8 @@ def verify():
         if got != entry.get("sha256"):
             fail(f"sha256 mismatch: {rel}")
         total_bytes += st.st_size
+
+    check_lexicon(expected)
 
     # Pass 2: nothing extra anywhere in the prefix; every directory listable and expected.
     for root, dirs, files in os.walk(PREFIX, onerror=on_walk_error, followlinks=False):

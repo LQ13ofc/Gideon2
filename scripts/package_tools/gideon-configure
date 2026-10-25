@@ -156,6 +156,31 @@ def check_hashes(root, hashes, label):
             die(f"{label} artifact does not match pin: {path}")
 
 
+def packaged_lexicon(mapping):
+    """Pronunciation lexicon named by templates/lexicon.json, read in place from the package assets.
+
+    Custom wake phrases are tokenized with it (src/phrases.rs load_lexicon), so pack.json must declare it by
+    absolute path and sha256 (src/pack.rs `lexicon`). The file must sit inside ASSETS and match its pin.
+    """
+    template = os.path.join(TEMPLATES, "lexicon.json")
+    if not os.path.isfile(template):
+        die("package has no lexicon template (templates/lexicon.json); rebuild the package")
+    entry = load_json(template)
+    path = render_value(entry.get("path"), mapping)
+    expected = entry.get("sha256")
+    if not isinstance(path, str) or not isinstance(expected, str):
+        die("lexicon.json needs string path and sha256")
+    check_no_placeholder(path, "lexicon.json")
+    path = os.path.normpath(path)
+    if not os.path.isabs(path) or os.path.commonpath([ASSETS, path]) != ASSETS:
+        die(f"lexicon must live inside the package assets: {path}")
+    if not os.path.isfile(path) or os.path.islink(path):
+        die(f"lexicon missing or not regular: {path}")
+    if digest(path) != expected:
+        die(f"lexicon does not match pinned sha256: {path}")
+    return {"path": path, "sha256": expected}
+
+
 def main():
     if len(sys.argv) != 2:
         die("usage: gideon-configure ABSOLUTE_STATE_DIR")
@@ -255,6 +280,7 @@ def main():
             "path": os.path.join(profile, "qualification-manifest.json"),
             "sha256": qual_sha,
         },
+        "lexicon": packaged_lexicon(mapping),
         "phrases": phrases,
     }
     write_json(os.path.join(profile, "pack.json"), pack)
@@ -280,6 +306,9 @@ def validate(profile):
         tts["voice"] == os.path.join(tts["root"], "alba.safetensors"),
         set(replay["supported_phrases"]) == set(pack["phrases"]),
     ]
+    lexicon = pack.get("lexicon")
+    checks.append(isinstance(lexicon, dict) and isinstance(lexicon.get("path"), str)
+                  and os.path.isfile(lexicon["path"]) and digest(lexicon["path"]) == lexicon.get("sha256"))
     for field in ["engine", "supported_phrases", "rejection_labels", "hashes", "encoder",
                   "decoder", "joiner", "asset_root"]:
         checks.append(qual.get(field) is not None and qual.get(field) == replay.get(field))
