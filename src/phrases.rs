@@ -654,6 +654,64 @@ pub fn preflight(python: &Path, home: &Path, manifest: &Path) -> io::Result<()> 
     }
 }
 
+/// Cache key of a passing preflight: `sha256(python NUL manifest NUL keyword file)`, hex. The manifest names
+/// every model with its digest (`hashes`), so a changed asset, hash, keyword list or interpreter changes the key.
+pub fn preflight_key(python: &Path, manifest: &Path) -> io::Result<String> {
+    let manifest_bytes = read_bounded(manifest, 1_048_576)?;
+    let value: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
+    let keywords = value["keywords_file"]
+        .as_str()
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "keywords file"))?;
+    let keyword_bytes = read_bounded(&keywords, 65536)?;
+    let mut hasher = Sha256::new();
+    hasher.update(python.as_os_str().as_encoded_bytes());
+    hasher.update([0u8]);
+    hasher.update(&manifest_bytes);
+    hasher.update([0u8]);
+    hasher.update(&keyword_bytes);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+#[derive(Serialize, Deserialize)]
+struct PreflightRecord {
+    version: u8,
+    key: String,
+}
+
+fn preflight_record(root: &Path) -> PathBuf {
+    runtime_dir(root).join("preflight.json")
+}
+
+/// Key of the last keyword set that passed the worker preflight (`None` when absent or unreadable).
+fn recorded_key(root: &Path) -> Option<String> {
+    let bytes = read_bounded(&preflight_record(root), 4096).ok()?;
+    let record: PreflightRecord = serde_json::from_slice(&bytes).ok()?;
+    (record.version == 1).then_some(record.key)
+}
+
+/// Preflight with a cache: a keyword set whose key already passed is not run again (boot, switches and boot
+/// rollback). Only a passing run is recorded, 0600, in the Core's private wake runtime directory. The cache
+/// skips a duplicate check only; the worker still verifies hashes when it runs, and `gideon-verify` covers the
+/// installed package at every launch.
+pub fn preflight_cached(
+    root: &Path,
+    python: &Path,
+    home: &Path,
+    manifest: &Path,
+) -> io::Result<()> {
+    let key = preflight_key(python, manifest)?;
+    if recorded_key(root).as_deref() == Some(key.as_str()) {
+        return Ok(());
+    }
+    preflight(python, home, manifest)?;
+    // A failed record write only means the next start runs the preflight again.
+    if let Ok(record) = serde_json::to_vec(&PreflightRecord { version: 1, key }) {
+        let _ = write_private(&preflight_record(root), &record);
+    }
+    Ok(())
+}
+
 /// Keyword set kept by the Core: `current` runs at the next start; `previous` is the rollback target.
 pub fn runtime_dir(root: &Path) -> PathBuf {
     root.join("wake-runtime")
@@ -680,7 +738,7 @@ pub fn stage(
         fs::rename(&current, &previous)?;
     }
     let checked = materialize(&current, base_manifest, catalog, settings, global)
-        .and_then(|manifest| preflight(python, home, &manifest));
+        .and_then(|manifest| preflight_cached(root, python, home, &manifest));
     if let Err(error) = checked {
         let _ = fs::remove_dir_all(&current);
         if had_current {
@@ -701,9 +759,37 @@ fn rebase(dir: &Path) -> io::Result<()> {
     write_private(&manifest, &serde_json::to_vec(&value)?)
 }
 
-/// Boot: keeps the stored list in force. `current` is reused when its keyword file already matches the stored
-/// list and passes preflight (rollback targets are not rotated on every start). Otherwise the stored list is
-/// staged; when that fails, the previous or current set that still passes preflight takes over.
+/// The worker manifest a keyword set in `dir` must have for the packaged base now running. The base manifest is
+/// copied in full, and it names version-specific paths (assets, fixtures, interpreters of the STT stage).
+fn expected_manifest(
+    base: &serde_json::Value,
+    dir: &Path,
+    keywords_text: &str,
+    catalog: &[Entry],
+    settings: &[Setting],
+) -> io::Result<serde_json::Value> {
+    manifest_value(
+        base,
+        &dir.join("keywords.txt"),
+        &format!("{:x}", Sha256::digest(keywords_text.as_bytes())),
+        catalog,
+        settings,
+    )
+}
+
+/// True when the stored manifest file is exactly the wanted value (unreadable or other content is not a match).
+fn stored_manifest_matches(manifest: &Path, wanted: &serde_json::Value) -> bool {
+    read_bounded(manifest, 1_048_576)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|stored| &stored == wanted)
+}
+
+/// Boot: keeps the stored list in force. `current` is reused only when its keyword file matches the stored list,
+/// its manifest equals the one the running package would write (a set built by an older package names that
+/// package's paths and is rebuilt), and it passes preflight (rollback targets are not rotated on every start).
+/// Otherwise the stored list is staged; when that fails, the previous or current set that still passes preflight
+/// takes over.
 pub fn ensure_boot(
     root: &Path,
     python: &Path,
@@ -713,7 +799,7 @@ pub fn ensure_boot(
     settings: &[Setting],
     global: f32,
 ) -> io::Result<PathBuf> {
-    let (_, base_text) = base_keywords(base_manifest)?;
+    let (base, base_text) = base_keywords(base_manifest)?;
     let expected = keywords_text(&base_text, catalog, settings, global)?;
     let current = runtime_dir(root).join("current");
     let manifest = current.join("manifest.json");
@@ -722,7 +808,9 @@ pub fn ensure_boot(
             .ok()
             .as_deref()
             == Some(expected.as_str())
-        && preflight(python, home, &manifest).is_ok()
+        && expected_manifest(&base, &current, &expected, catalog, settings)
+            .is_ok_and(|wanted| stored_manifest_matches(&manifest, &wanted))
+        && preflight_cached(root, python, home, &manifest).is_ok()
     {
         return Ok(manifest);
     }
@@ -802,7 +890,7 @@ pub fn boot_manifest(root: &Path, python: &Path, home: &Path) -> Option<PathBuf>
     let runtime = runtime_dir(root);
     for name in ["current", "previous"] {
         let manifest = runtime.join(name).join("manifest.json");
-        if manifest.is_file() && preflight(python, home, &manifest).is_ok() {
+        if manifest.is_file() && preflight_cached(root, python, home, &manifest).is_ok() {
             return Some(manifest);
         }
     }
@@ -1252,6 +1340,97 @@ mod tests {
             migrated(&stored, Some("okay_gideon"), "hey_gideon"),
             stored.to_vec()
         );
+    }
+
+    fn keyword_set(dir: &Path, base_asset_root: &str) -> (PathBuf, PathBuf) {
+        let keywords = dir.join("keywords.txt");
+        fs::write(
+            &keywords,
+            "HH EY1 G IH1 D IY0 AH0 N :1.2 #0.22 @HEY_GIDEON\n",
+        )
+        .unwrap();
+        let manifest = dir.join("manifest.json");
+        let value = serde_json::json!({
+            "asset_root": base_asset_root,
+            "keywords_file": keywords.to_string_lossy(),
+            "hashes": {"keywords.txt": "x"},
+        });
+        fs::write(&manifest, serde_json::to_vec(&value).unwrap()).unwrap();
+        (keywords, manifest)
+    }
+
+    #[test]
+    fn preflight_key_follows_python_manifest_and_keywords() {
+        let dir = tempfile::tempdir().unwrap();
+        let (keywords, manifest) = keyword_set(dir.path(), "/v1/assets");
+        let python = Path::new("/v1/venv/bin/python");
+        let key = preflight_key(python, &manifest).unwrap();
+        assert_eq!(key, preflight_key(python, &manifest).unwrap());
+        assert_ne!(
+            key,
+            preflight_key(Path::new("/v2/venv/bin/python"), &manifest).unwrap()
+        );
+        fs::write(
+            &keywords,
+            "HH EY1 G IH1 D IY0 AH0 N :1.3 #0.22 @HEY_GIDEON\n",
+        )
+        .unwrap();
+        assert_ne!(key, preflight_key(python, &manifest).unwrap());
+        let (_, other) = keyword_set(dir.path(), "/v2/assets");
+        assert_ne!(key, preflight_key(python, &other).unwrap());
+    }
+
+    #[test]
+    fn preflight_record_is_read_back_and_corrupt_is_a_miss() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime_dir(root.path());
+        fs::create_dir_all(&runtime).unwrap();
+        assert_eq!(recorded_key(root.path()), None);
+        let record = serde_json::to_vec(&PreflightRecord {
+            version: 1,
+            key: "abc".into(),
+        })
+        .unwrap();
+        write_private(&preflight_record(root.path()), &record).unwrap();
+        assert_eq!(recorded_key(root.path()).as_deref(), Some("abc"));
+        write_private(&preflight_record(root.path()), b"{not json").unwrap();
+        assert_eq!(recorded_key(root.path()), None);
+        let stale = serde_json::to_vec(&PreflightRecord {
+            version: 9,
+            key: "abc".into(),
+        })
+        .unwrap();
+        write_private(&preflight_record(root.path()), &stale).unwrap();
+        assert_eq!(recorded_key(root.path()), None);
+    }
+
+    #[test]
+    fn stored_manifest_from_another_package_is_not_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = |asset_root: &str| {
+            serde_json::json!({
+                "asset_root": asset_root,
+                "supported_phrases": {"hey_gideon": "HEY_GIDEON"},
+                "hashes": {"tokens.txt": "t"},
+            })
+        };
+        let catalog = vec![default_entry("hey_gideon", "HEY_GIDEON", "dev_qualified")];
+        let settings = vec![Setting {
+            id: "hey_gideon".into(),
+            active: true,
+            sensitivity: None,
+        }];
+        let text = "HH EY1 G IH1 D IY0 AH0 N :1.2 #0.22 @HEY_GIDEON\n";
+        let wanted_v1 =
+            expected_manifest(&base("/v1/assets"), dir.path(), text, &catalog, &settings).unwrap();
+        let wanted_v2 =
+            expected_manifest(&base("/v2/assets"), dir.path(), text, &catalog, &settings).unwrap();
+        let manifest = dir.path().join("manifest.json");
+        fs::write(&manifest, serde_json::to_vec(&wanted_v1).unwrap()).unwrap();
+        assert!(stored_manifest_matches(&manifest, &wanted_v1));
+        assert!(!stored_manifest_matches(&manifest, &wanted_v2));
+        fs::write(&manifest, b"garbage").unwrap();
+        assert!(!stored_manifest_matches(&manifest, &wanted_v1));
     }
 
     fn default_entry(id: &str, label: &str, qualification: &'static str) -> Entry {

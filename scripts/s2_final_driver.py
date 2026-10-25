@@ -17,6 +17,7 @@ from pathlib import Path
 STEPS = ("s1_observe", "configure", "observe_persisted", "remove_plugin")
 PLUGIN = "benign_fixture"
 HEY, OKAY = "Hey Gideon", "Okay Gideon"
+HEY_ID, POC_ID = "hey_gideon", "okay_gideon"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--app-dir", required=True)
@@ -87,8 +88,37 @@ def find(name):
     return obj
 
 
+def find_visual(name):
+    """Control found in the visual item tree. Delegates of a Repeater (the wake phrase rows) are not reachable
+    through findChild, so they are looked up the way visual_item does."""
+    stack = [window.contentItem()]
+    while stack:
+        current = stack.pop()
+        if current.objectName() == name:
+            check(f"object {name} present", True)
+            return current
+        stack.extend(current.childItems())
+    check(f"object {name} present", False)
+
+
 def prefs():
     return bridge.snapshot.get("preferences") or {}
+
+
+def wake_active(preferences, phrase=HEY_ID):
+    """The Core's persisted list (`wake_phrases: [{id, active, sensitivity?}]`) has the phrase active."""
+    return any(p.get("id") == phrase and p.get("active") is True for p in preferences.get("wake_phrases") or [])
+
+
+def row_texts(row):
+    """Text the user reads inside a wake phrase row (every Text item below the row)."""
+    texts, stack = [], [row]
+    while stack:
+        item = stack.pop()
+        if item.property("text"):
+            texts.append(str(item.property("text")))
+        stack.extend(item.childItems())
+    return texts
 
 
 def record(plugin_id):
@@ -254,23 +284,24 @@ def configure():
 
     # 5. Wake: only the qualified phrase is selectable; selection needs a real Core restart.
     # Done after Hub install on purpose: Core reports restart_required, which disables Hub approve/install.
+    # Voz e Wake lists the packaged phrases as switches (CfgVoz.qml: wakeRow_<id>, wakeSwitch_<id>). The default
+    # is already the active phrase, so its switch cannot be turned off to save it; "Restaurar padrão"
+    # (restoreWakeDefaults) is the explicit save of the default list. The Core then writes wake_phrases and the
+    # legacy wake_phrase with the same phrase, and requires a real restart.
     open_settings("cfg_voz")
-    combo, select = find("wakeChoice"), find("selectWakeButton")
-    check("explicit phrase text presented", combo.property("currentText") == HEY, combo.property("currentText"))
-    combo.setProperty("currentIndex", 1)
-    QTest.qWait(50)
-    check("POC phrase cannot be selected", combo.property("currentText") == OKAY and not select.property("enabled"))
-    combo.setProperty("currentIndex", 0)
-    QTest.qWait(50)
-    activate(select)
-    # Changing the wake phrase asks first (wakeConfirm); the user's confirmation is the only way to save it.
-    confirm = find("wakeConfirm")
-    wait(lambda: confirm.property("visible"), 3, "wake change confirmation shown")
-    activate(visual_item("confirmWakeButton"))
+    hey_row = find_visual("wakeRow_" + HEY_ID)
+    check("explicit phrase text presented", HEY in row_texts(hey_row), row_texts(hey_row))
+    poc_switch = find_visual("wakeSwitch_" + POC_ID)
+    check("POC phrase cannot be selected", poc_switch.property("enabled") is False
+          and poc_switch.property("checked") is False, {"enabled": poc_switch.property("enabled"),
+                                                        "checked": poc_switch.property("checked")})
+    restore = find_visual("restoreWakeDefaults")
+    check("restore defaults control enabled before the save", restore.property("enabled") is True)
+    activate(restore)
     wait(lambda: bridge.configurationStatus == "restart_required", 10,
          f"restart_required after wake selection (preferences result {bridge.preferencesResult!r}, "
-         f"wake choice {combo.property('currentText')!r}, revision {bridge.preferencesRevision})")
-    check("wake hey_gideon persisted by Core", prefs().get("wake_phrase") == "hey_gideon", prefs())
+         f"revision {bridge.preferencesRevision})")
+    check("wake hey_gideon persisted by Core", wake_active(prefs()) and prefs().get("wake_phrase") == HEY_ID, prefs())
     check("selection requires real restart", not bridge.preferencesAvailable and not bridge.textAvailable)
     window.grabWindow().save(str(ART / "pack.png"))
     QTest.qWait(50)
@@ -285,8 +316,8 @@ def observe_persisted():
           prefs())
     check("visual feedback off persisted", prefs().get("visual_feedback") is False and not bridge.visualFeedback,
           prefs())
-    check("wake hey_gideon persisted and active", prefs().get("wake_phrase") == "hey_gideon"
-          and (bridge.snapshot.get("base_pack") or {}).get("active_phrase") == "hey_gideon",
+    check("wake hey_gideon persisted and active", prefs().get("wake_phrase") == HEY_ID and wake_active(prefs())
+          and (bridge.snapshot.get("base_pack") or {}).get("active_phrase") == HEY_ID,
           {"prefs": prefs(), "active": (bridge.snapshot.get("base_pack") or {}).get("active_phrase")})
     rec = record(PLUGIN)
     if args.expect_plugin == "present":

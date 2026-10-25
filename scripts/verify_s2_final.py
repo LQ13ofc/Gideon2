@@ -42,9 +42,16 @@ BENIGN_BYTES = b"benign fixture\n"
 MIN_FREE = 6 * 1024 ** 3
 CORE_START_TIMEOUT = 90
 UI_TIMEOUT = 420
+def wake_persisted(preferences):
+    """Persisted wake shape (src/storage.rs update_wake_phrases): `wake_phrases` lists hey_gideon active, and the
+    legacy `wake_phrase` agrees (the Core keeps it equal to the first active id)."""
+    listed = any(p.get("id") == "hey_gideon" and p.get("active") is True for p in preferences.get("wake_phrases") or [])
+    return listed and preferences.get("wake_phrase") == "hey_gideon"
+
+
 S2_UI_REQUIRED = {
     "s1-A": ["actual Core connection", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples"],
-    "configure": ["configuration ready before changes", "object visualPagePreference present", "Qt switch save acknowledged by Core", "object gainSlider present", "volume draft reaches 50 on the slider", "object applyGainButton present", "Core persisted volume 50 and visual off", "object hubReviewDialog present", "object publisherAcknowledgement present", "object approveHubButton present", "review never defaults to publisher acknowledgement", "explicit acknowledgement enables approval", "Qt approval persisted by Core", "acknowledged approval disables duplicate submit", "approval is not installation nor publisher identity", "staged payload is not installed", "fixture installed with runtime disabled", "state label shows desativado after install", "install control unavailable once installed", "object wakeChoice present", "object selectWakeButton present", "object wakeConfirm present", "explicit phrase text presented", "POC phrase cannot be selected", "wake hey_gideon persisted by Core", "selection requires real restart"],
+    "configure": ["configuration ready before changes", "object visualPagePreference present", "Qt switch save acknowledged by Core", "object gainSlider present", "volume draft reaches 50 on the slider", "object applyGainButton present", "Core persisted volume 50 and visual off", "object hubReviewDialog present", "object publisherAcknowledgement present", "object approveHubButton present", "review never defaults to publisher acknowledgement", "explicit acknowledgement enables approval", "Qt approval persisted by Core", "acknowledged approval disables duplicate submit", "approval is not installation nor publisher identity", "staged payload is not installed", "fixture installed with runtime disabled", "state label shows desativado after install", "install control unavailable once installed", "object wakeRow_hey_gideon present", "object wakeSwitch_okay_gideon present", "object restoreWakeDefaults present", "explicit phrase text presented", "POC phrase cannot be selected", "wake hey_gideon persisted by Core", "selection requires real restart"],
     "persisted-B": ["volume 50 persisted and shown", "visual feedback off persisted", "wake hey_gideon persisted and active", "installed plugin persisted, runtime disabled", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples"],
     "persisted-C": ["volume 50 persisted and shown", "visual feedback off persisted", "wake hey_gideon persisted and active", "installed plugin persisted, runtime disabled", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples"],
     "persisted-D": ["volume 50 persisted and shown", "visual feedback off persisted", "wake hey_gideon persisted and active", "installed plugin persisted, runtime disabled", "configuration ready", "base pack preflight verified", "wake replay finished", "stt ready", "command_success receipt verified in UI", "event session_started observed by UI", "event transcript_final observed by UI", "event command_success observed by UI", "transcript source voice", "subtitle non-empty in UI", "result receipt non-empty in UI", "UI observed states ['executing', 'speaking', 'transcribing']", "speech completed on virtual sink with samples"],
@@ -612,7 +619,7 @@ def sc_A():
           rec is not None and rec["state"] == "installed" and rec["runtime"] == "disabled", rec)
     check("A configure: Core persisted volume 50, visual off and wake hey_gideon",
           snapshot["preferences"]["output_volume_percent"] == 50 and snapshot["preferences"]["visual_feedback"] is False
-          and snapshot["preferences"]["wake_phrase"] == "hey_gideon", snapshot["preferences"])
+          and wake_persisted(snapshot["preferences"]), snapshot["preferences"])
     check("A configure: Hub approval recorded for exact manifest (not publisher identity)",
           not snapshot["hub"]["publisher_verified"], snapshot["hub"].get("publisher_verified"))
     RESULT["identity"]["A_hub_installed"] = {k: rec[k] for k in ("plugin_id", "state", "runtime")}
@@ -649,7 +656,7 @@ def sc_B():
     snapshot = snap()
     check("B persisted: Core snapshot keeps volume 50, visual off, hey_gideon, plugin installed",
           snapshot["preferences"]["output_volume_percent"] == 50 and snapshot["preferences"]["visual_feedback"] is False
-          and snapshot["preferences"]["wake_phrase"] == "hey_gideon" and record_of(snapshot) is not None, snapshot["preferences"])
+          and wake_persisted(snapshot["preferences"]) and record_of(snapshot) is not None, snapshot["preferences"])
 
 
 def sc_C():

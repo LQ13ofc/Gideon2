@@ -658,15 +658,14 @@ pub async fn serve(
                 core.enable_capture();
             }
             let mut descriptor: WakeDescriptor = serde_json::from_slice(&bytes)?;
-            // A Core keyword set names its own active list. The packaged manifest takes the stored legacy phrase
-            // only when that phrase is one of its own (a custom phrase falls back to the packaged default).
+            // A Core keyword set names its own active list. Without one, the packaged manifest runs the stored
+            // legacy phrase only when it is one of its own. Any other stored phrase fails closed (A1 contract:
+            // the active phrase must exist in the catalog); the config is left unchanged and nothing is started.
             if descriptor.active_phrases.is_empty() {
-                if let Some(phrase) = storage
-                    .config
-                    .wake_phrase
-                    .as_ref()
-                    .filter(|p| descriptor.supported_phrases.contains_key(p.as_str()))
-                {
+                if let Some(phrase) = storage.config.wake_phrase.as_ref() {
+                    if !descriptor.supported_phrases.contains_key(phrase.as_str()) {
+                        return Err(io::Error::other("configured wake phrase is not supported"));
+                    }
                     descriptor.active_phrase = phrase.clone();
                 }
             }

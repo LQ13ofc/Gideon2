@@ -1136,6 +1136,10 @@ def skills_prepare(root, p):
 
 # ---- ledgers ---------------------------------------------------------------------------------
 VOLATILE = ('audit.log', 'core.sock', 'core.lock')
+# Derived per package version: the wake keyword set and its preflight cache (src/phrases.rs ensure_boot). It is
+# rebuilt when the running package changes, so it is not part of the byte-identical ledger; wake_runtime_check
+# verifies it names the running version.
+DERIVED = ('wake-runtime',)
 
 
 def ledger_state(profile):
@@ -1146,7 +1150,7 @@ def ledger_state(profile):
     for path in sorted(root.rglob('*')):
         rel = path.relative_to(root).as_posix()
         head = rel.split('/')[0]
-        if path.is_symlink() or head in VOLATILE or head.startswith('audit.log') or rel.startswith('quarantine') or path.is_socket():
+        if path.is_symlink() or head in VOLATILE or head in DERIVED or head.startswith('audit.log') or rel.startswith('quarantine') or path.is_socket():
             continue
         st = path.lstat()
         if stat.S_ISDIR(st.st_mode):
@@ -1184,10 +1188,22 @@ def compare_ledgers(before, after, label, allow_changed=()):
     check(f'{label}: every state file is 0600 and every directory 0700', not bad, [(k, oct(after['modes'][k])) for k in bad[:8]])
 
 
+def wake_runtime_check(p, label, version):
+    """The keyword set of the running package names only that version's paths (a set built by another version
+    is rebuilt at boot, not reused: a stale STT interpreter path made the STT worker fail after the update)."""
+    manifest = core_root(p) / 'wake-runtime' / 'current' / 'manifest.json'
+    text = manifest.read_text(encoding='utf-8') if manifest.is_file() else ''
+    paths = set(re.findall(r'"(/[^"]*)"', text))
+    stray = sorted(x for x in paths if '/versions/' in x and not x.startswith(str(vdir(version)) + '/'))
+    check(f'{label}: wake runtime keyword set is rebuilt for the running version (no path of another version)',
+          bool(paths) and not stray, stray[:6])
+
+
 def after_restart_checks(p, label, version):
     root = core_root(p)
     exe_check(p, version, label)
     s1_check(p, f'{label} S1')
+    wake_runtime_check(p, label, version)
     items = [(i['id'], i['status']) for i in e1.conn_items(root)]
     gh_id = S['tree']['github_id']
     check(f'{label}: the vaulted github token still works after the restart (repo.get ok without a new login)',
