@@ -300,6 +300,12 @@ def main():
     staging = Path(tempfile.mkdtemp(prefix=f".{name}.partial-", dir=out_root))
     try:
         dropped = build_tree(staging / name, name, version, gideon_base, packaged_binary)
+        # A package whose Core or workers need a script it does not ship fails at runtime, not at build:
+        # fail here instead (the live wake worker once imported a module the package lacked).
+        closure = subprocess.run([sys.executable, str(REPO / "scripts" / "package_closure_check.py"),
+                                  str(staging / name)], capture_output=True, text=True)
+        if closure.returncode != 0:
+            die("package closure check failed:\n" + closure.stdout + closure.stderr)
         if pkg.exists():
             die(f"refusing to overwrite {pkg}")
         os.rename(staging / name, pkg)
@@ -384,7 +390,7 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     # net_broker.py is the Core-brokered HTTP process (LLM routes and S5 connections): without it every
     # network call of an installed package fails (the Core resolves <home>/scripts/net_broker.py).
     for worker in ("wake_worker.py", "stt_worker.py", "tts_worker.py", "command_worker.py", "pcm_fixture.py",
-                   "net_broker.py"):
+                   "net_broker.py", "audio_conditioning.py", "wake_phrase_test.py"):
         copy_file(REPO / "scripts" / worker, pkg / "scripts" / worker)
     app_src = REPO / "app"
     for app_file in ("main.py", "bridge.py", "uisettings.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
