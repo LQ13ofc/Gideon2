@@ -72,3 +72,9 @@
 - UI: sub-aba Configurações › Idiomas (app/pages/CfgIdiomas.qml), botões Instalar desativados com "Aguardando aprovação do download pelo dono"; docs/ui-spec/40-configuracoes.md §7.1A.
 - Gates rodados: cargo fmt --check, clippy -D warnings, cargo test (todos), test_bridge_protocol 228, test_snapshot_contract 16, test_ui_settings 24, test_languages_qml 4 (novo).
 - Limites: troca de idioma só vale no próximo início do Core (sem troca quente de worker); idioma da busca de configurações (app/uisettings.py) não indexa Idiomas; nenhum modelo PT/FR instalado nem medido.
+
+## 2026-10-25 — wake ao vivo, frases, idiomas
+- Causa do "wake não funciona": o pacote nunca abria o microfone (só tocava áudio de teste). Agora: preferência `live_audio` (Configurações › Dispositivos, com consentimento), áudio ao vivo testado com dispositivos virtuais (docs/A7-wake-live-test.md) e 5 defeitos corrigidos. Teste acústico real inconclusivo (docs/A8): nenhum par caixa/microfone captou o som; validação com voz real continua com o dono.
+- Frases: várias ativas (até 5), personalizadas com medição sintética, boost 1.2 (96,05% -> 98,68% no protocolo A1, 0 falsos). Léxico en.phone empacotado.
+- Idiomas: catálogo + UI; só EN instalado; PT/FR dependem de download aprovado (docs/research/idiomas-stt-tts.md).
+- Gates verdes: design, b2feedback, a1..a5, c1..c4, s4final, e1, e24, e3, s2final(216), b4package, e4(290).
