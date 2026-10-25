@@ -109,10 +109,17 @@ def main():
             {'boost': 1.0, 'threshold': 0.20, 'recall': '73/76', 'false': '0/320'},
         ],
         'sweep_lab_clips': {
-            'corpus': '/tmp/gideon-wake-lab/clips.json (51 positive, 54 negative; live-equivalent framing)',
-            'packaged_three_lines_threshold_0_25': '49/51, 0 false',
-            'boost_1_2_threshold_0_22': '51/51, 0 false',
-            'boost_1_5_threshold_0_25': '51/51, 0 false (rejected on A1: 2 false wakes)',
+            'corpus': 'private lab clips (51 positive, 54 negative; pinned in docs/evidence/wake-live-pins.json)',
+            'method': 'scripts/wake_live_regression.py: one continuous stream in the live lab order, production engine; '
+                      'hits per repeat (3 or 6 repeats, lead and gaps seeded)',
+            'packaged_warm3_cond_auto': '41.3 mean (40, 42, 42), 0 false',
+            'packaged_warm3_cond_off': '41.3 mean (42, 42, 40), 0 false',
+            'boost_1_2_threshold_0_22_warm3_cond_auto': '44.3 mean over 6 repeats (44, 44, 43, 44, 42, 49), 0 false; '
+                                                        '0 false in 66 min of real noise',
+            'boost_1_2_threshold_0_22_warm0_cond_auto': '41.3 mean (36, 41, 47): the warm-up is what keeps the spread small',
+            'boost_1_4_threshold_0_22_warm3_cond_auto': '45.2 mean over 6 repeats, 1 false (the babble clip) in 1 of 6: rejected',
+            'note': 'Earlier figures 49/51 (packaged) and 51/51 (boost 1.2) were not reproduced by this harness; their script '
+                    'is not in the repository. They are not used as evidence.',
         },
         'limits': [
             'Tuning used the same synthetic corpora that measure it; the lab clips are not an independent holdout.',
