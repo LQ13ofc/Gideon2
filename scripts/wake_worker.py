@@ -190,6 +190,10 @@ class EnergyOnsetEngine:
         self.last_end = end
         return events
 
+    def speech(self, samples):
+        # Test-only speech flag (the Core captures and endpoints on it): the same RMS rule as the onset.
+        return math.sqrt(sum(x*x for x in samples)/len(samples)) >= 0.05
+
 
 class VadEngine:
     def __init__(self, manifest):
@@ -272,7 +276,7 @@ def live(engine, vad, stdin, stdout, conditioner=None):
         samples = engine.frame_samples(raw)
         heard = conditioner.process(samples) if conditioner is not None else samples
         events = engine.accept(heard, timestamp)
-        speech = vad.accept(samples) if vad else None
+        speech = vad.accept(samples) if vad else (engine.speech(samples) if hasattr(engine, 'speech') else None)
         stdout.write(json.dumps({'timestamp_us': timestamp, 'samples': plain(samples), 'detections': events, 'speech': speech}) + '\n')
         stdout.flush()
 
@@ -309,7 +313,8 @@ if __name__ == '__main__':
     if arguments.check:
         print(json.dumps({'check': 'ok', 'engine': manifest['engine'], 'active_phrases': list(getattr(engine, 'active_phrases', ()))}), flush=True)
         sys.exit(0)
-    vad = VadEngine(manifest['vad']) if 'vad' in manifest else None
+    # The test-only detector names a `vad` block so the Core captures, but it has no VAD model: it sets speech itself.
+    vad = VadEngine(manifest['vad']) if 'vad' in manifest and manifest.get('test_only') is not True else None
     if arguments.live:
         conditioner = None
         # The test-only detector stays numpy-free (no conditioning there); production manifests never carry test_only.

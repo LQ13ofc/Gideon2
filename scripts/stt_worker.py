@@ -56,7 +56,8 @@ def run(manifest):
                 if state is None or state['session_id']!=sid:continue
                 if op=='frame':
                     samples=np.asarray(req['samples'],dtype=np.float32)
-                    if not 0<len(samples)<=1280 or not np.isfinite(samples).all() or np.max(np.abs(samples))>1:raise ValueError('invalid PCM')
+                    # Up to 160 ms per message: the Core merges live frames (src/stt.rs LIVE_CHUNK_SAMPLES = 2560).
+                    if not 0<len(samples)<=2560 or not np.isfinite(samples).all() or np.max(np.abs(samples))>1:raise ValueError('invalid PCM')
                     state['end_us']=req['end_us'];stream.add_audio(samples.tolist(),16000)
                 elif op=='finish':
                     result=stream.stop()

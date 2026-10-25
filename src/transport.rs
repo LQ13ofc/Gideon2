@@ -3,7 +3,7 @@ use crate::{
     core::Core,
     protocol::{Operation, Request, MAX_MESSAGE},
     storage::Storage,
-    stt::{SttConfig, SttReply, SttRequest},
+    stt::{SttConfig, SttReply},
     wake::{Packet, WakeDescriptor, WakeInput},
 };
 use std::{
@@ -453,6 +453,34 @@ fn pump_plugins(
         }
     }
 }
+/// The STT worker failed (or its backlog overflowed): the session ends, the stderr tail goes to the 0600 diagnostics
+/// file, and a restart is booked while the budget lasts. Returns whether a restart was booked (`starting`); when it
+/// was not, the status is `failed` for the rest of the run.
+fn stt_down(
+    core: &mut Core,
+    stt: &mut crate::stt::Pipe,
+    root: &std::path::Path,
+    reason: &'static str,
+    tail: &[u8],
+) -> bool {
+    if !tail.is_empty() {
+        let _ = crate::live::write_private_file(&root.join(crate::stt::LAST_ERROR_FILE), tail);
+    }
+    stt.abort();
+    // A missing import or a model that fails its hashes fails the same way on every start: no restart.
+    let deterministic = matches!(
+        reason,
+        crate::live::WORKER_IMPORT_ERROR | crate::live::MODEL_MISSING
+    );
+    if !deterministic && stt.schedule_restart(std::time::Instant::now()) {
+        core.stt_restarting(reason);
+        true
+    } else {
+        core.stt_failed_with(reason);
+        false
+    }
+}
+
 /// Connection audit lines: a closed vocabulary written with the current response sequence.
 fn write_connection_audit(core: &mut Core, storage: &Storage) {
     let audits = core.take_connection_audit();
@@ -631,9 +659,8 @@ pub async fn serve(
         }
     }
 
-    let (stt_tx, stt_requests) = mpsc::channel::<SttRequest>(16);
-    let (stt_replies, mut stt_rx) = mpsc::channel::<Result<SttReply, ()>>(2);
-    let mut stt_task = None;
+    // STT worker owner (src/stt.rs): live audio merges frames into 160 ms messages; the replay path does not.
+    let mut stt_config: Option<SttConfig> = None;
     if let Some(r) = replay.as_ref() {
         let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&r.manifest)?)?;
         if !manifest["stt"].is_null() {
@@ -643,13 +670,11 @@ pub async fn serve(
                 .as_str()
                 .ok_or_else(|| io::Error::other("STT engine missing"))?;
             core.configure_stt(engine.into());
-            stt_task = Some(tokio::spawn(crate::stt::worker(
-                config,
-                stt_requests,
-                stt_replies,
-            )));
+            stt_config = Some(config);
         }
     }
+    let mut stt = crate::stt::Pipe::new(stt_config, live_audio);
+    stt.start();
     let (wake_sender, mut wake_rx) = mpsc::channel(2);
     let mut wake_tx = Some(wake_sender);
     let mut command_wake_texts: Vec<String> = Vec::new();
@@ -756,7 +781,7 @@ pub async fn serve(
     // A13 microphone assistant: one run at a time (the Core refuses a second one while it runs).
     let mut recommend_task: Option<(u64, tokio::task::JoinHandle<crate::mic_assist::Done>)> = None;
     let (speech_progress, mut speech_progress_rx) = mpsc::channel(2);
-    let mut pending_replay = if stt_task.is_some() {
+    let mut pending_replay = if stt.configured() {
         replay.take()
     } else {
         None
@@ -786,6 +811,8 @@ pub async fn serve(
         let deadline = core.deadline();
         let tool_deadline = core.tool_deadline();
         let import_deadline = crate::hub::import_deadline(&storage);
+        let stt_restart = stt.restart_at();
+        let stt_backlogged = stt.pending();
         tokio::select! {
             _ = shutdown.recv() => break,
             _ = async { match import_deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => {
@@ -885,22 +912,30 @@ pub async fn serve(
                     break;
                 }
             },
-            reply=stt_rx.recv(), if stt_task.is_some() => {
-                match reply {
+            reply = stt.next_reply(), if stt.running() => {
+                let failure = match reply {
                     Some(Ok(r)) => {
                         let ready=matches!(r,SttReply::Ready{..});
                         core.stt_reply(r,std::time::Instant::now());
                         if ready && core.response(String::new(),"ok").stt_status=="ready" {
                             if let Some(replay)=pending_replay.take() { let threshold=crate::wake::keywords_threshold(storage.config.wake_sensitivity); wake_task=Some(start_wake(replay,wake_tx.take().expect("single audio producer"),&mut live_wiring,threshold)); }
                         }
+                        None
                     },
-                    Some(Err(())) | None => {
-                        core.stt_failed();
-                        if pending_replay.take().is_some() { core.wake_health("unavailable");wake_tx.take(); }
-                        if let Some(task)=stt_task.take() { task.abort(); let _=task.await; }
-                    }
+                    Some(Err(failure)) => Some(failure),
+                    None => Some(crate::stt::Failure { reason: crate::live::WORKER_CRASHED, tail: Vec::new() }),
+                };
+                if let Some(failure) = failure {
+                    let restarting = stt_down(&mut core, &mut stt, &storage.root, failure.reason, &failure.tail);
+                    if !restarting && pending_replay.take().is_some() { core.wake_health("unavailable"); wake_tx.take(); }
                 }
             },
+            // STT supervisor: a booked restart starts a new worker with fresh channels (status `starting` until ready).
+            _ = async { match stt_restart { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } }, if stt_restart.is_some() => {
+                stt.start();
+            },
+            // Requests waiting for a free slot in the worker queue are offered again shortly.
+            _ = tokio::time::sleep(std::time::Duration::from_millis(10)), if stt_backlogged => {},
             packet = wake_rx.recv(), if wake_task.is_some() => {
                 match packet {
                     Some(Ok(p)) => {
@@ -1038,16 +1073,19 @@ pub async fn serve(
             std::time::Instant::now(),
         );
         write_connection_audit(&mut core, &storage);
+        let now = std::time::Instant::now();
         for request in core.take_stt_requests() {
-            if stt_tx.try_send(request).is_err() {
-                core.stt_failed();
-                if let Some(task) = stt_task.take() {
-                    task.abort();
-                    let _ = task.await;
+            if let Err(reason) = stt.enqueue(request, now) {
+                // Only a stuck worker overflows the bounded backlog; the supervisor restarts it.
+                let restarting = stt_down(&mut core, &mut stt, &storage.root, reason, &[]);
+                if !restarting && pending_replay.take().is_some() {
+                    core.wake_health("unavailable");
+                    wake_tx.take();
                 }
                 break;
             }
         }
+        stt.flush(now);
     }
     if let Some((_, task)) = speech_task.take() {
         task.abort();
@@ -1077,10 +1115,7 @@ pub async fn serve(
         task.abort();
         let _ = task.await;
     }
-    if let Some(task) = stt_task.take() {
-        task.abort();
-        let _ = task.await;
-    }
+    stt.stop().await;
     plugins.shutdown().await;
     // Sandboxed MCP servers die with the Core.
     crate::mcp::stop_all();

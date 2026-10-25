@@ -33,12 +33,15 @@ def run():
                 def req(op='snapshot',**kw):
                     nonlocal counter
                     counter+=1;s.sendall((json.dumps({'version':1,'request_id':f's{counter}','op':op,**kw})+'\n').encode());return json.loads(f.readline())
-                until=time.monotonic()+25;partials=[];final=None;sid=None;cancelled=False
+                until=time.monotonic()+25;partials=[];final=None;sid=None;cancelled=False;killed=False;revoked=False
                 while time.monotonic()<until:
                     snap=req()
                     if snap['stt_status']=='failed':
-                        if bad_model or kill_worker:break
+                        if bad_model:break
                         raise RuntimeError('native STT worker failed')
+                    # A killed worker is restarted by the Core (A14): the session and transcript are revoked, then status returns to ready.
+                    if kill_worker and killed and snap['stt_status']=='starting' and snap['transcript'] is None and snap['session_id'] is None:revoked=True
+                    if kill_worker and revoked and snap['stt_status']=='ready':break
                     started=[e for e in snap['events'] if e['kind']=='session_started']
                     if started:sid=started[0]['session_id']
                     t=snap['transcript']
@@ -48,7 +51,7 @@ def run():
                         if kill_worker:
                             children=Path(f'/proc/{p.pid}/task/{p.pid}/children').read_text().split()
                             check('STT child owned and distinguishable',len(children)>=1)
-                            os.kill(int(children[0]),9)
+                            os.kill(int(children[0]),9);killed=True
                         if cancel:
                             check('cancel streaming recognized session',req('cancel',session_id=sid)['code']=='ok');cancelled=True
                     if t and t['is_final']:final=t
@@ -58,7 +61,7 @@ def run():
                 if bad_model:
                     check('model integrity failure before any capture',snap['stt_status']=='failed' and not partials and not started and snap['transcript'] is None)
                 elif kill_worker:
-                    check('worker failure revokes transcript and session',snap['stt_status']=='failed' and snap['transcript'] is None and snap['session_id'] is None)
+                    check('worker failure revokes transcript and session, then the worker restarts',revoked and snap['stt_status']=='ready' and snap.get('stt_last_error')=='worker_crashed' and snap['transcript'] is None)
                 elif cancel:
                     check('late native final fenced after cancel',cancelled and final is None and snap['transcript'] is None and snap['state']=='idle')
                 else:
@@ -67,7 +70,11 @@ def run():
                     check('raw normalization separate and confidence unknown',final['normalized']==' '.join(final['raw'].split()) and final['confidence'] is None)
                     check('revisions monotonic',all(b['revision']>a['revision'] for a,b in zip(partials,partials[1:])) and final['revision']>partials[-1]['revision'])
                     check('no command executed by STT final',req('action',session_id=sid,capability='open_app')['code']=='stale_session')
-                check('no voice/text files persisted',set(x.name for x in root.iterdir())=={'core.sock','core.lock','config.json','audit.log'})
+                # A failed worker leaves only its stderr tail (0600, content-free; A14), never transcripts or audio.
+                # A SIGKILLed worker writes no stderr, so its tail file may be absent.
+                expected={'core.sock','core.lock','config.json','audit.log'};optional={'stt-last-error.txt'} if bad_model or kill_worker else set()
+                present=set(x.name for x in root.iterdir())
+                check('no voice/text files persisted',expected<=present<=expected|optional)
                 resource=None
                 if final:
                     def owned_pids():

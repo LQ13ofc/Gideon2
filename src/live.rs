@@ -105,7 +105,7 @@ pub fn reason_for(step_code: &str, tail: &[u8]) -> &'static str {
                 WORKER_IMPORT_ERROR
             } else if text.contains("FileNotFoundError")
                 || text.contains("No such file or directory")
-                || text.contains("artifact hashes")
+                || text.contains("artifact hash")
             {
                 MODEL_MISSING
             } else {
@@ -117,17 +117,21 @@ pub fn reason_for(step_code: &str, tail: &[u8]) -> &'static str {
 
 /// Writes the diagnostic tail to `root/live-last-error.txt` with mode 0600, never following a link.
 pub fn write_last_error(root: &Path, tail: &[u8]) -> io::Result<()> {
+    write_private_file(&root.join(LAST_ERROR_FILE), tail)
+}
+
+/// Replaces `path` with `bytes` at mode 0600 (no-follow). Used for worker stderr tails only.
+pub fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let path = root.join(LAST_ERROR_FILE);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
+        .open(path)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    io::Write::write_all(&mut file, tail)?;
+    io::Write::write_all(&mut file, bytes)?;
     file.sync_all()
 }
 
@@ -658,7 +662,7 @@ pub async fn run_input(
 }
 
 /// Keeps the last `STDERR_TAIL` bytes of a worker's stderr until it closes. Output is never written anywhere else.
-async fn read_tail(mut stderr: tokio::process::ChildStderr) -> Vec<u8> {
+pub(crate) async fn read_tail(mut stderr: tokio::process::ChildStderr) -> Vec<u8> {
     let mut tail: VecDeque<u8> = VecDeque::with_capacity(STDERR_TAIL);
     let mut chunk = [0u8; 512];
     loop {

@@ -10,6 +10,8 @@ PLUGIN_STATES=('disabled','starting','running','failed','stopped','quarantined')
 # Exact status sets emitted by the Core (src/core.rs, src/transport.rs). Anything else is an invalid snapshot.
 WAKE_STATES=('unavailable','starting','replaying','failed','replay_finished')
 STT_STATES=('unavailable','starting','ready','failed')
+# Content-free STT failure reasons (src/stt.rs, src/live.rs reason_for); optional key stt_last_error.
+STT_REASONS=('worker_crashed','worker_import_error','model_missing','worker_unavailable','worker_timeout','worker_backlog')
 SPEECH_STATES=('unavailable','idle','muted','disabled','speaking','completed','failed','cancelled','timed_out','audio_error','stt_failed','stt_unavailable','transcript_final','capture_completed','no_speech','capture_too_long')
 OUTPUT_LIMIT=8192;TEXT_LIMIT=512;HEX=frozenset('0123456789abcdef')
 # Portuguese words for the Core state codes shown in the diagnostic line (same words as Main.qml statusLabels).
@@ -30,7 +32,7 @@ STAGED_ERRORS=('staged_payload_invalid',)
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
 STT_SOURCES=('voice','user_text')
 COMMAND_KINDS={'open_app':('desktop_id',),'volume':('level',),'mute':(),'unmute':(),'volume_up':(),'volume_down':(),'status':(),'time':(),'date':(),'cancel':()}
-TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','actions','command','speech','transcript','capture','agent','skills','connections','registry','audio','languages','wake_phrases','phrase_check'})
+TOP_KEYS=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','stt_last_error','wake_status','hub','capability_result','partial','base_pack','configuration_status','configuration_recovery_available','preferences','actions','command','speech','transcript','capture','agent','skills','connections','registry','audio','languages','wake_phrases','phrase_check'})
 TOP_REQUIRED=frozenset({'version','request_id','code','state','session_id','sequence','events','plugins','llm','tool_proposals','text_input_available','speech_samples','speech_status','stt_status','wake_status'})
 HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision','install_revision','installed','import','entries','orphans','reason','repository','catalog_sha256'})
 HUB_REQUIRED=HUB_KEYS-{'reason'}
@@ -851,6 +853,7 @@ def validate_snapshot(data,request_id,min_sequence):
     if 'code' in data:require(short(data['code']))
     for key,states in (('wake_status',WAKE_STATES),('stt_status',STT_STATES),('speech_status',SPEECH_STATES)):
         if key in data:require(data[key] in states)
+    if 'stt_last_error' in data:require(data['stt_last_error'] in STT_REASONS)
     if 'audio' in data:require(audio_ok(data['audio']))
     if 'text_input_available' in data:require(type(data['text_input_available']) is bool)
     if 'speech_samples' in data:require(integer(data['speech_samples'],0,240000))
@@ -2576,11 +2579,14 @@ class Bridge(QObject):
         return {**banner,'show':True} if banner else {'show':False,'device':'','text':'','action':''}
     @Slot(result=str)
     def liveLastErrorText(self):
-        """A13 diagnostics: the last worker stderr tail, from the 0600 file in the Core data dir. Only Diagnóstico › Desenvolvedor reads it; never the snapshot."""
-        try:
-            with open(self.root/'live-last-error.txt','rb') as handle:data=handle.read(4096)
-        except OSError:return ''
-        return data.decode('utf-8','replace')[-2048:]
+        """A13/A14 diagnostics: the last stderr tails of the wake worker and of the STT worker, from the 0600 files in the Core data dir. Only Diagnóstico › Desenvolvedor reads them; never the snapshot."""
+        parts=[]
+        for label,name in (('Worker de wake','live-last-error.txt'),('Worker de STT','stt-last-error.txt')):
+            try:
+                with open(self.root/name,'rb') as handle:data=handle.read(4096)
+            except OSError:continue
+            parts.append(label+':\n'+data.decode('utf-8','replace')[-2048:])
+        return '\n\n'.join(parts)
     # A9 meter and probe (Dispositivos) and the state line (Hoje). Every value comes from audio.live / audio.probe.
     @Property('QVariantMap',notify=audioChanged)
     def audioLevel(self):return level_view(self._live(),self.online)

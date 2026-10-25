@@ -49,6 +49,8 @@ pub struct Core {
     capture_summary: Option<CaptureSummary>,
     stt_engine: Option<String>,
     stt_status: &'static str,
+    /// Content-free reason of the last STT failure (`stt_last_error`); kept after a successful restart.
+    stt_reason: Option<&'static str>,
     stt_requests: VecDeque<SttRequest>,
     transcript: Option<Transcript>,
     /// Wake phrase texts that open a command (one per active phrase). `None` = commands not configured.
@@ -130,6 +132,7 @@ impl Core {
             capture_summary: None,
             stt_engine: None,
             stt_status: "unavailable",
+            stt_reason: None,
             stt_requests: VecDeque::new(),
             transcript: None,
             command_wake: None,
@@ -533,11 +536,7 @@ impl Core {
             return;
         }
         self.expire(now);
-        if self.stt_requests.len() >= 32 {
-            self.stt_requests.clear();
-            self.stt_failed();
-            return;
-        }
+        // No count limit here: the transport owns the STT queue (merging and a bounded backlog, src/stt.rs).
         if self.stt_engine.is_some() && self.stt_status != "ready" {
             if detected {
                 self.audio_wake(now);
@@ -615,12 +614,27 @@ impl Core {
     pub fn configure_stt(&mut self, engine: String) {
         self.stt_engine = Some(engine);
         self.stt_status = "starting";
+        self.stt_reason = None;
     }
     pub fn take_stt_requests(&mut self) -> VecDeque<SttRequest> {
         std::mem::take(&mut self.stt_requests)
     }
+    /// Permanent STT failure (no restart left): status `failed` until the Core restarts.
     pub fn stt_failed(&mut self) {
         self.stt_status = "failed";
+        self.transcript = None;
+        self.finish("stt_failed");
+    }
+    /// Permanent failure with its content-free reason.
+    pub fn stt_failed_with(&mut self, reason: &'static str) {
+        self.stt_reason = Some(reason);
+        self.stt_failed();
+    }
+    /// A worker failed and a restart is scheduled: the session ends, the transcript is revoked, and the status
+    /// reads `starting` until the new worker reports ready (detections meanwhile end as `stt_unavailable`).
+    pub fn stt_restarting(&mut self, reason: &'static str) {
+        self.stt_reason = Some(reason);
+        self.stt_status = "starting";
         self.transcript = None;
         self.finish("stt_failed");
     }
@@ -1071,6 +1085,7 @@ impl Core {
             speech: self.speech_summary.clone(),
             version: VERSION,
             stt_status: self.stt_status,
+            stt_last_error: self.stt_reason,
             transcript: self.transcript.clone(),
             capture: self.capture_summary.clone(),
             wake_status: self.wake_status,
@@ -2969,7 +2984,9 @@ mod tests {
         assert_eq!(c.sequence, sequence);
     }
     #[test]
-    fn streaming_backpressure_is_terminal_and_drops_pending_audio() {
+    fn stt_queue_backlog_never_fails_the_session_or_drops_audio() {
+        // A backlog is the transport's to absorb (src/stt.rs `Pipe`): the Core keeps every request in order
+        // and the status stays ready. Only a stuck worker fails it, and that is reported by the supervisor.
         let now = Instant::now();
         let mut c = Core::new(Duration::from_secs(30), false);
         c.enable_capture();
@@ -2994,9 +3011,54 @@ mod tests {
                 now + Duration::from_millis(i * 100),
             );
         }
+        assert_eq!(c.stt_status, "ready");
+        assert!(c.session.is_some());
+        let queued: usize = c
+            .stt_requests
+            .iter()
+            .map(|r| match r {
+                SttRequest::Frame { samples, .. } => samples.len(),
+                _ => 0,
+            })
+            .sum();
+        // The detection packet opens the capture (pre-roll), and the 49 packets after it are queued: none dropped.
+        assert_eq!(queued, 50 * 1600);
+        assert!(c.stt_requests.len() > 32);
+    }
+    #[test]
+    fn restart_moves_status_through_starting_to_ready_and_keeps_the_reason() {
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), false);
+        c.configure_stt("test".into());
+        c.stt_reply(
+            SttReply::Ready {
+                engine: "test".into(),
+            },
+            now,
+        );
+        c.stt_restarting("worker_crashed");
+        assert_eq!(c.stt_status, "starting");
+        assert_eq!(
+            c.response(String::new(), "ok").stt_last_error,
+            Some("worker_crashed")
+        );
+        c.stt_reply(
+            SttReply::Ready {
+                engine: "test".into(),
+            },
+            now,
+        );
+        assert_eq!(c.stt_status, "ready");
+        assert_eq!(
+            c.response(String::new(), "ok").stt_last_error,
+            Some("worker_crashed")
+        );
+        c.stt_failed_with("worker_backlog");
         assert_eq!(c.stt_status, "failed");
-        assert!(c.session.is_none() && c.completed_audio.is_none());
-        assert!(c.stt_requests.len() <= 1);
+        assert_eq!(
+            c.response(String::new(), "ok").stt_last_error,
+            Some("worker_backlog")
+        );
     }
     #[test]
     fn detection_while_restart_is_pending_is_dropped_without_panic() {

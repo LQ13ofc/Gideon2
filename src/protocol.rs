@@ -485,6 +485,9 @@ pub struct Response {
     pub speech_status: &'static str,
     pub speech: Option<crate::tts::Summary>,
     pub stt_status: &'static str,
+    /// Content-free reason of the last STT failure (closed vocabulary in src/stt.rs and src/live.rs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stt_last_error: Option<&'static str>,
     pub transcript: Option<crate::stt::Transcript>,
     pub capture: Option<crate::capture::CaptureSummary>,
     pub wake_status: &'static str,
