@@ -101,7 +101,7 @@ PageFrame {
                     Accessible.name: "Indicador da câmera: " + core.perceptionCameraIndicator
                 }
             }
-            // B16: the live recorder of the Core (--live-audio); "Microfone ativo" only while it captures.
+            // B16: the live recorder of the Core (A6 consent, Dispositivos); "Microfone ativo" only while it captures.
             Text {
                 objectName: "liveInputState"
                 text: core.micActive ? "Microfone ativo · " + core.audioLiveText : core.audioLiveText

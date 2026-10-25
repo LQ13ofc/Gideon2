@@ -85,7 +85,7 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(BASE),'other',1)
         with self.assertRaises(ValueError):validate_snapshot(copy.deepcopy(BASE),'r',2)
     def test_preferences_presentation_rejects_bad_values(self):
-        valid={'version':1,'revision':2**64-1,'audible_feedback':False,'visual_feedback':True,'output_volume_percent':100,'session_timeout_ms':60000,'wake_phrase':None}
+        valid={'version':1,'revision':2**64-1,'audible_feedback':False,'visual_feedback':True,'output_volume_percent':100,'session_timeout_ms':60000,'wake_phrase':None,'live_audio':False}
         cfg=copy.deepcopy(BASE);cfg['preferences']=valid
         validate_snapshot(cfg,'r',0)
         for key,value in [('version',True),('revision',True),('revision',-1),('revision',2**64),('audible_feedback','yes'),('visual_feedback','yes'),('output_volume_percent',True),('output_volume_percent',101),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':30000,'output_volume_percent':-1}),('session_timeout_ms',0),('session_timeout_ms',60001),('wake_phrase','../private'),('previous_preferences',[]),('previous_preferences',{'audible_feedback':True,'session_timeout_ms':0})]:
@@ -93,11 +93,11 @@ class Tests(unittest.TestCase):
             with self.subTest(key=key),self.assertRaises(ValueError):validate_snapshot(cfg,'r',0)
     def test_audio_block_accepts_core_shapes_and_rejects_fakes(self):
         # A4/A5 (src/live.rs, src/devices.rs): the mic indicator and device lists must match what the Core can report.
-        live={'enabled':True,'input_state':'capturing','output_state':'idle','mic_active':True}
+        live={'enabled':True,'input_state':'capturing','output_state':'idle','mic_active':True,'restart_required':False}
         devices={'inputs':[{'id':'usb-mic.1','label':'USB Microphone','default':True}],'outputs':[],'source':'pactl'}
         validate_snapshot({**BASE,'audio':{'live':live}},'r',0)
-        validate_snapshot({**BASE,'audio':{'live':{'enabled':False,'input_state':'idle','output_state':'idle','mic_active':False},'devices':{'inputs':[],'outputs':[],'source':'none','reason':'no_audio_tool'}}},'r',0)
-        for bad in [{**live,'input_state':'idle'},{**live,'mic_active':False},{'enabled':False,'input_state':'capturing','output_state':'idle','mic_active':True},{**live,'last_error':'shell_exec'},{**live,'output_state':'listening'},{**live,'extra':1}]:
+        validate_snapshot({**BASE,'audio':{'live':{'enabled':False,'input_state':'idle','output_state':'idle','mic_active':False,'restart_required':True},'devices':{'inputs':[],'outputs':[],'source':'none','reason':'no_audio_tool'}}},'r',0)
+        for bad in [{**live,'input_state':'idle'},{**live,'mic_active':False},{'enabled':False,'input_state':'capturing','output_state':'idle','mic_active':True,'restart_required':False},{**live,'last_error':'shell_exec'},{**live,'output_state':'listening'},{**live,'extra':1},{**live,'restart_required':'no'},{k:v for k,v in live.items() if k!='restart_required'}]:
             with self.subTest(live=bad),self.assertRaises(ValueError):validate_snapshot({**BASE,'audio':{'live':bad}},'r',0)
         for bad in [{**devices,'source':'pulse'},{**devices,'inputs':[{'id':'bad$name','label':'x','default':False}]},{**devices,'inputs':[{'id':'ok','label':'x','default':'yes'}]},{'inputs':[],'outputs':[],'source':'none'},{'inputs':[],'outputs':[],'source':'pactl','reason':'no_audio_tool'},{**devices,'inputs':[{'id':f'd{i}','label':'x','default':False} for i in range(17)]}]:
             with self.subTest(devices=bad),self.assertRaises(ValueError):validate_snapshot({**BASE,'audio':{'live':live,'devices':bad}},'r',0)
@@ -191,7 +191,7 @@ class Tests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_snapshot({**empty,'plugins':{'revision':0,'status':'ok','items':[{'plugin_id':'x','semver':'1','capabilities':[],'state':'disabled','enabled':False,'restarts':0,'last_error':None}]}},'r',0)
     def test_plugin_requests_bind_revision_and_bounded_input_over_socket(self):
         def at(state,enabled,revision,result=None):
-            snap=plugin_snapshot(state,enabled);snap['plugins']['revision']=revision;snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000,'wake_phrase':None,'visual_feedback':True,'output_volume_percent':100}
+            snap=plugin_snapshot(state,enabled);snap['plugins']['revision']=revision;snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000,'wake_phrase':None,'visual_feedback':True,'output_volume_percent':100,'live_audio':False}
             if result is None:snap.pop('capability_result',None)
             else:snap['capability_result']=result
             return snap
@@ -249,7 +249,7 @@ def answer(peer,request,snap,code='ok'):
 def settle(bridge):
     pump(lambda:bridge.pending is None);bridge.poll.stop()
 def ready(snap):
-    snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000,'wake_phrase':None,'visual_feedback':True,'output_volume_percent':100};return snap
+    snap['preferences']={'version':1,'revision':0,'audible_feedback':True,'session_timeout_ms':30000,'wake_phrase':None,'visual_feedback':True,'output_volume_percent':100,'live_audio':False};return snap
 def dual_snapshot():
     """Two installed, approved, running plugins: enough to prove per-plugin state survives unrelated updates."""
     s=ready(copy.deepcopy(plugin_snapshot('running',True)))
@@ -2962,10 +2962,10 @@ class DeveloperDiagnostics(unittest.TestCase):
             with self.subTest(bad=bad),self.assertRaises(ValueError):validate_snapshot({**snap,'hub':{**snap['hub'],'entries':[{**entry,**bad}]}},'r',0)
         with self.subTest(case='date without approval'),self.assertRaises(ValueError):validate_snapshot({**snap,'hub':{**snap['hub'],'entries':[{**entry,'permissions_approved':False}]}},'r',0)
 # ---- B16 (docs/A6-live-audio.md): sensitivity, devices, live status and the Core defaults restore. Fake Core frames only.
-from bridge import DEVICE_INVALID_TEXT,LIVE_ERROR_MESSAGES,RESTORE_BUSY_TEXT,SENSITIVITY_RANGE_TEXT,UNAVAILABLE_DEVICE_LABEL,AUDIO_REASON_MESSAGES,device_choices,devices_status,live_input_text,live_output_text
+from bridge import DEVICE_INVALID_TEXT,LIVE_ERROR_MESSAGES,RESTORE_BUSY_TEXT,SENSITIVITY_RANGE_TEXT,UNAVAILABLE_DEVICE_LABEL,AUDIO_REASON_MESSAGES,CODE_MESSAGES,device_choices,devices_status,live_input_text,live_output_text,live_state_text
 AUDIO_DEVICES={'source':'pactl','inputs':[{'id':'usb-mic.1','label':'USB Mic','default':True}],'outputs':[{'id':'alsa_out.hdmi','label':'HDMI','default':False}]}
-AUDIO_LIVE_OFF={'enabled':False,'input_state':'idle','output_state':'idle','mic_active':False}
-AUDIO_CAPTURING={'enabled':True,'input_state':'capturing','output_state':'idle','mic_active':True}
+AUDIO_LIVE_OFF={'enabled':False,'input_state':'idle','output_state':'idle','mic_active':False,'restart_required':False}
+AUDIO_CAPTURING={'enabled':True,'input_state':'capturing','output_state':'idle','mic_active':True,'restart_required':False}
 def audio_snapshot(devices=None,live=None,prefs=None):
     """A ready Core snapshot with the audio block (live always; devices only after audio_devices) and optional preference fields."""
     snap=ready(copy.deepcopy(BASE));snap['audio']={'live':dict(AUDIO_LIVE_OFF if live is None else live)}
@@ -3021,14 +3021,14 @@ class AudioBridge(unittest.TestCase):
         self.assertEqual(bridge.preferencesResult,'Padrões do Core restaurados; cópia anterior em config.json.bak')
     def test_live_status_and_mic_indicator_follow_the_core_only(self):
         bridge,_=connect_bridge(self,audio_snapshot(devices=AUDIO_DEVICES))
-        self.assertFalse(bridge.micActive);self.assertEqual(bridge.audioLiveText,'Entrada ao vivo: desligada — inicie o Core com --live-audio')
+        self.assertFalse(bridge.micActive);self.assertEqual(bridge.audioLiveText,'Escuta do microfone: desligado')
         bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=AUDIO_CAPTURING),'r',1))
-        self.assertTrue(bridge.micActive);self.assertEqual(bridge.audioLiveText,'Entrada ao vivo: capturando')
-        failed={'enabled':True,'input_state':'error','output_state':'error','mic_active':False,'last_error':'recorder_unavailable'}
+        self.assertTrue(bridge.micActive);self.assertEqual(bridge.audioLiveText,'Escuta do microfone: ouvindo')
+        failed={'enabled':True,'input_state':'error','output_state':'error','mic_active':False,'restart_required':False,'last_error':'recorder_unavailable'}
         bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=failed),'r',1))
         self.assertFalse(bridge.micActive)
-        self.assertEqual(bridge.audioLiveText,'Entrada ao vivo: erro: gravador de áudio indisponível (instale pipewire-pulse)')
-        playing_error={'enabled':True,'input_state':'idle','output_state':'error','mic_active':False,'last_error':'player_timeout'}
+        self.assertEqual(bridge.audioLiveText,'Escuta do microfone: erro: gravador de áudio indisponível (instale pipewire-pulse)')
+        playing_error={'enabled':True,'input_state':'idle','output_state':'error','mic_active':False,'restart_required':False,'last_error':'player_timeout'}
         bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=playing_error),'r',0))
         self.assertEqual(bridge.audioOutputText,'Saída ao vivo: erro: o reprodutor de áudio não respondeu')
     def test_sensitivity_and_audio_values_come_from_the_snapshot(self):
@@ -3038,6 +3038,55 @@ class AudioBridge(unittest.TestCase):
         self.assertEqual(bridge.wakeSensitivity,1.5)
         self.assertEqual(bridge.audioInputChoices[-1],{'value':'gone-mic','text':UNAVAILABLE_DEVICE_LABEL})
         self.assertEqual(bridge.audioInputSaved,'gone-mic')
+    def test_live_consent_slot_sends_confirmed_only_with_the_enable(self):
+        # A6: the dialog runs before enabled=True; the request carries the revision, the value and the confirmation.
+        bridge,peer=connect_bridge(self,audio_snapshot())
+        bridge.setLiveAudio(True);request=next_request(peer)
+        self.assertEqual(set(request)-{'version','request_id'},{'op','revision','enabled','confirmed'})
+        self.assertEqual((request['op'],request['revision'],request['enabled'],request['confirmed']),('live_audio_preference',0,True,True))
+        answer(peer,request,audio_snapshot(prefs={'live_audio':True},live=dict(AUDIO_LIVE_OFF,restart_required=True)));settle(bridge)
+        self.assertTrue(bridge.liveAudioEnabled);self.assertTrue(bridge.liveAudioRestartRequired)
+        self.assertEqual(bridge.preferencesResult,'Escuta do microfone salva no Core; reinicie o Core para aplicar')
+        bridge.setLiveAudio(False);request=next_request(peer)
+        self.assertEqual((request['enabled'],request['confirmed']),(False,False))
+        answer(peer,request,audio_snapshot());settle(bridge)
+        self.assertFalse(bridge.liveAudioEnabled)
+        bridge.setLiveAudio('yes');self.assertIsNone(bridge.pending)
+    def test_consent_refusal_names_the_missing_confirmation(self):
+        bridge,peer=connect_bridge(self,audio_snapshot())
+        bridge.setLiveAudio(True);request=next_request(peer)
+        answer(peer,request,audio_snapshot(),'consent_required');settle(bridge)
+        self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['consent_required'])
+        self.assertNotIn('_',bridge.preferencesResult)
+    def test_live_state_text_and_restart_flag_follow_the_core(self):
+        self.assertEqual(live_state_text(None),'sem informação do Core')
+        self.assertEqual(live_state_text(dict(AUDIO_LIVE_OFF)),'desligado')
+        self.assertEqual(live_state_text(dict(AUDIO_LIVE_OFF,restart_required=True)),'aguardando reinício do Core')
+        self.assertEqual(live_state_text(dict(AUDIO_CAPTURING)),'ouvindo')
+        self.assertEqual(live_state_text({'enabled':True,'input_state':'error','output_state':'idle','mic_active':False,'restart_required':False,'last_error':'restart_limit'}),'erro: limite de reinícios atingido')
+        bridge,_=connect_bridge(self,audio_snapshot(prefs={'live_audio':True},live=dict(AUDIO_LIVE_OFF,restart_required=True)))
+        self.assertTrue(bridge.liveAudioEnabled);self.assertTrue(bridge.liveAudioRestartRequired)
+        self.assertEqual(bridge.liveAudioStateText,'aguardando reinício do Core')
+        bridge._apply(validate_snapshot(audio_snapshot(prefs={'live_audio':True},live=AUDIO_CAPTURING),'r',0))
+        self.assertFalse(bridge.liveAudioRestartRequired);self.assertEqual(bridge.liveAudioStateText,'ouvindo')
+        bridge._apply(validate_snapshot(audio_snapshot(),'r',0))
+        self.assertFalse(bridge.liveAudioEnabled);self.assertEqual(bridge.liveAudioStateText,'desligado')
+        for bad in ({'live_audio':'yes'},{'live_audio':1}):
+            with self.subTest(prefs=bad),self.assertRaises(ValueError):validate_snapshot(audio_snapshot(prefs=bad),'r',0)
+        for bad in (dict(AUDIO_LIVE_OFF,restart_required='no'),{k:v for k,v in AUDIO_LIVE_OFF.items() if k!='restart_required'}):
+            with self.subTest(live=bad),self.assertRaises(ValueError):validate_snapshot(audio_snapshot(live=bad),'r',0)
+    def test_last_voice_turn_is_labelled_test_audio_while_the_mic_is_off(self):
+        bridge,_=connect_bridge(self,audio_snapshot())
+        self.assertFalse(bridge.lastInteractionIsTestAudio)
+        voice=audio_snapshot();voice['transcript']=transcript_block(source='voice')
+        bridge._apply(validate_snapshot(voice,'r',0))
+        self.assertTrue(bridge.lastInteractionIsTestAudio)
+        typed=audio_snapshot();typed['transcript']=transcript_block(source='user_text')
+        bridge._apply(validate_snapshot(typed,'r',0))
+        self.assertFalse(bridge.lastInteractionIsTestAudio)
+        live=audio_snapshot(live=AUDIO_CAPTURING);live['transcript']=transcript_block(source='voice')
+        bridge._apply(validate_snapshot(live,'r',0))
+        self.assertFalse(bridge.lastInteractionIsTestAudio)
     def test_audio_changes_notify_only_the_audio_consumers(self):
         bridge=Bridge('/nonexistent-gideon-root');counts=Counter()
         for signal in ('audioChanged','preferencesChanged'):getattr(bridge,signal).connect(lambda n=signal:counts.update([n]))
@@ -3060,7 +3109,7 @@ class AudioContract(unittest.TestCase):
         self.assertEqual(devices_status(None),'Dispositivos ainda não consultados: use Atualizar lista')
         self.assertEqual(devices_status({'source':'pw-dump','inputs':[],'outputs':[]}),'Nenhum dispositivo de áudio listado por PipeWire (pw-dump)')
         self.assertEqual(device_choices(None,'inputs','default'),[{'value':'default','text':'Padrão do sistema'}])
-        self.assertEqual(live_input_text(None),'Entrada ao vivo: sem informação do Core')
+        self.assertEqual(live_input_text(None),'Escuta do microfone: sem informação do Core')
         self.assertEqual(live_output_text({'enabled':True,'input_state':'idle','output_state':'playing','mic_active':False}),'Saída ao vivo: reproduzindo')
 class AudioQml(unittest.TestCase):
     def test_voice_devices_general_and_indicators_follow_qml_rules(self):
@@ -3106,23 +3155,37 @@ def qml_audio_child():
             check('restore of the speaker is off at the system default',find('restoreAudioOutput').property('enabled') is False)
             check('output select offers the default and the listed speaker',outputs.property('count')==2 and outputs.property('enabled'))
             check('no unavailable note remains on devices',find('audioDevicesStatus').property('visible') is False and find('audioInputEmpty').property('visible') is False)
-            check('live status says the recorder is off',find('liveInputStatus').property('text')=='Entrada ao vivo: desligada — inicie o Core com --live-audio')
+            check('live status says the microphone is off',find('liveInputStatus').property('text')=='Escuta do microfone: desligado')
+            check('consent switch is off by default and not checked by the page',find('liveAudioSwitch').property('checked') is False)
             check('refresh list button is enabled while connected',find('refreshAudioDevicesButton').property('enabled'))
             bridge._apply(validate_snapshot(audio_snapshot(devices={'source':'none','reason':'no_audio_tool','inputs':[],'outputs':[]}),'r',0))
             QTest.qWait(50)
             check('unsupported state names the tool to install',find('audioDevicesStatus').property('text')==AUDIO_REASON_MESSAGES['no_audio_tool'] and find('audioDevicesStatus').property('visible'))
             bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=AUDIO_CAPTURING),'r',0))
             QTest.qWait(50)
-            check('devices page reads the capturing state',find('liveInputStatus').property('text')=='Entrada ao vivo: capturando')
+            check('devices page reads the capturing state',find('liveInputStatus').property('text')=='Escuta do microfone: ouvindo')
             check('top bar shows Microfone ativo while captured',find('micActiveLabel').property('visible') and find('micDot').property('visible'))
             window.setProperty('pageId','hoje');QTest.qWait(50)
             check('hoje badge shows Microfone ativo while captured',find('hojeMicBadge').property('visible') and find('hojeMicBadge').property('text')=='Microfone ativo')
+            check('hoje quiet line is hidden while the microphone captures',find('hojeLiveHint').property('visible') is False)
             window.setProperty('pageId','cfg_privacidade');QTest.qWait(50)
             check('privacy page names the microphone as active',find('privacyMicState').property('text')=='Captura ao vivo em andamento.' and find('privacyMicBadge').property('visible'))
             bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=AUDIO_LIVE_OFF),'r',0))
             QTest.qWait(50)
             check('top bar hides Microfone ativo when the recorder is off',find('micActiveLabel').property('visible') is False)
             check('hoje badge is hidden when the recorder is off',find('hojeMicBadge').property('visible') is False)
+            window.setProperty('pageId','hoje');QTest.qWait(50)
+            check('hoje says the microphone is off in one quiet line',find('hojeLiveHint').property('visible') and find('hojeLiveHint').property('text')=='Microfone desligado: ative em Dispositivos para usar a voz')
+            bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,prefs={'live_audio':True},live=dict(AUDIO_LIVE_OFF,restart_required=True)),'r',0))
+            QTest.qWait(50)
+            check('hoje says a consented microphone starts at the restart',find('hojeLiveHint').property('text')=='Microfone será ativado ao reiniciar o Core.')
+            window.setProperty('pageId','cfg_dispositivos');QTest.qWait(50)
+            check('devices page offers the Core restart while it is pending',find('liveAudioRestartButton').property('visible') and find('liveAudioRestartButton').property('enabled'))
+            check('devices page names the pending restart',find('liveInputStatus').property('text')=='Escuta do microfone: aguardando reinício do Core')
+            bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,live=AUDIO_LIVE_OFF),'r',0))
+            QTest.qWait(50)
+            check('restart button hides once nothing is pending',find('liveAudioRestartButton').property('visible') is False)
+            window.setProperty('pageId','hoje');QTest.qWait(50)
             check('privacy page says the microphone is inactive',find('privacyMicState').property('text')=='Microfone inativo.')
             window.setProperty('pageId','cfg_geral');QTest.qWait(50)
             check('core defaults restore is offered while preferences are available',find('restoreCoreDefaultsButton').property('enabled'))

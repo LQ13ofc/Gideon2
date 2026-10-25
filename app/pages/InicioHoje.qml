@@ -95,7 +95,7 @@ PageFrame {
         }
         Chip {
             objectName: "chipEntrada"
-            // B16: the real device name only while the live recorder is on (--live-audio); otherwise the virtual PCM the wake uses.
+            // B16: the real device name only while the live microphone listens (A6 consent); otherwise the virtual PCM the wake uses.
             text: core.wakeChoices.length === 0 ? "Entrada: indisponível"
                 : (core.audioLive.enabled === true ? "Entrada: " + core.audioInputLabel : "Entrada: PCM virtual")
             onClicked: Window.window.goPage("cfg_dispositivos")
@@ -165,6 +165,19 @@ PageFrame {
                 visible: core.micActive || page.hud.badge.length > 0
                 text: core.micActive ? "Microfone ativo" : page.hud.badge
                 tone: core.micActive ? "warning" : "info"
+            }
+            // A6: while the Core does not listen to the microphone, one quiet line says how to turn it on.
+            Text {
+                objectName: "hojeLiveHint"
+                visible: core.audioLive.enabled !== true
+                text: core.liveAudioEnabled ? "Microfone será ativado ao reiniciar o Core." : "Microfone desligado: ative em Dispositivos para usar a voz"
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Accessible.name: text
             }
         }
     }
@@ -276,6 +289,17 @@ PageFrame {
     Section {
         title: "Última interação"
         // The last words of the session: what the user said (partial or final) and the receipt of the last command.
+        // Turns heard while the microphone is off come from the boot replay or the virtual PCM: they are test audio.
+        Text {
+            objectName: "interactionTestLabel"
+            visible: core.lastInteractionIsTestAudio && core.subtitle.length > 0
+            text: "(áudio de teste)"
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            Layout.fillWidth: true
+        }
         Rectangle {
             objectName: "transcriptViewport"
             Layout.fillWidth: true

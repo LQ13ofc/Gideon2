@@ -36,7 +36,7 @@ HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision',
 HUB_REQUIRED=HUB_KEYS-{'reason'}
 ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','approved_at_ms','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
 ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities','approved_at_ms'}
-PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','audio_input_device','audio_output_device'})
+PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','audio_input_device','audio_output_device','live_audio'})
 # Core bounds (src/storage.rs): sensitivity 0.5..=1.5; device names 1..=128 bytes from this charset.
 DEVICE_CHARS=frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:@/+ -')
 def wake_sensitivity_ok(value):return type(value) in (int,float) and math.isfinite(value) and 0.5<=value<=1.5
@@ -57,8 +57,8 @@ def audio_devices_ok(d):
     if d['source']=='none':return 'reason' in d and d['reason'] in AUDIO_REASONS and not lists[0] and not lists[1]
     return 'reason' not in d
 def audio_live_ok(live):
-    if not isinstance(live,dict) or not {'enabled','input_state','output_state','mic_active'}<=set(live)<={'enabled','input_state','output_state','mic_active','last_error'}:return False
-    if type(live['enabled']) is not bool or type(live['mic_active']) is not bool:return False
+    if not isinstance(live,dict) or not {'enabled','input_state','output_state','mic_active','restart_required'}<=set(live)<={'enabled','input_state','output_state','mic_active','restart_required','last_error'}:return False
+    if type(live['enabled']) is not bool or type(live['mic_active']) is not bool or type(live['restart_required']) is not bool:return False
     if live['input_state'] not in LIVE_INPUT_STATES or live['output_state'] not in LIVE_OUTPUT_STATES:return False
     if 'last_error' in live and live['last_error'] not in LIVE_ERRORS:return False
     # The microphone indicator is only true while the recorder captures; a disabled feature is idle.
@@ -84,17 +84,20 @@ def device_choices(devices,direction,saved):
     known={item['id'] for item in listed}
     if saved!=DEFAULT_DEVICE and saved not in known:rows.append({'value':saved,'text':UNAVAILABLE_DEVICE_LABEL})
     return rows
-def live_input_text(live):
-    if not live:return 'Entrada ao vivo: sem informação do Core'
-    if not live.get('enabled'):return 'Entrada ao vivo: desligada — inicie o Core com --live-audio'
-    if live.get('input_state')=='capturing':return 'Entrada ao vivo: capturando'
+# A6 state line of the microphone consent: desligado / aguardando reinício / ouvindo / erro: motivo (texts only; no Core code).
+def live_state_text(live):
+    if not live:return 'sem informação do Core'
+    if live.get('restart_required') is True:return 'aguardando reinício do Core'
+    if not live.get('enabled'):return 'desligado'
+    if live.get('input_state')=='capturing':return 'ouvindo'
     if live.get('input_state')=='error':
         error=live.get('last_error') or ''
-        return 'Entrada ao vivo: erro: '+(LIVE_ERROR_MESSAGES.get(error,'falha na captura') if not error.startswith('player_') else 'falha na captura')
-    return 'Entrada ao vivo: em espera'
+        return 'erro: '+(LIVE_ERROR_MESSAGES.get(error,'falha na captura') if not error.startswith('player_') else 'falha na captura')
+    return 'em espera'
+def live_input_text(live):return 'Escuta do microfone: '+live_state_text(live)
 def live_output_text(live):
     if not live:return 'Saída ao vivo: sem informação do Core'
-    if not live.get('enabled'):return 'Saída ao vivo: desligada — inicie o Core com --live-audio'
+    if not live.get('enabled'):return 'Saída ao vivo: desligada — a resposta usa a saída virtual'
     if live.get('output_state')=='playing':return 'Saída ao vivo: reproduzindo'
     if live.get('output_state')=='error':
         error=live.get('last_error') or ''
@@ -613,6 +616,8 @@ def validate_snapshot(data,request_id,min_sequence):
         require(integer(prefs.get('revision')) and integer(prefs.get('session_timeout_ms'),50,60000))
         require(type(prefs.get('audible_feedback')) is bool)
         require(type(prefs['visual_feedback']) is bool and integer(prefs['output_volume_percent'],0,100))
+        # A6 consent: the Core always reports it; strict bool.
+        require(type(prefs.get('live_audio')) is bool)
         if 'wake_sensitivity' in prefs:require(wake_sensitivity_ok(prefs['wake_sensitivity']))
         for key in ('audio_input_device','audio_output_device'):
             if key in prefs:require(audio_device_ok(prefs[key]))
@@ -797,6 +802,7 @@ CODE_MESSAGES={
     'invalid_preferences':'Preferências recusadas pelo Core: valor inválido; nada foi salvo',
     'preferences_storage_error':'Preferências indisponíveis: o arquivo de configuração não pôde ser lido ou gravado',
     'preferences_unavailable':'Preferências indisponíveis agora; tente quando o Gideon estiver em espera',
+    'consent_required':'Escuta do microfone não ativada: a confirmação não chegou ao Core; nada foi alterado',
     # C1: LLM engine, secrets and tool proposals (Core codes from src/llmcfg.rs, src/core.rs, src/tools.rs).
     'key_missing':'Chave ausente para este provedor',
     'provider_not_configured':'Provedor não configurado',
@@ -1335,6 +1341,9 @@ OPS.update({
     'preferences_restore_defaults':('prefs','Padrões do Core restaurados; cópia anterior em config.json.bak'),
 })
 PENDING.update({'audio_devices':'Consultando dispositivos no Core…','preferences_restore_defaults':'Restaurando padrões do Core…'})
+# A6 consent for the live microphone (docs/A6-live-audio.md): one op, read back from preferences.live_audio and audio.live.restart_required.
+OPS.update({'live_audio_preference':('prefs','Escuta do microfone salva no Core; reinicie o Core para aplicar')})
+PENDING.update({'live_audio_preference':'Salvando a escuta do microfone no Core…'})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
 SECTION_SIGNALS={'entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged'}
@@ -2089,6 +2098,22 @@ class Bridge(QObject):
     def audioOutputText(self):return live_output_text(self._live())
     @Property(str,notify=changed)
     def audioResult(self):return self.results['audio']
+    # A6 consent: the switch shows the ledger value; the state line and the restart flag come from audio.live.
+    @Property(bool,notify=preferencesChanged)
+    def liveAudioEnabled(self):return (self.snapshot.get('preferences') or {}).get('live_audio') is True
+    @Property(bool,notify=audioChanged)
+    def liveAudioRestartRequired(self):return self._live().get('restart_required') is True
+    @Property(str,notify=audioChanged)
+    def liveAudioStateText(self):return live_state_text(self._live() if self.online else None)
+    # Voice turns come from the boot replay fixture or the virtual PCM whenever the microphone is not live: such a turn is test audio.
+    @Property(bool,notify=changed)
+    def lastInteractionIsTestAudio(self):return (self.snapshot.get('transcript') or {}).get('source')=='voice' and self._live().get('enabled') is not True
+    @Slot(bool)
+    def setLiveAudio(self,enabled):
+        """Consent switch. The dialog (Cancelar by default) runs before enabled=True; the Core refuses an enable without confirmed."""
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        self._preferences('live_audio_preference',revision=int(self.preferencesRevision),enabled=enabled,confirmed=enabled)
     @Slot(float)
     def setWakeSensitivity(self,value):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())

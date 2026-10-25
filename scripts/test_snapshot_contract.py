@@ -910,7 +910,7 @@ class SnapshotContract(unittest.TestCase):
         c = self.core.start()
         before = c.snap('before audio_devices')
         self.assertNotIn('devices', before['audio'], 'devices exist only after the first audio_devices')
-        self.assertEqual(before['audio']['live'], {'enabled': False, 'input_state': 'idle', 'output_state': 'idle', 'mic_active': False})
+        self.assertEqual(before['audio']['live'], {'enabled': False, 'input_state': 'idle', 'output_state': 'idle', 'mic_active': False, 'restart_required': False})
         self.assertEqual(c.req('audio_devices')['code'], 'ok')
         devices = c.snap('audio_devices answered')['audio']['devices']
         self.assertEqual(devices['source'], 'pactl')
@@ -928,6 +928,26 @@ class SnapshotContract(unittest.TestCase):
         defaults = c.snap('defaults restored')['preferences']
         self.assertEqual((defaults['wake_sensitivity'], defaults['audio_input_device']), (1.0, 'default'))
         self.assertTrue((self.root / 'config.json.bak').exists(), 'the previous config is kept as config.json.bak')
+        c.stop()
+
+    def test_live_consent_snapshots_validate_against_real_core(self):
+        """A6: the consent op and its snapshot (preferences.live_audio, audio.live.restart_required) validate; a refused enable changes nothing."""
+        fakes = BASE / 'tests/fixtures/fake_audio_tools'
+        home = str(self.td)
+        self.core.env = lambda: {'PATH': f'{fakes}:/usr/bin:/bin', 'HOME': home, 'XDG_CONFIG_HOME': home,
+                                 'XDG_DATA_HOME': home, 'XDG_CACHE_HOME': home, 'XDG_RUNTIME_DIR': home}
+        c = self.core.start()
+        before = c.snap('before consent')
+        self.assertFalse(before['preferences']['live_audio'])
+        refused = c.req('live_audio_preference', revision=before['preferences']['revision'], enabled=True, confirmed=False)
+        self.assertEqual(refused['code'], 'consent_required')
+        self.assertFalse(c.snap('refused consent')['preferences']['live_audio'])
+        granted = c.req('live_audio_preference', revision=before['preferences']['revision'], enabled=True, confirmed=True)
+        self.assertEqual(granted['code'], 'ok')
+        pending = c.snap('consent granted')
+        self.assertTrue(pending['preferences']['live_audio'])
+        self.assertEqual((pending['audio']['live']['restart_required'], pending['audio']['live']['enabled']), (True, False))
+        self.assertTrue(any(e['kind'] == 'live_audio_enabled' for e in pending['events']))
         c.stop()
 
 if __name__ == '__main__':

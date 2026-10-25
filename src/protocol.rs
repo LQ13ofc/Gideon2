@@ -71,6 +71,13 @@ pub enum Operation {
         revision: u64,
         phrase_id: String,
     },
+    /// A6 consent for the live microphone. `confirmed` must be true to turn it on: the client asserts that
+    /// the user accepted the consent text. Takes effect at the next Core start (`restart_required`).
+    LiveAudioPreference {
+        revision: u64,
+        enabled: bool,
+        confirmed: bool,
+    },
     RecoverConfiguration {
         revision: u64,
     },
@@ -345,7 +352,8 @@ pub fn unix_ms() -> u64 {
 /// Origin of an event kind. Closed set: core, plugin, hub, skill, connection, tool, agent, llm,
 /// speech, config, registry.
 pub fn origin_of(kind: &str) -> &'static str {
-    const PREFIXES: [(&str, &str); 14] = [
+    const PREFIXES: [(&str, &str); 15] = [
+        ("live_audio_", "config"),
         ("connection_", "connection"),
         ("tool_", "tool"),
         ("agent_", "agent"),
@@ -520,6 +528,13 @@ enum WireRequest {
         request_id: String,
         revision: u64,
         phrase_id: String,
+    },
+    LiveAudioPreference {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        enabled: bool,
+        confirmed: bool,
     },
     RecoverConfiguration {
         version: u16,
@@ -998,6 +1013,21 @@ impl<'de> Deserialize<'de> for Request {
                 Operation::SelectWake {
                     revision,
                     phrase_id,
+                },
+            ),
+            WireRequest::LiveAudioPreference {
+                version,
+                request_id,
+                revision,
+                enabled,
+                confirmed,
+            } => (
+                version,
+                request_id,
+                Operation::LiveAudioPreference {
+                    revision,
+                    enabled,
+                    confirmed,
                 },
             ),
             WireRequest::RecoverConfiguration {

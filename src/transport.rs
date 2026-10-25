@@ -483,7 +483,7 @@ pub async fn serve(
     hub_catalog: Option<(std::path::PathBuf, String)>,
     plugin_python: Option<std::path::PathBuf>,
     net_allow_loopback: bool,
-    live_audio: bool,
+    live_flag: bool,
 ) -> io::Result<bool> {
     let mut base_pack =
         if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
@@ -531,7 +531,14 @@ pub async fn serve(
     core.configure_connections(&storage);
     core.configure_registry(&storage);
     core.configure_skills(&storage);
-    core.configure_live(live_audio);
+    // A6: the ledger's consent starts the same live pipeline as `--live-audio`, and only with a Ready ledger
+    // and the wake profile (the live path replaces the boot replay). Safe mode carries the defaults: off.
+    let live_from_ledger = storage.configuration_status
+        == crate::storage::ConfigurationStatus::Ready
+        && storage.config.live_audio
+        && replay.is_some();
+    let live_audio = live_flag || live_from_ledger;
+    core.configure_live(live_audio, live_from_ledger);
     // A5: live settings (input device, spotter threshold) and live status. Settings are published
     // only between voice sessions, so a running utterance is never cut by a preference change.
     let (live_settings_tx, live_settings_rx) =

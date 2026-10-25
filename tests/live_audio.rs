@@ -166,6 +166,175 @@ fn kill_quietly(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// The replay profile WITHOUT `--live-audio`: the start-up mode comes from the ledger alone (A6). The wake
+/// python is the fake of tests/fixtures/live_audio: the replay run ends at once (`replay_finished`), and the
+/// live run hands over to the real test-energy worker.
+fn spawn_ledger(dir: &Path) -> Child {
+    fs::create_dir_all(dir.join("data")).unwrap();
+    let assets = repo().join("tests/fixtures/live_audio");
+    let manifest = dir.join("replay-manifest.json");
+    let body = json!({
+        "engine": "test-energy-detector",
+        "test_only": true,
+        "supported_phrases": {"hey_gideon": "HEY"},
+        "active_phrase": "hey_gideon",
+        "asset_root": assets.display().to_string(),
+        "fixtures": [{"id": "fixture-0", "path": assets.join("manifest.json").display().to_string()}],
+    });
+    fs::write(&manifest, body.to_string()).unwrap();
+    Command::new(env!("CARGO_BIN_EXE_gideon-base"))
+        .arg("--root")
+        .arg(dir.join("core"))
+        .arg("--home")
+        .arg(repo())
+        .arg("--data-dir")
+        .arg(dir.join("data"))
+        .arg("--wake-replay")
+        .arg(assets.join("fake_replay_worker.py"))
+        .arg(&manifest)
+        .arg("0")
+        .env("PATH", fakes_path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn Core")
+}
+
+fn manifest_of(dir: &Path) -> String {
+    dir.join("replay-manifest.json").display().to_string()
+}
+
+fn revision(root: &Path) -> u64 {
+    snapshot(root)["preferences"]["revision"].as_u64().unwrap()
+}
+
+/// Waits for the Core process to exit and returns its status code (75 after an accepted core_restart).
+fn exit_code(child: &mut Child) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status.code();
+        }
+        assert!(Instant::now() < deadline, "Core did not exit");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn ledger_consent_starts_live_after_restart_and_the_boot_replay_stops() {
+    let dir = std::env::temp_dir().join(format!("gideon-live-e-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let root = dir.join("core");
+    let manifest = manifest_of(&dir);
+    let mut child = spawn_ledger(&dir);
+    wait_ready(&root);
+
+    // Consent off (the default): the boot replay runs as before and no live worker or recorder exists.
+    let replayed = wait_snapshot(&root, 15, "boot replay finished", |s| {
+        s["wake_status"] == "replay_finished"
+    });
+    assert_eq!(replayed["preferences"]["live_audio"], false);
+    assert_eq!(replayed["audio"]["live"]["enabled"], false);
+    assert_eq!(replayed["audio"]["live"]["restart_required"], false);
+    assert!(pids_with_pair(&manifest, "--live").is_empty());
+    assert_eq!(set_preferences(&root, "fake-tone-e1", 1.0)["code"], "ok");
+
+    // Consent needs the client's confirmation: without it nothing changes.
+    let refused = call(
+        &root,
+        json!({"op": "live_audio_preference", "revision": revision(&root), "enabled": true, "confirmed": false}),
+    );
+    assert_eq!(refused["code"], "consent_required");
+    assert_eq!(snapshot(&root)["preferences"]["live_audio"], false);
+
+    // Confirmed: the ledger records it, the event is content-free, and the running Core is unchanged.
+    let granted = call(
+        &root,
+        json!({"op": "live_audio_preference", "revision": revision(&root), "enabled": true, "confirmed": true}),
+    );
+    assert_eq!(granted["code"], "ok");
+    let pending = snapshot(&root);
+    assert_eq!(pending["preferences"]["live_audio"], true);
+    assert_eq!(pending["audio"]["live"]["restart_required"], true);
+    assert_eq!(pending["audio"]["live"]["enabled"], false);
+    assert!(pending["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["kind"] == "live_audio_enabled"));
+
+    // A Core restart applies it: the same root starts the live pipeline with the chosen device and no replay.
+    assert_eq!(call(&root, json!({"op": "core_restart"}))["code"], "ok");
+    assert_eq!(exit_code(&mut child), Some(75));
+    let mut child = spawn_ledger(&dir);
+    wait_ready(&root);
+    let live = wait_snapshot(&root, 20, "live mic after restart", |s| {
+        s["audio"]["live"]["mic_active"] == true
+    });
+    assert_eq!(live["audio"]["live"]["enabled"], true);
+    assert_eq!(live["audio"]["live"]["restart_required"], false);
+    assert_ne!(live["wake_status"], "replay_finished");
+    assert!(wait_pair("--target", "fake-tone-e1", 15), "recorder device");
+    assert!(wait_pair(&manifest, "--live", 15), "live wake worker");
+
+    // Withdrawing consent is applied the same way: the running Core asks for a restart, then replays again.
+    assert_eq!(
+        call(
+            &root,
+            json!({"op": "live_audio_preference", "revision": revision(&root), "enabled": false, "confirmed": false}),
+        )["code"],
+        "ok"
+    );
+    assert_eq!(snapshot(&root)["audio"]["live"]["restart_required"], true);
+    assert_eq!(call(&root, json!({"op": "core_restart"}))["code"], "ok");
+    assert_eq!(exit_code(&mut child), Some(75));
+    let mut child = spawn_ledger(&dir);
+    wait_ready(&root);
+    wait_snapshot(&root, 15, "replay again after consent withdrawn", |s| {
+        s["wake_status"] == "replay_finished"
+    });
+    let off = snapshot(&root);
+    assert_eq!(off["audio"]["live"]["enabled"], false);
+    assert_eq!(off["audio"]["live"]["mic_active"], false);
+    assert_eq!(off["audio"]["live"]["restart_required"], false);
+    assert!(pids_with_pair("--target", "fake-tone-e1").is_empty());
+    kill_quietly(&mut child);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn unreadable_ledger_keeps_the_microphone_off() {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let dir = std::env::temp_dir().join(format!("gideon-live-f-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let root = dir.join("core");
+    // A ledger that names the microphone and asks for live audio, but is invalid (version 2): safe mode.
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(&root)
+        .unwrap();
+    let ledger = root.join("config.json");
+    fs::write(
+        &ledger,
+        r#"{"version":2,"session_timeout_ms":30000,"audio_input_device":"fake-tone-f1","live_audio":true}"#,
+    )
+    .unwrap();
+    fs::set_permissions(&ledger, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut child = spawn_ledger(&dir);
+    wait_ready(&root);
+    let snap = snapshot(&root);
+    assert_eq!(snap["configuration_status"], "safe_mode");
+    assert_eq!(snap["audio"]["live"]["enabled"], false);
+    assert_eq!(snap["audio"]["live"]["restart_required"], false);
+    thread::sleep(Duration::from_millis(500));
+    assert!(pids_with_pair("--target", "fake-tone-f1").is_empty());
+    assert!(pids_with_pair(&manifest_of(&dir), "--live").is_empty());
+    kill_quietly(&mut child);
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn recorder_frames_reach_the_wake_detector_and_mic_follows_the_recorder() {
     let dir = std::env::temp_dir().join(format!("gideon-live-a-{}", std::process::id()));

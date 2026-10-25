@@ -287,3 +287,112 @@ fn restore_without_storage_is_unavailable_and_never_writes() {
     );
     assert_eq!(r.code, "preferences_unavailable");
 }
+
+#[test]
+fn live_audio_consent_is_strict_off_by_default_and_rollback_keeps_it() {
+    use gideon_base::{protocol::Request, storage::Config};
+    // Default and missing field: consent is off.
+    assert!(!Config::default().live_audio);
+    let legacy = r#"{"version":1,"session_timeout_ms":30000}"#;
+    assert!(!serde_json::from_str::<Config>(legacy).unwrap().live_audio);
+    // Strict wire: a bool only, no extra fields, and `confirmed` is required.
+    for bad in [
+        r#"{"version":1,"request_id":"x","op":"live_audio_preference","revision":0,"enabled":"yes","confirmed":true}"#,
+        r#"{"version":1,"request_id":"x","op":"live_audio_preference","revision":0,"enabled":true}"#,
+        r#"{"version":1,"request_id":"x","op":"live_audio_preference","revision":0,"enabled":true,"confirmed":true,"device":"x"}"#,
+    ] {
+        assert!(serde_json::from_str::<Request>(bad).is_err(), "{bad}");
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let (mut storage, mut core) = open(&root);
+    let now = Instant::now();
+    let grant = |revision: u64, enabled: bool, confirmed: bool| Operation::LiveAudioPreference {
+        revision,
+        enabled,
+        confirmed,
+    };
+    // Turning on without the confirmation changes nothing.
+    let refused = core.handle_with_storage(
+        request("c0", grant(0, true, false)),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(refused.code, "consent_required");
+    assert!(!storage.config.live_audio);
+    assert_eq!(storage.config.revision, 0);
+
+    let granted =
+        core.handle_with_storage(request("c1", grant(0, true, true)), now, Some(&mut storage));
+    assert_eq!(granted.code, "ok");
+    assert!(storage.config.live_audio);
+    assert_eq!(storage.config.revision, 1);
+    assert!(granted
+        .events
+        .iter()
+        .any(|e| e.kind == "live_audio_enabled"));
+    assert!(granted.preferences.live_audio);
+    assert!(granted.audio.live.restart_required);
+    assert!(!granted.audio.live.enabled);
+
+    // Stale revision and same-value no-op.
+    let stale = core.handle_with_storage(
+        request("c2", grant(0, false, false)),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(stale.code, "stale_preferences");
+    let same = core.handle_with_storage(
+        request("c3", grant(1, true, false)),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(same.code, "ok");
+    assert_eq!(storage.config.revision, 1);
+
+    // Other preferences keep it; rollback keeps the current consent (an older record never re-grants it).
+    let keep = core.handle_with_storage(
+        request("c4", set_all(1, Some(1.2), "usb-mic.1", "default")),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(keep.code, "ok");
+    assert!(storage.config.live_audio);
+    let rolled = core.handle_with_storage(
+        request("c5", Operation::RollbackPreferences { revision: 2 }),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(rolled.code, "ok");
+    assert!(storage.config.live_audio);
+    assert_eq!(storage.config.audio_input_device, "default");
+
+    // Withdrawing needs no confirmation; restoring the Core defaults turns it off as well.
+    let off = core.handle_with_storage(
+        request("c6", grant(storage.config.revision, false, false)),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(off.code, "ok");
+    assert!(!storage.config.live_audio);
+    assert!(off.events.iter().any(|e| e.kind == "live_audio_disabled"));
+    let on_again = core.handle_with_storage(
+        request("c7", grant(storage.config.revision, true, true)),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(on_again.code, "ok");
+    let restored = core.handle_with_storage(
+        request(
+            "c8",
+            Operation::PreferencesRestoreDefaults {
+                revision: storage.config.revision,
+            },
+        ),
+        now,
+        Some(&mut storage),
+    );
+    assert_eq!(restored.code, "ok");
+    assert!(!storage.config.live_audio);
+}

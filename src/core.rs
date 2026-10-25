@@ -124,9 +124,10 @@ impl Core {
             live: Default::default(),
         }
     }
-    /// A5: called once by `transport::serve` from the `--live-audio` flag.
-    pub(crate) fn configure_live(&mut self, enabled: bool) {
-        self.live.set_enabled(enabled);
+    /// A5/A6: called once by `transport::serve`. `enabled` is the pipeline switch of this process (flag or
+    /// ledger); `from_preference` is true when the ledger alone turned it on.
+    pub(crate) fn configure_live(&mut self, enabled: bool, from_preference: bool) {
+        self.live.configure(enabled, from_preference);
     }
     /// A5: status from the live input or output supervisors.
     pub(crate) fn live_event(&mut self, event: crate::live::LiveEvent) {
@@ -863,7 +864,7 @@ impl Core {
             wake_status: self.wake_status,
             audio: crate::live::AudioView {
                 devices: self.audio_devices.clone(),
-                live: self.live.view(),
+                live: self.live.view(self.preferences.live_audio),
             },
             request_id,
             code,
@@ -1682,6 +1683,46 @@ impl Core {
                     self.configure_storage(storage);
                     if result.is_ok() {
                         self.emit(req.request_id.clone(), None, "preferences_updated");
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
+            Operation::LiveAudioPreference { revision, .. }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::LiveAudioPreference { .. } if self.session.is_some() => "busy",
+            // Turning the microphone on needs the client's confirmation; turning it off never does.
+            Operation::LiveAudioPreference {
+                enabled: true,
+                confirmed: false,
+                ..
+            } if !self.preferences.live_audio => "consent_required",
+            // Same value: nothing is written and no event is emitted.
+            Operation::LiveAudioPreference { enabled, .. }
+                if enabled == self.preferences.live_audio =>
+            {
+                "ok"
+            }
+            Operation::LiveAudioPreference {
+                revision, enabled, ..
+            } => {
+                if let Some(storage) = storage {
+                    let result = storage.update_live_audio(revision, enabled);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        // Content-free: the kind alone says whether the microphone consent went on or off.
+                        let kind = if enabled {
+                            "live_audio_enabled"
+                        } else {
+                            "live_audio_disabled"
+                        };
+                        self.emit(req.request_id.clone(), None, kind);
                         "ok"
                     } else {
                         "preferences_storage_error"

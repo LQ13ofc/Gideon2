@@ -82,6 +82,8 @@ var rows = [
     ["secret_set", "Chave de provedor salva", "Configuração", false, true, false, "Plugin", "Concluído"],
     ["secret_cleared", "Chave de provedor removida", "Configuração", false, true, false, "Plugin", "Concluído"],
     ["preferences_updated", "Preferências salvas", "Configuração", false, true, false, "Comando", "Concluído"],
+    ["live_audio_enabled", "Escuta do microfone ligada (vale após reiniciar o Core)", "Configuração", false, true, false, "Comando", "Concluído"],
+    ["live_audio_disabled", "Escuta do microfone desligada (vale após reiniciar o Core)", "Configuração", false, true, false, "Comando", "Concluído"],
     ["configuration_recovered", "Configuração recuperada; reinício necessário", "Configuração", false, true, true, "Comando", "Concluído"],
     ["connection_added", "Conta adicionada", "Conexão", false, true, false, "Conexão", "Concluído"],
     ["connection_connected", "Conta conectada", "Conexão", false, true, false, "Conexão", "Concluído"],

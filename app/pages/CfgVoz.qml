@@ -311,7 +311,7 @@ PageFrame {
         title: "Como funciona"
         summary: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core."
         Text {
-            text: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core. O prazo da sessão vale na próxima sessão de voz. A sensibilidade ajusta o limiar do detector: na escuta ao vivo (--live-audio) vale na próxima sessão de voz; no modo de replay, só no próximo início do Core. Ainda não foi validada com microfone real."
+            text: "A frase de despertar muda só entre as opções certificadas do pacote. Trocar exige reiniciar o Core. O prazo da sessão vale na próxima sessão de voz. A sensibilidade ajusta o limiar do detector: com a escuta do microfone ligada (Dispositivos) vale na próxima sessão de voz; no modo de replay, só no próximo início do Core. Ainda não foi validada com microfone real."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

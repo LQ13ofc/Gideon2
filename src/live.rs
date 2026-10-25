@@ -81,10 +81,13 @@ pub enum LiveEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LiveView {
+    /// The live pipeline runs in this process (`--live-audio` or the ledger preference at start).
     pub enabled: bool,
     pub input_state: &'static str,
     pub output_state: &'static str,
     pub mic_active: bool,
+    /// The ledger preference differs from what this process started with: a Core restart applies it.
+    pub restart_required: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<&'static str>,
 }
@@ -100,6 +103,8 @@ pub struct AudioView {
 #[derive(Clone, Debug)]
 pub struct LiveState {
     enabled: bool,
+    /// The ledger preference that was in effect when this process started the pipeline.
+    started_with_preference: bool,
     input: &'static str,
     output: &'static str,
     error: Option<&'static str>,
@@ -108,6 +113,7 @@ impl Default for LiveState {
     fn default() -> Self {
         Self {
             enabled: false,
+            started_with_preference: false,
             input: "idle",
             output: "idle",
             error: None,
@@ -115,8 +121,11 @@ impl Default for LiveState {
     }
 }
 impl LiveState {
-    pub fn set_enabled(&mut self, enabled: bool) {
+    /// Called once at start: `enabled` is the pipeline switch of this process (flag or preference),
+    /// `from_preference` says whether the ledger alone turned it on.
+    pub fn configure(&mut self, enabled: bool, from_preference: bool) {
         self.enabled = enabled;
+        self.started_with_preference = from_preference;
     }
     pub fn apply(&mut self, event: LiveEvent) {
         match event {
@@ -133,12 +142,14 @@ impl LiveState {
             }
         }
     }
-    pub fn view(&self) -> LiveView {
+    /// `preference` is the current ledger value (`Config::live_audio`).
+    pub fn view(&self, preference: bool) -> LiveView {
         LiveView {
             enabled: self.enabled,
             input_state: self.input,
             output_state: self.output,
             mic_active: self.input == "capturing",
+            restart_required: preference != self.started_with_preference,
             last_error: self.error,
         }
     }
@@ -705,19 +716,35 @@ mod tests {
     #[test]
     fn view_reports_mic_only_while_capturing() {
         let mut state = LiveState::default();
-        assert!(!state.view().mic_active);
+        assert!(!state.view(false).mic_active);
         state.apply(LiveEvent::Input {
             state: "capturing",
             error: None,
         });
-        assert!(state.view().mic_active);
+        assert!(state.view(false).mic_active);
         state.apply(LiveEvent::Input {
             state: "error",
             error: Some("recorder_exited"),
         });
-        let view = state.view();
+        let view = state.view(false);
         assert!(!view.mic_active);
         assert_eq!(view.last_error, Some("recorder_exited"));
+    }
+
+    #[test]
+    fn restart_is_required_only_when_the_ledger_differs_from_the_start() {
+        let mut state = LiveState::default();
+        // Off at start, consent given: the next start applies it.
+        state.configure(false, false);
+        assert!(state.view(true).restart_required);
+        assert!(!state.view(false).restart_required);
+        // On from the ledger at start, consent withdrawn: the running pipeline stops at the next start.
+        state.configure(true, true);
+        assert!(!state.view(true).restart_required);
+        assert!(state.view(false).restart_required);
+        // On by the flag only: the ledger (off) is what it was at start, so nothing is pending.
+        state.configure(true, false);
+        assert!(!state.view(false).restart_required);
     }
 
     #[test]

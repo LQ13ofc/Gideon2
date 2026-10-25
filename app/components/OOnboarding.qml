@@ -119,7 +119,7 @@ Item {
                         IntroText { text: "•  Nada do que você fala é guardado em disco pela interface."; indent: true }
                         IntroText { text: "•  O áudio fica só em memória durante a captura. Nenhum arquivo de voz é gravado."; indent: true }
                         IntroText { text: "•  Não há histórico de conversas salvo. A nuvem só recebe conversas com consentimento."; indent: true }
-                        IntroText { text: "•  A entrada é virtual, salvo com o Core iniciado com --live-audio."; indent: true }
+                        IntroText { text: "•  A entrada é virtual, salvo se você ligar a escuta do microfone (passo 3 ou Dispositivos)."; indent: true }
                     }
 
                     // ---- 2. Frase de despertar (só certificadas)
@@ -170,12 +170,33 @@ Item {
                         objectName: "onboarding_step3"
                         Layout.fillWidth: true
                         spacing: Theme.space(10)
-                        IntroText { text: "Sem --live-audio, entrada e saída são virtuais. O volume abaixo é o da resposta por voz, não o do sistema." }
+                        IntroText { text: "Sem a escuta do microfone, entrada e saída são virtuais. O volume abaixo é o da resposta por voz, não o do sistema." }
                         IntroText { objectName: "onboarding_input_virtual"; text: "Entrada: PCM virtual (em uso)"; strong: true }
                         IntroText { objectName: "onboarding_output_virtual"; text: "Saída: virtual (em uso)"; strong: true }
                         IntroText {
                             objectName: "onboarding_physical_mic"
-                            text: "Microfone: escolha em Configurações › Dispositivos. A lista vem do sistema e a captura ao vivo só existe com --live-audio."
+                            text: "Microfone: escolha em Configurações › Dispositivos. A lista vem do sistema."
+                            small: true
+                        }
+                        // A6: optional and off by default. Turning it on asks for consent; the Core listens after its next start.
+                        Toggle {
+                            id: onboardingLiveSwitch
+                            objectName: "onboardingLiveSwitch"
+                            Layout.fillWidth: true
+                            text: "Ouvir o microfone (ativação por voz)"
+                            Accessible.name: "Ouvir o microfone para a ativação por voz"
+                            checked: core.liveAudioEnabled
+                            enabled: core.preferencesAvailable
+                            onToggled: {
+                                if (checked) liveConsent.open()
+                                else core.setLiveAudio(false)
+                                checked = Qt.binding(function () { return core.liveAudioEnabled })
+                            }
+                        }
+                        IntroText {
+                            objectName: "onboarding_live_note"
+                            visible: core.liveAudioEnabled && core.audioLive.enabled !== true
+                            text: "Será ativado ao reiniciar o Core. Enquanto isso, a entrada segue virtual."
                             small: true
                         }
                         IntroText {
@@ -278,6 +299,12 @@ Item {
                 }
             }
         }
+    }
+
+    // Consent of the optional microphone switch on step 3 (same text and focus rules as Dispositivos).
+    LiveAudioConsent {
+        id: liveConsent
+        onAgreed: core.setLiveAudio(true)
     }
 
     // Plain paragraph of the guide (13 or 14 px, wrapped). `strong` is the bold lead, `indent` the bullet line.

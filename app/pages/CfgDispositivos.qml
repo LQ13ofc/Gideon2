@@ -71,12 +71,81 @@ PageFrame {
         Layout.fillWidth: true
     }
 
+    // A6 consent for the live microphone. The switch shows the saved choice; turning it on opens the consent first, and
+    // the Core starts listening at its next start (Reiniciar agora applies it now, when no voice session runs).
+    Section {
+        title: "Escuta do microfone"
+        Text {
+            text: "Desligada, o Gideon não abre o microfone. Ligada, ele ouve o microfone escolhido abaixo só para detectar a frase de ativação. O áudio fica na memória e nada é gravado em disco. A troca vale depois de reiniciar o Core."
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Toggle {
+            id: liveSwitch
+            objectName: "liveAudioSwitch"
+            text: "Ouvir o microfone (ativação por voz)"
+            Accessible.name: "Ouvir o microfone para a ativação por voz"
+            checked: core.liveAudioEnabled
+            enabled: core.preferencesAvailable
+            onToggled: {
+                if (checked) consent.open()
+                else core.setLiveAudio(false)
+                // The switch follows the Core only: a click is not a change until the Core saves it.
+                checked = Qt.binding(function () { return core.liveAudioEnabled })
+            }
+        }
+        Text {
+            objectName: "liveInputStatus"
+            text: core.audioLiveText
+            textFormat: Text.PlainText
+            color: core.micActive || core.liveAudioRestartRequired ? Theme.warning : Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Accessible.name: "Estado da escuta do microfone: " + text
+        }
+        RowLayout {
+            objectName: "liveAudioRestartRow"
+            visible: core.liveAudioRestartRequired
+            Layout.fillWidth: true
+            spacing: Theme.space(10)
+            Text {
+                text: "A escolha só vale no próximo início do Core. Sessões de voz em andamento bloqueiam o reinício."
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            GButton {
+                objectName: "liveAudioRestartButton"
+                variant: "primary"
+                text: "Reiniciar agora"
+                Accessible.name: "Reiniciar o Core agora para aplicar a escuta do microfone"
+                enabled: core.coreRestartAvailable
+                onClicked: core.coreRestart()
+            }
+        }
+    }
+
+    // Opened by the switch; Cancelar (the default) leaves the saved value as it was.
+    LiveAudioConsent {
+        id: consent
+        onAgreed: core.setLiveAudio(true)
+    }
+
     Section {
         title: "Entrada (microfone)"
         Text {
             text: "Em uso agora: " + (core.audioLive.enabled === true
                 ? "captura ao vivo pelo dispositivo escolhido."
-                : "PCM virtual da escuta de teste. A captura pelo microfone só existe com o Core iniciado com --live-audio.")
+                : "entrada virtual (PCM de teste). O microfone entra em uso com a escuta ligada e o Core reiniciado.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -128,17 +197,6 @@ PageFrame {
             label: "Escolha salva"
             value: page.choiceText(core.audioInputChoices, core.audioInputSaved)
         }
-        Text {
-            objectName: "liveInputStatus"
-            text: core.audioLiveText
-            textFormat: Text.PlainText
-            color: core.micActive ? Theme.warning : Theme.textMuted
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontHelp
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-            Accessible.name: "Estado da entrada ao vivo: " + text
-        }
         EValueRow {
             label: "Formato da entrada"
             value: "PCM mono 16 kHz"
@@ -154,7 +212,7 @@ PageFrame {
     Section {
         title: "Saída (alto-falante)"
         Text {
-            text: "A resposta por voz sai pelo dispositivo escolhido quando o Core roda com --live-audio; sem isso, a saída é virtual."
+            text: "A resposta por voz sai pelo dispositivo escolhido quando a escuta do microfone está ligada e o Core foi reiniciado; sem isso, a saída é virtual."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -252,7 +310,7 @@ PageFrame {
         title: "Como funciona"
         summary: "Os dispositivos vêm da lista do sistema. A troca vale na próxima sessão de voz."
         Text {
-            text: "Os dispositivos são listados pelo sistema (pactl, depois pw-dump). Monitores de saída não aparecem. A troca vale na próxima sessão de voz. A captura ao vivo só existe com o Core iniciado com --live-audio. Nada aqui prova o microfone ou o alto-falante reais: a validação com hardware continua pendente."
+            text: "Os dispositivos são listados pelo sistema (pactl, depois pw-dump). Monitores de saída não aparecem. A troca vale na próxima sessão de voz. A captura ao vivo só existe com a escuta do microfone ligada e o Core reiniciado depois disso. Nada aqui prova o microfone ou o alto-falante reais: a validação com hardware continua pendente."
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

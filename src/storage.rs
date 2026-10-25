@@ -56,6 +56,12 @@ pub struct Config {
     /// Preferred playback device name (`default` = system default). Bounded by `valid_audio_device`.
     #[serde(default = "default_audio_device")]
     pub audio_output_device: String,
+    /// Consent to listen to the microphone continuously (A6). Off by default. A Core that starts with
+    /// it on runs the live recorder and wake worker instead of the boot replay; a change applies at the
+    /// next start (`restart_required` in `audio.live`). Rollback keeps the current value: an older
+    /// record never re-grants consent. Restoring defaults turns it off.
+    #[serde(default)]
+    pub live_audio: bool,
 }
 fn full_volume() -> u8 {
     100
@@ -106,6 +112,7 @@ impl Default for Config {
             wake_sensitivity: default_wake_sensitivity(),
             audio_input_device: default_audio_device(),
             audio_output_device: default_audio_device(),
+            live_audio: false,
         }
     }
 }
@@ -786,6 +793,20 @@ impl Storage {
         }
         let mut next = self.config.clone();
         next.wake_phrase = Some(phrase_id);
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
+    /// A6 consent switch. CAS on `revision` like every preference; only `live_audio` changes.
+    pub fn update_live_audio(&mut self, revision: u64, enabled: bool) -> io::Result<()> {
+        if self.configuration_status != ConfigurationStatus::Ready
+            || revision != self.config.revision
+        {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.live_audio = enabled;
         next.revision = revision
             .checked_add(1)
             .ok_or_else(|| io::Error::other("revision exhausted"))?;
