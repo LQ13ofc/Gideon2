@@ -153,3 +153,102 @@ pactl unload-module <id-do-remap-source>
 
 Verificação de cada etapa: `results/<tag>-s<sens>.json` (por clipe: disparo, latência,
 transcrição, comando), `results/summary-<tag>.json` (tabelas), e `docs/evidence/wake-live-virtual.json`.
+
+## Revisão: variância, causa e nova medição (2026-10-25, depois de A13)
+
+Esta revisão responde à queda de A13 (37/51) e mede o caminho ao vivo de HEAD (4165709) com o mesmo laboratório.
+Dados: `docs/evidence/wake-live-matrix.json`. Clipes fixados por sha256 em `docs/evidence/wake-live-pins.json`
+(o áudio não é versionado). Verificação: `scripts/wake_live_regression.py check`.
+
+### Não houve regressão de acerto comprovada
+
+| Execução (HEAD, sensibilidade 1.0, 105 clipes) | Condicionamento | Contagem | Positivos | Falsos nos 54 negativos |
+|---|---|---|---|---|
+| auto r1 | auto | sessões (STT ok) | 43/51 | 0 |
+| auto r2b | auto | detecções | 43/51 | 0 |
+| off r2 | off | detecções | 44/51 | 0 |
+| off r1b | off | detecções | 39/51 | 0 |
+| auto r2, off r1 | | sessões (STT falhou) | 2 e 4 (inválidas) | 0 |
+
+- Contagem por detecção: `live.last_detection` do snapshot, com ou sem sessão. Contagem por sessão só vê
+  sessões que aparecem em uma amostragem; quando o STT falha, a sessão termina antes e a contagem cai (2 e 4 acima).
+  Por isso as execuções inválidas não entram na taxa. O harness passou a contar por detecção.
+- O STT do laboratório travou (`worker_crashed`, reinícios e depois `failed`) em todas as execuções por detecção.
+  O acerto do wake não depende do STT, mas as sessões seguintes terminam como `stt_failed`. Causa não encontrada
+  nesta rodada (o traceback do worker não é guardado). Ver a seção de limites.
+- Offline, a mesma configuração (`scripts/wake_live_regression.py`, fluxo contínuo na ordem do laboratório) dá
+  43, 44 e 44 em três repetições; ao vivo deu 39 a 44. O modelo offline reproduz o ao vivo.
+- O número 37/51 de A13 não pode ser reproduzido com os dados guardados: o harness de A13 usava janela de 2,5 s e
+  contagem por sessão, e não há como saber se o STT falhou naquela execução.
+
+### Quais mudanças custam acertos (medido, offline, mesmos clipes e ordem)
+
+Três repetições por célula. A coluna "pareado" é a diferença repetição a repetição com a configuração de HEAD.
+
+| Célula | Acertos por repetição | Média | Falsos (negativos) | Pareado vs HEAD |
+|---|---|---|---|---|
+| HEAD: boost 1,2, limiar de frase 0,22, auto, aquecimento 3 s | 44, 44, 43 | 43,7 | 0 | - |
+| pacote (A7): sem boost, limiar 0,25, auto, 3 s | 40, 42, 42 | 41,3 | 0 | -2,3 (todas <0) |
+| HEAD sem condicionamento (off) | 44, 45, 43 | 44,0 | 1 (babble, rep. 0) | +0,3 |
+| HEAD sem aquecimento (0 s) | 36, 41, 47 | 41,3 | 1 (okay, rep. 1) | -2,3 (sinal misto: +8, +3, -4) |
+| pacote, sem condicionamento, sem aquecimento | 38, 44, 48 | 43,3 | 0 | - |
+| sem os concorrentes (só a linha "hey") | 44, 44, 43 | 43,7 | 2 a 4 (okay, hi, babble) | - |
+| linha extra de variante "HEY" | 44, 44, 43 | 43,7 | 0 | 0 |
+
+Conclusões de A7 que mudam:
+
+- A tabela de A7 (41/51, 50/51, 44/51) mistura execuções diferentes. A média da mesma configuração, medida
+  agora, é 41 a 44 de 51. Diferenças menores que cerca de 5 acertos entre execuções de uma só configuração não
+  são sinal (ver variância abaixo).
+- O número "51/51 com boost 1,2" de `docs/evidence/wake-phrases.json` não foi reproduzido. Foi retirado
+  como evidência e a justificativa está no próprio arquivo.
+- Os concorrentes (linhas OKAY e REJECT) são necessários. Sem eles, "Okay Gideon" e "Hi Gideon" disparam.
+- O aquecimento de 3 s foi mantido pela medição de cold start de A7 (D4: 28/51 com 1 s de antecedência, 47/51 com
+  4 s, em clipe isolado logo após o início do worker). Em fluxo contínuo o efeito médio (+2,3) não separa do efeito de
+  alinhamento; ele muda a fase de rotação de todos os clipes.
+
+### Variância: de onde vem
+
+- Mesma configuração, seis repetições offline: 42 a 49 (desvio-padrão 2,4). Ao vivo: 39 a 44.
+- Não é a fase da rotação do stream: positivos por posição desde a última rotação dão 85% a 88% em
+  cada faixa de 2 s (0 a 8 s; a rotação ocorre a cada 8 s, pois o worker rotaciona aos 10 s e reinicia com 2 s de
+  sobreposição).
+- Não é o limiar: clipes borderline disparam mesmo com limiar 0,35 quando estão isolados (traço de limiar de
+  cinco clipes), e 0,15 a 0,22 dão os mesmos acertos.
+- É o alinhamento do clipe com a grade de quadros do encoder (varredura de 320 ms em passos de 10 ms, motor isolado):
+  "hey brave af_bella clean" acerta 13 de 32 posições; "hey time am_michael room" 16 de 32; "hey plain am_michael clean"
+  8 de 32; "hey plain bf_emma snr20" 32 de 32. Cada execução ao vivo coloca cada clipe em outra posição da grade.
+  Os clipes que mudam entre repetições são cerca de 16 dos 51.
+- Portanto a variância entre execuções é intrínseca ao modelo de streaming (zipformer em blocos), não é um
+  defeito do Core. Não há um limiar que a elimine sem falsos disparos (ver a grade abaixo).
+
+### Ajuste de padrões: nenhum
+
+Grade de boost x limiar de frase (auto, 3 s, sensibilidade 1,0, 6 repetições, 66 min de ruído):
+
+| Boost | Limiar de frase | Acertos por repetição | Média | Falsos nos negativos | Falsos no ruído |
+|---|---|---|---|---|---|
+| 1,0 | 0,22 | 42, 42, 42, 44, 40, 48 | 43,0 | 0 | 0 |
+| 1,2 | 0,15 a 0,22 (padrão 0,22) | 44, 44, 43, 44, 42, 49 | 44,3 | 0 | 0 |
+| 1,2 | 0,26 | 42, 44, 42, 44, 42, 49 | 43,8 | 0 | 0 |
+| 1,4 | 0,22 | 43, 46, 45, 45, 43, 49 | 45,2 | 1 (babble, 1 de 6) | 0 |
+| 1,6 | 0,22 | 42, 46, 45, 47, 43, 49 | 45,3 | 3 de 6 repetições | 0 |
+
+O maior número de acertos com zero falso disparo é boost 1,2 com limiar 0,22 (padrão de HEAD, sem mudança). Boost 1,4
+ganha cerca de um acerto e admite o clipe de babble de 10 s. Limiar abaixo de 0,22 não muda nada nesta faixa.
+Pareado contra boost 1,0: +1,3 acertos (2, 2, 1, 0, 2, 1), mas isso é uma medição feita sobre o mesmo conjunto que
+escolheu o padrão: não há holdout. Os 66 min de ruído real não deram falso disparo em nenhuma célula.
+
+### Regressão
+
+`scripts/wake_live_regression.py check` (chão 0,82 = 42 de 51, mínimo de três repetições e ruído de 66 min):
+- configuração de HEAD: PASS, mínimo 43/51 (0,843), 0 falsos.
+- controle negativo (pacote, sem condicionamento, sem aquecimento): FAIL, saída 1.
+
+### Limites desta revisão
+
+- Os clipes são os mesmos que escolheram o padrão (sem holdout). Medição física com a voz do proprietário continua pendente.
+- O STT do laboratório falha durante as execuções ao vivo (`worker_crashed`). A causa não foi encontrada; o
+  acerto do wake foi contado por detecção. Esse problema é separado e precisa de investigação própria.
+- Execuções ao vivo: cinco com contagem válida ou parcial, nove minutos cada. Não é amostra estatística do microfone do proprietário.
+- O traço de limiar e a varredura de fase usam o motor isolado; não são uma medida ao vivo.

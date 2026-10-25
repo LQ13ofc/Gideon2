@@ -1,0 +1,980 @@
+{
+ "gate": "WAKE-LIVE-MATRIX",
+ "scope": "Private lab clips (105: 51 positives, 54 negatives; TTS Kokoro and Pocket; audio not versioned, sha256 in docs/evidence/wake-live-pins.json). Real-noise negatives: 66 min (three microphones, 22 min each), not versioned.",
+ "protocol": "Offline: scripts/wake_live_regression.py, one continuous stream in the live lab order (lead 1.0 s, tail 1.5 s, gap 0.8 s), production WakeEngine, 2 s cooldown. Repeats move the lead and the gaps (seeded). Live: real Core (--live-audio, private root, PipeWire virtual mic gideon_lab_mic), 105 clips, one at a time, waiting for session end. Detections counted from live.last_detection.",
+ "offline_matrix_default_family": {
+  "note": "Factorial over keyword variant x conditioning x warm-up, sensitivity 1.0, 3 repeats each. Noise column is the sum over the 3 real-noise files (66 min) of each cell.",
+  "cells": [
+   {
+    "cell": "default|cond-auto|warm0|s1",
+    "hits_per_repeat": [
+     36,
+     41,
+     47
+    ],
+    "mean_hits": 41.33,
+    "negative_false_per_repeat": [
+     0,
+     1,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1",
+    "hits_per_repeat": [
+     44,
+     44,
+     43
+    ],
+    "mean_hits": 43.67,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "default|cond-off|warm0|s1",
+    "hits_per_repeat": [
+     38,
+     45,
+     48
+    ],
+    "mean_hits": 43.67,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     1
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "default|cond-off|warm3|s1",
+    "hits_per_repeat": [
+     44,
+     45,
+     43
+    ],
+    "mean_hits": 44.0,
+    "negative_false_per_repeat": [
+     1,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "hey-only|cond-auto|warm0|s1",
+    "hits_per_repeat": [
+     36,
+     41,
+     47
+    ],
+    "mean_hits": 41.33,
+    "negative_false_per_repeat": [
+     2,
+     3,
+     4
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     1,
+     1,
+     1
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "hey-only|cond-auto|warm3|s1",
+    "hits_per_repeat": [
+     44,
+     44,
+     43
+    ],
+    "mean_hits": 43.67,
+    "negative_false_per_repeat": [
+     2,
+     4,
+     3
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     1,
+     1,
+     0
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "hey-only|cond-off|warm0|s1",
+    "hits_per_repeat": [
+     38,
+     45,
+     48
+    ],
+    "mean_hits": 43.67,
+    "negative_false_per_repeat": [
+     2,
+     4,
+     4
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     1,
+     0,
+     2
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "hey-only|cond-off|warm3|s1",
+    "hits_per_repeat": [
+     44,
+     45,
+     43
+    ],
+    "mean_hits": 44.0,
+    "negative_false_per_repeat": [
+     1,
+     4,
+     4
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     2,
+     0,
+     1
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "packaged|cond-auto|warm0|s1",
+    "hits_per_repeat": [
+     36,
+     41,
+     47
+    ],
+    "mean_hits": 41.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "packaged|cond-auto|warm3|s1",
+    "hits_per_repeat": [
+     40,
+     42,
+     42
+    ],
+    "mean_hits": 41.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "packaged|cond-off|warm0|s1",
+    "hits_per_repeat": [
+     38,
+     44,
+     48
+    ],
+    "mean_hits": 43.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "packaged|cond-off|warm3|s1",
+    "hits_per_repeat": [
+     42,
+     42,
+     40
+    ],
+    "mean_hits": 41.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "variant|cond-auto|warm0|s1",
+    "hits_per_repeat": [
+     36,
+     41,
+     47
+    ],
+    "mean_hits": 41.33,
+    "negative_false_per_repeat": [
+     0,
+     1,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "variant|cond-auto|warm3|s1",
+    "hits_per_repeat": [
+     44,
+     44,
+     43
+    ],
+    "mean_hits": 43.67,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "variant|cond-off|warm0|s1",
+    "hits_per_repeat": [
+     38,
+     45,
+     48
+    ],
+    "mean_hits": 43.67,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     1
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     64,
+     67,
+     67
+    ],
+    "noise_false": 0
+   },
+   {
+    "cell": "variant|cond-off|warm3|s1",
+    "hits_per_repeat": [
+     44,
+     45,
+     43
+    ],
+    "mean_hits": 44.0,
+    "negative_false_per_repeat": [
+     1,
+     0,
+     0
+    ],
+    "gap_false_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "cooldown_dropped_per_repeat": [
+     0,
+     0,
+     0
+    ],
+    "rotations_per_repeat": [
+     65,
+     67,
+     67
+    ],
+    "noise_false": 0
+   }
+  ]
+ },
+ "grid_boost_threshold": {
+  "note": "Default family (auto conditioning, warm-up 3 s, sensitivity 1.0) with the hey line boost and phrase threshold varied; 6 repeats; noise on all 66 min. This grid was run on the same clips that set the default, so it is tuning evidence, not a holdout.",
+  "cells": [
+   {
+    "cell": "default|cond-auto|warm3|s1",
+    "hits_per_repeat": [
+     44,
+     44,
+     43,
+     44,
+     42,
+     49
+    ],
+    "mean_hits": 44.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.2t0.15",
+    "hits_per_repeat": [
+     44,
+     44,
+     43,
+     44,
+     42,
+     49
+    ],
+    "mean_hits": 44.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.2t0.18",
+    "hits_per_repeat": [
+     44,
+     44,
+     43,
+     44,
+     42,
+     49
+    ],
+    "mean_hits": 44.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.2t0.26",
+    "hits_per_repeat": [
+     42,
+     44,
+     42,
+     44,
+     42,
+     49
+    ],
+    "mean_hits": 43.83,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.4t0.15",
+    "hits_per_repeat": [
+     44,
+     46,
+     45,
+     45,
+     43,
+     49
+    ],
+    "mean_hits": 45.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.4t0.18",
+    "hits_per_repeat": [
+     44,
+     46,
+     45,
+     45,
+     43,
+     49
+    ],
+    "mean_hits": 45.33,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.4t0.22",
+    "hits_per_repeat": [
+     43,
+     46,
+     45,
+     45,
+     43,
+     49
+    ],
+    "mean_hits": 45.17,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.4t0.26",
+    "hits_per_repeat": [
+     40,
+     45,
+     44,
+     43,
+     43,
+     49
+    ],
+    "mean_hits": 44.0,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.6t0.15",
+    "hits_per_repeat": [
+     44,
+     46,
+     45,
+     47,
+     43,
+     49
+    ],
+    "mean_hits": 45.67,
+    "negative_false_per_repeat": [
+     0,
+     1,
+     1,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.6t0.18",
+    "hits_per_repeat": [
+     44,
+     46,
+     45,
+     47,
+     43,
+     49
+    ],
+    "mean_hits": 45.67,
+    "negative_false_per_repeat": [
+     0,
+     1,
+     1,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.6t0.22",
+    "hits_per_repeat": [
+     42,
+     46,
+     45,
+     47,
+     43,
+     49
+    ],
+    "mean_hits": 45.33,
+    "negative_false_per_repeat": [
+     0,
+     1,
+     1,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1.6t0.26",
+    "hits_per_repeat": [
+     40,
+     45,
+     44,
+     45,
+     43,
+     49
+    ],
+    "mean_hits": 44.33,
+    "negative_false_per_repeat": [
+     0,
+     1,
+     1,
+     0,
+     0,
+     1
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1t0.15",
+    "hits_per_repeat": [
+     42,
+     42,
+     42,
+     44,
+     40,
+     48
+    ],
+    "mean_hits": 43.0,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1t0.18",
+    "hits_per_repeat": [
+     42,
+     42,
+     42,
+     44,
+     40,
+     48
+    ],
+    "mean_hits": 43.0,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1t0.22",
+    "hits_per_repeat": [
+     42,
+     42,
+     42,
+     44,
+     40,
+     48
+    ],
+    "mean_hits": 43.0,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   },
+   {
+    "cell": "default|cond-auto|warm3|s1|b1t0.26",
+    "hits_per_repeat": [
+     40,
+     42,
+     42,
+     44,
+     40,
+     48
+    ],
+    "mean_hits": 42.67,
+    "negative_false_per_repeat": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "noise_false": 0,
+    "noise_seconds": 3959.6
+   }
+  ]
+ },
+ "live_runs": [
+  {
+   "tag": "hd-auto-r1",
+   "conditioning": "auto",
+   "session_hits": 43,
+   "detection_hits": null,
+   "negative_false": 0,
+   "detection_negative_false": null,
+   "stt_status_last": null,
+   "stt_worker_crashes": 0,
+   "valid_for_hit_rate": false,
+   "note": "Session-based count, STT ready for the whole run: 43 of 51 sessions. Kept as the only auto run without STT failure."
+  },
+  {
+   "tag": "hd-auto-r2",
+   "conditioning": "auto",
+   "session_hits": 2,
+   "detection_hits": null,
+   "negative_false": 0,
+   "detection_negative_false": null,
+   "stt_status_last": null,
+   "stt_worker_crashes": 0,
+   "valid_for_hit_rate": false,
+   "note": "STT failed during the run; sessions ended before snapshots caught them. Detections were not recorded in this harness version."
+  },
+  {
+   "tag": "hd-auto-r2b",
+   "conditioning": "auto",
+   "session_hits": 4,
+   "detection_hits": 43,
+   "negative_false": 0,
+   "detection_negative_false": 0,
+   "stt_status_last": "failed",
+   "stt_worker_crashes": 3,
+   "valid_for_hit_rate": true,
+   "note": "Detection-based count (live.last_detection). STT worker crashed three times (worker_crashed) and was marked failed at 42.8 s."
+  },
+  {
+   "tag": "hd-off-r1",
+   "conditioning": "off",
+   "session_hits": 4,
+   "detection_hits": null,
+   "negative_false": 0,
+   "detection_negative_false": null,
+   "stt_status_last": null,
+   "stt_worker_crashes": 0,
+   "valid_for_hit_rate": false,
+   "note": "STT failed during the run; session-based count only, not valid."
+  },
+  {
+   "tag": "hd-off-r2",
+   "conditioning": "off",
+   "session_hits": 4,
+   "detection_hits": 44,
+   "negative_false": 0,
+   "detection_negative_false": 0,
+   "stt_status_last": null,
+   "stt_worker_crashes": 0,
+   "valid_for_hit_rate": true,
+   "note": "Detection-based count. STT failed during the run; sessions were not counted, detections were."
+  },
+  {
+   "tag": "hd-off-r1b",
+   "conditioning": "off",
+   "session_hits": 4,
+   "detection_hits": 39,
+   "negative_false": 0,
+   "detection_negative_false": 0,
+   "stt_status_last": "failed",
+   "stt_worker_crashes": 3,
+   "valid_for_hit_rate": true,
+   "note": "Detection-based count. STT failed during the run."
+  }
+ ],
+ "placement_sweep_fresh_engine": {
+  "note": "One clip shifted in 10 ms steps over 320 ms (default cell, fresh engine each step). Pattern 1 = hit.",
+  "clips": {
+   "pos-hey_brave-af_bella-clean": {
+    "hits": 13,
+    "of": 32,
+    "pattern": "11111100011101011100000000000000"
+   },
+   "pos-hey_plain-bf_emma-snr20": {
+    "hits": 32,
+    "of": 32,
+    "pattern": "11111111111111111111111111111111"
+   },
+   "pos-hey_time-am_michael-room": {
+    "hits": 16,
+    "of": 32,
+    "pattern": "11111011111110011110000000000000"
+   },
+   "pos-hey_plain-am_michael-clean": {
+    "hits": 8,
+    "of": 32,
+    "pattern": "11010100000100011100000000000000"
+   }
+  }
+ },
+ "rotation_phase_offline": {
+  "note": "Positives binned by start time since the last keyword-stream rotation (3 repeats, 153 positives). Rotations occur about every 8 s: the worker rotates at 10 s of stream and primes the new stream with 2 s.",
+  "bins_hits": {
+   "0-2 s": "35/40",
+   "2-4 s": "30/35",
+   "4-6 s": "33/39",
+   "6-8 s": "33/39"
+  }
+ },
+ "fire_threshold_trace_fresh_engine": {
+  "note": "Highest hey-line threshold (grid 0.10 to 0.35) that fires each clip alone, default lead 1.0 s, boost 1.2.",
+  "clips": {
+   "pos-hey_brave-af_bella-clean": 0.35,
+   "pos-hey_time-am_michael-room": 0.35,
+   "pos-hey_plain-am_michael-clean": 0.35,
+   "pos-hey_plain-bf_emma-snr20": 0.35,
+   "pos-hey_mute-af_bella-composite": 0.35
+  },
+  "reading": "These clips fire at the strictest threshold in this alignment. The miss is an alignment effect, not a threshold effect."
+ },
+ "conclusions": [
+  "Offline model and live Core agree for the default (auto) cell: 43-44 of 51 offline; live 43 (session count, STT ok) and 43 (detections, STT crashed). Conditioning off: offline 43-45; live detections 44 and 39. Zero false triggers on the 54 negatives in every valid live run, and on 66 min of real noise in every offline cell.",
+  "Warm-up 3 s matters: without it offline hits spread 36-47 across repeats; with it 43-44.",
+  "Conditioning auto removes the babble false trigger that conditioning off produced in one offline repeat (default, warm-up 3 s, repeat 0; in the packaged cell it did not fire). It costs no hits.",
+  "Boost 1.2 with phrase threshold 0.22 is the highest-hit setting with zero false triggers; boost 1.4 or 1.6 admits the 10 s babble clip in 1 of 6 repeats; thresholds 0.15 to 0.22 change nothing; 0.26 loses one hit on average.",
+  "Hit variance between runs comes from clip alignment on the stream: borderline positives change outcome with a sub-chunk shift of the same clip (placement sweep), not from rotation phase or the threshold.",
+  "The earlier live runs at 37/51 (A13) and 41-50 (A7) used session-based counts; with STT failing or restarting, sessions can be missed. The detection-based counts above are the measure of the wake path.",
+  "STT worker crashed (worker_crashed), restarted, and was marked failed in all three detection-era live runs. Wake detection kept working; sessions after the failure ended as stt_failed. Cause not found in this round."
+ ],
+ "limits": [
+  "Clips were used to set the default (A1 corpus and lab clips); no independent holdout for hit rate.",
+  "Four Kokoro voices and one Pocket voice; no human speech, no room or device measurement.",
+  "Live runs: four valid-or-partly valid runs, nine minutes each; not a statistical sample of the owner microphone."
+ ]
+}

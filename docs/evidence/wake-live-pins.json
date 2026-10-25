@@ -1,0 +1,954 @@
+{
+ "version": 1,
+ "clips": [
+  {
+   "id": "pos-hey_plain-bf_emma-clean",
+   "sha256": "078d27bbb3d400a815d7c183733ad34818645e50b89dbf9fe9af5d7643e230a0",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-bf_emma-snr20",
+   "sha256": "e58a026ecde37921afe76383551d062038d418e7f3f413ff0efebedd062245ed",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-bf_emma-room",
+   "sha256": "76bd671f214f36282e7c2c840a62147ce958244a2712e754c050b0a1e261ca15",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-bm_george-clean",
+   "sha256": "51b03f24ce49cfeaea09ed6f7cbcb788fa3abab834c20e223b9bad1520e25e21",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-bm_george-snr20",
+   "sha256": "93608df35170d070df4b1ae12a66cc4d529ceaa3c8570bdecc19fbe6f3100088",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-bm_george-room",
+   "sha256": "5c00785c233fd94b59d5afa40bd0688c92ee41874f1a5db7bda364eb018dd2c8",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-af_bella-clean",
+   "sha256": "7fc8dc2e44be90551a76a8b660a5de707bceba9d069c424e81c88fcc58b1d582",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-af_bella-snr20",
+   "sha256": "daf3bda019e1d90bcfd688cd778266497a6615a4aadbd657ef4c48e71e52db65",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-af_bella-room",
+   "sha256": "9196e1e3725119dc516863e231b5dbb373d544fafcc58e057e283595fe1b6702",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-am_michael-clean",
+   "sha256": "a87117eb168c3b1154e22a129a47caf2615da2529fc0dd43f099b53757cd8b12",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-am_michael-snr20",
+   "sha256": "fe993aa349171374a81438f5353169fb2f8261687f7cb22d4ee9de4c311af898",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_plain-am_michael-room",
+   "sha256": "984d435ffce7ee44c5ac319b5f624c09039d0d6cc695cb550f0ee373401f4472",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon."
+  },
+  {
+   "id": "pos-hey_brave-bf_emma-clean",
+   "sha256": "a5ed11f914517e33a6c52e03f8e5a358f528fec7610316320bf97cd74eda8daa",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bf_emma-snr20",
+   "sha256": "db965cb7a732a2a6895eef58f800d584fd3138f1e62c85eec769d261d22472b2",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bf_emma-room",
+   "sha256": "14125282e5e48d53ae3168e9535e76b46656bd19432ab856897dfcd22c4ce464",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bm_george-clean",
+   "sha256": "b9df3fe5c114e3857d3badff2075373454efbe4c73838f8a010b2c1ea0b7d324",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bm_george-snr20",
+   "sha256": "769007c8018c5b6deb1b0901b8b961f994ea1325f14723ea88f063504592e97c",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bm_george-room",
+   "sha256": "1d4450f20027dbc2335526f48eb4d708c6ce2dd5c6f3f848b499c9e78ffcf5e9",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-af_bella-clean",
+   "sha256": "1ebd01e0379deac868ca623a909fa4462c763735efa947a1f1b95bf6e4fa6bc2",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-af_bella-snr20",
+   "sha256": "d6aa9ac65ed1e9cc139985e4ffe39fd6e1962f64c0ce1932610e8935db00267c",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-af_bella-room",
+   "sha256": "55a2e7fb0f844e5fb2268a4d395a48efe84d5f4615c28119c45ec9a8b4206459",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-am_michael-clean",
+   "sha256": "a267c35d0604803d6a8f31585503c65b6294e8fb79736a463418f0ebef7189f6",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-am_michael-snr20",
+   "sha256": "1959c2e387e1578b27df5660273abf0e92be692d05570607f05142c9c38ab6b7",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-am_michael-room",
+   "sha256": "8e1e96771e508c76594fcd727ba270dc7f2e6dce6d467863659b0c9734b2e93c",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_time-bf_emma-clean",
+   "sha256": "58f590ab65184be5171112e1505eaf4cce62a8e4bc74adefcd1ae20521f0dee8",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-bf_emma-snr20",
+   "sha256": "89bdd7f2460ee9a8f9da0c32ef528263e359157cad9e4182b4750f8f45045ce8",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-bf_emma-room",
+   "sha256": "38c132fc732247eb0a6d5d315d5528a1ce9d89612d1de998f14c0e409118c342",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-bm_george-clean",
+   "sha256": "57faf9a853b237026b17d214e1e39c23102e683012cbfb6a2e9bfb66f00572bf",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-bm_george-snr20",
+   "sha256": "39c13b1a5d9033dc140946122815b6b7c6e62c0a62fcf4904bb8562c88aed4ea",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-bm_george-room",
+   "sha256": "d01d81348f03563ee6cccef00030f601f5cdae53117c873627bdbe15148b86e1",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-af_bella-clean",
+   "sha256": "caaf26d8fa3a1e5c0d09410b7df4671fef8b912f81b980f6623a01b8a2a9536d",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-af_bella-snr20",
+   "sha256": "6c64c4b8337cfbd3c07970f393663dfba6b73776f34f6f7632b6cab69cabfc40",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-af_bella-room",
+   "sha256": "5b06331e6f6b392bd2ca8ed95165893c1c7362de7d96b80efad0036f15d16f2c",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-am_michael-clean",
+   "sha256": "bd9fa632614183aec06189d5c1b6ff97893ad88154cb031aa67a08fd2a29bb07",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-am_michael-snr20",
+   "sha256": "014d7fb2d708a57ad993af934fafcaf21a273450420a858452627a89f63ee085",
+   "expect": true,
+   "class": "positive",
+   "condition": "noise-snr20db",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_time-am_michael-room",
+   "sha256": "62be9f9cce9efc376e24fb507da1a29ed4d767ae9530f6d988e183bb90006209",
+   "expect": true,
+   "class": "positive",
+   "condition": "room-fir-synthetic",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, what time is it?"
+  },
+  {
+   "id": "pos-hey_brave-bf_emma-quiet",
+   "sha256": "99e94260458ed2e4e9ed0d88ae2f60cdac1b54f27b210994f50e981a34bab1c2",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-quiet",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bf_emma-loud",
+   "sha256": "fc4763430f316b6c0336a2b5f41366deeaee01049b155e5a467cf0867abdf99a",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-loud",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bm_george-quiet",
+   "sha256": "21c4506e0204e1abc72ab267e193c010599b2d8de445f0da10ca4ece81f736ae",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-quiet",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-bm_george-loud",
+   "sha256": "30daa7cb77c71e7259d171ffd0aea04de18466f96a876ac0f4ff97f5e2d0f00a",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-loud",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-af_bella-quiet",
+   "sha256": "1f6ef2d6d8c61a5777ec1dade3f35295d89818eb15197a0b63cebf618e4b0145",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-quiet",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-af_bella-loud",
+   "sha256": "fbc69b547b71005b59a434b62e6ab952966cbc5b6f8eab75d171e9ea9f71d390",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-loud",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-am_michael-quiet",
+   "sha256": "5b175c05ae219847386c022b929ec41953950da7780be7288226bae2389fdcad",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-quiet",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_brave-am_michael-loud",
+   "sha256": "d06420ddec3d1d2d0b683709b21dd97adfefd23d70f81ac77e0b9ec631434dd7",
+   "expect": true,
+   "class": "positive",
+   "condition": "volume-loud",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-hey_mute-bf_emma-composite",
+   "sha256": "f0a125dff598dd6b6dfb7de7a1704b734b9a3670e4c85c0af7283f5491408839",
+   "expect": true,
+   "class": "positive",
+   "condition": "composite-concat",
+   "voice": "bf_emma",
+   "phrase": "Hey Gideon, mute."
+  },
+  {
+   "id": "pos-hey_mute-bm_george-composite",
+   "sha256": "c60d99d80454c3170eb71f73d6cb06c4460af53071fe584d85181f6a32c162f9",
+   "expect": true,
+   "class": "positive",
+   "condition": "composite-concat",
+   "voice": "bm_george",
+   "phrase": "Hey Gideon, mute."
+  },
+  {
+   "id": "pos-hey_mute-af_bella-composite",
+   "sha256": "92a85d2da1fcb0f7f3e7369dc66acf1af61695530391b0ee27801b2b971096d0",
+   "expect": true,
+   "class": "positive",
+   "condition": "composite-concat",
+   "voice": "af_bella",
+   "phrase": "Hey Gideon, mute."
+  },
+  {
+   "id": "pos-hey_mute-am_michael-composite",
+   "sha256": "cea0267bf44a7fcbaf8130479622aa7a45d553d177cc83ded44e4a579e724ad5",
+   "expect": true,
+   "class": "positive",
+   "condition": "composite-concat",
+   "voice": "am_michael",
+   "phrase": "Hey Gideon, mute."
+  },
+  {
+   "id": "neg-hey_julian-bf_emma",
+   "sha256": "5001738bbaccefc3a5c096f00f8ff430ba5754745a193f48a7e0bdb9d353cdc5",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Hey Julian, are you ready?"
+  },
+  {
+   "id": "neg-hey_julian-bm_george",
+   "sha256": "c2d0a8ee2ae5a250beb2da347fa174a7b1afccf9c4ba17677dc43c2ec9a4c1f4",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Hey Julian, are you ready?"
+  },
+  {
+   "id": "neg-hey_julian-af_bella",
+   "sha256": "5fc850254dbd35d05385679a78c1bc65e8c2fe02982fdd2aaef92b313b90fef6",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Hey Julian, are you ready?"
+  },
+  {
+   "id": "neg-hey_julian-am_michael",
+   "sha256": "e47ef18d8eb0f1ce3d1c4e074d43583f75c3d93194d440fb40c0487062b231fd",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Hey Julian, are you ready?"
+  },
+  {
+   "id": "neg-hey_giddy-bf_emma",
+   "sha256": "0ad5f254f15cafba7c7b546b287b15d246b1fc5257df41ca7e882e0fbc70716e",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Hey Giddy, come over here."
+  },
+  {
+   "id": "neg-hey_giddy-bm_george",
+   "sha256": "7c5e8f90dcee6b8609c49294a34d06983bb19c093f2b03a44b7b4544c3abcad1",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Hey Giddy, come over here."
+  },
+  {
+   "id": "neg-hey_giddy-af_bella",
+   "sha256": "f47c468f46ef67a793d8d6b5c58466098a62e53d87047f4c66d605894b304e43",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Hey Giddy, come over here."
+  },
+  {
+   "id": "neg-hey_giddy-am_michael",
+   "sha256": "8bd24f71acbaaaa4aa1850c9c082fe952953a21532834b3e435cb3965ff202a5",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Hey Giddy, come over here."
+  },
+  {
+   "id": "neg-hi_gideon-bf_emma",
+   "sha256": "2d713a3587a91a219ec8dcb4705ade317a47690b464aba27fa4b466877496d93",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Hi Gideon, how are you?"
+  },
+  {
+   "id": "neg-hi_gideon-bm_george",
+   "sha256": "12f13524e61d65d5da62efd0d7266600a8f7c793977e01dc8f35ccb9216e52eb",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Hi Gideon, how are you?"
+  },
+  {
+   "id": "neg-hi_gideon-af_bella",
+   "sha256": "e237022e56af8e70076d5e72cec6c44d4cd276d32e829b91ffd08e7a086e7c37",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Hi Gideon, how are you?"
+  },
+  {
+   "id": "neg-hi_gideon-am_michael",
+   "sha256": "1c4a62bba59efd7399a16ff919a03796dd9e8927f9352ad56efd23ee9e437aa9",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Hi Gideon, how are you?"
+  },
+  {
+   "id": "neg-okay_gideon-bf_emma",
+   "sha256": "b759975fba6eb7827aa7bd0f0b37aa15bf618eb6487a7a08494d7bbff05be357",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Okay Gideon, open Steam."
+  },
+  {
+   "id": "neg-okay_gideon-bm_george",
+   "sha256": "79835b1b54c17f3e6715436f3266d4b192fc0629612e1905ef00653d4738fa7d",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Okay Gideon, open Steam."
+  },
+  {
+   "id": "neg-okay_gideon-af_bella",
+   "sha256": "ad18f2f84cfa704c434fba08fcadb2186fba5d0aac78c440f0112c1b5851f7ba",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Okay Gideon, open Steam."
+  },
+  {
+   "id": "neg-okay_gideon-am_michael",
+   "sha256": "001834435adf0ca9cb0d9872892d78e00e69477400b2057ac780e786adc54ecc",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Okay Gideon, open Steam."
+  },
+  {
+   "id": "neg-gideon_alone-bf_emma",
+   "sha256": "51c13d78ffd0bb95423d226f6498727fb6f27724e9c4aaae6572ccd8ed0c6f83",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Gideon."
+  },
+  {
+   "id": "neg-gideon_alone-bm_george",
+   "sha256": "5715a50fdeb4f1212e749a073a9db35836febe862480c87309b2e08fc8cd8843",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Gideon."
+  },
+  {
+   "id": "neg-gideon_alone-af_bella",
+   "sha256": "937161c57e8d1c32ef189ec93204f56fdf4b1c5824a97ad41cf5e78e50a46bbd",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Gideon."
+  },
+  {
+   "id": "neg-gideon_alone-am_michael",
+   "sha256": "a0b24e0aa85d1141b533bb8bfb7f86104d15545d1fb4975c255ccb06e6dc0b68",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Gideon."
+  },
+  {
+   "id": "neg-open_chrome-bf_emma",
+   "sha256": "ce61a7501b16de52947910d576b79375473653834c7ae3cadd62bfb1e0ef0fb0",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Open Chrome."
+  },
+  {
+   "id": "neg-open_chrome-bm_george",
+   "sha256": "3cd63f75cef159e1030d51a94156c20c235bea13143cc600724c67a76e08293f",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Open Chrome."
+  },
+  {
+   "id": "neg-open_chrome-af_bella",
+   "sha256": "8e064ba1264773448404d533ac5ffc3d2dba0f6bca69db639a2db2f967817807",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Open Chrome."
+  },
+  {
+   "id": "neg-open_chrome-am_michael",
+   "sha256": "8bc0759cc37908ae14166bd1ce9dee3e996e74bf68202a1dab5ed86fc4e65e87",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Open Chrome."
+  },
+  {
+   "id": "neg-what_app-bf_emma",
+   "sha256": "eb0aef1ae49c8a54c5f5c10759caa8ac0a0041668b280f97d8ea0dbf3acb3ec1",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "What app did you open?"
+  },
+  {
+   "id": "neg-what_app-bm_george",
+   "sha256": "3776fd1ecb2e8251b2f742072f82e3304bc2054f1129ccebd6fd7e23bf67ccc5",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "What app did you open?"
+  },
+  {
+   "id": "neg-what_app-af_bella",
+   "sha256": "4d0df068c0a2dbcd8a169ac12e4b2425468ed6352943954ad65e0ace311ce7ae",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "What app did you open?"
+  },
+  {
+   "id": "neg-what_app-am_michael",
+   "sha256": "884826afe3e436623504a38d3d6a633155513dd565e266957059f79ee6c2d27d",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "What app did you open?"
+  },
+  {
+   "id": "neg-team_join-bf_emma",
+   "sha256": "ed0739b8c0eeb7653ec0135f9ffee3f8432c2cded7a88502a95ef7d5ea759a5e",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "The team will join us."
+  },
+  {
+   "id": "neg-team_join-bm_george",
+   "sha256": "0af6d4e299d265b13f1779960b77daa42f8ff925e36e34ca08958ec901a6e53f",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "The team will join us."
+  },
+  {
+   "id": "neg-team_join-af_bella",
+   "sha256": "6bbe9ce1eb8cc4df6f1aea01adbae7af21943e1dc0fe045a0839c0e7a98ca447",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "The team will join us."
+  },
+  {
+   "id": "neg-team_join-am_michael",
+   "sha256": "214f46b12a57f9756aa9d2cdc1a96c4d6d952cc0247365a62fdc726aec966a9f",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "The team will join us."
+  },
+  {
+   "id": "neg-yeah_yeah-bf_emma",
+   "sha256": "246fb91268b0bfcbd05c6b29809ef497646d2627c97325f95b24b9134b268fef",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "Yeah, yeah, I heard you."
+  },
+  {
+   "id": "neg-yeah_yeah-bm_george",
+   "sha256": "7bd049b8deb9dfa81633d1b1c06651760eea027f792756989b556298200db5fa",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "Yeah, yeah, I heard you."
+  },
+  {
+   "id": "neg-yeah_yeah-af_bella",
+   "sha256": "c6363055ffb9ac79084fb92b5330f994fca9b74418790e6ce877e951b6d5f452",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "Yeah, yeah, I heard you."
+  },
+  {
+   "id": "neg-yeah_yeah-am_michael",
+   "sha256": "ff5805c7a85641600ba09f0df5d244ed5ae3bd476cf475a0d40c9299a1702b30",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "Yeah, yeah, I heard you."
+  },
+  {
+   "id": "neg-weather-bf_emma",
+   "sha256": "168f7261d03e5a55c63f3a8df4c22d43c4b3fa6d6f455a6736d5da13ce507034",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "The weather changed before the train arrived."
+  },
+  {
+   "id": "neg-weather-bm_george",
+   "sha256": "1b1b535a994ae2bdfbaee7817e6159ccf5de8565e012da5953d06f7a725743c4",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "The weather changed before the train arrived."
+  },
+  {
+   "id": "neg-weather-af_bella",
+   "sha256": "47706412924e279641bc7620298d43c9ad080ebf4f2fd9604753f8ad9264b10a",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "The weather changed before the train arrived."
+  },
+  {
+   "id": "neg-weather-am_michael",
+   "sha256": "0920ef837a56418998107053afdcf3b7952cc463ce16d12c6d27f52c407d48a8",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "The weather changed before the train arrived."
+  },
+  {
+   "id": "neg-music-bf_emma",
+   "sha256": "5e74f57d0ee5ade00fb36425fa74a20580d23207f4fe3db4d618e333f90f84e8",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bf_emma",
+   "phrase": "I think the music is a little too loud."
+  },
+  {
+   "id": "neg-music-bm_george",
+   "sha256": "85689cd0bbaf3123ec758672f7a5c6a3c36abb3ff26d51a5dc151090593dd66c",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "bm_george",
+   "phrase": "I think the music is a little too loud."
+  },
+  {
+   "id": "neg-music-af_bella",
+   "sha256": "fc1bd173c420ea660de0c23acef4750148312856a744ba69a4e05579fe085f2e",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "af_bella",
+   "phrase": "I think the music is a little too loud."
+  },
+  {
+   "id": "neg-music-am_michael",
+   "sha256": "04bd9ec1a90f7649cc7ccc9e85cc26a912c8c412e3179d6ba7dab87ae522339b",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "am_michael",
+   "phrase": "I think the music is a little too loud."
+  },
+  {
+   "id": "neg-silence-10s",
+   "sha256": "ee7bea4232762775f8fce9b3e27e4d3948c8ac6a45a87ca769f703d6eed0b448",
+   "expect": false,
+   "class": "negative",
+   "condition": "silence",
+   "voice": null,
+   "phrase": null
+  },
+  {
+   "id": "neg-white-noise-10s",
+   "sha256": "977022c79690281fca14b3b932845c0232879e8f123218efc7e5801266672a08",
+   "expect": false,
+   "class": "negative",
+   "condition": "white-noise",
+   "voice": null,
+   "phrase": null
+  },
+  {
+   "id": "neg-pink-noise-10s",
+   "sha256": "b1718ef4531f483f3140588491616e6b69d034263f77a402f3042cc1d972e01b",
+   "expect": false,
+   "class": "negative",
+   "condition": "pink-noise",
+   "voice": null,
+   "phrase": null
+  },
+  {
+   "id": "neg-babble-10s",
+   "sha256": "afee4d060420b624ff4c344c2d14d30799cb445926a6ff8527dbe590544bc467",
+   "expect": false,
+   "class": "negative",
+   "condition": "tv-babble",
+   "voice": null,
+   "phrase": null
+  },
+  {
+   "id": "neg-okay_google_time-pocket",
+   "sha256": "9ac862a64e96a2fc68e96635ab1825fc769347f2ce8da62bb560f325928e2083",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Okay Google, what time is it?"
+  },
+  {
+   "id": "neg-okay_google_steam-pocket",
+   "sha256": "e9dade19786e02ded5d84fbf5cd3ac9c0fdf7a2126b9b7856a2281a207d69d1b",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Okay Google, open Steam."
+  },
+  {
+   "id": "neg-hey_jordan_brave-pocket",
+   "sha256": "a787c70e69aabd56779b7d9c2f5b931ac8a5572ad76f803bf2456b7834d2f45f",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Hey Jordan, open Brave."
+  },
+  {
+   "id": "neg-hey_jordan_time-pocket",
+   "sha256": "f3964563369c39f12cc57d2ab3ef9270d906ae8123032e1fa0d8a562cb2bfc49",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Hey Jordan, what time is it?"
+  },
+  {
+   "id": "neg-random_weather-pocket",
+   "sha256": "4320bfb1444abdff7cf260159891ad6787c1e1618714a900186d05b7414886a9",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "The weather is nice for a walk today."
+  },
+  {
+   "id": "neg-random_grocery-pocket",
+   "sha256": "5d299a5ca4253945ec31e1cebdf6a37205d886efa16e7286864271434cd35a6e",
+   "expect": false,
+   "class": "negative",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Please add eggs and milk to the list."
+  },
+  {
+   "id": "pos-pos_hey_pocket_mute-pocket",
+   "sha256": "a89a108b39f6f0ca081f9af0a6fff6173096e07debf77ccdd8aa00db269bc163",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Hey Gideon, mute."
+  },
+  {
+   "id": "pos-pos_hey_pocket_brave-pocket",
+   "sha256": "09c8100d98d46e9639ebd281532f79fa0ed4e14f413f1a65fbba60b5b8d22357",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Hey Gideon, open Brave."
+  },
+  {
+   "id": "pos-pos_hey_pocket_time-pocket",
+   "sha256": "11c7b81a5b698d5aacb77efcfb63983003bed7f6724763e0f1c4c879d7aa46be",
+   "expect": true,
+   "class": "positive",
+   "condition": "clean",
+   "voice": "alba (pocket-tts)",
+   "phrase": "Hey Gideon, what time is it?"
+  }
+ ],
+ "positives": 51,
+ "negatives": 54,
+ "protocol": "live lab order (seed 20261024), lead 1.0 s, tail 1.5 s, gap 0.8 s; 16 kHz mono s16 clips",
+ "scope": "private TTS clips (Kokoro, Pocket); audio not versioned"
+}

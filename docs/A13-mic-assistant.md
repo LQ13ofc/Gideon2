@@ -96,9 +96,11 @@ base só carrega com o manifesto para o qual foi montado).
 | Positivos detectados | **37 de 51** | 41 a 50 de 51 em três execuções |
 | Negativos com falso disparo | **0 de 54** | 0 de 54 |
 
-Esta queda não está explicada. Possíveis causas: manifesto diferente do A7 (A3 em vez do de laboratório),
-janela de 2,5 s depois de cada clipe, e aquecimento do worker. Não tratei como regressão provada; fica como
-pendência de investigação. Os falsos disparos continuam zero.
+Esta queda não está explicada neste documento. Revisão posterior (`docs/A7-wake-live-test.md`, seção de revisão):
+o modelo de palavra-chave e o manifesto dos ativos são os mesmos do laboratório (mesmos hashes do encoder, do
+decoder e do tokens), e a contagem desta rodada foi por sessão, com janela fixa de 2,5 s depois de cada clipe. Com a contagem por
+detecção, o mesmo HEAD deu 43 e 43 de 51 (auto) e 44 e 39 (off), e zero falsos nos negativos. Não foi possível
+reproduzir o 37/51 com os dados guardados. Os falsos disparos continuam zero.
 
 ### 3.5 Sensibilidade duas vezes, sem reinício do Core
 

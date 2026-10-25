@@ -180,3 +180,29 @@ e tem zero falso disparo nesse subtotal. Não foi escolhido por seguir a regra e
 /home/lucas/GideonV8/versions/0.8.0-ac074071/venvs/a1/bin/python -I /tmp/gideon-wake-lab/realnoise/summarize.py
 /home/lucas/GideonV8/versions/0.8.0-ac074071/venvs/a1/bin/python -I /tmp/gideon-wake-lab/realnoise/build_evidence.py
 ```
+
+## Revisão (A7, depois de A13): condicionamento no caminho ao vivo e no laboratório
+
+Esta revisão verifica a escolha de `auto` com o mesmo laboratório de A7 (105 clipes, fluxo contínuo na ordem do
+laboratório) e com o Core ao vivo. Detalhes e variância em `docs/A7-wake-live-test.md`; dados em
+`docs/evidence/wake-live-matrix.json`.
+
+| Medida (HEAD, boost 1,2, limiar 0,22, aquecimento 3 s, sensibilidade 1,0) | auto | off |
+|---|---|---|
+| Acertos offline, 3 repetições | 44, 44, 43 | 44, 45, 43 |
+| Falso disparo em babble de 10 s (offline, 3 repetições) | 0 | 1 (rep. 0) |
+| Falso disparo em babble, aquecimento 0 s (offline, 3 repetições) | 0 | 1 (rep. 2) |
+| Acertos ao vivo por detecção | 43 e 43 | 44 e 39 |
+| Falsos nos 54 negativos ao vivo | 0 | 0 |
+| Falsos no ruído real, 66 min (offline, 16 células) | 0 | 0 |
+
+Leitura: `auto` não custa acertos em nenhuma medida e evita o falso disparo do babble que `off` produziu em
+execuções offline. Mantém-se `auto` como padrão. Observação: o falso de `okay gideon` com aquecimento de 0 s
+(auto, repetição 1) é um concorrente, não o babble; sem aquecimento o fluxo começa frio e o concorrente
+pode ganhar a primeira decisão. Não é motivo para mudar o padrão, pois o aquecimento de 3 s é o padrão.
+
+A ponderação de A9 (`hpf` escolhido pela regra escrita) continua válida. O ganho medido aqui é nulo, então a
+escolha se apoia no falso do babble e não em acertos.
+
+Limites da revisão: os clipes são TTS (Kokoro e Pocket) e são os mesmos que escolheram o padrão; sem voz humana e
+sem medição física com a voz do proprietário.

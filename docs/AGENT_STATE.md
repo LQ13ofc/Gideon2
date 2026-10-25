@@ -94,3 +94,10 @@
 - Ajuste com dado real: limiar de ruído grave 0,5 → 0,75 (fifine 0,34 a 0,50; webcam 0,88 a 0,98).
 - Pendência: regressão do laboratório caiu para 37/51 positivos (A7: 41 a 50); não investigada. Validação com voz e microfone do dono continua pendente.
 - Gates: fmt OK, clippy -D warnings OK, cargo test OK (498), test_bridge_protocol 243 OK, test_snapshot_contract 18 OK, test_ui_settings 25 OK, test_wake_live 5 OK, test_wake_worker 9 OK.
+
+## 2026-10-25 — revisão da taxa de acerto do wake ao vivo (NÃO COMMITADO)
+- Causa da variância: alinhamento do clipe com a grade de quadros do encoder (varredura de 320 ms); não é rotação, limiar nem defeito do Core. Causa da queda de 37/51 não reproduzível; contagem por sessão subconta quando o STT falha (3 de 3 execuções por detecção com `worker_crashed`, causa não encontrada).
+- Padrões mantidos: boost 1.2, limiar de frase 0.22, condicionamento auto, aquecimento 3 s (boost 1.4 admite babble; ver docs/A7 seção de revisão).
+- Código: `scripts/wake_live_regression.py` (offline, grade e `check` com chão 0,82), `scripts/test_wake_live_regression.py`, `scripts/wake_phrase_evidence.py` (números de laboratório corrigidos).
+- Evidência: docs/evidence/wake-live-matrix.json, docs/evidence/wake-live-pins.json; docs/A7 (revisão), docs/A9 (revisão), docs/A13 (nota). Nenhum código Rust mudou.
+- Gates: test_wake_live_regression 9 OK, test_wake_live 5 OK, test_audio_conditioning 10 OK, test_wake_worker 9 OK (rodar sem `-I`).
