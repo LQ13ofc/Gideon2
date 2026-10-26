@@ -11,7 +11,7 @@ Card {
     readonly property string pid: plugin.plugin_id || ""
     readonly property bool running: plugin.state === "running"
     readonly property bool isDisplay: pid === "display_manipulate"
-    readonly property var actions: L.perceptionActions[pid] || []
+    readonly property var actions: L.perceptionActions()[pid] || []
     readonly property var backends: ({
         "screen_observe": "portal XDG (captura de tela)",
         "computer_control": "AT-SPI (árvore) e RemoteDesktop (teclado)",

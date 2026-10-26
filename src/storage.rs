@@ -99,6 +99,9 @@ pub struct Config {
     /// DIAG-02 developer mode of the diagnostics. Strict bool; no consent and no authority is attached to it.
     #[serde(default)]
     pub developer_mode: bool,
+    /// WP-20 interface language (`pt-BR`, `en`, `fr`; strict). A ledger without it takes the system locale.
+    #[serde(default = "UiLanguage::from_environment")]
+    pub ui_language: UiLanguage,
 }
 fn default_stt_languages() -> Vec<String> {
     vec![crate::languages::DEFAULT_STT_LANGUAGE.into()]
@@ -188,6 +191,48 @@ impl HistoryRetention {
         }
     }
 }
+/// Preference `ui_language` (WP-20): the language of the interface. Wire values are exactly `pt-BR`, `en`, `fr`;
+/// anything else fails to parse. The default follows the system locale among the three, otherwise `pt-BR`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum UiLanguage {
+    #[serde(rename = "pt-BR")]
+    PtBr,
+    #[serde(rename = "en")]
+    En,
+    #[serde(rename = "fr")]
+    Fr,
+}
+impl UiLanguage {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PtBr => "pt-BR",
+            Self::En => "en",
+            Self::Fr => "fr",
+        }
+    }
+    /// Maps a POSIX locale name (`fr_FR.UTF-8`, `en`, `pt_PT`) to one of the three; `None` for anything else.
+    pub fn from_locale(locale: &str) -> Option<Self> {
+        let language = locale
+            .split(['_', '.', '@', '-'])
+            .next()?
+            .to_ascii_lowercase();
+        match language.as_str() {
+            "pt" => Some(Self::PtBr),
+            "en" => Some(Self::En),
+            "fr" => Some(Self::Fr),
+            _ => None,
+        }
+    }
+    /// The first non-empty of `LC_ALL`, `LC_MESSAGES`, `LANG` decides; no usable locale means `pt-BR`.
+    pub fn from_environment() -> Self {
+        ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .find(|value| !value.is_empty())
+            .and_then(|value| Self::from_locale(&value))
+            .unwrap_or(Self::PtBr)
+    }
+}
 /// Strict range check; NaN and infinities are outside every range and therefore rejected.
 pub fn valid_wake_sensitivity(value: f32) -> bool {
     (WAKE_SENSITIVITY_MIN..=WAKE_SENSITIVITY_MAX).contains(&value)
@@ -231,6 +276,7 @@ impl Default for Config {
             tts_voice: default_tts_voice(),
             history_retention: HistoryRetention::default(),
             developer_mode: false,
+            ui_language: UiLanguage::from_environment(),
         }
     }
 }
@@ -1025,6 +1071,18 @@ impl Storage {
         }
         let mut next = self.config.clone();
         next.developer_mode = enabled;
+        next.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("revision exhausted"))?;
+        self.commit_preferences(next)
+    }
+    /// WP-20 interface language switch (CAS on `revision`); only `ui_language` changes. Applies at once in the UI.
+    pub fn update_ui_language(&mut self, revision: u64, ui_language: UiLanguage) -> io::Result<()> {
+        if !self.writes_open() || revision != self.config.revision {
+            return Err(io::Error::other("configuration not ready"));
+        }
+        let mut next = self.config.clone();
+        next.ui_language = ui_language;
         next.revision = revision
             .checked_add(1)
             .ok_or_else(|| io::Error::other("revision exhausted"))?;

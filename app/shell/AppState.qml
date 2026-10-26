@@ -86,22 +86,22 @@ Item {
     // Why a setting cannot be changed now ("" when it can). Core-backed keys (core.*) depend on the Core's state.
     function blockReason(key) {
         if (!key) return ""
-        if (!uiLive()) return "configurações do app indisponíveis"
+        if (!uiLive()) return qsTr("configurações do app indisponíveis")
         if (key.indexOf("core.") !== 0 || typeof core === "undefined" || !core) return ""
-        if (!core.connected) return "Core desconectado"
-        if (core.configurationStatus === "safe_mode") return "modo seguro"
+        if (!core.connected) return qsTr("Core desconectado")
+        if (core.configurationStatus === "safe_mode") return qsTr("modo seguro")
         // U1: a pending restart does not block preference writes; the Core applies the latest one at its next start.
-        if (String(core.sessionId || "").length > 0) return "sessão de voz em andamento; tente quando o Gideon estiver em espera"
-        if (!core.preferencesAvailable) return "o Core está ocupado com outra alteração"
-        if ((key === "core.responseGain" || key === "core.audibleFeedback") && !core.voiceAvailable) return "motor de voz não está disponível no Core"
+        if (String(core.sessionId || "").length > 0) return qsTr("sessão de voz em andamento; tente quando o Gideon estiver em espera")
+        if (!core.preferencesAvailable) return qsTr("o Core está ocupado com outra alteração")
+        if ((key === "core.responseGain" || key === "core.audibleFeedback") && !core.voiceAvailable) return qsTr("motor de voz não está disponível no Core")
         return ""
     }
     // Writes one setting through `ui`. Core-backed keys stay "applying" until the Core confirms the new value.
     function setSetting(key, value) {
-        if (!uiLive()) { toast("Configurações do app indisponíveis: nada foi salvo."); return false }
+        if (!uiLive()) { toast(qsTr("Configurações do app indisponíveis: nada foi salvo.")); return false }
         var result = ui.set(key, value)
         if (!result.ok) { toast(result.error); return false }
-        if (result.corrected && result.corrected.length > 0) toast("Cor ajustada para manter o contraste mínimo.")
+        if (result.corrected && result.corrected.length > 0) toast(qsTr("Cor ajustada para manter o contraste mínimo."))
         if (result.pending) markPending(key, value)
         return true
     }
@@ -166,13 +166,13 @@ Item {
     property bool onboardingOpen: false
     // Why the guide cannot show or be started now ("" when it can): it never appears offline or during a voice session.
     function introBlockReason() {
-        if (typeof core === "undefined" || !core || !core.connected) return "Core desconectado"
-        if (String(core.sessionId || "").length > 0) return "sessão de voz em andamento"
+        if (typeof core === "undefined" || !core || !core.connected) return qsTr("Core desconectado")
+        if (String(core.sessionId || "").length > 0) return qsTr("sessão de voz em andamento")
         return ""
     }
     function openOnboarding() {
         var reason = introBlockReason()
-        if (reason.length > 0) { toast("Introdução indisponível: " + reason + "."); return false }
+        if (reason.length > 0) { toast(qsTr("Introdução indisponível: %1.").arg(reason)); return false }
         onboardingOpen = true
         return true
     }
@@ -181,8 +181,8 @@ Item {
     function configNotice() {
         if (typeof core === "undefined" || !core) return ""
         if (core.configurationStatus === "safe_mode" || core.configurationStatus === "restart_required") return core.configurationMessage
-        if (!core.connected) return "Indisponível: Core desconectado. Os valores mostrados são os últimos conhecidos."
-        if (String(core.sessionId || "").length > 0) return "Indisponível agora: sessão de voz em andamento. Tente quando o Gideon estiver em espera."
+        if (!core.connected) return qsTr("Indisponível: Core desconectado. Os valores mostrados são os últimos conhecidos.")
+        if (String(core.sessionId || "").length > 0) return qsTr("Indisponível agora: sessão de voz em andamento. Tente quando o Gideon estiver em espera.")
         return ""
     }
 }

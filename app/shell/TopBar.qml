@@ -137,7 +137,7 @@ Rectangle {
             border.color: Theme.strongOutline
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
-            Accessible.name: "Abrir a paleta de comandos, Ctrl+K"
+            Accessible.name: qsTr("Abrir a paleta de comandos, Ctrl+K")
             Keys.onSpacePressed: bar.paletteRequested()
             Keys.onReturnPressed: bar.paletteRequested()
             RowLayout {
@@ -203,7 +203,7 @@ Rectangle {
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontHelp
                     Accessible.role: Accessible.StaticText
-                    Accessible.name: "Estado do Gideon"
+                    Accessible.name: qsTr("Estado do Gideon")
                     Accessible.description: text
                 }
                 // B16: the microphone indicator. Shown only while the Core reports the live recorder capturing.
@@ -217,14 +217,14 @@ Rectangle {
                 Text {
                     objectName: "micActiveLabel"
                     visible: bar.micActive
-                    text: "Microfone ativo"
+                    text: qsTr("Microfone ativo")
                     textFormat: Text.PlainText
                     color: Theme.warning
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontHelp
                     font.weight: 600
                     Accessible.role: Accessible.StaticText
-                    Accessible.name: "Microfone ativo"
+                    Accessible.name: qsTr("Microfone ativo")
                 }
             }
         }
@@ -234,11 +234,11 @@ Rectangle {
             objectName: "cancelButton"
             visible: bar.cancellable
             enabled: bar.cancellable
-            text: "Cancelar"
+            text: qsTr("Cancelar")
             variant: "secondary"
             implicitHeight: 36
             Layout.leftMargin: Theme.space(4)
-            Accessible.name: "Cancelar sessão"
+            Accessible.name: qsTr("Cancelar sessão")
             onClicked: bar.cancelRequested()
         }
     }

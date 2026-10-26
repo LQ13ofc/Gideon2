@@ -34,41 +34,41 @@ ApplicationWindow {
     property var lastSub: ({})
 
     readonly property var tabDefs: [
-        {id: "assistente", label: "Assistente", icon: "chat"},
-        {id: "extensoes", label: "Extensões", icon: "puzzle"},
-        {id: "permissoes", label: "Permissões", icon: "shield"},
-        {id: "configuracoes", label: "Configurações", icon: "gear"},
-        {id: "diagnostico", label: "Diagnóstico", icon: "activity"}
+        {id: "assistente", label: qsTr("Assistente"), icon: "chat"},
+        {id: "extensoes", label: qsTr("Extensões"), icon: "puzzle"},
+        {id: "permissoes", label: qsTr("Permissões"), icon: "shield"},
+        {id: "configuracoes", label: qsTr("Configurações"), icon: "gear"},
+        {id: "diagnostico", label: qsTr("Diagnóstico"), icon: "activity"}
     ]
     readonly property var pageDefs: [
-        {id: "hoje", tab: "assistente", label: "Hoje"},
-        {id: "conversa", tab: "assistente", label: "Conversa"},
-        {id: "conversas", tab: "assistente", label: "Histórico"},
-        {id: "agente", tab: "assistente", label: "Agente"},
-        {id: "atividade", tab: "assistente", label: "Atividade"},
-        {id: "automacoes", tab: "assistente", label: "Automações"},
-        {id: "plugins", tab: "extensoes", label: "Plugins"},
-        {id: "skills", tab: "extensoes", label: "Skills"},
-        {id: "habitos", tab: "extensoes", label: "Hábitos"},
-        {id: "conexoes", tab: "extensoes", label: "Conexões"},
-        {id: "modelos", tab: "extensoes", label: "Modelos LLM"},
-        {id: "percepcao", tab: "extensoes", label: "Percepção e ação"},
-        {id: "perm_visao", tab: "permissoes", label: "Visão geral"},
-        {id: "perm_concessoes", tab: "permissoes", label: "Concessões"},
-        {id: "perm_auditoria", tab: "permissoes", label: "Auditoria"},
-        {id: "memoria", tab: "permissoes", label: "Memória"},
-        {id: "cfg_voz", tab: "configuracoes", label: "Voz e Wake"},
-        {id: "cfg_idiomas", tab: "configuracoes", label: "Idiomas"},
-        {id: "cfg_audio", tab: "configuracoes", label: "Áudio"},
-        {id: "cfg_dispositivos", tab: "configuracoes", label: "Dispositivos"},
-        {id: "cfg_aparencia", tab: "configuracoes", label: "Aparência"},
-        {id: "cfg_privacidade", tab: "configuracoes", label: "Privacidade"},
-        {id: "almas", tab: "configuracoes", label: "Almas"},
-        {id: "cfg_geral", tab: "configuracoes", label: "Geral"},
-        {id: "diag_estado", tab: "diagnostico", label: "Estado"},
-        {id: "diag_motores", tab: "diagnostico", label: "Motores"},
-        {id: "diag_recuperacao", tab: "diagnostico", label: "Recuperação"},
-        {id: "diag_dev", tab: "diagnostico", label: "Desenvolvedor"}
+        {id: "hoje", tab: "assistente", label: qsTr("Hoje")},
+        {id: "conversa", tab: "assistente", label: qsTr("Conversa")},
+        {id: "conversas", tab: "assistente", label: qsTr("Histórico")},
+        {id: "agente", tab: "assistente", label: qsTr("Agente")},
+        {id: "atividade", tab: "assistente", label: qsTr("Atividade")},
+        {id: "automacoes", tab: "assistente", label: qsTr("Automações")},
+        {id: "plugins", tab: "extensoes", label: qsTr("Plugins")},
+        {id: "skills", tab: "extensoes", label: qsTr("Skills")},
+        {id: "habitos", tab: "extensoes", label: qsTr("Hábitos")},
+        {id: "conexoes", tab: "extensoes", label: qsTr("Conexões")},
+        {id: "modelos", tab: "extensoes", label: qsTr("Modelos LLM")},
+        {id: "percepcao", tab: "extensoes", label: qsTr("Percepção e ação")},
+        {id: "perm_visao", tab: "permissoes", label: qsTr("Visão geral")},
+        {id: "perm_concessoes", tab: "permissoes", label: qsTr("Concessões")},
+        {id: "perm_auditoria", tab: "permissoes", label: qsTr("Auditoria")},
+        {id: "memoria", tab: "permissoes", label: qsTr("Memória")},
+        {id: "cfg_voz", tab: "configuracoes", label: qsTr("Voz e Wake")},
+        {id: "cfg_idiomas", tab: "configuracoes", label: qsTr("Idiomas")},
+        {id: "cfg_audio", tab: "configuracoes", label: qsTr("Áudio")},
+        {id: "cfg_dispositivos", tab: "configuracoes", label: qsTr("Dispositivos")},
+        {id: "cfg_aparencia", tab: "configuracoes", label: qsTr("Aparência")},
+        {id: "cfg_privacidade", tab: "configuracoes", label: qsTr("Privacidade")},
+        {id: "almas", tab: "configuracoes", label: qsTr("Almas")},
+        {id: "cfg_geral", tab: "configuracoes", label: qsTr("Geral")},
+        {id: "diag_estado", tab: "diagnostico", label: qsTr("Estado")},
+        {id: "diag_motores", tab: "diagnostico", label: qsTr("Motores")},
+        {id: "diag_recuperacao", tab: "diagnostico", label: qsTr("Recuperação")},
+        {id: "diag_dev", tab: "diagnostico", label: qsTr("Desenvolvedor")}
     ]
     // Conditional sub-tabs: a page is offered only when its plugin or mode is there (docs/UI_IA.md).
     readonly property var availability: ({
@@ -126,7 +126,7 @@ ApplicationWindow {
 
     // ---- Status pill -------------------------------------------------------------------------------------------
     readonly property bool sessionCancellable: core.connected && core.sessionId.length > 0 && (core.state === "capturing" || core.state === "transcribing" || core.state === "executing" || core.state === "speaking")
-    readonly property string pillText: !core.connected ? "Offline" : ((core.state === "idle" && (core.chatState === "waiting" || core.chatState === "streaming")) ? "Pensando" : L.stateText(core.state))
+    readonly property string pillText: !core.connected ? qsTr("Offline") : ((core.state === "idle" && (core.chatState === "waiting" || core.chatState === "streaming")) ? qsTr("Pensando") : L.stateText(core.state))
     readonly property string pillTone: !core.connected ? "offline"
         : (core.state === "offline" || core.state === "safe_mode" || core.state === "restart_required") ? "offline"
         : (core.state === "capturing" || core.state === "transcribing" || core.state === "executing" || core.state === "speaking" || core.chatState === "waiting" || core.chatState === "streaming") ? "working"
@@ -137,12 +137,12 @@ ApplicationWindow {
         return {label: d.label, detail: tabDefs.filter(function (t) { return t.id === d.tab })[0].label, target: "page:" + d.id}
     })
     readonly property var paletteCommands: [
-        {label: "Cancelar sessão", target: "cmd:cancel"},
-        {label: "Abrir Motor LLM", target: "cmd:llm"},
-        {label: "Restaurar padrões do app", target: "page:cfg_geral"},
-        {label: "Ligar modo desenvolvedor", target: "page:diag_estado"},
-        {label: "Trocar tema ou cor", target: "page:cfg_aparencia"},
-        {label: "Refazer introdução", target: "cmd:intro"}
+        {label: qsTr("Cancelar sessão"), target: "cmd:cancel"},
+        {label: qsTr("Abrir Motor LLM"), target: "cmd:llm"},
+        {label: qsTr("Restaurar padrões do app"), target: "page:cfg_geral"},
+        {label: qsTr("Ligar modo desenvolvedor"), target: "page:diag_estado"},
+        {label: qsTr("Trocar tema ou cor"), target: "page:cfg_aparencia"},
+        {label: qsTr("Refazer introdução"), target: "cmd:intro"}
     ]
     // The theme singleton, for the QML tests (scripts/test_bridge_protocol.py reads the effective effects through it).
     readonly property var themeRef: Theme
@@ -163,7 +163,7 @@ ApplicationWindow {
             var r = found[i]
             var key = typeof r === "string" ? r : (r.key || r.id || "")
             var label = typeof r === "string" ? r : (r.label || r.key || r.id || "")
-            out.push({label: label, detail: "Configuração", target: "page:" + settingPage(String(key))})
+            out.push({label: label, detail: qsTr("Configuração"), target: "page:" + settingPage(String(key))})
         }
         return out
     }
@@ -191,11 +191,11 @@ ApplicationWindow {
     function toggleListening() {
         if (core.connected && core.sessionId.length > 0) {
             core.cancel()
-            AppState.toast("Escuta encerrada.")
+            AppState.toast(qsTr("Escuta encerrada."))
         } else if (core.connected) {
             core.listenStart()
         } else {
-            AppState.toast("Core desconectado: nada pode ser iniciado agora")
+            AppState.toast(qsTr("Core desconectado: nada pode ser iniciado agora"))
         }
     }
     // Esc cancels a running capture. It is handled by the shell layout, which is the focus chain of the pages: when a

@@ -3,9 +3,10 @@ import datetime,hashlib,json,math,os,re,stat,struct,time,unicodedata,uuid
 import socket as _sock
 from pathlib import Path
 from urllib.parse import unquote,urlsplit
-from PySide6.QtCore import QObject,Property,Signal,Slot,QTimer
+from PySide6.QtCore import QCoreApplication,QObject,Property,Signal,Slot,QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtNetwork import QLocalSocket
+import translations
 CAPABILITY_ID=re.compile(r'[a-z0-9_]+(\.[a-z0-9_]+)+');PLUGIN_ID=re.compile(r'[A-Za-z0-9_-]+');SNAKE_CODE=re.compile(r'[a-z][a-z0-9_]*')
 PLUGIN_STATES=('disabled','starting','running','failed','stopped','quarantined')
 # Exact status sets emitted by the Core (src/core.rs, src/transport.rs). Anything else is an invalid snapshot.
@@ -52,9 +53,11 @@ HUB_KEYS=frozenset({'version','status','publisher_verified','approval_revision',
 HUB_REQUIRED=HUB_KEYS-{'reason'}
 ENTRY_KEYS=frozenset({'manifest_sha256','permissions_approved','approved_at_ms','payload_staged','staged_error','plugin_id','semver','publisher','api_version','targets','license','permissions','dependencies','conflicts','download_size','support_policy','runtime','capabilities','status','reason'})
 ENTRY_REQUIRED=ENTRY_KEYS-{'staged_error','runtime','capabilities','approved_at_ms'}
-PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','input_conditioning','audio_input_device','audio_output_device','live_audio','real_actions','stt_languages','tts_language','tts_voice','wake_phrases','history_retention','developer_mode'})
+PREFERENCE_KEYS=frozenset({'version','session_timeout_ms','wake_phrase','revision','audible_feedback','visual_feedback','output_volume_percent','previous_preferences','wake_sensitivity','input_conditioning','audio_input_device','audio_output_device','live_audio','real_actions','stt_languages','tts_language','tts_voice','wake_phrases','history_retention','developer_mode','ui_language'})
 # CFG-04 retention (src/storage.rs HistoryRetention): exactly these four wire values. DIAG-02 developer mode is a strict bool.
 HISTORY_RETENTION_VALUES=('days_7','days_30','days_90','never')
+# WP-20 interface language (src/storage.rs UiLanguage): exactly these three wire values.
+UI_LANGUAGE_VALUES=('pt-BR','en','fr')
 # DIAG-05 resource sampling: CPU ticks per second is read from the system (SC_CLK_TCK); the sample keeps the previous reading per pid.
 CLOCK_TICKS=os.sysconf('SC_CLK_TCK') if hasattr(os,'sysconf') else 100
 LATENCY_SAMPLES=20
@@ -957,6 +960,7 @@ def validate_snapshot(data,request_id,min_sequence):
         # CFG-04 retention and DIAG-02 developer mode: the Core always reports them; checked when present (older fixtures omit them).
         if 'history_retention' in prefs:require(prefs['history_retention'] in HISTORY_RETENTION_VALUES)
         if 'developer_mode' in prefs:require(type(prefs['developer_mode']) is bool)
+        if 'ui_language' in prefs:require(prefs['ui_language'] in UI_LANGUAGE_VALUES)
         if 'wake_phrases' in prefs:require(wake_setting_list_ok(prefs['wake_phrases']))
         if 'wake_sensitivity' in prefs:require(wake_sensitivity_ok(prefs['wake_sensitivity']))
         if 'input_conditioning' in prefs:require(prefs['input_conditioning'] in INPUT_CONDITIONING_VALUES)
@@ -1836,6 +1840,9 @@ OPS.update({'history_retention_preference':('prefs','Retenção do histórico sa
 PENDING.update({'history_retention_preference':'Salvando a retenção do histórico no Core…'})
 OPS.update({'developer_mode_preference':('prefs','Modo desenvolvedor salvo no Core')})
 PENDING.update({'developer_mode_preference':'Salvando o modo desenvolvedor no Core…'})
+# WP-20: the interface language is a Core preference; the UI switches live when the snapshot reports it.
+OPS.update({'ui_language_preference':('prefs','Idioma da interface salvo no Core')})
+PENDING.update({'ui_language_preference':'Salvando o idioma da interface no Core…'})
 # DIAG-04 (docs/ui-spec/50-diagnostico.md §3.4): codes the Core emits that had no Portuguese text.
 CODE_MESSAGES.update({'hub_storage_error':'Falha ao gravar o registro do catálogo.','plugin_storage_error':'Falha ao gravar o registro dos plugins.','hub_import_timeout':'Importação expirou antes de terminar.'})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
@@ -1846,7 +1853,7 @@ SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_p
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
-    preferencesChanged=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal();actionsChanged=Signal()
+    preferencesChanged=Signal();uiLanguageChanged=Signal(str);packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal();actionsChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal();personalChanged=Signal()
     def __init__(self,root):
@@ -1976,6 +1983,9 @@ class Bridge(QObject):
         data['session_id']=str(data['session_id']) if data.get('session_id') is not None else ''
         old=self.snapshot
         if data!=old:self.snapshot=data;self._publish(old,data)
+        # WP-20: a language the Core reports that differs from the one on screen switches the whole UI (main.py).
+        language=(data.get('preferences') or {}).get('ui_language')
+        if language in UI_LANGUAGE_VALUES and language!=translations.current():self.uiLanguageChanged.emit(language)
         if data!=old or settled:self.changed.emit();self.perceptionChanged.emit()
     def _read(self):
         # Never read more than the 64 KiB cap plus one byte; the cap check below drops the Core.
@@ -2744,6 +2754,16 @@ class Bridge(QObject):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
         if value not in HISTORY_RETENTION_VALUES:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
         self._preferences('history_retention_preference',revision=int(self.preferencesRevision),retention=value)
+    @Property(str,notify=preferencesChanged)
+    def uiLanguage(self):
+        # The Core's value once a snapshot has it; until then the language the app is showing.
+        value=(self.snapshot.get('preferences') or {}).get('ui_language')
+        return value if value in UI_LANGUAGE_VALUES else translations.current()
+    @Slot(str)
+    def setUiLanguage(self,value):
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if value not in UI_LANGUAGE_VALUES:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        self._preferences('ui_language_preference',revision=int(self.preferencesRevision),ui_language=value)
     @Property(bool,notify=preferencesChanged)
     def developerMode(self):return (self.snapshot.get('preferences') or {}).get('developer_mode') is True
     @Slot(bool)

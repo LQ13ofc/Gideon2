@@ -2111,6 +2111,7 @@ impl Core {
                 | Operation::RealActionsPreference { .. }
                 | Operation::HistoryRetentionPreference { .. }
                 | Operation::DeveloperModePreference { .. }
+                | Operation::UiLanguagePreference { .. }
                 | Operation::AudioDevices
                 | Operation::AudioProbe { .. }
                 | Operation::AudioRecommendInput
@@ -2749,6 +2750,34 @@ impl Core {
                             "developer_mode_disabled"
                         };
                         self.emit(req.request_id.clone(), None, kind);
+                        "ok"
+                    } else {
+                        "preferences_storage_error"
+                    }
+                } else {
+                    "preferences_unavailable"
+                }
+            }
+            // WP-20 interface language. Content-free event; no consent and no effect on authority.
+            Operation::UiLanguagePreference { revision, .. }
+                if revision != self.preferences.revision =>
+            {
+                "stale_preferences"
+            }
+            Operation::UiLanguagePreference { ui_language, .. }
+                if ui_language == self.preferences.ui_language =>
+            {
+                "ok"
+            }
+            Operation::UiLanguagePreference {
+                revision,
+                ui_language,
+            } => {
+                if let Some(storage) = storage {
+                    let result = storage.update_ui_language(revision, ui_language);
+                    self.configure_storage(storage);
+                    if result.is_ok() {
+                        self.emit(req.request_id.clone(), None, "ui_language_changed");
                         "ok"
                     } else {
                         "preferences_storage_error"
@@ -3920,6 +3949,55 @@ mod tests {
         );
         assert_eq!(no_storage.code, "preferences_unavailable");
         assert!(!c.preferences.developer_mode);
+    }
+
+    #[test]
+    fn ui_language_is_a_plain_cas_and_the_locale_maps_to_three_languages() {
+        use crate::storage::UiLanguage;
+        let now = Instant::now();
+        let mut c = Core::new(Duration::from_secs(30), true);
+        let stale = c.handle(
+            request(
+                "ui-stale",
+                Operation::UiLanguagePreference {
+                    revision: 7,
+                    ui_language: UiLanguage::En,
+                },
+            ),
+            now,
+        );
+        assert_eq!(stale.code, "stale_preferences");
+        let no_storage = c.handle(
+            request(
+                "ui-en",
+                Operation::UiLanguagePreference {
+                    revision: 0,
+                    ui_language: UiLanguage::En,
+                },
+            ),
+            now,
+        );
+        assert_eq!(no_storage.code, "preferences_unavailable");
+        assert_eq!(
+            c.handle(
+                request(
+                    "ui-same",
+                    Operation::UiLanguagePreference {
+                        revision: 0,
+                        ui_language: c.preferences.ui_language,
+                    },
+                ),
+                now,
+            )
+            .code,
+            "ok"
+        );
+        assert_eq!(UiLanguage::from_locale("fr_FR.UTF-8"), Some(UiLanguage::Fr));
+        assert_eq!(UiLanguage::from_locale("en_GB"), Some(UiLanguage::En));
+        assert_eq!(UiLanguage::from_locale("pt_PT"), Some(UiLanguage::PtBr));
+        assert_eq!(UiLanguage::from_locale("de_DE"), None);
+        assert_eq!(UiLanguage::from_locale("C"), None);
+        assert_eq!(UiLanguage::PtBr.as_str(), "pt-BR");
     }
 
     #[test]

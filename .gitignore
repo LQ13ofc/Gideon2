@@ -3,3 +3,5 @@
 /__pycache__/
 **/__pycache__/
 /graphify-out/
+# WP-20: compiled catalogs are build output; the .ts sources are committed.
+/app/translations/*.qm

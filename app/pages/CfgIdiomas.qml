@@ -9,6 +9,7 @@ import "../shell"
 // Configurações > Idiomas (Frente 2 de docs/PLANO_FRASES_IDIOMAS.md): em que idiomas a IA fala (TTS) e entende (STT).
 // Só idioma instalado pode ser escolhido. Português e francês aparecem como "não instalado", com tamanho, licença e motivo.
 // Nada é baixado daqui: o Core só verifica e ativa modelos que já vêm no pacote (hash). Idiomas extras seguem sem download. A troca vale na próxima fala.
+// WP-20: a primeira seção escolhe o idioma da própria interface; a troca vale na hora (preference ui_language, sem reiniciar).
 PageFrame {
     id: page
     objectName: "page_cfg_idiomas"
@@ -22,6 +23,17 @@ PageFrame {
 
     readonly property var sttItems: core.languageSttItems
     readonly property var ttsItems: core.languageTtsItems
+    // The catalog labels are Core data (Portuguese); the three languages get their names in the interface language here.
+    readonly property var sttNamed: named(sttItems)
+    readonly property var ttsNamed: named(ttsItems)
+    function langName(item) {
+        if (item.id === "en") return qsTr("Inglês")
+        if (item.id === "fr") return qsTr("Francês")
+        return item.label
+    }
+    function named(list) {
+        return list.map(function (item) { var copy = Object.assign({}, item); copy.label = langName(item); return copy })
+    }
     readonly property var savedStt: core.languageSttSelected
     readonly property string savedTts: core.languageTtsSelected
     readonly property string savedVoice: core.languageTtsVoice
@@ -31,6 +43,14 @@ PageFrame {
     readonly property bool dirty: JSON.stringify(shownStt) !== JSON.stringify(savedStt) || shownTts !== savedTts
     readonly property bool sttCountOk: shownStt.length >= 1 && shownStt.length <= 3
     readonly property bool restartNeeded: core.languageRestartStt || core.languageRestartTts
+
+    // WP-20 interface language. The names are written in their own language (endonyms), so they never translate.
+    readonly property var uiLanguageOptions: [
+        {id: "pt-BR", text: "Português (Brasil)"},
+        {id: "en", text: "English"},
+        {id: "fr", text: "Français"}
+    ]
+    readonly property int uiLanguageIndex: Math.max(0, uiLanguageOptions.findIndex(function (o) { return o.id === core.uiLanguage }))
 
     // One voice at a time: the TTS radios share this group across their delegates.
     ButtonGroup { id: ttsGroup; exclusive: true }
@@ -58,11 +78,11 @@ PageFrame {
         core.setLanguages(JSON.stringify(shownStt), shownTts, shownVoice)
     }
 
-    // Portuguese state word for the badge and the detail line.
+    // Word for the badge and the detail line (the state comes from the catalog).
     function stateText(item) {
-        if (item.state === "bundled") return "Instalado"
-        if (item.state === "available_not_installed") return "Não instalado"
-        return "Não suportado"
+        if (item.state === "bundled") return qsTr("Instalado")
+        if (item.state === "available_not_installed") return qsTr("Não instalado")
+        return qsTr("Não suportado")
     }
     function stateTone(item) {
         if (item.state === "bundled") return "success"
@@ -70,27 +90,44 @@ PageFrame {
         return "warning"
     }
     function sizeText(item) {
-        if (item.size_bytes === null || item.size_bytes === undefined) return item.size_note || "tamanho não informado"
+        if (item.size_bytes === null || item.size_bytes === undefined) return item.size_note || qsTr("tamanho não informado")
         var mb = Math.round(item.size_bytes / 1000000)
-        return "cerca de " + mb + " MB" + (item.size_partial ? " (parcial)" : "")
+        return (item.size_partial ? qsTr("cerca de %1 MB (parcial)") : qsTr("cerca de %1 MB")).arg(mb)
     }
     function detailText(item) {
-        var parts = ["Tamanho: " + sizeText(item), "Licença: " + (item.license || "não informada"),
-                     "Qualidade: " + item.quality]
+        var parts = [qsTr("Tamanho: %1").arg(sizeText(item)), qsTr("Licença: %1").arg(item.license || qsTr("não informada")),
+                     qsTr("Qualidade: %1").arg(item.quality)]
         if (item.reason) parts.push(item.reason)
         return parts.join(" · ")
     }
 
     PageHeader {
-        title: "Idiomas"
-        subtitle: "Em que idiomas a IA fala e entende. Só idiomas instalados podem ser escolhidos."
+        title: qsTr("Idiomas")
+        subtitle: qsTr("Em que idiomas a IA fala e entende. Só idiomas instalados podem ser escolhidos.")
         GButton {
             objectName: "applyLanguagesButton"
             variant: "primary"
-            text: "Aplicar"
-            Accessible.name: "Aplicar a escolha de idiomas"
+            text: qsTr("Aplicar")
+            Accessible.name: qsTr("Aplicar a escolha de idiomas")
             enabled: page.dirty && page.sttCountOk
             onClicked: page.apply()
+        }
+    }
+
+    Section {
+        title: qsTr("Idioma da interface")
+        caption: qsTr("A tela inteira muda na hora. A escolha é salva no Core e vale para este perfil.")
+        Select {
+            id: uiLanguageSelect
+            objectName: "uiLanguageSelect"
+            Layout.fillWidth: true
+            Layout.maximumWidth: 360
+            model: page.uiLanguageOptions
+            textRole: "text"
+            valueRole: "id"
+            currentIndex: page.uiLanguageIndex
+            Accessible.name: qsTr("Idioma da interface")
+            onActivated: function (index) { core.setUiLanguage(page.uiLanguageOptions[index].id) }
         }
     }
 
@@ -98,7 +135,7 @@ PageFrame {
         objectName: "languagesRestartNote"
         visible: page.restartNeeded
         Layout.fillWidth: true
-        text: "Idioma salvo. A troca vale na próxima fala, sem reiniciar o Core."
+        text: qsTr("Idioma salvo. A troca vale na próxima fala, sem reiniciar o Core.")
         wrapMode: Text.WordWrap
         color: Theme.warning
         font.family: Theme.fontFamily
@@ -106,18 +143,18 @@ PageFrame {
     }
 
     Section {
-        title: "A IA entende em…"
-        caption: "Você pode escolher de 1 a 3 idiomas. A transcrição usa o primeiro que casar com a fala."
+        title: qsTr("A IA entende em…")
+        caption: qsTr("Você pode escolher de 1 a 3 idiomas. A transcrição usa o primeiro que casar com a fala.")
         Text {
             objectName: "sttCountText"
             visible: !page.sttCountOk
-            text: "Escolha de 1 a 3 idiomas para entender a fala."
+            text: qsTr("Escolha de 1 a 3 idiomas para entender a fala.")
             color: Theme.error
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
         }
         Repeater {
-            model: page.sttItems
+            model: page.sttNamed
             delegate: ColumnLayout {
                 required property var modelData
                 Layout.fillWidth: true
@@ -127,7 +164,7 @@ PageFrame {
                     text: modelData.label
                     checked: page.shownStt.indexOf(modelData.id) >= 0
                     enabled: modelData.selectable
-                    Accessible.name: "Entender em " + modelData.label
+                    Accessible.name: qsTr("Entender em %1").arg(modelData.label)
                     onClicked: page.toggleStt(modelData.id, checked)
                 }
                 Text {
@@ -144,18 +181,18 @@ PageFrame {
                     objectName: "installStt_" + modelData.id
                     visible: modelData.state === "available_not_installed"
                     Layout.leftMargin: Theme.space(26)
-                    text: "Instalar"
+                    text: qsTr("Instalar")
                     enabled: false
-                    Accessible.name: "Instalar " + modelData.label + ": " + core.languageInstallReason
+                    Accessible.name: qsTr("Instalar %1: %2").arg(modelData.label).arg(core.languageInstallReason)
                 }
                 // CFG-03: pacotes que já vêm no Gideon (português e francês) são conferidos pelo hash e ativados no Core.
                 GButton {
                     objectName: "verifyLanguage_" + modelData.id
                     visible: modelData.state === "bundled" && modelData.id !== "en"
                     Layout.leftMargin: Theme.space(26)
-                    text: "Verificar e ativar"
+                    text: qsTr("Verificar e ativar")
                     enabled: core.languagesAvailable
-                    Accessible.name: "Verificar e ativar os modelos de " + modelData.label + " no Core"
+                    Accessible.name: qsTr("Verificar e ativar os modelos de %1 no Core").arg(modelData.label)
                     onClicked: core.installLanguage(modelData.id)
                 }
             }
@@ -163,10 +200,10 @@ PageFrame {
     }
 
     Section {
-        title: "A IA fala em…"
-        caption: "Uma voz por vez. Idioma não instalado não aparece como escolha ativa."
+        title: qsTr("A IA fala em…")
+        caption: qsTr("Uma voz por vez. Idioma não instalado não aparece como escolha ativa.")
         Repeater {
-            model: page.ttsItems
+            model: page.ttsNamed
             delegate: ColumnLayout {
                 required property var modelData
                 Layout.fillWidth: true
@@ -177,7 +214,7 @@ PageFrame {
                     text: modelData.label
                     checked: page.shownTts === modelData.id
                     enabled: modelData.selectable
-                    Accessible.name: "Falar em " + modelData.label
+                    Accessible.name: qsTr("Falar em %1").arg(modelData.label)
                     onClicked: page.chooseTts(modelData)
                 }
                 Text {
@@ -194,26 +231,21 @@ PageFrame {
                     objectName: "installTts_" + modelData.id
                     visible: modelData.state === "available_not_installed"
                     Layout.leftMargin: Theme.space(26)
-                    text: "Instalar"
+                    text: qsTr("Instalar")
                     enabled: false
-                    Accessible.name: "Instalar voz em " + modelData.label + ": " + core.languageInstallReason
+                    Accessible.name: qsTr("Instalar voz em %1: %2").arg(modelData.label).arg(core.languageInstallReason)
                 }
             }
         }
     }
 
     Section {
-        title: "Frase de despertar em português e francês"
-        caption: "Como o Gideon é acordado em cada idioma."
+        title: qsTr("Frase de despertar em português e francês")
+        caption: qsTr("Como o Gideon é acordado em cada idioma.")
         Text {
             objectName: "wakeLanguageText"
             Layout.fillWidth: true
-            text: "Em português e francês, a frase de despertar é \"Hey Gideon\" (o detector de palavra-chave é o inglês, "
-                  + "e a frase funciona com ele) e também vale o atalho global de pressionar para falar. "
-                  + "Despertar por transcrição em português e francês: não ativado; precisa de gravações da sua voz. "
-                  + "Medido: 11 de 14 frases no laboratório limpo, 6 de 14 pelo áudio do sistema, 1 falso disparo com ruído de webcam a 5 dB; "
-                  + "a meta era 80% com zero falso disparo. Para ativar, grave a sua voz com a frase em cada idioma: "
-                  + "as medições com voz sintética não bastam para decidir."
+            text: qsTr("Em português e francês, a frase de despertar é \"Hey Gideon\" (o detector de palavra-chave é o inglês, e a frase funciona com ele) e também vale o atalho global de pressionar para falar. Despertar por transcrição em português e francês: não ativado; precisa de gravações da sua voz. Medido: 11 de 14 frases no laboratório limpo, 6 de 14 pelo áudio do sistema, 1 falso disparo com ruído de webcam a 5 dB; a meta era 80% com zero falso disparo. Para ativar, grave a sua voz com a frase em cada idioma: as medições com voz sintética não bastam para decidir.")
             wrapMode: Text.WordWrap
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -224,7 +256,7 @@ PageFrame {
     Text {
         objectName: "installReasonText"
         Layout.fillWidth: true
-        text: core.languageInstallReason + " Os idiomas incluídos são verificados pelo hash antes de serem ativados."
+        text: qsTr("%1 Os idiomas incluídos são verificados pelo hash antes de serem ativados.").arg(core.languageInstallReason)
         wrapMode: Text.WordWrap
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -234,7 +266,7 @@ PageFrame {
     Text {
         objectName: "uiLanguageNote"
         Layout.fillWidth: true
-        text: "O idioma da interface é outra configuração e continua em português."
+        text: qsTr("O idioma da interface vale na hora. Os idiomas da fala e da transcrição são escolhidos nas seções acima.")
         wrapMode: Text.WordWrap
         color: Theme.textMuted
         font.family: Theme.fontFamily

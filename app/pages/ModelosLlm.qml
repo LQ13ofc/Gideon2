@@ -341,22 +341,22 @@ PageFrame {
             ColumnLayout {
                 Layout.fillWidth: true
                 FieldLabel { text: "Streaming" }
-                Select { id: customStreaming; objectName: "customStreaming"; Layout.fillWidth: true; model: L.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Streaming declarado" }
+                Select { id: customStreaming; objectName: "customStreaming"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Streaming declarado" }
             }
             ColumnLayout {
                 Layout.fillWidth: true
                 FieldLabel { text: "Tool use" }
-                Select { id: customToolUse; objectName: "customToolUse"; Layout.fillWidth: true; model: L.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Tool use declarado" }
+                Select { id: customToolUse; objectName: "customToolUse"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Tool use declarado" }
             }
             ColumnLayout {
                 Layout.fillWidth: true
                 FieldLabel { text: "Visão" }
-                Select { id: customVision; objectName: "customVision"; Layout.fillWidth: true; model: L.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Visão declarada" }
+                Select { id: customVision; objectName: "customVision"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Visão declarada" }
             }
             ColumnLayout {
                 Layout.fillWidth: true
                 FieldLabel { text: "Cancelamento" }
-                Select { id: customCancel; objectName: "customCancel"; Layout.fillWidth: true; model: L.featureChoices; textRole: "text"; valueRole: "id"; Accessible.name: "Cancelamento declarado" }
+                Select { id: customCancel; objectName: "customCancel"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Cancelamento declarado" }
             }
         }
         Text {

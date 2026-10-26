@@ -3725,6 +3725,33 @@ class Wp4Bridge(unittest.TestCase):
             self.assertEqual(bridge.hubApprovalResult,CODE_MESSAGES['stale_hub_revision'])
             self.assertIsNone(bridge.hub_upload);self.assertFalse(peer.canReadLine())
 
+class Wp20Language(unittest.TestCase):
+    """WP-20 interface language: preferences.ui_language is a strict Core preference (CAS); a snapshot that reports
+    another language is announced once, so main.py can switch the whole UI without a restart."""
+    def test_ui_language_is_read_strictly_and_sent_as_a_cas_preference(self):
+        from bridge import UI_LANGUAGE_VALUES
+        self.assertEqual(UI_LANGUAGE_VALUES,('pt-BR','en','fr'))
+        bridge,peer=connect_bridge(self,audio_snapshot(prefs={'ui_language':'en'}))
+        self.assertEqual(bridge.uiLanguage,'en')
+        bridge.setUiLanguage('fr');request=next_request(peer)
+        self.assertEqual((request['op'],request['revision'],request['ui_language']),('ui_language_preference',0,'fr'))
+        self.assertNotIn('confirmed',request)
+        answer(peer,request,audio_snapshot(prefs={'ui_language':'fr'}));settle(bridge)
+        self.assertEqual(bridge.uiLanguage,'fr')
+        self.assertEqual(bridge.preferencesResult,OPS['ui_language_preference'][1])
+        bridge.setUiLanguage('de');self.assertIsNone(bridge.pending)
+        self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['invalid_preferences'])
+    def test_a_reported_language_is_announced_once_and_bad_values_are_refused(self):
+        bridge,_=connect_bridge(self,audio_snapshot(prefs={'ui_language':'pt-BR'}))
+        announced=[];bridge.uiLanguageChanged.connect(announced.append)
+        bridge._apply(audio_snapshot(prefs={'ui_language':'pt-BR'}))
+        self.assertEqual(announced,[])
+        bridge._apply(audio_snapshot(prefs={'ui_language':'fr'}))
+        self.assertEqual(announced,['fr'])
+        for bad in ({'ui_language':'de'},{'ui_language':'pt'},{'ui_language':'FR'},{'ui_language':None}):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):validate_snapshot(audio_snapshot(prefs=bad),'r',0)
+        validate_snapshot(audio_snapshot(prefs={'ui_language':'en'}),'r',0)
+
 if __name__=='__main__':
     if QML_CHILD:sys.exit(qml_child())
     if QML_SHELL_CHILD:sys.exit(qml_shell_child())

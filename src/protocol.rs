@@ -141,6 +141,11 @@ pub enum Operation {
         revision: u64,
         enabled: bool,
     },
+    /// WP-20 interface language (`preferences.ui_language`). CAS on `revision`; no consent is needed.
+    UiLanguagePreference {
+        revision: u64,
+        ui_language: crate::storage::UiLanguage,
+    },
     RecoverConfiguration {
         revision: u64,
     },
@@ -439,10 +444,11 @@ pub fn unix_ms() -> u64 {
 /// Origin of an event kind. Closed set: core, plugin, hub, skill, connection, tool, agent, llm,
 /// speech, config, registry.
 pub fn origin_of(kind: &str) -> &'static str {
-    const PREFIXES: [(&str, &str); 18] = [
+    const PREFIXES: [(&str, &str); 19] = [
         ("live_audio_", "config"),
         ("real_actions_", "config"),
         ("developer_mode_", "config"),
+        ("ui_language_", "config"),
         ("history_retention_", "config"),
         ("connection_", "connection"),
         ("tool_", "tool"),
@@ -704,6 +710,12 @@ enum WireRequest {
         request_id: String,
         revision: u64,
         enabled: bool,
+    },
+    UiLanguagePreference {
+        version: u16,
+        request_id: String,
+        revision: u64,
+        ui_language: crate::storage::UiLanguage,
     },
     RecoverConfiguration {
         version: u16,
@@ -1342,6 +1354,19 @@ impl<'de> Deserialize<'de> for Request {
                 version,
                 request_id,
                 Operation::DeveloperModePreference { revision, enabled },
+            ),
+            WireRequest::UiLanguagePreference {
+                version,
+                request_id,
+                revision,
+                ui_language,
+            } => (
+                version,
+                request_id,
+                Operation::UiLanguagePreference {
+                    revision,
+                    ui_language,
+                },
             ),
             WireRequest::RecoverConfiguration {
                 version,
@@ -1985,6 +2010,27 @@ mod tests {
         let text = r#"{"version":1,"request_id":"d2","op":"developer_mode_preference","revision":2,"enabled":"yes"}"#;
         assert!(serde_json::from_str::<Request>(text).is_err());
         let confirmed = r#"{"version":1,"request_id":"d3","op":"developer_mode_preference","revision":2,"enabled":true,"confirmed":true}"#;
+        assert!(serde_json::from_str::<Request>(confirmed).is_err());
+    }
+
+    #[test]
+    fn ui_language_wire_format_is_strict_enum_without_consent() {
+        let json = r#"{"version":1,"request_id":"u1","op":"ui_language_preference","revision":2,"ui_language":"fr"}"#;
+        let req = serde_json::from_str::<Request>(json).expect("parses");
+        assert!(matches!(
+            req.operation,
+            Operation::UiLanguagePreference {
+                revision: 2,
+                ui_language: crate::storage::UiLanguage::Fr,
+            }
+        ));
+        for bad in ["pt", "pt-PT", "de", "FR", ""] {
+            let text = format!(
+                r#"{{"version":1,"request_id":"u2","op":"ui_language_preference","revision":2,"ui_language":"{bad}"}}"#
+            );
+            assert!(serde_json::from_str::<Request>(&text).is_err(), "{bad}");
+        }
+        let confirmed = r#"{"version":1,"request_id":"u3","op":"ui_language_preference","revision":2,"ui_language":"en","confirmed":true}"#;
         assert!(serde_json::from_str::<Request>(confirmed).is_err());
     }
 

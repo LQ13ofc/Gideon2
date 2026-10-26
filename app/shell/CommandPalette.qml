@@ -39,11 +39,11 @@ Popup {
         q = q.trim().toLowerCase()
         var out = []
         function hit(s) { return q.length === 0 || String(s).toLowerCase().indexOf(q) >= 0 }
-        if (kind === "" || kind === "p") for (var i = 0; i < pages.length; i++) if (hit(pages[i].label)) out.push({kind: "p", label: pages[i].label, detail: pages[i].detail || "Página", target: pages[i].target})
-        if (kind === "" || kind === "c") for (var j = 0; j < commands.length; j++) if (hit(commands[j].label)) out.push({kind: "c", label: commands[j].label, detail: "Comando", target: commands[j].target})
+        if (kind === "" || kind === "p") for (var i = 0; i < pages.length; i++) if (hit(pages[i].label)) out.push({kind: "p", label: pages[i].label, detail: pages[i].detail || qsTr("Página"), target: pages[i].target})
+        if (kind === "" || kind === "c") for (var j = 0; j < commands.length; j++) if (hit(commands[j].label)) out.push({kind: "c", label: commands[j].label, detail: qsTr("Comando"), target: commands[j].target})
         if ((kind === "" && q.length >= 2) || kind === "s") {
             var found = settingsProvider ? settingsProvider(q) : []
-            for (var k = 0; k < found.length && k < 30; k++) out.push({kind: "s", label: found[k].label, detail: found[k].detail || "Configuração", target: found[k].target})
+            for (var k = 0; k < found.length && k < 30; k++) out.push({kind: "s", label: found[k].label, detail: found[k].detail || qsTr("Configuração"), target: found[k].target})
         }
         return out
     }
@@ -55,14 +55,14 @@ Popup {
             id: query
             objectName: "paletteField"
             Layout.fillWidth: true
-            placeholderText: "Digite para ir a uma página, configuração ou comando"
+            placeholderText: qsTr("Digite para ir a uma página, configuração ou comando")
             Keys.onDownPressed: list.incrementCurrentIndex()
             Keys.onUpPressed: list.decrementCurrentIndex()
             Keys.onReturnPressed: list.activate()
             Keys.onEnterPressed: list.activate()
         }
         Text {
-            text: "Prefixos: p: páginas · s: configurações · c: comandos"
+            text: qsTr("Prefixos: p: páginas · s: configurações · c: comandos")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -126,7 +126,7 @@ Popup {
         }
         Text {
             visible: palette.results.length === 0
-            text: "Nada encontrado."
+            text: qsTr("Nada encontrado.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

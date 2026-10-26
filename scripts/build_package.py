@@ -299,6 +299,10 @@ def main():
     if not gideon_base.is_file():
         die("target/release/gideon-base missing; build it first")
     packaged_binary = build_packaged_binary()
+    # WP-20: compile the interface catalogs (app/translations/*.ts -> *.qm) before the app files are copied.
+    translations = subprocess.run([sys.executable, str(REPO / "scripts" / "i18n_tools.py"), "release"])
+    if translations.returncode != 0:
+        die("interface catalogs (scripts/i18n_tools.py release) failed; the package would ship untranslated screens")
     # Build into a private sibling dir, then rename on success: a die or disk-full leaves no partial package.
     staging = Path(tempfile.mkdtemp(prefix=f".{name}.partial-", dir=out_root))
     try:
@@ -426,9 +430,12 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     copy_file(perception_catalog, pkg / "catalog" / "hub-perception.json")
     (pkg / "catalog" / "hub-perception.sha256").write_text(sha256(perception_catalog) + "\n", encoding="utf-8")
     app_src = REPO / "app"
-    for app_file in ("main.py", "bridge.py", "uisettings.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
+    for app_file in ("main.py", "bridge.py", "uisettings.py", "visual.py", "translations.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
         copy_file(app_src / app_file, pkg / "app" / app_file)
     shutil.copytree(app_src / "assets", pkg / "app/assets", ignore=ignore_pycache)
+    # WP-20: the compiled catalogs (built above). The .ts sources stay in the repository, not in the package.
+    for code in ("en", "fr"):
+        copy_file(app_src / "translations" / f"gideon_{code}.qm", pkg / "app/translations" / f"gideon_{code}.qm")
     # Shell and pages: theme singleton, components, page files, window shell, icons (QML loads them relative to each file).
     for app_dir in ("theme", "components", "pages", "shell", "icons"):
         shutil.copytree(app_src / app_dir, pkg / "app" / app_dir, ignore=ignore_pycache)
