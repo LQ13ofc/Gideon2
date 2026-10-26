@@ -359,6 +359,214 @@ CHECKS = [
 ]
 
 
+CORE_EVIDENCE = ROOT / "docs" / "evidence" / "perception-core-live.json"
+CORE_PLUGINS = ["screen_observe", "computer_control", "audio_advanced", "mic_advanced", "camera_gesture",
+                "display_manipulate", "shortcut_global"]
+READ_ONLY = ["screen_observe.status", "computer_control.status", "audio_advanced.state", "mic_advanced.state",
+             "camera_gesture.state", "camera_gesture.gestures", "display_manipulate.status",
+             "shortcut_global.status", "shortcut_global.events"]
+SHORTCUT_ID = "wp18a_probe"
+SHORTCUT_TRIGGER = "CTRL+ALT+G"
+
+
+def core_session_env():
+    """The owner's session as the Core inherits it: runtime dir, session bus, Wayland socket, HOME (for ~/Imagens).
+    Only these four names; the Core's config, data and cache stay in the private temporary root."""
+    names = ("HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY")
+    return {name: os.environ[name] for name in names if name in os.environ}
+
+
+def host_display():
+    """Scale and brightness of the first output, read outside any sandbox (only to verify the restore)."""
+    env = {"PATH": "/usr/bin:/bin", **core_session_env()}  # no QT_QPA_PLATFORM: offscreen hides every output
+    done = subprocess.run(["kscreen-doctor", "-j"], capture_output=True, text=True, timeout=15, check=False, env=env)
+    assert done.returncode == 0, "kscreen-doctor rc %s" % done.returncode
+    first = json.loads(done.stdout)["outputs"][0]
+    return {"name": first["name"], "scale": round(float(first["scale"]) * 100),
+            "brightness": round(float(first["brightness"]) * 100)}
+
+
+class CoreRun:
+    """One real Core (target/release/gideon-base) with the seven perception plugins installed through the Hub."""
+
+    def __init__(self, td):
+        import test_snapshot_contract as contract  # lazy: the bridge imports PySide6 (run with target/ui-venv)
+        self.contract = contract
+        self.td = Path(td)
+        self.core = contract.Core(self.td / "core", self.td)
+        home = self.td / "home"
+        home.mkdir()
+        self.core.catalog = contract.C4_CATALOG
+        self.core.extra = ["--home", str(home)]
+        private = {"PATH": "/usr/bin:/bin", "XDG_CONFIG_HOME": str(self.td), "XDG_DATA_HOME": str(self.td),
+                   "XDG_CACHE_HOME": str(self.td)}
+        real = core_session_env()
+        self.core.env = lambda: {**private, **real}
+
+    def start_and_install(self):
+        core = self.core
+        core.start()
+        for pid in CORE_PLUGINS:
+            hub = core.req()["hub"]
+            entry = next(e for e in hub["entries"] if e["plugin_id"] == pid)
+            ack = core.req("hub_approve", revision=hub["approval_revision"], plugin_id=pid,
+                           manifest_sha256=entry["manifest_sha256"], permissions=entry["permissions"],
+                           publisher_unverified_ack=True)
+            assert ack["code"] == "ok", (pid, ack)
+            self.contract.stage_upload(str(core.root), pid, str(ROOT / "scripts" / "perception_worker.py"))
+            hub = core.req()["hub"]
+            install = core.req("hub_install", revision=hub["install_revision"], plugin_id=pid,
+                               manifest_sha256=entry["manifest_sha256"])
+            assert install["code"] == "ok", (pid, install)
+            enable = core.req("plugin_enable", revision=core.req()["plugins"]["revision"], plugin_id=pid)
+            assert enable["code"] == "ok", (pid, enable)
+            core.wait(lambda s, p=pid: self.contract.plugin_item(s, p) is not None
+                      and self.contract.plugin_item(s, p)["state"] == "running", 20, pid + " running")
+
+    def invoke(self, capability, inp, deadline_ms=30000):
+        """One capability_invoke through the Core; returns the capability_result it published."""
+        problem = self.contract.perception_input_problem(capability, json.dumps(inp))
+        assert problem is None, (capability, problem)
+        before = self.core.req().get("capability_result")
+        reply = self.core.req("capability_invoke", capability=capability, input=inp, deadline_ms=deadline_ms)
+        assert reply["code"] == "ok", (capability, reply)
+        snap = self.core.wait(lambda s: s.get("capability_result") is not None
+                              and s["capability_result"]["capability"] == capability
+                              and s["capability_result"] != before, 40, "result " + capability)
+        return snap["capability_result"]
+
+    def checked(self, label, capability, inp, deadline_ms=30000):
+        """Invokes and records a pass only when the Core answered ok and the bridge rule accepts the output."""
+        result = self.invoke(capability, inp, deadline_ms)
+        if not result["ok"]:
+            record("core:" + label, "fail", {"capability": capability, "error": result["error"]})
+            return None
+        output = result["output"]
+        if not self.contract.PERCEPTION_OUTPUTS[capability](output):
+            record("core:" + label, "fail", {"capability": capability, "bridge_rejected": output})
+            return None
+        record("core:" + label, "pass", {"capability": capability, "output": output})
+        return output
+
+
+def press_shortcut(shortcut_id):
+    """Fires the bound action the way KDE does (KGlobalAccel component invokeShortcut). Returns the component used,
+    or None when no component answered. Only the session environment is passed to gdbus."""
+    env = {"PATH": "/usr/bin:/bin", **core_session_env()}
+    for component in ("com_anthropic_Claude", "gideon_perception"):
+        done = subprocess.run(["gdbus", "call", "--session", "--dest", "org.kde.kglobalaccel", "--object-path",
+                               "/component/" + component, "--method", "org.kde.kglobalaccel.Component.invokeShortcut",
+                               shortcut_id], capture_output=True, text=True, timeout=10, check=False, env=env)
+        if done.returncode == 0:
+            time.sleep(0.5)  # the portal signal reaches the worker on its own timer
+            return component
+    return None
+
+
+def core_live():
+    import glob as _glob
+    import tempfile as _tempfile
+    td = Path(_tempfile.mkdtemp(prefix="gideon-wp18a-"))
+    run = CoreRun(td)
+    before_display = host_display()
+    record("core:display_before", "info", before_display)
+    try:
+        run.start_and_install()
+        record("core:plugins_running", "pass", {"plugins": CORE_PLUGINS})
+        for capability in READ_ONLY:
+            run.checked(capability, capability, {})
+
+        pictures = os.path.expanduser("~/Imagens")
+        shots_before = set(_glob.glob(os.path.join(pictures, "Screenshot_*.png")))
+        shot = run.checked("screenshot", "screen_observe.capture", {})
+        left = set(_glob.glob(os.path.join(pictures, "Screenshot_*.png"))) - shots_before
+        record("core:screenshot_no_file_left", "pass" if not left else "fail",
+               {"left_behind": sorted(left), "image_kept": False})
+
+        refused = run.invoke("camera_gesture.capture", {})
+        record("core:camera_refused_without_opt_in", "pass" if refused.get("error") == "opt_in_required" else "fail",
+               {"result": refused})
+        try:
+            run.checked("camera_opt_in_on", "camera_gesture.optin", {"enabled": True})
+            run.checked("camera_frame", "camera_gesture.capture", {})
+        finally:
+            run.checked("camera_opt_in_off", "camera_gesture.optin", {"enabled": False})
+
+        status = run.checked("display_status", "display_manipulate.status", {})
+        first = status["outputs"][0]
+        name, scale0, bright0 = first["name"], first["scale"], first["brightness"]
+        try:
+            run.checked("display_scale_125", "display_manipulate.act",
+                        {"output": name, "op": "scale", "value": 125})
+            run.checked("display_brightness_90", "display_manipulate.act",
+                        {"output": name, "op": "brightness", "value": 90})
+        finally:
+            run.checked("display_restore", "display_manipulate.restore", {})
+        after = host_display()
+        record("core:display_restored", "pass" if after["scale"] == scale0 and abs(after["brightness"] - bright0) <= 1
+               else "fail", {"before": {"scale": scale0, "brightness": bright0}, "after": after})
+
+        # Same payload as the bridge's push-to-talk bind ({id, trigger}); the worker names the shortcut itself.
+        run.checked("shortcut_bind", "shortcut_global.bind", {"id": SHORTCUT_ID, "trigger": SHORTCUT_TRIGGER})
+        run.checked("shortcut_events_before_press", "shortcut_global.events", {})
+        pressed = press_shortcut(SHORTCUT_ID)
+        record("core:shortcut_press", "pass" if pressed else "fail", {"invoked_on": pressed, "id": SHORTCUT_ID})
+        events = run.checked("shortcut_events_after_press", "shortcut_global.events", {})
+        seen = [e["id"] for e in (events or {}).get("events", [])]
+        record("core:shortcut_event_received", "pass" if SHORTCUT_ID in seen else "fail",
+               {"events": events, "expected_id": SHORTCUT_ID})
+
+        # Restore on Core exit (WP12p 6.1): change the display, then stop the Core without calling restore.
+        run.checked("display_scale_125_before_exit", "display_manipulate.act",
+                    {"output": name, "op": "scale", "value": 125})
+        run.core.stop()
+        exited = host_display()
+        record("core:display_restored_on_core_exit",
+               "pass" if exited["scale"] == scale0 and abs(exited["brightness"] - bright0) <= 1 else "fail",
+               {"before": {"scale": scale0, "brightness": bright0}, "after_core_exit": exited})
+    finally:
+        if run.core.proc is not None:
+            run.core.proc.kill()
+            run.core.proc.wait(timeout=5)
+            run.core.proc = None
+        # The Core root holds only the test's private state (nothing of the owner's); it is removed here.
+        import shutil as _shutil
+        _shutil.rmtree(td, ignore_errors=True)
+    counts = {"pass": 0, "fail": 0, "info": 0}
+    for r in results:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    return counts
+
+
+def core_serve(seconds):
+    """Keeps a real Core with the seven perception plugins running for `seconds` (the UI check attaches to it)."""
+    import tempfile as _tempfile
+    td = Path(_tempfile.mkdtemp(prefix="gideon-wp18a-serve-"))
+    run = CoreRun(td)
+    run.start_and_install()
+    print("ROOT=%s" % (td / "core"), flush=True)
+    try:
+        time.sleep(seconds)
+    finally:
+        run.core.stop()
+        import shutil as _shutil
+        _shutil.rmtree(td, ignore_errors=True)
+    return 0
+
+
+def core_main():
+    counts = core_live()
+    evidence = {"generated_by": "scripts/perception_live.py --core", "counts": counts, "checks": results,
+                "worker_sha256": __import__("hashlib").sha256(
+                    (ROOT / "scripts" / "perception_worker.py").read_bytes()).hexdigest(),
+                "core": "target/release/gideon-base (real Core, session env from the owner's PC)"}
+    CORE_EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
+    CORE_EVIDENCE.write_text(json.dumps(evidence, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print("evidence:", CORE_EVIDENCE)
+    print("counts:", counts)
+    return 1 if counts.get("fail") else 0
+
+
 def main(argv):
     if argv[:1] == ["--kga-probe"]:
         print(json.dumps(kga_probe_inprocess()), flush=True)
@@ -366,10 +574,17 @@ def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("--confirm", action="store_true", help="required: acknowledges real desktop changes")
     parser.add_argument("--only", default="", help="comma-separated check names")
+    parser.add_argument("--core", action="store_true", help="drive every check through the real Core (WP-18a)")
+    parser.add_argument("--core-serve", type=int, default=0, metavar="SECONDS",
+                        help="keep a real Core with the perception plugins up for the UI check (WP-18a)")
     args = parser.parse_args(argv)
     if not args.confirm:
         print("refused: pass --confirm (this run changes and restores real desktop settings)")
         return 2
+    if args.core_serve:
+        return core_serve(args.core_serve)
+    if args.core:
+        return core_main()
     only = {n for n in args.only.split(",") if n}
     for name, fn in CHECKS:
         if only and name not in only:

@@ -223,7 +223,9 @@ fn visual_candidate(
             Status::Disabled,
             "A API está disponível: o visual só entra quando não há conexão".to_owned(),
         )
-    } else if !standing.fallback_eligible() {
+    } else if !crate::connections::visual_fallback_allowed(standing, allowed, true) {
+        // CONN-06: only with no usable account, the owner's switch on, and publication approval
+        // (enforced by the publish flow itself, so `approved` is true here).
         (
             Status::Disabled,
             "A conta existe com token expirado, reautenticação ou escopo negado: o visual nunca contorna a credencial"
@@ -574,7 +576,7 @@ const VISUAL_BRIDGES: [&str; 3] = ["ui_tree", "ui_click", "ui_type"];
 
 /// Whether the agent tool of the purpose exists in this run: only while the github fake is configured.
 pub fn tool_enabled() -> bool {
-    crate::connections::has_fake("github")
+    crate::connections::has_backend("github")
 }
 
 impl Core {

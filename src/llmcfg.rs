@@ -7,7 +7,18 @@ use crate::{
     storage::Storage,
 };
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize, Serializer};
-use std::{fmt, net::IpAddr};
+use sha2::{Digest, Sha256};
+use std::{
+    fmt,
+    fmt::Write as _,
+    fs,
+    io::{self, Read, Write},
+    net::{IpAddr, SocketAddr, TcpStream},
+    os::unix::{fs::OpenOptionsExt, process::CommandExt},
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    time::{Duration, Instant},
+};
 
 /// Hub permission id for brokered LLM HTTP. The Hub accepts only `[a-z0-9_-]` ids, so the
 /// contract name `network.llm` is spelled with an underscore.
@@ -29,6 +40,8 @@ pub enum Provider {
     Openrouter,
     Opencode,
     Google,
+    /// Anthropic Messages API (WP-18b): `x-api-key`, translated by the broker. Base is fixed.
+    Anthropic,
     Custom,
 }
 
@@ -38,6 +51,7 @@ impl Provider {
             "openrouter" => Some(Self::Openrouter),
             "opencode" => Some(Self::Opencode),
             "google" => Some(Self::Google),
+            "anthropic" => Some(Self::Anthropic),
             "custom" => Some(Self::Custom),
             _ => None,
         }
@@ -47,6 +61,7 @@ impl Provider {
             Self::Openrouter => "openrouter",
             Self::Opencode => "opencode",
             Self::Google => "google",
+            Self::Anthropic => "anthropic",
             Self::Custom => "custom",
         }
     }
@@ -56,6 +71,7 @@ impl Provider {
             Self::Openrouter => Some("https://openrouter.ai/api/v1"),
             Self::Opencode => Some("https://opencode.ai/zen/v1"),
             Self::Google => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+            Self::Anthropic => Some("https://api.anthropic.com/v1"),
             Self::Custom => None,
         }
     }
@@ -178,6 +194,17 @@ impl LlmLedger {
     pub(crate) fn validate(&self) -> bool {
         self.version == 1
     }
+}
+
+/// Model id as the llm_engine plugin accepts it in `describe` (its ID_RE): lowercase letters, digits, `_`, `.`, `-`,
+/// 1 to 64 bytes, starting with a letter or digit (WP-19).
+pub(crate) fn valid_model_id(id: &str) -> bool {
+    let bytes = id.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && bytes.iter().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'-')
+        })
 }
 
 fn valid_model(model: &str) -> bool {
@@ -453,6 +480,8 @@ pub struct Snapshot {
     /// Absent until a `*.chat` result reported whether the fallback model answered. No content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_chat: Option<ChatNote>,
+    /// Health of the Core-managed local server (WP-18b): stopped, running or unavailable.
+    pub local_server: LocalState,
 }
 
 /// Last chat answer: whether the fallback model produced it, and when (Unix ms, Core clock).
@@ -460,6 +489,306 @@ pub struct Snapshot {
 pub struct ChatNote {
     pub used_fallback: bool,
     pub at_ms: u64,
+}
+
+/// WP-18b: owner-provided settings of the Core-managed `llama-server`, read from `<root>/llm-local.json`.
+/// Paths are absolute and fixed by the owner (the plugin never sees or chooses them). The model
+/// sha256 is checked before every start.
+pub const LOCAL_SETTINGS_FILE: &str = "llm-local.json";
+const LOCAL_LOG: &str = "llama-server.log";
+const MAX_LOCAL_SETTINGS: u64 = 8 * 1024;
+/// A running server with no chat for this long is stopped; the next chat starts it again.
+pub const LOCAL_IDLE: Duration = Duration::from_secs(300);
+const LOCAL_HEALTH_WAIT: Duration = Duration::from_secs(45);
+const LOCAL_HEALTH_STEP: Duration = Duration::from_millis(200);
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalSettings {
+    pub version: u16,
+    pub binary: PathBuf,
+    pub model: PathBuf,
+    pub model_sha256: String,
+    pub run_dir: PathBuf,
+    pub threads: u16,
+    pub ctx: u32,
+    /// Optional idle time before a stop (5 to 3600 s); the default is `LOCAL_IDLE`.
+    #[serde(default)]
+    pub idle_s: Option<u64>,
+}
+
+impl LocalSettings {
+    fn valid(&self) -> bool {
+        self.version == 1
+            && self.binary.is_absolute()
+            && self.model.is_absolute()
+            && self.run_dir.is_absolute()
+            && self.model_sha256.len() == 64
+            && self.model_sha256.bytes().all(|b| b.is_ascii_hexdigit())
+            && (1..=128).contains(&self.threads)
+            && (512..=32768).contains(&self.ctx)
+            && self.idle_s.is_none_or(|s| (5..=3600).contains(&s))
+    }
+}
+
+/// Health of the local server as the snapshot reports it (`llm.local_server`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalState {
+    /// No server process; started on demand by the next local chat.
+    Stopped,
+    /// Process up and `/health` answered 200.
+    Running,
+    /// Settings missing or invalid, model hash mismatch, port taken, or the process died.
+    Unavailable,
+}
+
+/// The local `llama-server` process, owned by the Core. It runs under bwrap in a shared network
+/// namespace (loopback only), dies with the Core (`--die-with-parent`, `kill_on_drop`), and is
+/// stopped after `LOCAL_IDLE` without chat. Writes only its log, in the owner's run directory.
+pub struct LocalServer {
+    settings: Option<LocalSettings>,
+    child: Option<Child>,
+    port: Option<u16>,
+    last_use: Instant,
+    idle: Duration,
+    state: LocalState,
+}
+
+impl Default for LocalServer {
+    fn default() -> Self {
+        Self {
+            settings: None,
+            child: None,
+            port: None,
+            last_use: Instant::now(),
+            idle: LOCAL_IDLE,
+            state: LocalState::Unavailable,
+        }
+    }
+}
+
+impl Drop for LocalServer {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn read_settings(root: &Path) -> Option<LocalSettings> {
+    let path = root.join(LOCAL_SETTINGS_FILE);
+    let meta = fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_LOCAL_SETTINGS {
+        return None;
+    }
+    let settings: LocalSettings = serde_json::from_slice(&fs::read(&path).ok()?).ok()?;
+    settings.valid().then_some(settings)
+}
+
+fn sha256_of(path: &Path) -> io::Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    io::copy(&mut file, &mut hasher)?;
+    Ok(hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        }))
+}
+
+/// `GET /health` on loopback with a short deadline: true only for an HTTP 200 answer.
+fn health(port: u16) -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(300)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(800)));
+    if stream
+        .write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut head = [0u8; 12];
+    let mut got = 0;
+    while got < head.len() {
+        match stream.read(&mut head[got..]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => got += n,
+        }
+    }
+    got == head.len() && head.starts_with(b"HTTP/1.") && &head[9..12] == b"200"
+}
+
+/// The sandboxed server command: loopback-only network (shared namespace, no name resolution is
+/// needed), read-only binary and model, a private run directory, and no other host path.
+fn spawn(settings: &LocalSettings, port: u16) -> io::Result<Child> {
+    let bin_dir = settings
+        .binary
+        .parent()
+        .ok_or_else(|| io::Error::other("binary directory"))?;
+    fs::create_dir_all(&settings.run_dir)?;
+    let log = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(settings.run_dir.join(LOCAL_LOG))?;
+    let log_err = log.try_clone()?;
+    let mut command = Command::new(crate::plugins::BWRAP);
+    command
+        .env_clear()
+        .args([
+            "--unshare-all",
+            "--share-net",
+            "--die-with-parent",
+            "--new-session",
+            "--clearenv",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--symlink",
+            "usr/lib",
+            "/lib",
+            "--symlink",
+            "usr/lib",
+            "/lib64",
+            "--proc",
+            "/proc",
+            "--dev",
+            "/dev",
+            "--tmpfs",
+            "/tmp",
+        ])
+        .arg("--ro-bind")
+        .arg(bin_dir)
+        .arg(bin_dir)
+        .arg("--ro-bind")
+        .arg(&settings.model)
+        .arg(&settings.model)
+        .arg("--bind")
+        .arg(&settings.run_dir)
+        .arg(&settings.run_dir)
+        .args([
+            "--setenv",
+            "PATH",
+            "/usr/bin:/bin",
+            "--setenv",
+            "LANG",
+            "C.UTF-8",
+        ])
+        .arg("--setenv")
+        .arg("LD_LIBRARY_PATH")
+        .arg(bin_dir)
+        .arg("--setenv")
+        .arg("HOME")
+        .arg(&settings.run_dir)
+        .arg("--chdir")
+        .arg(&settings.run_dir)
+        .arg("--")
+        .arg(&settings.binary)
+        .arg("-m")
+        .arg(&settings.model)
+        .args(["--host", LOCAL_HOST, "--port"])
+        .arg(port.to_string())
+        .args(["--no-webui", "-c"])
+        .arg(settings.ctx.to_string())
+        .arg("-t")
+        .arg(settings.threads.to_string())
+        .args(["-np", "1", "--jinja"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_err))
+        .process_group(0);
+    command.spawn()
+}
+
+impl LocalServer {
+    pub fn load(root: &Path) -> Self {
+        let settings = read_settings(root);
+        let mut server = Self::default();
+        server.state = if settings.is_some() {
+            LocalState::Stopped
+        } else {
+            LocalState::Unavailable
+        };
+        if let Some(seconds) = settings.as_ref().and_then(|s| s.idle_s) {
+            server.idle = Duration::from_secs(seconds);
+        }
+        server.settings = settings;
+        server
+    }
+    pub fn state(&self) -> LocalState {
+        self.state
+    }
+    /// Starts the server for `port` if it is not already answering, and waits for `/health`.
+    /// The first chat after a stop pays the model load (measured in docs/WP18b.md).
+    pub fn ensure(&mut self, port: u16) -> Result<(), &'static str> {
+        self.last_use = Instant::now();
+        if self.child.is_some() && self.port == Some(port) && health(port) {
+            self.state = LocalState::Running;
+            return Ok(());
+        }
+        self.stop();
+        // No owner settings: the server is managed outside the Core (tests, manual llm_local.py); pass through.
+        let Some(settings) = self.settings.clone() else {
+            return Ok(());
+        };
+        let digest = sha256_of(&settings.model).map_err(|_| "backend_unavailable")?;
+        if !digest.eq_ignore_ascii_case(&settings.model_sha256) || health(port) {
+            self.state = LocalState::Unavailable;
+            return Err("backend_unavailable");
+        }
+        let mut child = spawn(&settings, port).map_err(|_| {
+            self.state = LocalState::Unavailable;
+            "backend_unavailable"
+        })?;
+        let deadline = Instant::now() + LOCAL_HEALTH_WAIT;
+        loop {
+            if health(port) {
+                break;
+            }
+            let exited = matches!(child.try_wait(), Ok(Some(_)) | Err(_));
+            if exited || Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                self.state = LocalState::Unavailable;
+                return Err("backend_unavailable");
+            }
+            std::thread::sleep(LOCAL_HEALTH_STEP);
+        }
+        self.child = Some(child);
+        self.port = Some(port);
+        self.state = LocalState::Running;
+        Ok(())
+    }
+    /// Kills the server process (and, through `--die-with-parent`, nothing else survives it).
+    pub fn stop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.port = None;
+        if self.state != LocalState::Unavailable {
+            self.state = LocalState::Stopped;
+        }
+    }
+    /// Periodic check: a dead process becomes `unavailable`; an idle server is stopped.
+    pub fn tick(&mut self, now: Instant) {
+        if let Some(child) = self.child.as_mut() {
+            if matches!(child.try_wait(), Ok(Some(_)) | Err(_)) {
+                self.child = None;
+                self.port = None;
+                self.state = LocalState::Unavailable;
+                return;
+            }
+        }
+        if self.child.is_some() && now.saturating_duration_since(self.last_use) >= self.idle {
+            self.stop();
+        }
+    }
 }
 
 /// Core-owned LLM state: loaded once at boot, updated only through CAS-checked operations.
@@ -472,6 +801,7 @@ pub struct LlmState {
     allow_loopback: bool,
     quarantined: bool,
     last_chat: Option<ChatNote>,
+    local: LocalServer,
 }
 
 impl LlmState {
@@ -498,6 +828,7 @@ impl LlmState {
             Ok(secrets) if secrets.validate() => state.secrets = secrets,
             _ => state.quarantined = true,
         }
+        state.local = LocalServer::load(&storage.root);
         state
     }
     pub fn snapshot(&self) -> Snapshot {
@@ -509,7 +840,28 @@ impl LlmState {
             }),
             secrets: self.secrets.flags(),
             last_chat: self.last_chat,
+            local_server: self.local.state(),
         }
+    }
+    /// Before a local chat: starts the llama-server on demand. Cloud routes and quarantined state pass.
+    pub fn ensure_local(&mut self) -> Result<(), &'static str> {
+        if self.quarantined {
+            return Ok(());
+        }
+        match self.config.as_ref().map(|c| (c.provider, c.local_port)) {
+            Some((provider, Some(port))) if provider.is_local() => self.local.ensure(port),
+            _ => Ok(()),
+        }
+    }
+    pub fn tick_local(&mut self, now: Instant) {
+        if self.config.as_ref().is_some_and(|c| c.provider.is_local()) {
+            self.local.tick(now);
+        } else {
+            self.local.stop();
+        }
+    }
+    pub fn stop_local(&mut self) {
+        self.local.stop();
     }
     /// Records the fallback flag of the last chat answer (in memory only; never persisted).
     pub(crate) fn note_chat(&mut self, used_fallback: bool, at_ms: u64) {
@@ -546,13 +898,19 @@ impl LlmState {
         self.check_revision(revision)?;
         let config = input.build()?;
         config.validate(self.allow_loopback)?;
+        let local = config.provider.is_local();
         let next = LlmLedger {
             version: 1,
             revision: revision.checked_add(1).ok_or("llm_revision_exhausted")?,
             config: Some(config),
             lkg: self.lkg.clone(),
         };
-        self.commit(storage, next)
+        self.commit(storage, next)?;
+        // A cloud configuration never keeps a local server running; a local one starts on the next chat.
+        if !local {
+            self.local.stop();
+        }
+        Ok(())
     }
     /// Promotes the current primary configuration to last-known-good (the fallback is not part of it).
     pub fn mark_good(&mut self, storage: &Storage, revision: u64) -> Result<(), &'static str> {

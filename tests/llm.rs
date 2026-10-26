@@ -701,7 +701,7 @@ fn vault_is_write_only_private_and_strictly_validated() {
     let key = lab.key.clone();
     assert_eq!(
         lab.core.snap()["llm"]["secrets"],
-        json!({"openrouter": false, "opencode": false, "google": false, "custom": false})
+        json!({"openrouter": false, "opencode": false, "google": false, "anthropic": false, "custom": false})
     );
     assert_eq!(lab.core.set_secret("custom", &key)["code"], "ok");
     assert_eq!(lab.core.snap()["llm"]["secrets"]["custom"], true);
@@ -1177,6 +1177,7 @@ fn broker_script_refuses_bad_requests_without_touching_the_network() {
             "url": url, "method": "POST", "headers": {"Content-Type": "application/json"},
             "body": "{}", "timeout_s": 5, "expected_host": expected,
             "allow_http": allow_http, "allow_loopback": false,
+            "auth": "bearer", "dialect": "openai",
         })
         .to_string()
     };

@@ -26,6 +26,7 @@ pub mod plugins;
 pub mod protocol;
 pub mod registry;
 pub mod secrets;
+pub mod skill_index;
 pub mod skills;
 pub mod souls;
 pub mod storage;

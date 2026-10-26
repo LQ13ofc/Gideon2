@@ -24,7 +24,7 @@ RUNTIME_STATES=('disabled','starting','running','failed','stopped')
 PLUGIN_LAST_ERRORS=frozenset({'plugin_crashed','plugin_cpu_exceeded','plugin_output_invalid','plugin_start_failed','plugin_not_runnable','plugin_quarantined','handshake_timeout','handshake_mismatch'})
 # Codes a capability_result can carry (src/plugins.rs PASS_THROUGH_ERRORS plus Core-owned results).
 CANCEL_CODES=frozenset({'cancelled','invoke_cancelled'})  # a cancelled capability is reported as invoke_cancelled by the Core (src/plugins.rs); 'cancelled' is the older name
-CAPABILITY_ERRORS=frozenset({'key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable','opt_in_required','stale_screen','unsupported','unknown_service','unknown_element','no_focus','unknown_route','unknown_app','indicator_off','already_recording','not_recording','world_unavailable','skill_invalid','model_output_invalid'})  # C4/S4 codes: plugin answers that the Core passes through unchanged (src/plugins.rs PASS_THROUGH_ERRORS)
+CAPABILITY_ERRORS=frozenset({'backend_unavailable','key_missing','cloud_not_authorized','provider_not_configured','permission_denied','http_error','timeout','response_too_large','network_unavailable','cancelled','invalid_input','host_not_allowed','redirect_refused','busy','invalid_host_call','plugin_error','plugin_not_runnable','plugin_output_invalid','plugin_cpu_exceeded','capability_unavailable','capability_timeout','invoke_cancelled','model_unsupported_feature','model_not_found','model_selftest_failed','settings_unavailable','opt_in_required','stale_screen','unsupported','unknown_service','unknown_element','no_focus','unknown_route','unknown_app','indicator_off','already_recording','not_recording','world_unavailable','skill_invalid','model_output_invalid'})  # C4/S4 codes: plugin answers that the Core passes through unchanged (src/plugins.rs PASS_THROUGH_ERRORS)
 # Tool proposal reasons (src/tools.rs and src/core.rs tool_denied/tool_failed).
 TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_failed','executor_unavailable','user_denied','invalid_args','unknown_tool','busy'})
 HUB_REASONS=('ledger_missing','ledger_invalid')
@@ -379,9 +379,11 @@ def bounded_output(value):
     try:return isinstance(value,dict) and shallow(value) and utf8_len(json.dumps(value,separators=(',',':'),ensure_ascii=False,allow_nan=False))<=OUTPUT_LIMIT
     except (TypeError,ValueError,RecursionError):return False
 # C1 (docs/C1.md) contract: Core limits mirrored here so the UI refuses before a round trip.
-LLM_PROVIDERS=('openrouter','opencode','google','custom');LLM_SECRET_KEYS=frozenset(LLM_PROVIDERS)
+LLM_PROVIDERS=('openrouter','opencode','google','anthropic','custom');LLM_SECRET_KEYS=frozenset(LLM_PROVIDERS)
+# WP-18b: the Core-managed local llama-server state (llm.local_server); no other values exist.
+LOCAL_SERVER_STATES=('stopped','running','unavailable')
 # C2 (docs/C2.md): local providers take a loopback port and never need a key or cloud consent.
-LOCAL_PROVIDERS=('local','ollama');CONFIG_PROVIDERS=LLM_PROVIDERS+LOCAL_PROVIDERS;FIXED_CLOUD_PROVIDERS=('openrouter','opencode','google')
+LOCAL_PROVIDERS=('local','ollama');CONFIG_PROVIDERS=LLM_PROVIDERS+LOCAL_PROVIDERS;FIXED_CLOUD_PROVIDERS=('openrouter','opencode','google','anthropic')
 LOCAL_PORT_MIN,LOCAL_PORT_MAX=1024,65535
 # The Core serializes config with local_port, fallback and lkg omitted when null (skip_serializing_if): they are optional keys.
 LLM_CONFIG_REQUIRED=frozenset({'provider','model','custom_url','cloud_consent'});LLM_CONFIG_KEYS=LLM_CONFIG_REQUIRED|{'local_port','fallback','lkg'}
@@ -500,7 +502,8 @@ def target_problem(target,keys,required):
     if not (isinstance(target,dict) and required<=set(target)<=keys):return True
     return llm_config_problem(target['provider'],target['model'],target.get('custom_url'),target.get('cloud_consent',False),target.get('local_port'))
 def valid_llm(llm):
-    if not (isinstance(llm,dict) and {'revision','config','secrets'}<=set(llm)<={'revision','config','secrets','last_chat'} and is_int(llm['revision'])):return False
+    if not (isinstance(llm,dict) and {'revision','config','secrets'}<=set(llm)<={'revision','config','secrets','last_chat','local_server'} and is_int(llm['revision'])):return False
+    if llm.get('local_server',LOCAL_SERVER_STATES[0]) not in LOCAL_SERVER_STATES:return False
     # NF-10: last_chat is absent until a chat answered; then only the fallback flag and its time (no content).
     last=llm.get('last_chat')
     if last is not None and not (isinstance(last,dict) and set(last)=={'used_fallback','at_ms'} and type(last['used_fallback']) is bool and is_int(last['at_ms'],1)):return False
@@ -580,6 +583,11 @@ def valid_models_page(output,tab,offset):
     hw=output['hardware']
     if not (isinstance(hw,dict) and set(hw)=={'cpu_cores','ram_gb','gpu'} and is_int(hw['cpu_cores'],1,4096) and finite_number(hw['ram_gb'],65536) and hw['gpu']=='unknown'):return False
     return bounded_output(output)
+def valid_describe(output):
+    """Answer of llm_describe (WP-19): exactly {'model': one Model of its own tier}, checked by the Model schema."""
+    if not (isinstance(output,dict) and set(output)=={'model'}):return False
+    model=output['model']
+    return isinstance(model,dict) and model.get('tier') in MODEL_TABS and valid_model(model,model['tier'])
 def valid_selftest(output):
     """Result of action selftest: a probe that passed. Vision is never probed, so it stays unknown."""
     return isinstance(output,dict) and set(output)=={'ok','latency_ms','features','source'} and output['ok'] is True and is_int(output['latency_ms'],0,600000) and output['source']=='probed' and feature_ok(output['features']) and output['features']['vision']=='unknown' and bounded_output(output)
@@ -745,56 +753,84 @@ def chat_messages_for(history,text):
 
 # C4 perception and action plugins (docs/C4.md). The allowlist is the only capability set perceptionInvoke may send. Shapes below are the
 # C4 contract (docs/C4.md): each rule matches the real output of its plugin, captured from the real Core by test_snapshot_contract.py (test_c4_plugin_outputs_validate_against_real_core).
-PERCEPTION_PLUGINS=('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate')
-PERCEPTION_NO_INPUT=frozenset({'screen_observe.capture','screen_observe.status','computer_control.tree','computer_control.status','audio_advanced.state','mic_advanced.state','camera_gesture.state','camera_gesture.capture','camera_gesture.gestures','display_manipulate.status'})
-PERCEPTION_CAPABILITIES=PERCEPTION_NO_INPUT|frozenset({'computer_control.act','audio_advanced.act','mic_advanced.configure','mic_advanced.monitor','mic_advanced.record','camera_gesture.optin'})
+PERCEPTION_PLUGINS=('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate','shortcut_global')
+PERCEPTION_NO_INPUT=frozenset({'screen_observe.capture','screen_observe.status','computer_control.tree','computer_control.status','audio_advanced.state','mic_advanced.state','camera_gesture.state','camera_gesture.capture','camera_gesture.gestures','display_manipulate.status','display_manipulate.restore','shortcut_global.status','shortcut_global.events'})
+PERCEPTION_CAPABILITIES=PERCEPTION_NO_INPUT|frozenset({'computer_control.act','audio_advanced.act','mic_advanced.configure','mic_advanced.monitor','mic_advanced.record','camera_gesture.optin','display_manipulate.act','shortcut_global.bind'})
 PERCEPTION_INPUT_LIMIT=8192;PERCEPTION_DEADLINE_MS=5000;PERCEPTION_GESTURES=16;PERCEPTION_ELEMENTS=64
+# WP-17: per-capability deadlines (ms). The Core accepts up to 60 s only for computer_control.act (portal consent).
+PERCEPTION_DEADLINES={'computer_control.act':60000,'screen_observe.capture':30000}
+PERCEPTION_STATUS_CAPABILITIES=('screen_observe.status','camera_gesture.state')
+def perception_deadline(capability):return PERCEPTION_DEADLINES.get(capability,PERCEPTION_DEADLINE_MS)
 PERCEPTION_LABELS={'backend':'backend','real_backend':'backend real','reason':'motivo','epoch':'época','width':'largura','height':'altura','sha256':'SHA-256','regions':'regiões','elements':'elementos','kind':'ação','verified':'verificado','routes':'rotas','apps':'apps','eq':'EQ','denoise':'redução de ruído','device':'dispositivo','gain':'ganho','filter':'filtro','monitor':'monitor','recording':'gravando','indicator':'indicador','opt_in':'opt-in','frame_seq':'quadro','gesture':'gesto','gestures':'gestos','supported':'suportado','state':'estado','note':'nota','volume':'volume','id':'id','role':'papel','name':'nome','x':'x','y':'y'}
-PERCEPTION_VALUES={'synthetic':'sintético','unsupported':'não suportado','needs_human_validation':'pendente de validação humana','UNSUPPORTED':'UNSUPPORTED'}
-PERCEPTION_MESSAGES={'permission_denied':'Permissão negada: o plugin precisa da permissão aprovada no Gideon Hub','stale_screen':'A tela mudou desde a última observação; observe de novo'}
+PERCEPTION_VALUES={'portal':'portal XDG','atspi':'AT-SPI','remote_desktop':'RemoteDesktop','pipewire':'PipeWire','v4l2':'câmera (v4l2)','kscreen':'KScreen (Plasma)','kglobalaccel':'KGlobalAccel','ok':'ok','portal_missing':'portal ausente nesta sessão','pygobject_missing':'PyGObject ausente no Python do sistema','no_active_window':'nenhuma janela ativa','no_gesture_model_installed':'nenhum modelo de gesto instalado','monitor_would_feed_back_to_speakers':'monitoração recusada: realimentação nos alto-falantes','on':'ligado','off':'desligado','scale':'escala','brightness':'brilho','route':'rota de saída','app_volume':'volume do stream','key':'tecla','type':'texto','start':'iniciar','stop':'parar','synthetic':'sintético','unsupported':'não suportado','needs_human_validation':'pendente de validação humana','UNSUPPORTED':'UNSUPPORTED'}
+PERCEPTION_MESSAGES={'permission_denied':'Permissão negada: o plugin precisa da permissão aprovada no Gideon Hub','stale_screen':'A tela mudou desde a última observação; observe de novo','backend_unavailable':'Este recurso não tem backend disponível nesta sessão (portal, AT-SPI, PipeWire, câmera ou KScreen); nada foi feito','not_recording':'Nenhuma gravação em andamento','already_recording':'Já há uma gravação em andamento','unknown_route':'Saída de áudio não encontrada; nada mudou','unknown_app':'Stream de áudio não encontrado; nada mudou','no_focus':'Nenhuma janela com foco; nada foi digitado','timeout':'O recurso não respondeu no prazo; nada foi confirmado','busy':'Outra operação de percepção está em andamento','invalid_input':'Entrada recusada pelo worker'}
 PERCEPTION_UNREAD='não lido';PERCEPTION_ARM=object()
 def _no_constant(name):raise ValueError(name)
 def _exact(value,keys):return isinstance(value,dict) and set(value)==set(keys)
-def _synthetic(value):return value.get('backend')=='synthetic'
-def _region(item,keys,limit):return _exact(item,keys) and plain_text(item[keys[0]],limit) and all(is_int(item[k],0,16384) for k in keys[2:]) and plain_text(item[keys[1]],256)
 def _keys_ok(o,required,optional=()):return isinstance(o,dict) and set(required)<=set(o)<=set(required)|set(optional)
-def _real_ok(o):return _synthetic(o) and o['real_backend']=='unsupported' and o['reason']=='needs_human_validation'
-REAL_KEYS=('backend','real_backend','reason')
-MIC_KEYS=REAL_KEYS+('device','gain','filter','monitor','recording','indicator')
-CAM_KEYS=REAL_KEYS+('opt_in','indicator','frame_seq')
-AUDIO_KEYS=REAL_KEYS+('routes','apps','eq','denoise')
-AUDIO_PRESETS=('flat','voice','music','bass')
-MIC_FILTERS=('off','low_cut','voice')
-def _mic_fields(o):return _real_ok(o) and plain_text(o['device'],128) and is_int(o['gain'],0,100) and o['filter'] in MIC_FILTERS and all(type(o[k]) is bool for k in ('monitor','recording','indicator')) and o['indicator']==(o['monitor'] or o['recording'])
-def _cam_fields(o):return _real_ok(o) and type(o['opt_in']) is bool and type(o['indicator']) is bool and o['indicator']==o['opt_in'] and is_int(o['frame_seq'],0,2**32)
-def _audio_fields(o):
-    if not (_real_ok(o) and isinstance(o['routes'],list) and len(o['routes'])<=8 and isinstance(o['apps'],list) and len(o['apps'])<=8):return False
-    return all(_keys_ok(r,('id','active')) and plain_text(r['id'],64) and type(r['active']) is bool for r in o['routes']) and all(_keys_ok(a,('id','volume')) and plain_text(a['id'],64) and is_int(a['volume'],0,100) for a in o['apps']) and o['eq'] in AUDIO_PRESETS and type(o['denoise']) is bool
-def _out_capture(o):return _keys_ok(o,('backend','epoch','width','height','sha256','regions'),('truncated',)) and _synthetic(o) and is_int(o['epoch'],0,2**32) and is_int(o['width'],1,16384) and is_int(o['height'],1,16384) and digest(o['sha256']) and isinstance(o['regions'],list) and len(o['regions'])<=64 and all(_region(r,('role','name','x','y'),64) for r in o['regions']) and ('truncated' not in o or type(o['truncated']) is bool)
-def _region(item,keys,limit):return _exact(item,keys) and plain_text(item[keys[0]],limit) and all(is_int(item[k],0,16384) for k in keys[2:]) and plain_text(item[keys[1]],256)
-def _out_status(o):return _keys_ok(o,REAL_KEYS) and _real_ok(o)
+def _backend(o,names):return isinstance(o,dict) and o.get('backend') in names
+def _refusal(o):return isinstance(o,dict) and o.get('supported') is False and o.get('reason') in PERCEPTION_REFUSALS
+def _on_off(value):return value in ('on','off')
+PERCEPTION_REFUSALS=('no_gesture_model_installed','monitor_would_feed_back_to_speakers')
+# WP-17: the real worker answers (scripts/perception_worker.py). `available`/`reason` read the backend; refusals are ok outputs.
+AVAILABILITY_KEYS=('backend','available','reason')
+AUDIO_LEVEL_MAX=150
+def _status(o,backend):return _keys_ok(o,AVAILABILITY_KEYS) and _backend(o,(backend,)) and type(o['available']) is bool and plain_text(o['reason'],64)
+def _out_capture(o):return _keys_ok(o,('backend','epoch','width','height','sha256','regions')) and _backend(o,('portal',)) and is_int(o['epoch'],0,2**32) and is_int(o['width'],1,16384) and is_int(o['height'],1,16384) and digest(o['sha256']) and o['regions']==[]
+def _out_status(o):return _status(o,'portal')
+def _out_cc_status(o):return _status(o,'atspi')
 def _out_tree(o):
-    if not (_keys_ok(o,('backend','epoch','elements'),('truncated',)) and _synthetic(o) and is_int(o['epoch'],0,2**32) and isinstance(o['elements'],list) and len(o['elements'])<=PERCEPTION_ELEMENTS and ('truncated' not in o or type(o['truncated']) is bool)):return False
-    return all(_keys_ok(e,('id','role','name','x','y','focused')) and plain_text(e['id'],64) and plain_text(e['role'],64) and plain_text(e['name'],256) and is_int(e['x'],0,16384) and is_int(e['y'],0,16384) and type(e['focused']) is bool for e in o['elements'])
-def _out_cc_act(o):return _keys_ok(o,('backend','kind','epoch','verified'),('element',)) and _synthetic(o) and o['kind'] in ('click','type','key','focus') and is_int(o['epoch'],0,2**32) and type(o['verified']) is bool and ('element' not in o or plain_text(o['element'],64))
-def _out_audio_state(o):return _keys_ok(o,AUDIO_KEYS) and _audio_fields(o)
-def _out_audio_act(o):return _keys_ok(o,AUDIO_KEYS+('kind','verified')) and _audio_fields(o) and o['kind'] in ('route','app_volume','eq','denoise') and type(o['verified']) is bool
-def _out_mic_state(o):return _keys_ok(o,MIC_KEYS) and _mic_fields(o)
-def _out_mic_receipt(o):return _keys_ok(o,MIC_KEYS+('verified',)) and _mic_fields(o) and type(o['verified']) is bool
-def _out_mic_record(o):return _keys_ok(o,MIC_KEYS+('verified','action')) and _mic_fields(o) and o['action'] in ('start','stop') and type(o['verified']) is bool
-def _out_cam_state(o):return _keys_ok(o,CAM_KEYS+('gesture',)) and _cam_fields(o) and (o['gesture'] is None or plain_text(o['gesture'],64))
-def _out_cam_optin(o):return _keys_ok(o,CAM_KEYS+('verified',)) and _cam_fields(o) and type(o['verified']) is bool
-def _out_cam_capture(o):return _keys_ok(o,CAM_KEYS) and _cam_fields(o)
-def _out_cam_gestures(o):return _keys_ok(o,REAL_KEYS+('gestures',)) and _real_ok(o) and isinstance(o['gestures'],list) and len(o['gestures'])<=PERCEPTION_GESTURES and all(plain_text(g,64) for g in o['gestures'])
-def _out_display(o):return _keys_ok(o,('supported','state','reason','note')) and o['supported'] is False and o['state']=='UNSUPPORTED' and o['reason']=='no_compositor_api_in_environment' and o['note']=='overlay/captura não é manipulação de saída'
+    if not (_keys_ok(o,('backend','epoch','window','elements')) and _backend(o,('atspi',)) and is_int(o['epoch'],0,2**32) and plain_text(o['window'],256) and isinstance(o['elements'],list) and len(o['elements'])<=PERCEPTION_ELEMENTS):return False
+    return all(_keys_ok(e,('id','role','name','x','y')) and is_int(e['id'],0,2**32) and plain_text(e['role'],64) and plain_text(e['name'],256) and is_int(e['x'],0,16384) and is_int(e['y'],0,16384) for e in o['elements'])
+def _out_cc_act(o):return _keys_ok(o,('backend','kind','injected','verified')) and _backend(o,('remote_desktop',)) and o['kind'] in ('type','key') and is_int(o['injected'],0,4096) and type(o['verified']) is bool
+def _sinks_ok(o):return isinstance(o['sinks'],list) and len(o['sinks'])<=64 and all(_keys_ok(s,('id','name')) and is_int(s['id'],0,2**32) and plain_text(s['name'],64) for s in o['sinks'])
+def _streams_ok(o):return isinstance(o['streams'],list) and len(o['streams'])<=64 and all(_keys_ok(s,('id','app','volume')) and is_int(s['id'],0,2**32) and plain_text(s['app'],64) and is_int(s['volume'],0,AUDIO_LEVEL_MAX) for s in o['streams'])
+def _out_audio_state(o):return _keys_ok(o,('backend','default_sink','sinks','streams')) and _backend(o,('pipewire',)) and is_int(o['default_sink'],-1,2**32) and _sinks_ok(o) and _streams_ok(o)
+def _out_audio_act(o):
+    if not _backend(o,('pipewire',)) or type(o.get('verified')) is not bool:return False
+    if o.get('kind')=='route':return _keys_ok(o,('backend','kind','previous','default_sink','verified')) and is_int(o['previous'],-1,2**32) and is_int(o['default_sink'],-1,2**32)
+    if o.get('kind')=='app_volume':return _keys_ok(o,('backend','kind','stream','previous','volume','verified')) and is_int(o['stream'],0,2**32) and is_int(o['previous'],0,AUDIO_LEVEL_MAX) and is_int(o['volume'],0,AUDIO_LEVEL_MAX)
+    return False
+def _mic_fields(o):return _backend(o,('pipewire',)) and is_int(o['gain'],0,AUDIO_LEVEL_MAX) and type(o['muted']) is bool and type(o['recording']) is bool and o['indicator']==('on' if o['recording'] else 'off')
+def _out_mic_state(o):return _keys_ok(o,('backend','source','gain','muted','recording','indicator')) and is_int(o['source'],0,2**32) and _mic_fields(o)
+def _out_mic_receipt(o):
+    if _refusal(o):return _keys_ok(o,('backend','supported','reason')) and _backend(o,('pipewire',))
+    return _keys_ok(o,('backend','previous','gain','verified')) and _backend(o,('pipewire',)) and is_int(o['previous'],0,AUDIO_LEVEL_MAX) and is_int(o['gain'],0,AUDIO_LEVEL_MAX) and type(o['verified']) is bool
+def _out_mic_record(o):
+    if not isinstance(o,dict):return False
+    if o.get('recording') is True:return _keys_ok(o,('backend','recording','indicator','max_seconds')) and _backend(o,('pipewire',)) and o['indicator']=='on' and is_int(o['max_seconds'],1,120)
+    return _keys_ok(o,('backend','recording','indicator','seconds','peak','rms','samples')) and _backend(o,('pipewire',)) and o['recording'] is False and o['indicator']=='off' and is_int(o['seconds'],0,3600) and is_int(o['peak'],0,32767) and is_int(o['rms'],0,32767) and is_int(o['samples'],0,2**40)
+def _out_cam_state(o):return _keys_ok(o,('backend','device','present','opt_in','indicator')) and _backend(o,('v4l2',)) and plain_text(o['device'],64) and type(o['present']) is bool and type(o['opt_in']) is bool and o['indicator']==('on' if o['opt_in'] else 'off')
+def _out_cam_optin(o):return _keys_ok(o,('backend','opt_in','indicator')) and _backend(o,('v4l2',)) and type(o['opt_in']) is bool and o['indicator']==('on' if o['opt_in'] else 'off')
+def _out_cam_capture(o):return _keys_ok(o,('backend','width','height','sha256','mean_luma','indicator')) and _backend(o,('v4l2',)) and is_int(o['width'],1,4096) and is_int(o['height'],1,4096) and digest(o['sha256']) and is_int(o['mean_luma'],0,255) and o['indicator']=='on'
+def _out_cam_gestures(o):return _refusal(o) and _keys_ok(o,('backend','supported','reason')) and _backend(o,('v4l2',))
+def _out_display_status(o):
+    if not (_keys_ok(o,('backend','outputs','undo_pending')) and _backend(o,('kscreen',)) and is_int(o['undo_pending'],0,64) and isinstance(o['outputs'],list) and len(o['outputs'])<=8):return False
+    return all(_keys_ok(i,('name','enabled','scale','brightness')) and plain_text(i['name'],32) and type(i['enabled']) is bool and is_int(i['scale'],50,400) and is_int(i['brightness'],-1,100) for i in o['outputs'])
+def _out_display_act(o):return _keys_ok(o,('backend','output','op','previous','value','verified')) and _backend(o,('kscreen',)) and plain_text(o['output'],32) and o['op'] in ('scale','brightness') and is_int(o['previous'],0,400) and is_int(o['value'],0,400) and type(o['verified']) is bool
+def _out_display_restore(o):return _keys_ok(o,('backend','restored','verified')) and _backend(o,('kscreen',)) and is_int(o['restored'],0,64) and type(o['verified']) is bool
+def _out_shortcut_status(o):return _keys_ok(o,('backend','available','reason','bound')) and _backend(o,('portal','kglobalaccel')) and type(o['available']) is bool and plain_text(o['reason'],64) and is_int(o['bound'],0,8)
+def _out_shortcut_bind(o):return _keys_ok(o,('backend','id','trigger','bound')) and _backend(o,('portal','kglobalaccel')) and plain_text(o['id'],32) and plain_text(o['trigger'],32) and is_int(o['bound'],0,8)
+def _out_shortcut_events(o):return _keys_ok(o,('backend','events')) and _backend(o,('portal','kglobalaccel')) and isinstance(o['events'],list) and len(o['events'])<=16 and all(_keys_ok(e,('id','at_ms')) and plain_text(e['id'],32) and is_int(e['at_ms'],0,2**53) for e in o['events'])
 # Output rule per allowlisted capability: a result that fails its rule is refused before QML sees it.
-PERCEPTION_OUTPUTS={'screen_observe.capture':_out_capture,'screen_observe.status':_out_status,'computer_control.tree':_out_tree,'computer_control.act':_out_cc_act,'computer_control.status':_out_status,'audio_advanced.state':_out_audio_state,'audio_advanced.act':_out_audio_act,'mic_advanced.state':_out_mic_state,'mic_advanced.configure':_out_mic_receipt,'mic_advanced.monitor':_out_mic_receipt,'mic_advanced.record':_out_mic_record,'camera_gesture.state':_out_cam_state,'camera_gesture.optin':_out_cam_optin,'camera_gesture.capture':_out_cam_capture,'camera_gesture.gestures':_out_cam_gestures,'display_manipulate.status':_out_display}
+PERCEPTION_OUTPUTS={'screen_observe.capture':_out_capture,'screen_observe.status':_out_status,'computer_control.tree':_out_tree,'computer_control.act':_out_cc_act,'computer_control.status':_out_cc_status,'audio_advanced.state':_out_audio_state,'audio_advanced.act':_out_audio_act,'mic_advanced.state':_out_mic_state,'mic_advanced.configure':_out_mic_receipt,'mic_advanced.monitor':_out_mic_receipt,'mic_advanced.record':_out_mic_record,'camera_gesture.state':_out_cam_state,'camera_gesture.optin':_out_cam_optin,'camera_gesture.capture':_out_cam_capture,'camera_gesture.gestures':_out_cam_gestures,'display_manipulate.status':_out_display_status,'display_manipulate.act':_out_display_act,'display_manipulate.restore':_out_display_restore,'shortcut_global.status':_out_shortcut_status,'shortcut_global.bind':_out_shortcut_bind,'shortcut_global.events':_out_shortcut_events}
 def _in_act(capability,value):
-    if capability=='computer_control.act':return value.get('kind') in ('click','type','key','focus') and is_int(value.get('epoch'),1)
-    if capability=='audio_advanced.act':return value.get('kind') in ('route','app_volume','eq','denoise') and (value.get('kind')!='eq' or value.get('preset') in AUDIO_PRESETS)
-    if capability=='mic_advanced.configure':return set(value)<={'gain','filter'} and ('gain' not in value or is_int(value['gain'],0,100)) and ('filter' not in value or value['filter'] in MIC_FILTERS)
+    if capability=='computer_control.act':
+        if value.get('kind')=='key':return set(value)=={'kind','key','epoch'} and plain_text(value['key'],16) and is_int(value['epoch'],0,2**32)
+        if value.get('kind')=='type':return set(value)=={'kind','text','epoch'} and plain_text(value['text'],256) and is_int(value['epoch'],0,2**32)
+        return False
+    if capability=='audio_advanced.act':
+        if value.get('kind')=='route':return set(value)=={'kind','sink'} and is_int(value['sink'],1,2**32)
+        if value.get('kind')=='app_volume':return set(value)=={'kind','stream','volume'} and is_int(value['stream'],1,2**32) and is_int(value['volume'],0,100)
+        return False
+    if capability=='mic_advanced.configure':return set(value)=={'gain'} and is_int(value['gain'],0,150)
     if capability=='mic_advanced.monitor':return set(value)=={'enabled'} and type(value['enabled']) is bool
     if capability=='mic_advanced.record':return set(value)=={'action'} and value['action'] in ('start','stop')
+    if capability=='display_manipulate.act':
+        return set(value)=={'output','op','value'} and plain_text(value['output'],32) and ((value['op']=='scale' and value['value'] in (100,125,150,175,200)) or (value['op']=='brightness' and is_int(value['value'],20,100)))
+    if capability=='display_manipulate.restore':return value=={}
+    if capability=='shortcut_global.bind':return set(value)=={'id','trigger'} and plain_text(value['id'],32) and plain_text(value['trigger'],32)
+    if capability in ('shortcut_global.status','shortcut_global.events'):return value=={}
     return set(value)=={'enabled'} and type(value['enabled']) is bool
 def perception_input_problem(capability,text):
     """Strict input rule for perceptionInvoke: an allowlisted capability, a JSON object of at most 8 KiB, exact keys for reads, checked fields for actions."""
@@ -1120,7 +1156,7 @@ CODE_MESSAGES={
     'stale_preferences':'Configurações mudaram no Core; atualize e tente de novo',
     'invalid_preferences':'Preferências recusadas pelo Core: valor inválido; nada foi salvo',
     'invalid_languages':'Idiomas recusados: escolha de 1 a 3 idiomas válidos para escuta e uma voz de fala; nada foi salvo',
-    'language_not_installed':'Idioma ainda não instalado: o download depende da aprovação do dono; nada foi salvo',
+    'language_not_installed':'Idioma ainda não instalado: o download depende da aprovação do dono; nada foi salvo','language_pack_unavailable':'Modelos do idioma ausentes ou diferentes do pacote; nada foi ativado',
     'language_unsupported':'Idioma sem suporte nesta versão; nada foi salvo',
     'preferences_storage_error':'Preferências indisponíveis: o arquivo de configuração não pôde ser lido ou gravado',
     'preferences_unavailable':'Preferências indisponíveis agora; tente quando o Gideon estiver em espera',
@@ -1283,7 +1319,7 @@ PERSONAL_MESSAGES={
     'busy':'Ocupado: aguarde o término da ação atual.',
 }
 PERSONAL_OPS=frozenset({'personal','personal_export','personal_erase_all'})
-LLM_PROVIDER_LABELS={'openrouter':'OpenRouter','opencode':'OpenCode','google':'Google','custom':'personalizado'}
+LLM_PROVIDER_LABELS={'openrouter':'OpenRouter','opencode':'OpenCode','google':'Google','anthropic':'Anthropic','custom':'personalizado'}
 LANGUAGE_LABELS={'EN':'inglês'}
 RECEIPT_PREFIXES=(('Sandbox app process verified: ','Processo do app verificado no sandbox: '),)
 def display_receipt(text):
@@ -1598,7 +1634,7 @@ def valid_conn_provider(provider):
     if not (isinstance(operations,list) and len(operations)<=CONN_OPERATIONS_LIMIT):return False
     names=[]
     for operation in operations:
-        if not (isinstance(operation,dict) and set(operation)=={'name','scope','risk'} and isinstance(operation['name'],str) and CONN_NAME.fullmatch(operation['name']) and operation['scope'] in scope_ids and operation['risk'] in CONN_ACCESS):return False
+        if not (isinstance(operation,dict) and set(operation)=={'name','scope','risk','needs_args'} and isinstance(operation['name'],str) and CONN_NAME.fullmatch(operation['name']) and operation['scope'] in scope_ids and operation['risk'] in CONN_ACCESS and type(operation['needs_args']) is bool):return False
         names.append(operation['name'])
     return len(set(names))==len(names)
 def valid_conn_item(item,catalog):
@@ -1792,6 +1828,9 @@ PENDING.update({'real_actions_preference':'Salvando as ações no computador no 
 # Idiomas (Frente 2): one op for the STT list and the TTS language/voice; applied at the next Core start.
 OPS.update({'language_preference':('prefs','Idiomas salvos no Core; reinicie o Core para aplicar')})
 PENDING.update({'language_preference':'Salvando idiomas no Core…'})
+# CFG-03: verifies the packaged models of one bundled language (hash per file) and activates them in the Core state. No download.
+OPS.update({'language_install':('prefs','Modelos verificados pelo hash e ativados no Core; a escolha vale na próxima fala')})
+PENDING.update({'language_install':'Verificando os modelos do idioma no pacote…'})
 # CFG-04 retention: applies at once; `never` also removes the audit trail (purge on commit). DIAG-02 developer mode: a plain switch.
 OPS.update({'history_retention_preference':('prefs','Retenção do histórico salva no Core; vale já')})
 PENDING.update({'history_retention_preference':'Salvando a retenção do histórico no Core…'})
@@ -1818,7 +1857,7 @@ class Bridge(QObject):
         self.chat_last_error=''
         # C2 model manager. models_req=(kind,op) awaits the Core ack; models_wait=kind awaits the capability result; models_flow is the useModel state machine.
         # models_marker is the response count when the awaited capability invoke was acknowledged; only a later response can carry its answer.
-        self.models_req=None;self.models_wait=None;self.models_marker=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_message=''
+        self.models_req=None;self.models_wait=None;self.models_marker=None;self.models_flow=None;self.models_recover=False;self.models_want_list=False;self.models_data=None;self.models_described=None;self.models_message=''
         self._responses=0
         # WP-10a: area of the personal request in flight, and the last reply ({area, code, reply}) shown by the pages.
         self.personal_area='';self.personal_reply={}
@@ -1828,6 +1867,9 @@ class Bridge(QObject):
         self.models_page_req=None;self.models_page=fresh_model_pages()
         # C4 perception: one allowlisted capability at a time. perception_req awaits the Core ack; perception_inflight awaits the plugin result; perception_before is the capability_result seen at ack, so a stale answer is never taken for the new one.
         self.perception_req=None;self.perception_inflight=None;self.perception_before=None;self.perception_indicators={'mic':None,'camera':None}
+        self.perception_status={};self.perception_status_queue=[]
+        # WP-17 push-to-talk: the global shortcut (shortcut_global plugin) starts a capture. Off until the owner turns it on.
+        self.ptt={'enabled':False,'trigger':'CTRL+ALT+G','state':'off','message':''};self.ptt_timer=QTimer(self);self.ptt_timer.setInterval(900);self.ptt_timer.timeout.connect(self._ptt_tick)
         # S4 skills: skill_req awaits the Core ack of the LLM draft; skill_inflight awaits the plugin result; skill_before is the capability_result seen at ack (same rule as perception).
         self.skill_req=None;self.skill_inflight=None;self.skill_before=None;self.skill_draft={}
         # WP-4 Hub import: the open payload file and the step in flight (see importHubPayload). None when no upload runs.
@@ -1907,7 +1949,8 @@ class Bridge(QObject):
             self._skills_touch();return
         if op=='capability_invoke' and self.perception_req is not None:
             req,self.perception_req=self.perception_req,None
-            if code=='ok':self.perception_inflight=req;self.perception_before=PERCEPTION_ARM;self.results['perception']=PENDING['capability_invoke']
+            if code=='ok':self.perception_inflight=req;self.perception_before=PERCEPTION_ARM;self.results['perception']=PENDING['capability_invoke'] if not req.get('silent') else self.results['perception']
+            elif req.get('silent'):self._ptt_observe(req,{'ok':False,'error':code})
             else:self.results['perception']=perception_code_message(code)
             self._perception_touch();return
         if op=='tool_decide':self.tool_inflight=None
@@ -2207,6 +2250,14 @@ class Bridge(QObject):
     def llmMarkGood(self):
         if not self.llmConfigAvailable:return self._models_say('Motor LLM indisponível agora')
         self._llm_revision_op('mark_manual','llm_mark_good','Marcando a configuração atual como boa…')
+    # WP-19 describe(id): the Core op llm_describe asks the plugin; the answer is the llm_engine.models capability result.
+    @Slot(str)
+    def describeModel(self,ident):
+        if self._models_blocked():return
+        if not (isinstance(ident,str) and MODEL_TOKEN.fullmatch(ident)):return self._models_say(CODE_MESSAGES['invalid_input'])
+        if self._models_send('describe','llm_describe',id=ident):self.models_message='Pedindo a descrição do modelo ao Core…';self._models_touch()
+    @Property('QVariantMap',notify=modelsStateChanged)
+    def modelDescription(self):return dict(self.models_described or {})
     @Property(bool,notify=changed)
     def llmTestAvailable(self):return self.modelsAvailable and bool((self.snapshot.get('llm') or {}).get('config')) and not self._models_busy_now()
     @Property(bool,notify=changed)
@@ -2289,6 +2340,9 @@ class Bridge(QObject):
         elif kind=='mark_manual':self.models_message='Configuração marcada como boa' if code=='ok' else code_message(code)
         elif kind=='fallback':self.models_message='Fallback salvo pelo Core' if code=='ok' else code_message(code)
         elif kind=='clear':self.models_message='Dados do plugin apagados' if code=='ok' else code_message(code)
+        elif kind=='describe':
+            if code=='ok':self.models_wait=kind;self.models_marker=self._responses
+            else:self.models_message=code_message(code)
         elif kind in ('list','save_custom','delete_custom'):
             if code=='ok':self.models_wait=kind;self.models_marker=self._responses
             else:self.models_message=code_message(code);self.models_page_req=None
@@ -2309,6 +2363,10 @@ class Bridge(QObject):
         elif kind in ('save_custom','delete_custom'):
             if ok:self.models_want_list='custom';self.models_message='Modelo personalizado salvo' if kind=='save_custom' else 'Modelo personalizado removido'
             else:self.models_message=self._result_text(result)
+        elif kind=='describe':
+            if ok and valid_describe(output):
+                self.models_described=output['model'];self.models_message=f"Modelo descrito pelo plugin: {output['model']['label']}"
+            else:self.models_message=self._result_text(result) if not ok else 'Resposta do plugin recusada pelo esquema'
         elif kind=='manual_selftest':
             if ok and valid_selftest(output):self.models_message=f"Teste ok: resposta em {output['latency_ms']} ms"
             else:self.models_message=self._result_text(result) if not ok else 'Resposta do teste recusada pelo esquema'
@@ -2831,6 +2889,12 @@ class Bridge(QObject):
         except (TypeError,ValueError):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
         if not language_request_ok(stt,tts_language,tts_voice):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
         self._preferences('language_preference',revision=int(self.preferencesRevision),stt_languages=stt,tts_language=tts_language,tts_voice=tts_voice)
+    @Slot(str)
+    def installLanguage(self,language):
+        """CFG-03: the Core verifies the packaged models of `language` and activates them. Nothing is downloaded."""
+        if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
+        if not language_tag_ok(language):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
+        self._preferences('language_install',language=language)
     @Slot(float)
     def setWakeSensitivity(self,value):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
@@ -3126,15 +3190,69 @@ class Bridge(QObject):
         if self.perception_before is PERCEPTION_ARM:self.perception_before=result;return
         if not result or result.get('capability')!=req['capability'] or result.get('plugin_id')!=req['plugin_id'] or result==self.perception_before:return
         self.perception_inflight=None;self.perception_before=None
+        if req.get('silent'):return self._ptt_observe(req,result)
         if not result['ok']:self.results['perception']=perception_code_message(result['error'])
         elif not PERCEPTION_OUTPUTS[req['capability']](result.get('output')):self.results['perception']='Resposta do plugin recusada pelo esquema; nada exibido'
         else:
             output=result['output'];self.results['perception']=perception_text(output)
             if 'indicator' in output and req['capability'].startswith('mic_advanced.'):self.perception_indicators['mic']=output['indicator']
             if 'indicator' in output and req['capability'].startswith('camera_gesture.'):self.perception_indicators['camera']=output['indicator']
-        self._perception_touch()
+            if req['capability'] in PERCEPTION_STATUS_CAPABILITIES:self.perception_status[req['capability']]=dict(output)
+        self._perception_touch();self._perception_pump()
     @Property(bool,notify=changed)
     def perceptionAvailable(self):return self.online and any(i['state']=='running' for i in self._perception_items())
+    # WP-17: real status reads for Configurações > Dispositivos (camera and screen). Read one at a time, through the same invoke path.
+    @Slot()
+    def perceptionRefreshStatus(self):
+        self.perception_status_queue=[c for c in PERCEPTION_STATUS_CAPABILITIES if self._perception_running(c)]
+        self._perception_pump()
+    def _perception_pump(self):
+        if self.perception_status_queue and not self._perception_busy_now() and self.perception_req is None:
+            self.perceptionInvoke(self.perception_status_queue.pop(0),'{}')
+    # WP-17 push-to-talk. The owner switches it on in Configurações (consent asked there). The bridge binds the shortcut once,
+    # then reads its events every 0.9 s; each activation is a listen_start (the Core still applies the microphone consent).
+    @Slot(bool,str)
+    def setPushToTalk(self,on,trigger):
+        if on is not True and on is not False:return
+        if not isinstance(trigger,str) or re.fullmatch(r'[A-Za-z0-9+_ ]{1,32}',trigger) is None:trigger='CTRL+ALT+G'
+        self.ptt.update(enabled=on,trigger=trigger.strip() or 'CTRL+ALT+G',state='binding' if on else 'off',message='')
+        if on:self.ptt_timer.start();self._ptt_tick()
+        else:self.ptt_timer.stop();self.perception_status_queue=[]
+        self._ptt_touch()
+    @Property(str,notify=perceptionChanged)
+    def pushToTalkState(self):return self.ptt['state']
+    @Property(str,notify=perceptionChanged)
+    def pushToTalkMessage(self):return self.ptt['message']
+    @Property(str,notify=perceptionChanged)
+    def pushToTalkTrigger(self):return self.ptt['trigger']
+    def _ptt_touch(self):self.perceptionChanged.emit()
+    def _ptt_tick(self):
+        if not self.ptt['enabled']:return
+        if not self.online:self.ptt.update(state='offline',message='Core offline: o atalho volta quando o Core responder');return self._ptt_touch()
+        if not self._perception_running('shortcut_global.bind'):
+            self.ptt.update(state='plugin_unavailable',message='Plugin shortcut_global não está em execução: aprove-o no Gideon Hub (permissão atalho global)');return self._ptt_touch()
+        if self._perception_busy_now() or self.pending:return
+        capability='shortcut_global.events' if self.ptt['state']=='bound' else 'shortcut_global.bind'
+        payload={} if capability=='shortcut_global.events' else {'id':'ptt_toggle','trigger':self.ptt['trigger']}
+        self.perception_req={'capability':capability,'plugin_id':'shortcut_global','silent':True}
+        if not self._request('capability_invoke',capability=capability,input=payload,deadline_ms=PERCEPTION_DEADLINE_MS):self.perception_req=None
+    def _ptt_observe(self,req,result):
+        if not result['ok']:
+            # A refused bind stops the poll (no retry loop); the owner switches it on again after fixing the cause.
+            if req['capability']=='shortcut_global.bind':self.ptt_timer.stop();self.ptt.update(state='error',message=perception_code_message(result['error']))
+            else:self.ptt.update(message=perception_code_message(result['error']))
+            return self._ptt_touch()
+        output=result.get('output')
+        if req['capability']=='shortcut_global.bind':
+            if not PERCEPTION_OUTPUTS[req['capability']](output):self.ptt.update(state='error',message='Resposta do atalho recusada pelo esquema');return self._ptt_touch()
+            self.ptt.update(state='bound',message=f"Atalho {output['trigger']} registrado pelo {output['backend']}");return self._ptt_touch()
+        if not PERCEPTION_OUTPUTS[req['capability']](output):self.ptt.update(state='error',message='Eventos do atalho recusados pelo esquema');return self._ptt_touch()
+        if any(e['id']=='ptt_toggle' for e in output['events']):self.listenStart()
+        self._ptt_touch()
+    @Property('QVariantMap',notify=perceptionChanged)
+    def perceptionCameraStatus(self):return dict(self.perception_status.get('camera_gesture.state') or {})
+    @Property('QVariantMap',notify=perceptionChanged)
+    def perceptionScreenStatus(self):return dict(self.perception_status.get('screen_observe.status') or {})
     @Property('QVariantList',notify=perceptionChanged)
     def perceptionPlugins(self):return self._perception_items()
     @Property(bool,notify=perceptionChanged)
@@ -3143,7 +3261,8 @@ class Bridge(QObject):
     def perceptionResult(self):return self.results['perception']
     def _indicator_text(self,plugin,value):
         if not any(i['plugin_id']==plugin and i['state']=='running' for i in self._perception_items()):return 'plugin inativo'
-        return PERCEPTION_UNREAD if value is None else ('ligado' if value else 'desligado')
+        # The worker reports 'on'/'off'; older synthetic answers used booleans. Anything else is not a reading.
+        return PERCEPTION_UNREAD if value is None else ('ligado' if value in ('on', True) else 'desligado')
     @Property(str,notify=perceptionChanged)
     def perceptionMicIndicator(self):return self._indicator_text('mic_advanced',self.perception_indicators['mic'])
     @Property(str,notify=perceptionChanged)
@@ -3159,7 +3278,7 @@ class Bridge(QObject):
         if problem is None and self._agent_active():problem=CODE_MESSAGES['agent_busy']
         if problem is not None:self.results['perception']=problem;self._perception_touch();return
         self.perception_req={'capability':capability,'plugin_id':capability.split('.')[0]}
-        if self._request('capability_invoke',capability=capability,input=json.loads(text),deadline_ms=PERCEPTION_DEADLINE_MS):self.results['perception']=PENDING['capability_invoke']
+        if self._request('capability_invoke',capability=capability,input=json.loads(text),deadline_ms=perception_deadline(capability)):self.results['perception']=PENDING['capability_invoke']
         else:self.perception_req=None;self.results['perception']='Core indisponível'
         self._perception_touch()
     # ---- S4 skills (docs/S4.md). The Core decides every transition and every permission; the bridge refuses what it can see is impossible, sends one bounded request at a time and shows the snapshot 'skills' block.

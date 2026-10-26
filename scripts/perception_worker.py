@@ -256,10 +256,21 @@ def _str_field(inp, key, pattern):
     return value
 
 
+PIPEWIRE_TOOLS = ("wpctl", "pw-dump", "pw-record")
+
+
+def _pipewire_reachable():
+    """WP-18a: without the PipeWire socket the tools fail with a generic error; name the missing backend instead."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    return bool(runtime) and os.path.exists(os.path.join(runtime, "pipewire-0"))
+
+
 def _run(argv, timeout=10.0, input_bytes=None, binary=False):
-    """Run an absolute-path tool. Returns (rc, stdout). Missing tool => backend_unavailable."""
+    """Run an absolute-path tool. Returns (rc, stdout). Missing tool or missing socket => backend_unavailable."""
     exe = shutil.which(argv[0])
     if exe is None:
+        raise _Fail("backend_unavailable")
+    if argv[0] in PIPEWIRE_TOOLS and not _pipewire_reachable():
         raise _Fail("backend_unavailable")
     try:
         proc = subprocess.run([exe] + [str(arg) for arg in argv[1:]], input=input_bytes, capture_output=True,
@@ -458,11 +469,28 @@ KEYSYMS = {"Return": 0xff0d, "Escape": 0xff1b, "Tab": 0xff09, "BackSpace": 0xff0
 KEY_RE = re.compile(r"[A-Za-z0-9]|Return|Escape|Tab|BackSpace|Left|Up|Right|Down|space")
 
 
+def _a11y_bus_answers():
+    """WP-18a: AT-SPI aborts the whole process ("Couldn't connect to accessibility bus") when no accessibility bus
+    answers, so the session bus is asked for the a11y address first. No answer is backend_unavailable."""
+    if Gio is None:
+        raise _Fail("backend_unavailable")
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync("org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress", None, None,
+                              Gio.DBusCallFlags.NONE, 3000, None)
+    except Exception:
+        raise _Fail("backend_unavailable")
+    address = reply.unpack()[0]
+    if not isinstance(address, str) or not address.startswith("unix:"):
+        raise _Fail("backend_unavailable")
+
+
 def _atspi():
     global _atspi_mod
     if _atspi_mod is None:
         if gi is None:
             raise _Fail("backend_unavailable")
+        _a11y_bus_answers()
         try:
             gi.require_version("Atspi", "2.0")
             from gi.repository import Atspi
@@ -521,16 +549,14 @@ def _text_of(atspi, node):
 
 
 def _cc_status(_inp):
+    # Only the keys the bridge's availability rule accepts (backend, available, reason).
     try:
         atspi = _atspi()
     except _Fail as fail:
-        return {"backend": "atspi", "available": False, "reason": fail.code,
-                "input_session": "open" if _rd_session else "closed"}
+        return {"backend": "atspi", "available": False, "reason": fail.code}
     if _active_window(atspi) is None:
-        return {"backend": "atspi", "available": False, "reason": "no_active_window",
-                "input_session": "open" if _rd_session else "closed"}
-    return {"backend": "atspi", "available": True, "reason": "ok",
-            "input_session": "open" if _rd_session else "closed"}
+        return {"backend": "atspi", "available": False, "reason": "no_active_window"}
+    return {"backend": "atspi", "available": True, "reason": "ok"}
 
 
 def _cc_tree(_inp):
@@ -919,6 +945,9 @@ _display_undo = []
 
 
 def _kscreen_outputs():
+    # WP-18a: kscreen-doctor reaches KWin through the Wayland socket and aborts without WAYLAND_DISPLAY (measured).
+    if not os.environ.get("WAYLAND_DISPLAY"):
+        raise _Fail("backend_unavailable")
     rc, out = _run(["kscreen-doctor", "-j"], timeout=10)
     if rc != 0:
         raise _Fail("plugin_error")
@@ -1150,7 +1179,8 @@ def _shortcut_bind(inp):
     _only(inp, ("id", "description", "trigger"))
     shortcut_id = _str_field(inp, "id", ID_RE)
     trigger = _str_field(inp, "trigger", TRIGGER_RE)
-    description = inp.get("description")
+    # The bridge binds with {id, trigger} only (WP-17 push-to-talk): the description then has a fixed default.
+    description = inp.get("description", "Gideon")
     if not isinstance(description, str) or not 1 <= len(description.encode("utf-8")) <= 64:
         raise _Fail("invalid_input")
     description = _clean(description, 64)

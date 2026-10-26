@@ -551,6 +551,7 @@ pub async fn serve(
     plugin_python: Option<std::path::PathBuf>,
     net_allow_loopback: bool,
     live_flag: bool,
+    skill_index_base: Option<String>,
 ) -> io::Result<bool> {
     let mut base_pack =
         if storage.configuration_status == crate::storage::ConfigurationStatus::Ready {
@@ -693,6 +694,11 @@ pub async fn serve(
         plugin_events_tx,
     );
     core.configure_plugins(&storage, plugin_python.is_some());
+    core.configure_broker(plugin_python.clone(), broker_script.clone());
+    // Test-only override (main accepts it only with --net-allow-loopback): a loopback fake of the index path.
+    if let Some(base) = skill_index_base.clone() {
+        core.configure_skill_index_base(base);
+    }
     pump_plugins(
         &mut core,
         &mut plugins,
@@ -890,6 +896,8 @@ pub async fn serve(
     let mut peers = JoinSet::new();
     let mut restart = false;
     // WP-10a: due automations are checked every 15 s (the timer is created once, so the loop cannot starve it).
+    // SKILL-03 index fetch: its result is checked every 250 ms (a cheap check; nothing is recorded without an event).
+    let mut skill_index_timer = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut personal_timer = tokio::time::interval(std::time::Duration::from_secs(15));
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
@@ -904,8 +912,14 @@ pub async fn serve(
                 if crate::hub::expire_import(&mut storage, std::time::Instant::now()) { core.hub_import_expired(&storage); storage.audit(core.response(String::new(), "ok").sequence)?; }
             },
             _ = tokio::signal::ctrl_c() => break,
+            _ = skill_index_timer.tick() => {
+                if core.skill_index_poll() {
+                    storage.audit(core.response(String::new(), "ok").sequence)?;
+                }
+            },
             _ = personal_timer.tick() => {
                 core.personal_tick();
+                core.llm_tick(std::time::Instant::now());
                 storage.audit(core.response(String::new(), "ok").sequence)?;
             },
             _ = async { match deadline { Some(d) => tokio::time::sleep_until(d.into()).await, None => std::future::pending::<()>().await } } => { core.expire(std::time::Instant::now()); storage.audit(core.response(String::new(), "ok").sequence)?; },

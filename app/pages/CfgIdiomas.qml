@@ -8,7 +8,7 @@ import "../shell"
 
 // Configurações > Idiomas (Frente 2 de docs/PLANO_FRASES_IDIOMAS.md): em que idiomas a IA fala (TTS) e entende (STT).
 // Só idioma instalado pode ser escolhido. Português e francês aparecem como "não instalado", com tamanho, licença e motivo.
-// Nada é baixado daqui: a instalação espera a aprovação do dono (botões desativados). A troca vale no próximo início do Core.
+// Nada é baixado daqui: o Core só verifica e ativa modelos que já vêm no pacote (hash). Idiomas extras seguem sem download. A troca vale na próxima fala.
 PageFrame {
     id: page
     objectName: "page_cfg_idiomas"
@@ -148,6 +148,16 @@ PageFrame {
                     enabled: false
                     Accessible.name: "Instalar " + modelData.label + ": " + core.languageInstallReason
                 }
+                // CFG-03: pacotes que já vêm no Gideon (português e francês) são conferidos pelo hash e ativados no Core.
+                GButton {
+                    objectName: "verifyLanguage_" + modelData.id
+                    visible: modelData.state === "bundled" && modelData.id !== "en"
+                    Layout.leftMargin: Theme.space(26)
+                    text: "Verificar e ativar"
+                    enabled: core.languagesAvailable
+                    Accessible.name: "Verificar e ativar os modelos de " + modelData.label + " no Core"
+                    onClicked: core.installLanguage(modelData.id)
+                }
             }
         }
     }
@@ -192,10 +202,29 @@ PageFrame {
         }
     }
 
+    Section {
+        title: "Frase de despertar em português e francês"
+        caption: "Como o Gideon é acordado em cada idioma."
+        Text {
+            objectName: "wakeLanguageText"
+            Layout.fillWidth: true
+            text: "Em português e francês, a frase de despertar é \"Hey Gideon\" (o detector de palavra-chave é o inglês, "
+                  + "e a frase funciona com ele) e também vale o atalho global de pressionar para falar. "
+                  + "Despertar por transcrição em português e francês: não ativado; precisa de gravações da sua voz. "
+                  + "Medido: 11 de 14 frases no laboratório limpo, 6 de 14 pelo áudio do sistema, 1 falso disparo com ruído de webcam a 5 dB; "
+                  + "a meta era 80% com zero falso disparo. Para ativar, grave a sua voz com a frase em cada idioma: "
+                  + "as medições com voz sintética não bastam para decidir."
+            wrapMode: Text.WordWrap
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontCaption
+        }
+    }
+
     Text {
         objectName: "installReasonText"
         Layout.fillWidth: true
-        text: core.languageInstallReason + " Os idiomas incluídos já funcionam; os botões Instalar aparecem só para idiomas extras."
+        text: core.languageInstallReason + " Os idiomas incluídos são verificados pelo hash antes de serem ativados."
         wrapMode: Text.WordWrap
         color: Theme.textMuted
         font.family: Theme.fontFamily

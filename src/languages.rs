@@ -420,6 +420,88 @@ pub fn install_tts(home: &Path, state: &Path, language: &str) -> io::Result<Path
     Ok(path)
 }
 
+/// Refusal code of `install_pack` when a packaged file does not match its pin (or is missing).
+pub const CODE_PACK_UNAVAILABLE: &str = "language_pack_unavailable";
+
+/// Outcome of `install_pack`: the packaged files checked against their pins and copied or rendered into state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PackInstall {
+    pub language: String,
+    /// True when the language is part of the base package (English): nothing had to be materialised.
+    pub packaged: bool,
+    pub stt_files: usize,
+    pub tts_files: usize,
+}
+
+/// Verifies every file of the packaged Parakeet pack (pt and fr, read in place by the STT worker) against the
+/// digests of its template. Returns how many files matched. Nothing is downloaded.
+fn verify_nemo_files(home: &Path) -> Result<usize, &'static str> {
+    let text = read_template(home, NEMO_STT_TEMPLATE).map_err(|_| CODE_PACK_UNAVAILABLE)?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&text).map_err(|_| CODE_PACK_UNAVAILABLE)?;
+    let hashes = value["hashes"].as_object().ok_or(CODE_PACK_UNAVAILABLE)?;
+    let root = home.join("assets").join("stt-pt-fr");
+    for (name, digest) in hashes {
+        let expected = digest.as_str().ok_or(CODE_PACK_UNAVAILABLE)?;
+        if !safe_name(name) || expected.len() != 64 {
+            return Err(CODE_PACK_UNAVAILABLE);
+        }
+        let actual = file_sha256(&root.join(name)).map_err(|_| CODE_PACK_UNAVAILABLE)?;
+        if actual != expected {
+            return Err(CODE_PACK_UNAVAILABLE);
+        }
+    }
+    Ok(hashes.len())
+}
+
+/// CFG-03: verifies the packaged models of one language and activates them in `state`: the Parakeet manifest is
+/// rendered for the STT worker and the Pocket voice is copied and hash-checked. Only languages the catalog lists
+/// as `bundled` are installed from the package. A listed but absent language (`available_not_installed`) needs an
+/// approved download, which this function never starts (`language_not_installed`).
+pub fn install_pack(
+    home: &Path,
+    state: &Path,
+    catalog: &LanguageCatalog,
+    language: &str,
+) -> Result<PackInstall, &'static str> {
+    let listed: Vec<&Entry> = ["stt", "tts"]
+        .iter()
+        .filter_map(|kind| catalog.entry(kind, language))
+        .collect();
+    if listed.is_empty() {
+        return Err(CODE_UNSUPPORTED);
+    }
+    if listed
+        .iter()
+        .any(|e| e.state == State::AvailableNotInstalled)
+    {
+        return Err(CODE_NOT_INSTALLED);
+    }
+    if listed.iter().any(|e| e.state != State::Bundled) {
+        return Err(CODE_UNSUPPORTED);
+    }
+    let mut out = PackInstall {
+        language: language.to_owned(),
+        packaged: true,
+        stt_files: 0,
+        tts_files: 0,
+    };
+    if needs_nemo_stt(&[language.to_owned()]) {
+        out.stt_files = verify_nemo_files(home)?;
+        render_nemo_stt(home, state).map_err(|_| CODE_PACK_UNAVAILABLE)?;
+        out.packaged = false;
+    }
+    if let Some(_pack) = tts_pack(language) {
+        let path = install_tts(home, state, language).map_err(|_| CODE_PACK_UNAVAILABLE)?;
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).map_err(|_| CODE_PACK_UNAVAILABLE)?)
+                .map_err(|_| CODE_PACK_UNAVAILABLE)?;
+        out.tts_files = manifest["artifacts"].as_array().map_or(0, Vec::len);
+        out.packaged = false;
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ItemView {
     pub id: String,
@@ -561,6 +643,40 @@ mod tests {
             tts.into(),
             voice.into(),
         )
+    }
+
+    #[test]
+    fn install_pack_refuses_unlisted_and_undownloaded_languages_and_checks_packaged_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let state = dir.path().join("state");
+        fs::create_dir_all(home.join("templates")).unwrap();
+        let catalog = document(fr_stt_not_installed());
+        let catalog = LanguageCatalog::parse(catalog.as_bytes()).unwrap();
+        // A language the catalog does not list cannot be installed.
+        assert_eq!(
+            install_pack(&home, &state, &catalog, "de"),
+            Err(CODE_UNSUPPORTED)
+        );
+        // A listed language that is not bundled needs an approved download: nothing is started.
+        assert_eq!(
+            install_pack(&home, &state, &catalog, "fr"),
+            Err(CODE_NOT_INSTALLED)
+        );
+        // English ships in the base package: nothing to materialise.
+        let en = install_pack(&home, &state, &catalog, "en").unwrap();
+        assert!(en.packaged);
+        assert_eq!((en.stt_files, en.tts_files), (0, 0));
+        // A bundled pack whose files are missing or unpinned is refused, and nothing is activated.
+        let bundled = document(
+            r#",{"kind":"stt","language":"pt-BR","label":"Português","state":"bundled","engine":"e","size_bytes":null,"size_partial":false,"size_note":null,"license":"x","sha256":null,"quality":"q","evidence":null,"voices":[],"reason":null,"source":"s"}"#,
+        );
+        let bundled = LanguageCatalog::parse(bundled.as_bytes()).unwrap();
+        assert_eq!(
+            install_pack(&home, &state, &bundled, "pt-BR"),
+            Err(CODE_PACK_UNAVAILABLE)
+        );
+        assert!(!state.join(PACK_DIR).join(NEMO_STT_TEMPLATE).exists());
     }
 
     #[test]

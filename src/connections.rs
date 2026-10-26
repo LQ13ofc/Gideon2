@@ -3,8 +3,11 @@
 //! device-code login against loopback fakes, and one network job at a time through the
 //! Core-brokered HTTP (`scripts/net_broker.py`). Operations are the only way to reach a service;
 //! responses are projected to the descriptor's fields before anything leaves this module.
-//! Test/dev only: every provider is served by a `--connections-fake` loopback URL. Without one,
-//! connect and calls are refused with `real_backend_unsupported` and no socket is opened.
+//! Backends (WP-11): GitHub has a real API (`GITHUB_API`) used with the owner's token, entered in the app
+//! and stored only in the vault; MCP servers are the owner's registered stdio servers (`mcp-servers.json`)
+//! run in the plugin sandbox. Google and Home Assistant have no real backend yet
+//! (`pronto, aguardando credenciais`, see `readiness`): without a `--connections-fake` they answer
+//! `real_backend_unsupported` and no socket is opened. Fakes are test/dev switches only.
 use crate::{
     broker,
     llmcfg::{self, LlmState},
@@ -42,6 +45,17 @@ const AUDIT_MAX: usize = 64;
 const PROJECTED_ITEMS_MAX: usize = 50;
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const TOKEN_MAX: usize = 1024;
+/// Real GitHub REST API (WP-11). Only the Core reaches it, through the net broker with the owner's token.
+pub const GITHUB_API: &str = "https://api.github.com";
+const GITHUB_ACCEPT: &str = "application/vnd.github+json";
+const GITHUB_API_VERSION: &str = "2022-11-28";
+const GITHUB_USER_AGENT: &str = "gideon-core";
+/// Registry of real MCP servers, in the data directory (owner-written, read-only for the Core).
+pub const SERVERS_FILE: &str = "mcp-servers.json";
+const SERVERS_FILE_MAX: u64 = 8 * 1024;
+const SERVERS_MAX: usize = 8;
+/// Scopes a real MCP server may be granted when its manifest declares none.
+const SERVER_DEFAULT_SCOPES: [&str; 2] = ["mcp.discover", "mcp.call"];
 
 /// Test/dev switches, set once by `main`. Empty `fakes` is production: nothing reaches a network.
 #[derive(Clone, Debug, Default)]
@@ -81,6 +95,125 @@ pub fn has_fake(provider: &str) -> bool {
     } else {
         fake_base(provider).is_some()
     }
+}
+
+/// Real backend of a provider, when this build has one. Only GitHub has one (WP-11); Google and Home
+/// Assistant stay `pronto, aguardando credenciais` (see `readiness`).
+fn real_base(provider: &str) -> Option<&'static str> {
+    (provider == "github").then_some(GITHUB_API)
+}
+
+/// Base the Core calls for a provider: the loopback fake when configured, else the real backend.
+fn backend_base(provider: &str) -> Option<&'static str> {
+    fake_base(provider).or_else(|| real_base(provider))
+}
+
+/// Whether the provider can be called at all here: a fake, a real backend, or (MCP) a registered server.
+pub fn has_backend(provider: &str) -> bool {
+    has_fake(provider)
+        || real_base(provider).is_some()
+        || (provider == "mcp" && !servers().is_empty())
+}
+
+/// Readiness of a provider's real backend, for the owner's connector status (WP-11).
+/// `pronto, aguardando credenciais`: adapter and token flow exist, real use waits for the owner's credentials.
+pub fn readiness(provider: &str) -> &'static str {
+    match provider {
+        "github" if fake_base("github").is_some() => "servidor falso",
+        "github" => "real: token do dono",
+        "mcp" if mcp_profile().is_some() => "servidor falso",
+        "mcp" => "real: servidores do registro",
+        "google" | "homeassistant" if fake_base(provider).is_some() => "servidor falso",
+        "google" | "homeassistant" => "pronto, aguardando credenciais",
+        _ => "desconhecido",
+    }
+}
+
+/// Visual fallback policy (CONN-06, WP-11). The visual route stands in for an API only when no connection
+/// exists at all (`fallback_eligible`), the owner enabled it for the purpose and the publication was approved.
+/// Expired, reauth-required, scope-missing or failing connections never fall back.
+pub fn visual_fallback_allowed(standing: Standing, enabled: bool, approved: bool) -> bool {
+    enabled && approved && standing.fallback_eligible()
+}
+
+/// One real MCP server declared in `mcp-servers.json` (owner-written). The manifest caps its scopes.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerDef {
+    pub name: String,
+    /// Absolute path of the server script; it runs inside the plugin sandbox, never on the host.
+    pub script: String,
+    /// Scopes this server may be granted (least privilege). Defaults to discover and call, never destructive.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ServersFile {
+    version: u16,
+    servers: Vec<ServerDef>,
+}
+
+/// Parses and validates a registry: version 1, at most 8 servers, unique id-shaped names, absolute scripts
+/// that are existing regular files, and only declared MCP scopes.
+pub fn parse_servers(raw: &str) -> Result<Vec<ServerDef>, &'static str> {
+    let file: ServersFile = serde_json::from_str(raw).map_err(|_| "invalid_servers")?;
+    if file.version != 1 || file.servers.len() > SERVERS_MAX {
+        return Err("invalid_servers");
+    }
+    let mut out = Vec::new();
+    for mut server in file.servers {
+        let script = Path::new(&server.script);
+        if !id_ok(&server.name)
+            || out.iter().any(|s: &ServerDef| s.name == server.name)
+            || !script.is_absolute()
+            || !script.is_file()
+        {
+            return Err("invalid_servers");
+        }
+        if server.scopes.is_empty() {
+            server.scopes = SERVER_DEFAULT_SCOPES
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect();
+        }
+        let known = |scope: &String| MCP_SCOPES.iter().any(|s| s.id == scope);
+        let unique = server
+            .scopes
+            .iter()
+            .enumerate()
+            .all(|(i, s)| !server.scopes[..i].contains(s));
+        if !server.scopes.iter().all(known) || !unique {
+            return Err("invalid_servers");
+        }
+        out.push(server);
+    }
+    Ok(out)
+}
+
+/// The owner's MCP registry, read once per Core run. A missing file means no real servers; a damaged one
+/// is refused at load (and so no real server can start).
+pub fn servers() -> &'static [ServerDef] {
+    static SERVERS: OnceLock<Vec<ServerDef>> = OnceLock::new();
+    SERVERS.get_or_init(|| {
+        let path = crate::transport::data_dir().join(SERVERS_FILE);
+        let Ok(meta) = std::fs::metadata(&path) else {
+            return Vec::new();
+        };
+        if meta.len() > SERVERS_FILE_MAX {
+            return Vec::new();
+        }
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| parse_servers(&raw).ok())
+            .unwrap_or_default()
+    })
+}
+
+/// Registered server with this name, when the registry is in use.
+fn server_named(name: &str) -> Option<&'static ServerDef> {
+    servers().iter().find(|s| s.name == name)
 }
 
 /// `--connections-fake-mcp` value: one of the fixture profiles.
@@ -242,7 +375,7 @@ const COMMENT_BODY: Field = Field {
     required: true,
 };
 
-const GITHUB_SCOPES: [ScopeDef; 3] = [
+const GITHUB_SCOPES: [ScopeDef; 5] = [
     ScopeDef {
         id: "repo:read",
         label: "Ler repositórios e actions",
@@ -250,19 +383,93 @@ const GITHUB_SCOPES: [ScopeDef; 3] = [
     },
     ScopeDef {
         id: "issues:write",
-        label: "Criar e editar issues",
-        access: Access::Write,
+        label: "Criar issues e comentar (confirmação)",
+        access: Access::Public,
     },
     ScopeDef {
         id: "pulls:write",
-        label: "Comentar pull requests",
-        access: Access::Write,
+        label: "Comentar pull requests (confirmação)",
+        access: Access::Public,
+    },
+    ScopeDef {
+        id: "user:read",
+        label: "Ler seu perfil GitHub",
+        access: Access::Read,
+    },
+    ScopeDef {
+        id: "notifications:read",
+        label: "Ler suas notificações",
+        access: Access::Read,
     },
 ];
 
 const ISSUE_FIELDS: &[&str] = &["number", "title", "url", "state", "public"];
+const NOTIFICATION_FIELDS: &[&str] = &[
+    "id",
+    "reason",
+    "unread",
+    "subject.title",
+    "repository.full_name",
+];
+const PROFILE_FIELDS: &[&str] = &["login", "name", "public_repos"];
 
-const GITHUB_OPERATIONS: [OpDef; 7] = [
+const GITHUB_OPERATIONS: [OpDef; 12] = [
+    OpDef {
+        name: "user.get",
+        scope: "user:read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/user",
+        params: &[],
+        body: &[],
+        idempotent: true,
+        project: PROFILE_FIELDS,
+    },
+    OpDef {
+        name: "notifications.list",
+        scope: "notifications:read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/notifications",
+        params: &[],
+        body: &[],
+        idempotent: true,
+        project: NOTIFICATION_FIELDS,
+    },
+    OpDef {
+        name: "issues.list",
+        scope: "repo:read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/repos/{repo}/issues",
+        params: &[REPO],
+        body: &[],
+        idempotent: true,
+        project: ISSUE_FIELDS,
+    },
+    OpDef {
+        name: "pulls.list",
+        scope: "repo:read",
+        risk: Access::Read,
+        method: "GET",
+        path: "/api/repos/{repo}/pulls",
+        params: &[REPO],
+        body: &[],
+        idempotent: true,
+        project: &["number", "title", "state", "url"],
+    },
+    OpDef {
+        name: "issues.comment",
+        scope: "issues:write",
+        // Confirmed by the owner for every call: a comment is visible to others.
+        risk: Access::Public,
+        method: "POST",
+        path: "/api/repos/{repo}/issues/{number}/comments",
+        params: &[REPO, NUMBER],
+        body: &[COMMENT_BODY],
+        idempotent: false,
+        project: &["id", "url"],
+    },
     OpDef {
         name: "repos.list",
         scope: "repo:read",
@@ -288,8 +495,9 @@ const GITHUB_OPERATIONS: [OpDef; 7] = [
     OpDef {
         name: "issues.create",
         scope: "issues:write",
-        // Public when the repo is public. Unknown visibility counts as public (see `effective_risk`).
-        risk: Access::Write,
+        // Dangerous by default (WP-11 owner decision): every create waits for the owner's confirmation. Only a
+        // repo known to be private, from `repo.get`, drops to a plain write (see `effective_risk`).
+        risk: Access::Public,
         method: "POST",
         path: "/api/repos/{repo}/issues",
         params: &[REPO],
@@ -657,16 +865,62 @@ const MCP_OPERATIONS: [OpDef; 2] = [
     },
 ];
 
-/// Providers whose account takes one token pasted by the user (`connection_set_token`), not a device login.
-const TOKEN_PROVIDERS: &[&str] = &["homeassistant"];
-
 /// The provider whose server is a Core-managed sandboxed process: connect starts it, consent grants scopes.
 fn uses_process(provider: &str) -> bool {
     provider == "mcp"
 }
 
+/// Accounts that take one token pasted by the user (`connection_set_token`), not a device login. Home
+/// Assistant always does; GitHub does against its real API (the owner's personal access token), while
+/// its loopback fake keeps the device flow.
 fn uses_token(provider: &str) -> bool {
-    TOKEN_PROVIDERS.contains(&provider)
+    match provider {
+        "homeassistant" => true,
+        "github" => fake_base("github").is_none(),
+        _ => false,
+    }
+}
+
+/// Headers of a real GitHub REST call. The broker keeps only allowlisted headers (WP-6 patch in docs/WP11.md).
+fn github_headers() -> Vec<(&'static str, String)> {
+    vec![
+        ("Accept", GITHUB_ACCEPT.to_owned()),
+        ("X-GitHub-Api-Version", GITHUB_API_VERSION.to_owned()),
+        ("User-Agent", GITHUB_USER_AGENT.to_owned()),
+    ]
+}
+
+/// Real GitHub path template of an operation (`{repo}`, `{number}` filled from validated input). The
+/// fake keeps its own `/api/...` paths; only the real backend uses these.
+fn github_real_template(op: &str) -> Option<&'static str> {
+    Some(match op {
+        "repos.list" => "/user/repos",
+        "repo.get" => "/repos/{repo}",
+        "issues.list" => "/repos/{repo}/issues",
+        "issues.create" => "/repos/{repo}/issues",
+        "issues.update" => "/repos/{repo}/issues/{number}",
+        "issues.comment" | "pulls.comment" => "/repos/{repo}/issues/{number}/comments",
+        "pulls.get" => "/repos/{repo}/pulls/{number}",
+        "pulls.list" => "/repos/{repo}/pulls",
+        "actions.list" => "/repos/{repo}/actions/runs",
+        "user.get" => "/user",
+        "notifications.list" => "/notifications",
+        _ => return None,
+    })
+}
+
+/// Fills a path template with validated values (no braces or slashes can come from a `Kind` value).
+fn fill_path(template: &str, input: &Map<String, Value>) -> String {
+    let mut path = template.to_owned();
+    for (key, value) in input {
+        let text = match value {
+            Value::String(text) => text.clone(),
+            Value::Number(number) => number.to_string(),
+            _ => continue,
+        };
+        path = path.replace(&format!("{{{key}}}"), &text);
+    }
+    path
 }
 
 /// Services that open, unlock or disarm something physical (docs/S5.md E2.3). Calling one is destructive.
@@ -797,13 +1051,13 @@ const AGENT_TOOLS: [AgentTool; 8] = [
 pub fn agent_tool(name: &str) -> Option<&'static AgentTool> {
     AGENT_TOOLS
         .iter()
-        .find(|tool| tool.name == name && has_fake(tool.provider))
+        .find(|tool| tool.name == name && has_backend(tool.provider))
 }
 
-/// Prompt lines for the agent, only for tools whose provider has a fake. Argument names are exact.
+/// Prompt lines for the agent, only for tools whose provider has a backend. Argument names are exact.
 pub fn agent_prompt() -> String {
     let mut text = String::new();
-    for tool in AGENT_TOOLS.iter().filter(|t| has_fake(t.provider)) {
+    for tool in AGENT_TOOLS.iter().filter(|t| has_backend(t.provider)) {
         match tool.name {
             "github_list_repos" => text.push_str("\n- github_list_repos {}"),
             "github_create_issue" => text.push_str(
@@ -1323,6 +1577,10 @@ pub struct Call {
     op: &'static OpDef,
     shape: Shape,
     base: String,
+    /// Request path actually sent (the fake's own path, or the real GitHub path).
+    path: String,
+    /// Real backend (no fake): GitHub headers, no Idempotency-Key, real response shapes.
+    real: bool,
     token: String,
     account_ref: Option<String>,
     idempotency: String,
@@ -1357,9 +1615,11 @@ pub enum Job {
         token: String,
     },
     Call(Box<Call>),
-    /// Home Assistant: one `GET /api/states` with the pasted token (never stored before it is validated).
+    /// Home Assistant (`GET /api/states`) or GitHub (`GET /user`) with the pasted token. Never stored before
+    /// the probe answers.
     Probe {
         account: String,
+        provider: &'static str,
         base: String,
         token: String,
     },
@@ -1528,6 +1788,7 @@ fn target(base: &str, path: &str) -> Result<broker::Target, Failure> {
         https: endpoint.https,
         loopback: endpoint.loopback,
         keyless: false,
+        anthropic: false,
     })
 }
 
@@ -1776,7 +2037,20 @@ async fn run_refresh(ex: &Exchange<'_>, base: &str, refresh: &str) -> Result<Ref
 
 /// One `GET /api/states` with the pasted token. The instance name comes back as `X-Instance`, which the
 /// broker reports as the account; a body that is not a JSON list is a provider error.
-async fn run_probe(ex: &Exchange<'_>, base: &str, token: &str) -> Result<String, Failure> {
+async fn run_probe(
+    ex: &Exchange<'_>,
+    provider: &str,
+    base: &str,
+    token: &str,
+) -> Result<String, Failure> {
+    if provider == "github" {
+        // One read of the owner's own profile: its `login` names the account. Nothing else is kept.
+        let response = ex
+            .send(base, "GET", "/user", &github_headers(), None, Some(token))
+            .await?;
+        let object = json_object(&response.body)?;
+        return short_string(&object, "login", 64).ok_or(Failure::new("provider_error"));
+    }
     let headers = [("Accept", "application/json".to_owned())];
     let response = ex
         .send(base, "GET", "/api/states", &headers, None, Some(token))
@@ -1798,18 +2072,23 @@ async fn run_call(
     ex: &Exchange<'_>,
     call: &Call,
 ) -> Result<(Value, Option<(String, bool)>), Failure> {
-    let mut headers: Vec<(&str, String)> = vec![("Accept", "application/json".to_owned())];
+    let mut headers: Vec<(&str, String)> = if call.real {
+        github_headers()
+    } else {
+        vec![("Accept", "application/json".to_owned())]
+    };
     if call.shape.body.is_some() {
         headers.push(("Content-Type", "application/json".to_owned()));
     }
-    if call.op.idempotent {
+    // The fake honours Idempotency-Key; the real GitHub API ignores it, so it is never sent there.
+    if call.op.idempotent && !call.real {
         headers.push(("Idempotency-Key", call.idempotency.clone()));
     }
     let response = ex
         .send(
             &call.base,
             call.op.method,
-            &call.shape.path,
+            &call.path,
             &headers,
             call.shape.body.as_ref(),
             Some(&call.token),
@@ -1823,8 +2102,15 @@ async fn run_call(
             return Err(Failure::new("account_mismatch"));
         }
     }
-    let value: Value =
+    let mut value: Value =
         serde_json::from_slice(&response.body).map_err(|_| Failure::new("provider_error"))?;
+    // GitHub wraps workflow runs in an object; the descriptor projects the list inside it.
+    if call.real && call.op.name == "actions.list" {
+        value = value
+            .get("workflow_runs")
+            .cloned()
+            .ok_or(Failure::new("provider_error"))?;
+    }
     let visibility = visibility_of(call.op, &value, call.shape.repo.as_deref());
     let projected = project(&value, call.op).map_err(Failure::new)?;
     Ok((projected, visibility))
@@ -1929,10 +2215,11 @@ pub async fn execute(id: u64, job: Job, python: PathBuf, script: PathBuf) -> Don
         }
         Job::Probe {
             account,
+            provider,
             base,
             token,
         } => {
-            let outcome = run_probe(&ex, &base, &token).await;
+            let outcome = run_probe(&ex, provider, &base, &token).await;
             Reply::Probe {
                 account,
                 token,
@@ -2058,6 +2345,9 @@ pub struct OperationView {
     pub name: &'static str,
     pub scope: &'static str,
     pub risk: Access,
+    /// True when the operation has a required parameter or body field. The UI's one-click read test sends no
+    /// arguments, so it is offered only for operations with `needs_args: false` (WP-19).
+    pub needs_args: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -2268,7 +2558,9 @@ impl Manager {
                             .iter()
                             .map(|t| ToolView {
                                 name: t.name.clone(),
-                                risk: if t.destructive {
+                                // Dangerous until trusted (CONN-04): an untrusted tool shows `destructive`, whatever it claims.
+                                risk: if t.destructive || t.state != crate::mcp::ToolState::Trusted
+                                {
                                     "destructive"
                                 } else {
                                     "write"
@@ -2318,6 +2610,11 @@ impl Manager {
                             name: o.name,
                             scope: o.scope,
                             risk: o.risk,
+                            needs_args: o
+                                .params
+                                .iter()
+                                .chain(o.body.iter())
+                                .any(|field| field.required),
                         })
                         .collect(),
                 })
@@ -2558,6 +2855,10 @@ impl Manager {
         if !label_ok(label) {
             return "invalid_label";
         }
+        // A real MCP account is named after its registered server (the registry decides what can run).
+        if uses_process(provider) && mcp_profile().is_none() && server_named(label).is_none() {
+            return "invalid_connection";
+        }
         if self.ledger.accounts.len() >= MAX_ACCOUNTS {
             return "connection_limit";
         }
@@ -2595,7 +2896,7 @@ impl Manager {
         if uses_process(provider.id) {
             return self.connect_process(storage, id);
         }
-        let Some(base) = fake_base(provider.id) else {
+        let Some(base) = backend_base(provider.id) else {
             return "real_backend_unsupported";
         };
         match self.ledger.accounts[index].status {
@@ -2626,7 +2927,7 @@ impl Manager {
     /// MCP: connect starts the fixed fake server in the sandbox and runs `initialize`; consent follows.
     /// Without the fake registration nothing is started (`real_backend_unsupported`). Restarts are limited.
     fn connect_process(&mut self, storage: &Storage, id: &str) -> &'static str {
-        let Some(profile) = mcp_profile() else {
+        let Ok((script, profile, _)) = self.process_target(id) else {
             return "real_backend_unsupported";
         };
         match self.status_of(id) {
@@ -2649,11 +2950,28 @@ impl Manager {
         self.push(Job::Mcp(Box::new(McpJob {
             account: id.to_owned(),
             proposal: None,
-            script: crate::transport::fixtures_dir().join(crate::mcp::FAKE_SCRIPT),
-            profile: profile.to_owned(),
+            script,
+            profile,
             work: McpWork::Start,
         })));
         "ok"
+    }
+
+    /// Script, launch tag and grantable scopes of an MCP account: the fixed fake under `--connections-fake-mcp`
+    /// (test only), else the registered real server named like the account. Real servers ignore the launch tag.
+    fn process_target(&self, id: &str) -> Result<(PathBuf, String, Vec<String>), &'static str> {
+        if let Some(profile) = mcp_profile() {
+            let all = MCP_SCOPES.iter().map(|s| s.id.to_owned()).collect();
+            let script = crate::transport::fixtures_dir().join(crate::mcp::FAKE_SCRIPT);
+            return Ok((script, profile.to_owned(), all));
+        }
+        let label = &self.account(id).ok_or("unknown_connection")?.label;
+        let server = server_named(label).ok_or("real_backend_unsupported")?;
+        Ok((
+            PathBuf::from(&server.script),
+            "good".to_owned(),
+            server.scopes.clone(),
+        ))
     }
 
     /// MCP consent: the server already answered `initialize`; the chosen scopes are granted at once and
@@ -2673,9 +2991,13 @@ impl Manager {
         if scopes.is_empty() {
             return "invalid_args";
         }
+        // The server's manifest caps what may be granted (least privilege); nothing beyond it is ever granted.
+        let Ok((_, _, allowed)) = self.process_target(id) else {
+            return "invalid_state";
+        };
         if scopes
             .iter()
-            .any(|scope| !provider.scopes.iter().any(|s| s.id == scope))
+            .any(|scope| !provider.scopes.iter().any(|s| s.id == scope) || !allowed.contains(scope))
         {
             return "scope_not_requested";
         }
@@ -2843,14 +3165,16 @@ impl Manager {
         if !ha_token_ok(token) {
             return "invalid_token";
         }
-        let Some(base) = fake_base(&account.provider) else {
+        let Some(base) = backend_base(&account.provider) else {
             return "real_backend_unsupported";
         };
+        let provider = provider_by_id(&account.provider).expect("validated").id;
         if self.busy() {
             return "busy";
         }
         self.push(Job::Probe {
             account: id.to_owned(),
+            provider,
             base: base.to_owned(),
             token: token.to_owned(),
         });
@@ -3087,7 +3411,7 @@ impl Manager {
     /// Standing of a provider for a scope (S5 E3). A credential problem on any account outranks a plain
     /// disconnected one, so the registry never reads "the user has no connection" when a token went bad.
     pub fn standing(&self, provider: &str, scope: &str) -> Standing {
-        if !has_fake(provider) {
+        if !has_backend(provider) {
             return Standing::NoBackend;
         }
         let accounts: Vec<&Account> = self
@@ -3369,13 +3693,18 @@ impl Manager {
         proposal: Option<String>,
         now: Instant,
     ) -> Result<(), &'static str> {
-        if matches!(plan.risk, Access::Public | Access::Destructive) && !options().allow_public {
+        // The test switch guards fakes only. A real backend is guarded by the owner's approval of each card.
+        if matches!(plan.risk, Access::Public | Access::Destructive)
+            && has_fake(plan.provider.id)
+            && !options().allow_public
+        {
             return Err("public_disabled");
         }
         if uses_process(plan.provider.id) {
             return self.start_process(plan, proposal, now);
         }
-        let base = fake_base(plan.provider.id).ok_or("real_backend_unsupported")?;
+        let base = backend_base(plan.provider.id).ok_or("real_backend_unsupported")?;
+        let real = fake_base(plan.provider.id).is_none();
         let found = self.account(&plan.account).ok_or("unknown_connection")?;
         for scope in required_scopes(plan.op, &plan.shape) {
             account_gate(found, scope)?;
@@ -3392,6 +3721,12 @@ impl Manager {
             "rate_limited"
         })?;
         let shape = validate(plan.op, &Value::Object(plan.shape.input.clone()))?;
+        let path = match (real, github_real_template(plan.op.name)) {
+            (true, Some(template)) => fill_path(template, &shape.input),
+            // A real backend without a path for the operation is refused before any request line exists.
+            (true, None) => return Err("real_backend_unsupported"),
+            (false, _) => shape.path.clone(),
+        };
         let call = Call {
             proposal: proposal.clone(),
             account: plan.account.clone(),
@@ -3399,6 +3734,8 @@ impl Manager {
             op: plan.op,
             shape,
             base: base.to_owned(),
+            path,
+            real,
             token,
             account_ref,
             idempotency: random_hex(16),
@@ -3423,7 +3760,7 @@ impl Manager {
         proposal: Option<String>,
         now: Instant,
     ) -> Result<(), &'static str> {
-        let profile = mcp_profile().ok_or("real_backend_unsupported")?;
+        let (script, profile, _) = self.process_target(&plan.account)?;
         let found = self.account(&plan.account).ok_or("unknown_connection")?;
         for scope in required_scopes(plan.op, &plan.shape) {
             account_gate(found, scope)?;
@@ -3471,8 +3808,8 @@ impl Manager {
         self.push(Job::Mcp(Box::new(McpJob {
             account: plan.account.clone(),
             proposal,
-            script: crate::transport::fixtures_dir().join(crate::mcp::FAKE_SCRIPT),
-            profile: profile.to_owned(),
+            script,
+            profile,
             work,
         })));
         Ok(())
@@ -3754,8 +4091,10 @@ impl Manager {
                 };
                 let index = self.index(&id)?;
                 let account = &self.ledger.accounts[index];
-                // Only a user's own discover trusts a first catalog; a skill's discover asks for approval.
-                let trust_first = !account.catalog && !from_skill;
+                // WP-11 owner decision (CONN-04): a real server's tools are dangerous until the owner trusts each
+                // one, so no discover trusts a first catalog. The fixed test fake keeps its E2.4 behaviour (the
+                // user's own discover trusts its first catalog); a skill's discover never trusts it.
+                let trust_first = mcp_profile().is_some() && !account.catalog && !from_skill;
                 let catalog = match crate::mcp::build_catalog(&listed, &account.tools, trust_first)
                 {
                     Ok(catalog) => catalog,
@@ -4244,7 +4583,8 @@ mod tests {
         assert!(risks.contains(&("calendar.events.create", Access::Write)));
         assert!(risks.contains(&("gmail.messages.list", Access::Read)));
         let github = github();
-        assert_eq!(github.scopes.len(), 3);
+        assert_eq!(github.scopes.len(), 5);
+        assert_eq!(github.operations.len(), 12);
         // Every operation names a declared scope and a method the broker allows.
         for op in github.operations {
             assert!(
@@ -4588,6 +4928,8 @@ mod tests {
             op,
             shape,
             base: String::new(),
+            path: String::new(),
+            real: false,
             token: String::new(),
             account_ref: None,
             idempotency: String::new(),
@@ -4744,9 +5086,10 @@ mod tests {
         let listed = json!({"tools": [{"name": "echo_note", "description": "Return the note.",
             "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}},
             "required": ["text"], "additionalProperties": false}}]});
+        // WP-11 (CONN-04): the owner's own discover trusts nothing either; every tool waits for a per-tool trust.
         for (from_skill, expected) in [
             (true, crate::mcp::ToolState::NeedsReapproval),
-            (false, crate::mcp::ToolState::Trusted),
+            (false, crate::mcp::ToolState::NeedsReapproval),
         ] {
             let mut manager = Manager::default();
             manager.ledger.accounts.push(Account {
@@ -4914,5 +5257,120 @@ mod tests {
             Access::Write
         );
         assert!(parse_call("conn:homeassistant.nope").is_none());
+    }
+
+    #[test]
+    fn github_real_paths_cover_every_operation_and_fill_only_validated_values() {
+        let github = github();
+        for op in github.operations {
+            assert!(
+                github_real_template(op.name).is_some(),
+                "no real path for {}",
+                op.name
+            );
+        }
+        let op = operation(github, "issues.comment").unwrap();
+        let shape = validate(
+            op,
+            &json!({"repo": "owner/name", "number": 7, "body": "oi"}),
+        )
+        .unwrap();
+        let path = fill_path(github_real_template(op.name).unwrap(), &shape.input);
+        assert_eq!(path, "/repos/owner/name/issues/7/comments");
+        assert_eq!(
+            fill_path("/user", &Map::new()),
+            "/user",
+            "a path without parameters is unchanged"
+        );
+        // Injection shaped values never reach the path: the Repo and Number kinds refuse them first.
+        assert!(validate(
+            op,
+            &json!({"repo": "owner/../x", "number": 7, "body": "oi"})
+        )
+        .is_err());
+        assert!(validate(
+            op,
+            &json!({"repo": "owner/name", "number": 0, "body": "oi"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn github_real_writes_are_dangerous_and_private_repos_drop_to_a_plain_write() {
+        let github = github();
+        let manager = Manager::default();
+        let create = operation(github, "issues.create").unwrap();
+        assert_eq!(create.risk, Access::Public);
+        let shape = validate(
+            create,
+            &json!({"repo": "owner/name", "title": "t", "body": "b"}),
+        )
+        .unwrap();
+        assert_eq!(
+            manager.effective_risk("conn_g", create, &shape),
+            Access::Public,
+            "unknown visibility is dangerous"
+        );
+        let comment = operation(github, "issues.comment").unwrap();
+        assert_eq!(comment.risk, Access::Public);
+        assert!(!comment.idempotent, "a comment is never repeated");
+    }
+
+    #[test]
+    fn server_registry_is_strict_and_caps_scopes() {
+        let script = std::env::temp_dir().join(format!("gideon-srv-{}.py", random_hex(4)));
+        std::fs::write(&script, "print(1)\n").unwrap();
+        let path = script.display().to_string();
+        let good = format!(r#"{{"version":1,"servers":[{{"name":"notes","script":"{path}"}}]}}"#);
+        let parsed = parse_servers(&good).unwrap();
+        assert_eq!(parsed[0].scopes, vec!["mcp.discover", "mcp.call"]);
+        // A relative script, an unknown scope, a duplicate name and an unknown field are all refused.
+        let relative = r#"{"version":1,"servers":[{"name":"n","script":"x.py"}]}"#;
+        assert!(parse_servers(relative).is_err());
+        let scope = format!(
+            r#"{{"version":1,"servers":[{{"name":"n","script":"{path}","scopes":["mcp.root"]}}]}}"#
+        );
+        assert!(parse_servers(&scope).is_err());
+        let dup = format!(
+            r#"{{"version":1,"servers":[{{"name":"n","script":"{path}"}},{{"name":"n","script":"{path}"}}]}}"#
+        );
+        assert!(parse_servers(&dup).is_err());
+        let extra =
+            format!(r#"{{"version":1,"servers":[{{"name":"n","script":"{path}","shell":true}}]}}"#);
+        assert!(parse_servers(&extra).is_err());
+        let _ = std::fs::remove_file(&script);
+    }
+
+    #[test]
+    fn visual_fallback_needs_no_connection_plus_owner_switch_and_approval() {
+        for standing in [
+            Standing::NoBackend,
+            Standing::NoAccount,
+            Standing::Disconnected,
+        ] {
+            assert!(visual_fallback_allowed(standing, true, true));
+            assert!(!visual_fallback_allowed(standing, false, true));
+            assert!(!visual_fallback_allowed(standing, true, false));
+        }
+        // A connection that exists but cannot be used never falls back, even with the switch on.
+        for standing in [
+            Standing::Expired,
+            Standing::Reauth,
+            Standing::ScopeNotGranted,
+            Standing::Unavailable,
+            Standing::Usable,
+        ] {
+            assert!(
+                !visual_fallback_allowed(standing, true, true),
+                "{standing:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn readiness_names_the_pending_providers_precisely() {
+        assert_eq!(readiness("google"), "pronto, aguardando credenciais");
+        assert_eq!(readiness("homeassistant"), "pronto, aguardando credenciais");
+        assert_eq!(readiness("github"), "real: token do dono");
     }
 }

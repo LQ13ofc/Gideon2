@@ -101,3 +101,11 @@
 - Código: `scripts/wake_live_regression.py` (offline, grade e `check` com chão 0,82), `scripts/test_wake_live_regression.py`, `scripts/wake_phrase_evidence.py` (números de laboratório corrigidos).
 - Evidência: docs/evidence/wake-live-matrix.json, docs/evidence/wake-live-pins.json; docs/A7 (revisão), docs/A9 (revisão), docs/A13 (nota). Nenhum código Rust mudou.
 - Gates: test_wake_live_regression 9 OK, test_wake_live 5 OK, test_audio_conditioning 10 OK, test_wake_worker 9 OK (rodar sem `-I`).
+
+## 2026-10-26 — WP-19 (gates vermelhos, describe, SKILL-03, pacote) — sem commit
+- Gates corrigidos por causa real (E1 e E24 Qt: "Testar leitura" só para operações sem argumentos; C1/C2: chave `anthropic`), e expectativas antigas atualizadas (A3, A5, E4; S2 final continua com 2 falhas de árvore limpa). Teste de cargo em paralelo: `flock` herdado por fork, espera limitada no teste.
+- `describe(id)`: op `llm_describe` no Core, ponte e página Modelos LLM; checado no Core real (C2).
+- SKILL-03: `skills-index.json` no repositório e `skill_index_fetch` pelo broker; gate loopback 11/11; ao vivo 404 até o push do dono.
+- Pacote `0.1.0-wp19` instalado em `~/GideonWp19`; Hub do pacote verificado com 7 entradas do catálogo de percepção.
+- Bloqueado: verify_live_package (sem clipes de voz em inglês). S2 final: 2 falhas de árvore limpa (sem commit).
+- Detalhes, comandos e números: docs/WP19.md.

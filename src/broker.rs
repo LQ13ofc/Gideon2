@@ -20,6 +20,9 @@ use tokio::{
 };
 
 pub const CHAT_PATH: &str = "/chat/completions";
+/// Upstream suffix of the Anthropic Messages API (its base is `https://api.anthropic.com/v1`).
+/// The plugin always sends `CHAT_PATH`; the Core and the broker translate for this provider.
+pub const MESSAGES_SUFFIX: &str = "/messages";
 pub const MAX_BODY: usize = 256 * 1024;
 pub const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 pub const DEADLINE: Duration = Duration::from_secs(120);
@@ -36,6 +39,8 @@ pub struct Target {
     pub https: bool,
     pub loopback: bool,
     pub keyless: bool,
+    /// Anthropic Messages dialect: `x-api-key` auth and the body/SSE translation in the broker.
+    pub anthropic: bool,
 }
 
 /// Fixed host of a built-in cloud provider; `custom` has none and is checked against its URL.
@@ -44,6 +49,7 @@ fn fixed_host(provider: Provider) -> Option<&'static str> {
         Provider::Openrouter => Some("openrouter.ai"),
         Provider::Opencode => Some("opencode.ai"),
         Provider::Google => Some("generativelanguage.googleapis.com"),
+        Provider::Anthropic => Some("api.anthropic.com"),
         Provider::Custom => None,
     }
 }
@@ -81,12 +87,19 @@ pub fn target(route: &Route, allow_loopback: bool) -> Result<Target, &'static st
     } else {
         format!("{}:{}", endpoint.host, endpoint.port)
     };
+    let anthropic = route.provider.cloud() == Some(Provider::Anthropic);
+    let suffix = if anthropic {
+        MESSAGES_SUFFIX
+    } else {
+        CHAT_PATH
+    };
     Ok(Target {
-        url: format!("{scheme}://{authority}{}{CHAT_PATH}", endpoint.path),
+        url: format!("{scheme}://{authority}{}{suffix}", endpoint.path),
         host: endpoint.host,
         https: endpoint.https,
         loopback: endpoint.loopback,
         keyless: route.provider.is_local(),
+        anthropic,
     })
 }
 
@@ -95,6 +108,24 @@ pub fn target(route: &Route, allow_loopback: bool) -> Result<Target, &'static st
 pub struct Payload {
     pub line: Vec<u8>,
     pub key_line: Vec<u8>,
+}
+
+/// Credential scheme the broker applies to the key: Anthropic takes `x-api-key`, the rest bearer.
+pub(crate) fn auth_scheme(target: &Target) -> &'static str {
+    if target.anthropic {
+        "x-api-key"
+    } else {
+        "bearer"
+    }
+}
+
+/// Body/SSE dialect the broker speaks to this target.
+pub(crate) fn dialect(target: &Target) -> &'static str {
+    if target.anthropic {
+        "anthropic"
+    } else {
+        "openai"
+    }
 }
 
 /// `key` is `None` only for keyless (local) targets, which send `{"key": null}`; a cloud target
@@ -117,6 +148,8 @@ pub fn payload(
         "expected_host": target.host,
         "allow_http": !target.https && target.loopback,
         "allow_loopback": target.loopback,
+        "auth": auth_scheme(target),
+        "dialect": dialect(target),
     });
     let mut line = serde_json::to_vec(&request).map_err(|_| "invalid_host_call")?;
     line.push(b'\n');
@@ -351,6 +384,8 @@ pub(crate) fn request_payload(
         "expected_host": target.host,
         "allow_http": !target.https && target.loopback,
         "allow_loopback": target.loopback,
+        "auth": auth_scheme(target),
+        "dialect": dialect(target),
     });
     let mut line = serde_json::to_vec(&request).map_err(|_| "invalid_host_call")?;
     line.push(b'\n');
@@ -449,6 +484,29 @@ mod tests {
             target(&route("local", None, None), false),
             Err("provider_not_configured")
         );
+    }
+
+    #[test]
+    fn anthropic_routes_resolve_to_messages_with_x_api_key_and_dialect() {
+        let t = target(&route("anthropic", None, None), false).unwrap();
+        assert_eq!(t.url, "https://api.anthropic.com:443/v1/messages");
+        assert_eq!(t.host, "api.anthropic.com");
+        assert!(t.anthropic && !t.keyless && !t.loopback);
+        let p = payload(&t, &serde_json::json!({"model": "m"}), Some(FAKE)).unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&p.line).unwrap();
+        assert_eq!(request["auth"], "x-api-key");
+        assert_eq!(request["dialect"], "anthropic");
+        assert_eq!(request["expected_host"], "api.anthropic.com");
+        // Anthropic never runs keyless: a missing key is refused before any request exists.
+        assert_eq!(
+            payload(&t, &serde_json::json!({}), None).err(),
+            Some("key_missing")
+        );
+        let openai = target(&route("google", None, None), false).unwrap();
+        let p = payload(&openai, &serde_json::json!({}), Some(FAKE)).unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&p.line).unwrap();
+        assert_eq!(request["auth"], "bearer");
+        assert_eq!(request["dialect"], "openai");
     }
 
     #[test]

@@ -79,6 +79,12 @@ pub struct Core {
     speech_samples: usize,
     pub(crate) plugins: crate::plugins::PluginView,
     pub(crate) llm: crate::llmcfg::LlmState,
+    /// SKILL-03: the one index fetch in flight (request id, result). Only one at a time.
+    skill_index_fetch: Option<(String, crate::skill_index::Fetch)>,
+    /// Test-only override of the index base (`--skill-index-base`, needs `--net-allow-loopback`).
+    skill_index_base: Option<String>,
+    /// Broker interpreter and script (absolute). None when the Core has no plugin interpreter.
+    broker_paths: Option<(std::path::PathBuf, std::path::PathBuf)>,
     pub(crate) tools: crate::tools::Ledger,
     /// Set by an accepted capability_invoke; cleared only when its matching result lands.
     tool_source: bool,
@@ -179,6 +185,9 @@ impl Core {
             speech_samples: 0,
             plugins: Default::default(),
             llm: Default::default(),
+            skill_index_fetch: None,
+            skill_index_base: None,
+            broker_paths: None,
             tools: Default::default(),
             tool_source: false,
             agent: crate::agent::Agent::new(crate::agent::options()),
@@ -1031,9 +1040,47 @@ impl Core {
     }
     pub fn shutdown(&mut self) {
         self.completed_audio = None;
+        self.llm.stop_local();
         if self.session.is_some() {
             self.finish("cancelled");
         }
+    }
+    /// Periodic check of the local llama-server (idle stop, dead process). Called every 15 s.
+    pub fn llm_tick(&mut self, now: Instant) {
+        self.llm.tick_local(now);
+    }
+    /// Finishes the index fetch when its thread has answered: validated and saved, or refused. Returns true when an
+    /// event was emitted (the caller then records the response).
+    pub fn skill_index_poll(&mut self) -> bool {
+        let Some((request_id, fetch)) = self.skill_index_fetch.take() else {
+            return false;
+        };
+        match fetch.poll() {
+            None => {
+                self.skill_index_fetch = Some((request_id, fetch));
+                false
+            }
+            Some(result) => {
+                let kind = match crate::skill_index::finish(result) {
+                    Ok(()) => "skill_index_saved",
+                    Err(_) => "skill_index_failed",
+                };
+                self.emit(request_id, None, kind);
+                true
+            }
+        }
+    }
+    /// Broker paths for the SKILL-03 fetch: the plugin interpreter runs the broker script (set by the transport).
+    pub fn configure_broker(
+        &mut self,
+        python: Option<std::path::PathBuf>,
+        script: std::path::PathBuf,
+    ) {
+        self.broker_paths = python.map(|python| (python, script));
+    }
+    /// Test-only index base; the transport accepts it only together with `--net-allow-loopback`.
+    pub fn configure_skill_index_base(&mut self, base: String) {
+        self.skill_index_base = Some(base);
     }
     fn finish(&mut self, kind: &'static str) {
         if let Some(mut s) = self.session.take() {
@@ -2190,13 +2237,22 @@ impl Core {
                 input,
                 deadline_ms,
             } => {
-                let result = self.plugins.invoke(
-                    self.hub.as_ref(),
-                    &capability,
-                    input,
-                    deadline_ms,
-                    &self.llm,
-                );
+                // WP-18b: the local llama-server starts on demand, before an LLM plugin call.
+                let started = if capability.starts_with("llm_engine.") {
+                    self.llm.ensure_local()
+                } else {
+                    Ok(())
+                };
+                let result = match started {
+                    Ok(()) => self.plugins.invoke(
+                        self.hub.as_ref(),
+                        &capability,
+                        input,
+                        deadline_ms,
+                        &self.llm,
+                    ),
+                    Err(code) => Err(code),
+                };
                 if result.is_ok() {
                     self.tool_source = true;
                 }
@@ -2211,10 +2267,42 @@ impl Core {
             | Operation::LlmConfigure { .. }
             | Operation::LlmMarkGood { .. }
             | Operation::LlmRollback { .. }
+            | Operation::LlmDescribe { .. }
             | Operation::PluginSettingsClear { .. }
                 if self.session.is_some() =>
             {
                 "busy"
+            }
+            Operation::SkillIndexFetch => match self.broker_paths.clone() {
+                None => "unavailable",
+                Some(_) if self.skill_index_fetch.is_some() => "busy",
+                Some((python, script)) => {
+                    let base = self
+                        .skill_index_base
+                        .clone()
+                        .unwrap_or_else(|| crate::skill_index::INDEX_BASE.to_owned());
+                    self.skill_index_fetch = Some((
+                        req.request_id.clone(),
+                        crate::skill_index::start(base, python, script),
+                    ));
+                    "ok"
+                }
+            },
+            Operation::LlmDescribe { id } => {
+                // Read-only: the plugin answers from its own store (no model is started). Asynchronous: the result is
+                // the llm_engine.models capability_result, like every other capability call.
+                if !crate::llmcfg::valid_model_id(&id) {
+                    "invalid_input"
+                } else {
+                    let result = self.plugins.invoke(
+                        self.hub.as_ref(),
+                        "llm_engine.models",
+                        serde_json::json!({"action": "describe", "id": id}),
+                        10_000,
+                        &self.llm,
+                    );
+                    self.plugin_result(&req.request_id, result)
+                }
             }
             Operation::SecretSet { provider, key } => match storage.as_deref() {
                 Some(storage) => match self.llm.set_secret(storage, &provider, key.expose()) {
@@ -2701,6 +2789,20 @@ impl Core {
             {
                 "stale_preferences"
             }
+            Operation::LanguageInstall { .. } if self.session.is_some() => "busy",
+            Operation::LanguageInstall { language } => match storage {
+                // CFG-03: verify the packaged models of the language and activate them in the Core state.
+                Some(storage) => match crate::languages::install_pack(
+                    crate::transport::home(),
+                    &storage.root,
+                    &self.languages,
+                    &language,
+                ) {
+                    Ok(_) => "ok",
+                    Err(code) => code,
+                },
+                None => "preferences_unavailable",
+            },
             Operation::LanguagePreference { .. } if self.session.is_some() => "busy",
             Operation::LanguagePreference {
                 revision,
@@ -3458,6 +3560,21 @@ mod tests {
         assert!(c.session.is_none());
         assert!(c.stt_requests.is_empty());
     }
+    fn reopen_when_released(root: &std::path::Path) -> crate::storage::Storage {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match crate::storage::Storage::open(root) {
+                Ok(storage) => return storage,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::AddrInUse
+                        && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("reopen failed: {error}"),
+            }
+        }
+    }
     fn wake_setting(id: &str, sensitivity: Option<f32>) -> crate::phrases::Setting {
         crate::phrases::Setting {
             id: id.into(),
@@ -3534,7 +3651,10 @@ mod tests {
                 .update_wake_phrases(revision, vec![wake_setting("hey_gideon", None)])
                 .unwrap();
         }
-        let mut storage = crate::storage::Storage::open(&root).unwrap();
+        // Reopening right after the drop can race a fork in a parallel test thread: `flock` belongs to the open file
+        // description, and a forked child holds a copy of the lock fd until its exec. The lock is released once that
+        // child execs, so the reopen waits for it (bounded) instead of failing. Production takes the lock once per process.
+        let mut storage = reopen_when_released(&root);
         assert_eq!(
             storage.configuration_status,
             crate::storage::ConfigurationStatus::Ready

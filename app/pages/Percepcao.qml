@@ -8,7 +8,7 @@ import "../shell"
 
 // Extensões > Percepção e ação (needs a perception plugin). Parts: Privacidade (mic and camera indicators, also in the
 // summary bar, always visible), Plugins (one card per plugin; test buttons in developer mode only) and Último resultado
-// (developer mode only). Nothing here touches hardware: every backend is synthetic in this build.
+// (developer mode only). Every plugin here runs its real backend (scripts/perception_worker.py) in its own sandbox.
 PageFrame {
     id: page
     objectName: "perceptionPanel"
@@ -25,12 +25,12 @@ PageFrame {
 
     PageHeader {
         title: "Percepção e ação"
-        subtitle: "Sensores e ações simulados nesta build. Nenhum hardware real é acessado."
+        subtitle: "Sensores e ações reais do computador. Cada plugin usa só o acesso que precisa e só funciona com permissão concedida."
     }
-    // The one notice of the page: every backend here is synthetic, and display_manipulate is not supported.
+    // The one notice of the page: the backends and what each refusal means.
     Banner {
         kind: "info"
-        text: "Backends simulados: nenhum hardware pessoal é acessado nesta build. Backend real: não suportado / pendente de validação humana."
+        text: "Backends reais: portal XDG, AT-SPI, RemoteDesktop, PipeWire, v4l2 e KScreen. Quando um recurso não existe nesta sessão, a resposta diz qual backend faltou e nada é feito."
     }
     // The privacy indicators are always in view, whatever the part.
     CSummaryBar {

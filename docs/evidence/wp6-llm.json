@@ -1,0 +1,372 @@
+{
+  "checks": [
+    {
+      "detail": null,
+      "name": "R1 artifacts sha256 equal the published hashes",
+      "ok": true
+    },
+    {
+      "detail": "cb0e7280834449ff",
+      "name": "R1 Hub catalog hash and size match scripts/llm_engine_plugin.py",
+      "ok": true
+    },
+    {
+      "detail": {
+        "port_open": false
+      },
+      "name": "R2 precondition: port 8080 free and no llama-server of earlier runs",
+      "ok": true
+    },
+    {
+      "detail": {
+        "state": "running",
+        "steps": [
+          "ok",
+          "ok",
+          "ok"
+        ]
+      },
+      "name": "R4 plugin llm_engine 1.3.0 running through the Hub",
+      "ok": true
+    },
+    {
+      "detail": "ok",
+      "name": "R4 local route configured (no key, no consent)",
+      "ok": true
+    },
+    {
+      "detail": {
+        "local_server": "stopped"
+      },
+      "name": "R2 no server before the first local call (on demand, not at boot or configure)",
+      "ok": true
+    },
+    {
+      "detail": {
+        "first_call_s": 8.1,
+        "local_server": "running",
+        "processes": 2
+      },
+      "name": "R2 first local call starts the server: state running, /health 200, one process",
+      "ok": true
+    },
+    {
+      "detail": {
+        "code": "ok",
+        "latency_ms": 266
+      },
+      "name": "R5 selftest through the Core: streaming ok",
+      "ok": true
+    },
+    {
+      "detail": "supported",
+      "name": "R5 tool_use probed, not declared (value recorded, never forced)",
+      "ok": true
+    },
+    {
+      "detail": {
+        "entries": 6
+      },
+      "name": "R4 the Qwen GGUF entry is listed by llm_engine.models",
+      "ok": true
+    },
+    {
+      "detail": {
+        "certification": "certified",
+        "code": "ok"
+      },
+      "name": "R4 describe returns the local entry with its certification and sha256",
+      "ok": true
+    },
+    {
+      "detail": {
+        "decode_tokens_per_s_median": 36.81,
+        "generated_tokens_per_run": [
+          20,
+          36,
+          14,
+          9,
+          3
+        ],
+        "prompt_tokens_per_s_median": 161.19,
+        "runs": 5,
+        "ttft_s_max": 0.271,
+        "ttft_s_median": 0.144,
+        "ttft_s_min": 0.12
+      },
+      "name": "R3 direct measurement on the Core-started server: 5 streamed runs",
+      "ok": true
+    },
+    {
+      "detail": {
+        "ok_turns": 5
+      },
+      "name": "R6 five chat turns through the Core: non-empty replies, partials seen",
+      "ok": true
+    },
+    {
+      "detail": {
+        "code": "ok",
+        "error": null,
+        "state": "draft"
+      },
+      "name": "R7 skill draft from the local model: manifest validated and stored as draft",
+      "ok": true
+    },
+    {
+      "detail": {
+        "approved_flag": false,
+        "draft_events": [
+          "skill_plugin_validate",
+          "skill_draft_put",
+          "skill_plugin_dry_run"
+        ],
+        "matches_in_view": 1
+      },
+      "name": "R7 the Core stored the draft (skill_draft_put event); nothing approved, enabled or run",
+      "ok": true
+    },
+    {
+      "detail": {
+        "code": "ok",
+        "kinds": [
+          "chat",
+          "tool",
+          "chat"
+        ],
+        "state": "done"
+      },
+      "name": "R9 agent loop with the real model: tool call executed, final answer produced",
+      "ok": true
+    },
+    {
+      "detail": {
+        "idle_s": 20,
+        "local_server": "stopped"
+      },
+      "name": "R10 idle stop: state stopped, port closed, no stray process after idle_s",
+      "ok": true
+    },
+    {
+      "detail": {
+        "error": null,
+        "local_server": "running"
+      },
+      "name": "R10 the next chat restarts the server on demand and gets a reply",
+      "ok": true
+    },
+    {
+      "detail": {
+        "port_open": false,
+        "processes_before_exit": 2
+      },
+      "name": "R11 Core exit: server and sandbox gone (port closed, no stray process), temp root removed",
+      "ok": true
+    }
+  ],
+  "engine": {
+    "asset": "llama-b11552-bin-ubuntu-x64.tar.gz",
+    "asset_sha256": "a45a6afda05d08028bd37998072ab602c96799bccde126835941623cb99bb727",
+    "asset_sha256_source": "GitHub releases API, asset field digest (sha256:a45a6afd...), checked against the downloaded file",
+    "asset_size": 17824766,
+    "asset_url": "https://github.com/ggml-org/llama.cpp/releases/download/b11552/llama-b11552-bin-ubuntu-x64.tar.gz",
+    "build": "CPU, x86_64 Linux, GCC 11.4.0; no CUDA/ROCm/Vulkan/SYCL backend",
+    "extract_into": "the archive top folder is llama-b11552/; extract into <bin-dir> so the server is at <bin-dir>/llama-b11552/llama-server",
+    "extracted_server": "llama-b11552/llama-server",
+    "license": "MIT",
+    "license_source": "https://github.com/ggml-org/llama.cpp (LICENSE file in the archive)",
+    "name": "llama.cpp",
+    "release_date": "2026-10-10",
+    "release_tag": "b11552",
+    "server_version": "0.6.0-dev (build 11552, commit 23b0202a1)"
+  },
+  "gate": "WP6_LLM_LOCAL",
+  "host": {
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "logical_cpus": 16,
+    "ram_gb": 31.2
+  },
+  "measures": {
+    "core_chat": [
+      {
+        "chars": 14,
+        "error": null,
+        "finish": "stop",
+        "ok": true,
+        "partial_seen": true,
+        "prompt_index": 0,
+        "total_s": 0.3150041720000445,
+        "ttft_s": 0.15338548799991258
+      },
+      {
+        "chars": 31,
+        "error": null,
+        "finish": "stop",
+        "ok": true,
+        "partial_seen": true,
+        "prompt_index": 1,
+        "total_s": 0.3901347010000791,
+        "ttft_s": 0.16385743099999672
+      },
+      {
+        "chars": 281,
+        "error": null,
+        "finish": "stop",
+        "ok": true,
+        "partial_seen": true,
+        "prompt_index": 2,
+        "total_s": 2.0653714400000354,
+        "ttft_s": 0.1648444660002042
+      },
+      {
+        "chars": 1,
+        "error": null,
+        "finish": "stop",
+        "ok": true,
+        "partial_seen": true,
+        "prompt_index": 3,
+        "total_s": 0.1963739309999255,
+        "ttft_s": 0.17493871800002125
+      },
+      {
+        "chars": 170,
+        "error": null,
+        "finish": "stop",
+        "ok": true,
+        "partial_seen": true,
+        "prompt_index": 4,
+        "total_s": 1.411471630999813,
+        "ttft_s": 0.15343265000001338
+      }
+    ],
+    "direct_server": {
+      "decode_tokens_per_s_median": 36.81,
+      "generated_tokens_per_run": [
+        20,
+        36,
+        14,
+        9,
+        3
+      ],
+      "prompt_tokens_per_s_median": 161.19,
+      "runs": 5,
+      "ttft_s_max": 0.271,
+      "ttft_s_median": 0.144,
+      "ttft_s_min": 0.12
+    },
+    "selftest": {
+      "features": {
+        "cancel": "unknown",
+        "context_tokens": null,
+        "streaming": "supported",
+        "tool_use": "supported",
+        "vision": "unknown"
+      },
+      "latency_ms": 266,
+      "source": "probed"
+    }
+  },
+  "model": {
+    "file": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "id": "qwen2.5-1.5b-instruct-q4_k_m",
+    "license": "apache-2.0",
+    "quantization": "Q4_K_M",
+    "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+    "size": 1117320736
+  },
+  "notes": {
+    "agent": {
+      "answer": "Até agora, são 21:25 (UTC).",
+      "budget": {
+        "tokens_max": 4096,
+        "tokens_used": 429
+      },
+      "error": null,
+      "state": "done",
+      "steps": [
+        {
+          "invocation_id": 1,
+          "kind": "chat",
+          "n": 1,
+          "state": "done"
+        },
+        {
+          "invocation_id": 2,
+          "kind": "tool",
+          "n": 1,
+          "risk": "read",
+          "state": "done",
+          "tool": "get_time"
+        },
+        {
+          "invocation_id": 3,
+          "kind": "chat",
+          "n": 2,
+          "state": "done"
+        }
+      ]
+    },
+    "core_start": {
+      "first_call_s": 8.1,
+      "load_seconds_in_selftest": 266
+    },
+    "draft_events": [
+      "skill_plugin_validate",
+      "skill_draft_put",
+      "skill_plugin_dry_run"
+    ],
+    "restart_total_s": 5.7,
+    "skill_draft": {
+      "elapsed_s": 8.45,
+      "error": null,
+      "invoke": "ok",
+      "output": {
+        "ambiguities": [],
+        "draft_id": "say_current_time_portuguese@1.0.0",
+        "preview": [
+          {
+            "call": "tool:get_time",
+            "id": "read_time"
+          }
+        ],
+        "requirements": [
+          "tool:get_time"
+        ],
+        "state": "draft",
+        "validation": {
+          "ok": true
+        },
+        "version": "1.0.0"
+      }
+    }
+  },
+  "passed": true,
+  "plugin": {
+    "plugin_id": "llm_engine",
+    "sha256": "cb0e7280834449ff75afd7b30e802ad568c53e979c2c16985fb66b1441bd2ce9",
+    "source": "scripts/llm_engine_plugin.py",
+    "version": "1.3.0"
+  },
+  "samples": [
+    {
+      "prompt": "Diga olá em uma frase curta.",
+      "reply": "Olá, tudo bem?"
+    },
+    {
+      "prompt": "Qual é a capital do Brasil? Responda em uma frase.",
+      "reply": "A capital do Brasil é Brasília."
+    },
+    {
+      "prompt": "Explique em uma frase o que é um assistente de voz.",
+      "reply": "Um assistente de voz é uma ferramenta que permite que você use a voz para interagir com um dispositivo ou sistema. Aqui está uma frase que descreve isso:\n\n\"Um assistente de voz é uma tecnologia que permite que você use a voz para comandar e interagir com dispositivos ou sistemas.\""
+    },
+    {
+      "prompt": "Quanto é dois mais dois? Responda só com o número.",
+      "reply": "4"
+    },
+    {
+      "prompt": "Escreva uma frase sobre o mar.",
+      "reply": "O mar é o maior reservatório de água doce do mundo, abrigando uma biodiversidade inestimável de seres vivos e contribuindo significativamente para a atmosfera do planeta."
+    }
+  ]
+}

@@ -99,6 +99,9 @@ SCHEMA=(
     _entry('theme.colors','Cores avançadas','Aparência','json',{},'Cores por papel','Substitui cores por papel. Cada cor passa pela validação de contraste.',level='advanced',keywords=('cor','papel','token','hex','personalizar')),
     _entry('behavior.startTab','Início','Geral','enum','assistente','Aba ao abrir','Aba mostrada quando o app abre.',options=_opts(('assistente','Assistente'),('extensoes','Extensões'),('permissoes','Permissões'),('configuracoes','Configurações'),('diagnostico','Diagnóstico')),keywords=('inicio','abrir','aba','padrao')),
     _entry('behavior.rememberWindow','Janela','Geral','bool',True,'Lembrar tamanho e posição da janela','Reabre a janela onde foi fechada.',keywords=('janela','tamanho','posicao')),
+    # WP-17: push-to-talk through the global shortcut (portal GlobalShortcuts). Off by default; the switch asks for consent.
+    _entry('shortcut.pushToTalk','Atalhos','Geral','bool',False,'Pressionar para falar com atalho global','Um atalho do sistema inicia a escuta. Desligado por padrão; ligar pede consentimento.',keywords=('atalho','global','falar','pressionar','escuta')),
+    _entry('shortcut.pushToTalkTrigger','Atalhos','Geral','string','CTRL+ALT+G','Atalho sugerido','Combinação registrada no portal de atalhos (ex.: CTRL+ALT+G). O sistema pode trocá-la.',keywords=('atalho','combinacao','tecla')),
     _entry('behavior.tips','Ajuda','Geral','bool',True,'Mostrar dicas','Exibe dicas curtas nas telas.',keywords=('dica','ajuda')),
     _entry('behavior.shortcuts','Ajuda','Geral','bool',True,'Atalhos de teclado','Liga os atalhos de teclado neste app.',keywords=('atalho','teclado','ctrl')),
     _entry('behavior.advanced','Opções','Geral','bool',False,'Mostrar opções avançadas','Revela opções avançadas em todas as telas. Não altera valores.',keywords=('avancado','opcoes','avancadas','detalhe')),

@@ -472,9 +472,20 @@ def scen_install_and_models(td):
     install_llm(root)
     check('llm_engine running after install and enable', item(req(root))['state'] == 'running')
     check('no key configured at start (secrets flags all false)',
-          llm(root)['secrets'] == {'openrouter': False, 'opencode': False, 'google': False, 'custom': False})
+          llm(root)['secrets'] == {'openrouter': False, 'opencode': False, 'google': False, 'anthropic': False, 'custom': False})
     rec, rec_pages, rec_err = list_all(root, 'recommended')
     check('models.list recommended pages ok (every page accepted, reaches total)', rec_err is None and bool(rec_pages), rec_err)
+    if rec:
+        # WP-19 describe(id): the Core op llm_describe validates the id, then asks llm_engine.models describe.
+        bad_code = req(root, 'llm_describe', id='Not A Model')['code']
+        check('llm_describe refuses a malformed id before the plugin (invalid_input)', bad_code == 'invalid_input', bad_code)
+        ident = rec[0]['id']
+        ok_code = req(root, 'llm_describe', id=ident)['code']
+        got = wait_snap(root, lambda s: (s.get('capability_result') or {}).get('capability') == MODELS
+                        and ((s['capability_result'].get('output') or {}).get('model') or {}).get('id') == ident,
+                        15, 'llm_describe result')['capability_result']
+        check('llm_describe(id) reaches llm_engine describe through the Core (same model, output {model} only)',
+              ok_code == 'ok' and got.get('ok') is True and set(got.get('output') or {}) == {'model'}, {'code': ok_code, 'ok': got.get('ok')})
     out = rec_pages[0] if rec_pages else {}
     check('models.list page echoes tab, offset 0 and total equal to the entries listed',
           out.get('tab') == 'recommended' and out.get('offset') == 0 and out.get('total') == len(rec), out)

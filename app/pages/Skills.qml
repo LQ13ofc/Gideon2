@@ -314,6 +314,46 @@ PageFrame {
         Layout.fillWidth: true
         spacing: Theme.space(16)
 
+        // WP-15 / SKILL-03: what the Core reports about packages: the base pack digest, the last export and the
+        // listed index (the UI never fetches the index URLs; "baixar" stays off until the owner approves a source).
+        Card {
+            objectName: "skillPackageCard"
+            Layout.fillWidth: true
+            title: "Pacotes e índice"
+            Text {
+                objectName: "skillPackHash"
+                text: "Hash do pacote base (SHA-256): " + (core.packHash.length > 0 ? core.packHash : "não informado pelo Core")
+                textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+                Accessible.name: "Hash do pacote base: " + core.packHash
+            }
+            Text {
+                objectName: "skillLastExport"
+                text: core.skillLastExport.path
+                      ? "Último pacote exportado: " + core.skillLastExport.id + " v" + core.skillLastExport.version + " em " + core.skillLastExport.path
+                      : "Nenhum pacote exportado nesta sessão."
+                textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+            }
+            Text {
+                objectName: "skillIndexSummary"
+                visible: !!core.skillIndex.repository
+                text: core.skillIndex.error
+                      ? "Índice de " + core.skillIndex.repository + " recusado: " + core.skillIndex.error
+                      : "Índice de " + core.skillIndex.repository + ": " + (core.skillIndex.entries ? core.skillIndex.entries.length : 0) + " pacote(s) listado(s)."
+                textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
+            }
+            Repeater {
+                model: core.skillIndex.entries || []
+                delegate: Text {
+                    required property var modelData
+                    objectName: "skillIndexEntry_" + modelData.name
+                    text: modelData.name + " v" + modelData.version + " · SHA-256 " + modelData.sha256
+                          + " · " + (modelData.signed ? "assinado" : "sem assinatura")
+                          + " · " + (modelData.present ? "já está na pasta de importação" : "não baixado (download depende de aprovação)")
+                    textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignTop

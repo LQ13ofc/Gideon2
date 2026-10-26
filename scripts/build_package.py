@@ -413,9 +413,18 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     # workers, app, binaries
     # net_broker.py is the Core-brokered HTTP process (LLM routes and S5 connections): without it every
     # network call of an installed package fails (the Core resolves <home>/scripts/net_broker.py).
+    # perception_worker.py (WP-17): the real perception and shortcut backends; run by the Core with the host
+    # interpreter (/usr/bin/python3, PyGObject) inside its per-plugin sandbox profile (src/plugins.rs).
     for worker in ("wake_worker.py", "stt_worker.py", "tts_worker.py", "command_worker.py", "pcm_fixture.py",
-                   "net_broker.py", "audio_conditioning.py", "wake_phrase_test.py"):
+                   "net_broker.py", "audio_conditioning.py", "wake_phrase_test.py", "perception_worker.py",
+                   "wake_transcript.py"):  # WP-7c: imported by wake_worker.py; the closure check requires it
         copy_file(REPO / "scripts" / worker, pkg / "scripts" / worker)
+    # WP-18a: the perception catalog the Hub offers (seven real plugins, one payload, docs/WP12p.md 6.4). The launcher
+    # passes it with `--hub-catalog PATH DIGEST`; the digest is written beside it. Every plugin still needs its own
+    # approval in the Hub, and nothing is granted by the catalog itself.
+    perception_catalog = REPO / "tests/fixtures/hub-perception.json"
+    copy_file(perception_catalog, pkg / "catalog" / "hub-perception.json")
+    (pkg / "catalog" / "hub-perception.sha256").write_text(sha256(perception_catalog) + "\n", encoding="utf-8")
     app_src = REPO / "app"
     for app_file in ("main.py", "bridge.py", "uisettings.py", "visual.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
         copy_file(app_src / app_file, pkg / "app" / app_file)

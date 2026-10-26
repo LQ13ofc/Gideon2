@@ -18,12 +18,12 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / 'app'))
 sys.path.insert(0, str(BASE / 'scripts'))
-from bridge import PERCEPTION_OUTPUTS, perception_input_problem, validate_snapshot  # noqa: E402
+from bridge import CAPABILITY_ERRORS, PERCEPTION_OUTPUTS, perception_input_problem, validate_snapshot  # noqa: E402
 from hub_import import upload as stage_upload  # noqa: E402
 
 BIN = BASE / 'target/release/gideon-base'
 CATALOG = BASE / 'tests/fixtures/hub-c1.json'
-C4_CATALOG = BASE / 'tests/fixtures/hub-c4.json'
+C4_CATALOG = BASE / 'tests/fixtures/hub-perception.json'  # WP-17: the real worker (scripts/perception_worker.py)
 PLUGIN_SRC = BASE / 'tests/fixtures/llm_engine.py'
 FAKE_SRC = BASE / 'tests/fixtures/fake_llm_server.py'
 GITHUB_SRC = BASE / 'tests/fixtures/connections/github_server.py'  # S5 E1 fake GitHub (loopback, stdlib)
@@ -35,6 +35,25 @@ PLUGIN = 'llm_engine'
 CAP = 'llm_engine.chat'
 KEY = 'sk-fake-0123456789abcdef'  # test-only key for the loopback fake provider
 CLEAN_ENV = {'PATH': '/usr/bin:/bin'}
+SESSION_KEYS = ('XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'WAYLAND_DISPLAY', 'DISPLAY')
+
+
+def c4_session_available():
+    """True when this machine has a real desktop session the perception backends can reach (bus and runtime dir)."""
+    runtime = os.environ.get('XDG_RUNTIME_DIR', '')
+    return bool(os.environ.get('DBUS_SESSION_BUS_ADDRESS')) and os.path.isdir(runtime) and os.path.exists(os.path.join(runtime, 'bus'))
+
+
+def c4_session_env(home):
+    """Core environment for the C4 read contract (WP-19): the real session variables, when set, plus a private HOME and
+    XDG config/data/cache. The Core only reads these to bind session sockets into the sandbox; the test calls read-only
+    capabilities only."""
+    env = {'PATH': '/usr/bin:/bin', 'HOME': str(home), 'XDG_CONFIG_HOME': str(home),
+           'XDG_DATA_HOME': str(home), 'XDG_CACHE_HOME': str(home)}
+    for key in SESSION_KEYS:
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    return env
 PACK = BASE / 'target/base-pack-dev.json'
 
 
@@ -409,8 +428,8 @@ class SnapshotContract(unittest.TestCase):
         return int(self.start_fake().rsplit(':', 1)[1].split('/')[0])
 
     def test_c4_plugin_outputs_validate_against_real_core(self):
-        # Every allowlisted C4 capability is invoked on the real Core (six plugins, synthetic world under a private
-        # home) and each output must pass the bridge rule of its capability; the inputs pass perception_input_problem.
+        # WP-17: the real perception worker runs under the real Core's sandbox. Only read-only capabilities are invoked
+        # here (no capture, no input, no volume or display change); each output must pass its bridge rule.
         home = self.td / 'home'
         home.mkdir()
         catalog = self.td / 'catalog-c4.json'
@@ -419,10 +438,12 @@ class SnapshotContract(unittest.TestCase):
         catalog.write_text(json.dumps({'version': c4['version'], 'repository': c4['repository'],
                                        'plugins': c1['plugins'] + c4['plugins']}), encoding='utf-8')
         self.core.catalog = catalog
-        self.core.extra = ['--agent-synthetic', '--home', str(home)]
+        self.core.extra = ['--home', str(home)]
+        # WP-19: the real session environment (bus, Wayland, runtime dir), with private HOME and XDG config/data/cache.
+        self.core.env = lambda: c4_session_env(home)
         self.core.start()
-        C4_PLUGINS = ['screen_observe', 'computer_control', 'audio_advanced', 'mic_advanced', 'camera_gesture',
-                      'display_manipulate']
+        C4_PLUGINS =['screen_observe', 'computer_control', 'audio_advanced', 'mic_advanced', 'camera_gesture',
+                      'display_manipulate', 'shortcut_global']
         for pid in C4_PLUGINS:
             hub = self.core.req()['hub']
             entry = next(e for e in hub['entries'] if e['plugin_id'] == pid)
@@ -430,7 +451,7 @@ class SnapshotContract(unittest.TestCase):
                                 manifest_sha256=entry['manifest_sha256'], permissions=entry['permissions'],
                                 publisher_unverified_ack=True)
             self.assertEqual(ack['code'], 'ok', pid)
-            stage_upload(str(self.root), pid, str(BASE / 'tests/fixtures/c4' / f'{pid}.py'))
+            stage_upload(str(self.root), pid, str(BASE / 'scripts/perception_worker.py'))
             hub = self.core.req()['hub']
             install = self.core.req('hub_install', revision=hub['install_revision'], plugin_id=pid,
                                     manifest_sha256=entry['manifest_sha256'])
@@ -440,26 +461,14 @@ class SnapshotContract(unittest.TestCase):
             self.core.wait(lambda s, p=pid: plugin_item(s, p) is not None and plugin_item(s, p)['state'] == 'running',
                            20, f'{pid} running')
         calls = [
-            ('screen_observe.status', {}), ('screen_observe.capture', {}),
-            ('computer_control.status', {}), ('computer_control.tree', {}),
-            ('computer_control.act', {'kind': 'click', 'epoch': 1, 'element': 'apply'}),
-            ('computer_control.act', {'kind': 'focus', 'epoch': 2, 'element': 'field'}),
-            ('computer_control.act', {'kind': 'type', 'epoch': 3, 'text': 'ola'}),
-            ('computer_control.act', {'kind': 'key', 'epoch': 4, 'key': 'enter'}),
-            ('audio_advanced.state', {}),
-            ('audio_advanced.act', {'kind': 'route', 'route': 'headphones'}),
-            ('audio_advanced.act', {'kind': 'app_volume', 'app': 'player', 'volume': 80}),
-            ('audio_advanced.act', {'kind': 'eq', 'preset': 'music'}),
-            ('audio_advanced.act', {'kind': 'denoise', 'enabled': True}),
-            ('mic_advanced.state', {}), ('mic_advanced.configure', {'gain': 70, 'filter': 'voice'}),
-            ('mic_advanced.monitor', {'enabled': True}), ('mic_advanced.record', {'action': 'start'}),
-            ('mic_advanced.record', {'action': 'stop'}),
-            ('camera_gesture.state', {}), ('camera_gesture.optin', {'enabled': True}),
-            ('camera_gesture.capture', {}), ('camera_gesture.gestures', {}),
-            ('camera_gesture.optin', {'enabled': False}),
-            ('display_manipulate.status', {}),
+            ('screen_observe.status', {}), ('computer_control.status', {}),
+            ('audio_advanced.state', {}), ('mic_advanced.state', {}),
+            ('camera_gesture.state', {}), ('camera_gesture.gestures', {}),
+            ('display_manipulate.status', {}), ('shortcut_global.status', {}),
+            ('shortcut_global.events', {}),
         ]
         covered = set()
+        sandbox_errors = {}
         for cap, inp in calls:
             self.assertIsNone(perception_input_problem(cap, json.dumps(inp)), (cap, inp))
             reply = self.core.req('capability_invoke', capability=cap, input=inp, deadline_ms=5000)
@@ -468,23 +477,25 @@ class SnapshotContract(unittest.TestCase):
                            and s['capability_result']['capability'] == c, 15, f'result {cap}')
             snap = self.core.snap(f'after {cap}')
             result = snap['capability_result']
-            self.assertTrue(result['ok'], (cap, result))
-            self.assertTrue(PERCEPTION_OUTPUTS[cap](result['output']), (cap, result['output']))
+            if result['ok']:
+                self.assertTrue(PERCEPTION_OUTPUTS[cap](result['output']), (cap, result['output']))
+            else:
+                # A backend the sandbox does not reach answers a documented code (WP-17: backend_unavailable), never a
+                # bare or unknown failure. Whether the real portal answers inside this sandbox is open (docs/WP17.md).
+                self.assertIn(result['error'], CAPABILITY_ERRORS, (cap, result))
+                sandbox_errors[cap] = result['error']
             covered.add(cap)
-        self.assertEqual(covered, set(PERCEPTION_OUTPUTS), 'every allowlisted C4 capability was checked')
-        # Negative controls: the rules refuse a near miss (extra key, wrong backend, missing focus flag).
+        self.assertEqual(covered, {cap for cap, _ in calls}, 'every read-only capability was checked')
+        # Printed for the record (docs/WP17.md): which read-only capabilities the Core-run sandbox could not serve.
+        print('c4 sandbox errors (read-only):', sandbox_errors)
+        if c4_session_available():
+            # With the real session the sandbox must reach every read-only backend; a documented code is not enough.
+            self.assertEqual(sandbox_errors, {}, 'real session: every read-only capability answers ok')
+        # Negative controls: the rules refuse a near miss (extra key, a claimed synthetic backend, a fake status).
         good = dict(result['output'])
-        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status'](dict(good, extra=1)))
+        self.assertFalse(PERCEPTION_OUTPUTS['shortcut_global.events'](dict(good, extra=1)))
         self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({'supported': True}))
-        tree = self.core.req('capability_invoke', capability='computer_control.tree', input={}, deadline_ms=5000)
-        self.assertEqual(tree['code'], 'ok')
-        self.core.wait(lambda s: s.get('capability_result') is not None
-                       and s['capability_result']['capability'] == 'computer_control.tree', 15, 'tree result')
-        tree_out = self.core.req()['capability_result']['output']
-        self.assertTrue(PERCEPTION_OUTPUTS['computer_control.tree'](tree_out))
-        bad_tree = json.loads(json.dumps(tree_out))
-        del bad_tree['elements'][0]['focused']
-        self.assertFalse(PERCEPTION_OUTPUTS['computer_control.tree'](bad_tree))
+        self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.status']({'backend': 'synthetic', 'available': True, 'reason': 'ok'}))
         self.core.stop()
 
     def test_wake_phrase_ops_validate_against_real_core(self):
@@ -678,7 +689,9 @@ class SnapshotContract(unittest.TestCase):
                'device code shown')
         pending = c.snap('connecting: user_code and pending scopes')
         item = next(i for i in pending['connections']['items'] if i['id'] == cid)
-        self.assertEqual(set(item['pending_scopes']), {'repo:read', 'issues:write', 'pulls:write'})
+        # WP-11/WP-18b: the real GitHub descriptor asks for five scopes (docs/WP11.md decision 2).
+        self.assertEqual(set(item['pending_scopes']), {'repo:read', 'issues:write', 'pulls:write',
+                                                       'user:read', 'notifications:read'})
         self.github_control(base, 'approve', {'user_code': item['user_code'], 'scopes': item['pending_scopes']})
         until = time.monotonic() + 20
         while self.ok_op('connection_consent', id=cid, scopes=['repo:read', 'issues:write'])['code'] != 'ok':

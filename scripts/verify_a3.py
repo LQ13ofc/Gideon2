@@ -74,7 +74,9 @@ def run():
                 # A SIGKILLed worker writes no stderr, so its tail file may be absent.
                 expected={'core.sock','core.lock','config.json','audit.log'};optional={'stt-last-error.txt'} if bad_model or kill_worker else set()
                 present=set(x.name for x in root.iterdir())
-                check('no voice/text files persisted',expected<=present<=expected|optional)
+                # WP-19: the personal store (WP-10a) is created empty at boot under the same root; it must stay empty here.
+                personal_empty=not (root/'personal').is_dir() or not any((root/'personal').iterdir())
+                check('no voice/text files persisted',expected<=present<=expected|optional|{'personal'} and personal_empty)
                 resource=None
                 if final:
                     def owned_pids():

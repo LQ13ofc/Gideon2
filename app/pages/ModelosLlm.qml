@@ -476,6 +476,17 @@ PageFrame {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+            Text {
+                objectName: "modelDescribed"
+                visible: page.selected !== null && core.modelDescription.id === page.selected.id
+                text: visible ? "Descrição do plugin: " + core.modelDescription.label + " · certificação: " + (core.modelDescription.certification ? core.modelDescription.certification.state : "desconhecida") + (core.modelDescription.sha256 ? " · sha256 " + String(core.modelDescription.sha256).slice(0, 12) + "…" : "") : ""
+                textFormat: Text.PlainText
+                color: Theme.textMuted
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontHelp
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.space(10)
@@ -486,6 +497,14 @@ PageFrame {
                     Accessible.name: page.selected ? "Usar este modelo: " + page.selected.label : "Usar este modelo"
                     enabled: core.modelsAvailable && page.selected !== null && page.useReason() === ""
                     onClicked: core.useModel(page.selected.id, AppState.modelsRevisionCaptured)
+                }
+                GButton {
+                    objectName: "describeModelButton"
+                    variant: "secondary"
+                    text: "Descrever"
+                    Accessible.name: page.selected ? "Descrever modelo " + page.selected.id : "Descrever modelo"
+                    enabled: core.modelsAvailable && page.selected !== null && !core.modelsBusy
+                    onClicked: core.describeModel(page.selected.id)
                 }
                 Item { Layout.fillWidth: true }
                 GButton {

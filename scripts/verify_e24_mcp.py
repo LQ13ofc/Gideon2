@@ -775,19 +775,13 @@ def scen_d(td):
 
 # ---- scenario E ---------------------------------------------------------------------------------------------
 def scen_e(td):
+    # WP-11: a real MCP account needs a registered server (mcp-servers.json). Without one the add is refused.
     root = boot(td, 'E', 'good', flag=False)
-    g = add(root, 'sem registro')
-    code = e1.req(root, 'connection_connect', id=g)['code']
-    e1.check('E real backend: mcp connect refused as real_backend_unsupported without the fake registration',
-             code == 'real_backend_unsupported', code)
-    e1.check('E real backend: the account stays disconnected and no process was started',
-             e1.find(root, g)['status'] == 'disconnected' and sandbox_pids(e1.CORE[0].pid) == ([], []))
-    e1.check('E real backend: the account is not flagged fake', e1.find(root, g).get('fake') is False, e1.find(root, g))
-    e1.check('E real backend: consent without a started server is invalid_state',
-             e1.req(root, 'connection_consent', id=g, scopes=BASIC)['code'] == 'invalid_state')
-    e1.check('E real backend: discover is not_connected', e1.op(root, g, 'mcp.discover', {}) == 'not_connected')
-    e1.check('E real backend: trust of an unknown tool is unknown_tool', e1.req(root, 'connection_trust_tools', id=g,
-                                                                                tools=['x'])['code'] == 'unknown_tool')
+    code = e1.req(root, 'connection_add', provider='mcp', label='sem registro')['code']
+    e1.check('E real backend: mcp add without a registered server is refused as invalid_connection',
+             code == 'invalid_connection', code)
+    e1.check('E real backend: no account and no process was started',
+             not [i for i in e1.conn_items(root) if i['label'] == 'sem registro'] and sandbox_pids(e1.CORE[0].pid) == ([], []))
     e1.stop_core('E')
     # flag validation: the Core refuses to start
     env = {'PATH': '/usr/bin:/bin'}

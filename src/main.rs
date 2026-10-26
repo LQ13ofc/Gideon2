@@ -25,6 +25,7 @@ async fn main() -> io::Result<()> {
     let mut fixtures_dir = None;
     let mut plugin_python = None;
     let mut net_allow_loopback = false;
+    let mut skill_index_base: Option<String> = None;
     // Test/dev only: S5 provider fakes on loopback (`provider=http://127.0.0.1:port`, repeatable).
     let mut connection_fakes = std::collections::BTreeMap::new();
     let mut connections_allow_public = false;
@@ -102,6 +103,14 @@ async fn main() -> io::Result<()> {
             }
             // Test/dev only: lets the LLM broker reach loopback HTTP servers. Never set in packages.
             "--net-allow-loopback" if !net_allow_loopback => net_allow_loopback = true,
+            // Test/dev only (WP-19): the SKILL-03 index base on loopback, e.g. http://127.0.0.1:PORT. Needs
+            // --net-allow-loopback; the broker still refuses every other host.
+            "--skill-index-base" if skill_index_base.is_none() => {
+                let base = args
+                    .next()
+                    .ok_or_else(|| io::Error::other("invalid --skill-index-base"))?;
+                skill_index_base = Some(base);
+            }
             "--connections-fake" => {
                 let raw = args
                     .next()
@@ -217,6 +226,16 @@ async fn main() -> io::Result<()> {
         return Err(io::Error::other("TTS requires command profile"));
     }
     // The live input feeds the wake worker of the replay profile; without it there is no pipeline.
+    if let Some(base) = skill_index_base.as_deref() {
+        let loopback_base = base
+            .strip_prefix("http://127.0.0.1:")
+            .is_some_and(|port| port.parse::<u16>().is_ok());
+        if !net_allow_loopback || !loopback_base {
+            return Err(io::Error::other(
+                "--skill-index-base needs --net-allow-loopback and http://127.0.0.1:PORT",
+            ));
+        }
+    }
     if live_audio && replay.is_none() {
         return Err(io::Error::other("--live-audio requires --wake-replay"));
     }
@@ -231,6 +250,7 @@ async fn main() -> io::Result<()> {
         plugin_python,
         net_allow_loopback,
         live_audio,
+        skill_index_base,
     )
     .await?;
     // A `core_restart` accepted by the Core: ledgers are flushed; the launcher starts it again.

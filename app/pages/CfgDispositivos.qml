@@ -429,17 +429,40 @@ PageFrame {
         IMicProbe {}
     }
 
+    // WP-17 / DISP-01, DISP-02: the camera and screen rows show what the real worker reported (v4l2 and the portal).
     Section {
         title: "Câmera e tela"
+        Component.onCompleted: core.perceptionRefreshStatus()
         EValueRow {
-            label: "Câmera: simulada"
-            badge: "SINTÉTICO"
-            note: "Indisponível: sem câmera real."
+            objectName: "cameraStatusRow"
+            label: "Câmera: " + (core.perceptionCameraStatus.device === undefined
+                ? "sem leitura ainda"
+                : (core.perceptionCameraStatus.present ? "encontrada" : "não encontrada"))
+            badge: core.perceptionCameraStatus.device === undefined ? "SEM LEITURA"
+                : (core.perceptionCameraStatus.present ? (core.perceptionCameraStatus.opt_in ? "ACESSO LIGADO" : "ACESSO DESLIGADO") : "INDISPONÍVEL")
+            note: core.perceptionCameraStatus.device === undefined
+                ? "Abra Atualizar leitura. A câmera só é usada com acesso ligado em Extensões › Percepção e ação."
+                : "Backend: v4l2" + (core.perceptionCameraStatus.device ? " · " + core.perceptionCameraStatus.device : "")
+                  + ". Nenhum quadro é guardado."
         }
         EValueRow {
-            label: "Tela: simulada"
-            badge: "SINTÉTICO"
-            note: "Indisponível: sem captura de tela real."
+            objectName: "screenStatusRow"
+            label: "Tela: " + (core.perceptionScreenStatus.available === undefined
+                ? "sem leitura ainda"
+                : (core.perceptionScreenStatus.available ? "captura disponível" : "captura indisponível"))
+            badge: core.perceptionScreenStatus.available === undefined ? "SEM LEITURA"
+                : (core.perceptionScreenStatus.available ? "REAL" : "INDISPONÍVEL")
+            note: core.perceptionScreenStatus.available === undefined
+                ? "Backend: portal XDG (Captura de tela). Abra Atualizar leitura."
+                : "Backend: portal XDG" + (core.perceptionScreenStatus.reason ? " · " + core.perceptionScreenStatus.reason : "")
+        }
+        GButton {
+            objectName: "perceptionRefreshButton"
+            variant: "secondary"
+            text: "Atualizar leitura"
+            enabled: core.perceptionAvailable && !core.perceptionBusy
+            Accessible.name: "Atualizar a leitura de câmera e tela"
+            onClicked: core.perceptionRefreshStatus()
         }
         GButton {
             objectName: "perceptionLinkButton"

@@ -93,8 +93,10 @@ FORBIDDEN_FILE_PARTS = ('tests', 'fixtures', 'synthetic', 'verify_', 'test_', 'f
                         'llm_engine', 'dummy_', 'mcp_server', 'github_server', 'google_server', 'homeassistant_server',
                         'screen_observe', 'computer_control', 'audio_advanced', 'mic_advanced', 'camera_gesture',
                         'display_manipulate')
-ALLOWED_SCRIPTS = {'command_worker.py', 'net_broker.py', 'pcm_fixture.py', 'stt_worker.py', 'tts_worker.py',
-                   'wake_worker.py'}
+# WP-19: the ten runtime scripts of the package (scripts/package_closure_check.py). Perception and wake helpers were added
+# in WP-7b/WP-17 and are imported or run by the packaged workers; none of them is a test fixture.
+ALLOWED_SCRIPTS = {'audio_conditioning.py', 'command_worker.py', 'net_broker.py', 'pcm_fixture.py', 'perception_worker.py',
+                   'stt_worker.py', 'tts_worker.py', 'wake_phrase_test.py', 'wake_transcript.py', 'wake_worker.py'}
 BINARY_FORBIDDEN = (b'BaseHTTPRequestHandler', b'ThreadingHTTPServer', b'SECRET_PROVIDER_BODY', b'sk-fake-', b'demo-user',
                     b'IGNORE AS REGRAS', b'fake_llm_server', b'fake_llama_server', b'github_server.py',
                     b'google_server.py', b'homeassistant_server.py')
@@ -578,7 +580,7 @@ def sec_static(args):
     rels = [e['path'] for e in files]
     # 1. what the package must contain for the new code, and nothing from the fixtures
     scripts = {Path(r).name for r in rels if r.startswith('scripts/')}
-    check('static: scripts/ holds exactly the six runtime workers (net_broker.py included, nothing else)',
+    check('static: scripts/ holds exactly the ten runtime scripts (net_broker.py included, no fixtures)',
           scripts == ALLOWED_SCRIPTS, sorted(scripts ^ ALLOWED_SCRIPTS))
     entry = next((e for e in files if e['path'] == 'scripts/net_broker.py'), None)
     check('static: scripts/net_broker.py is in PACKAGE.json with the sha256 of the repository file',
@@ -627,7 +629,11 @@ def sec_static(args):
     argv = json.loads(proc.stdout)['argv'] if proc.returncode == 0 else []
     check('static: gideon-core builds its Core argv', proc.returncode == 0 and bool(argv), proc.stderr[-300:])
     on = [flag for flag in TEST_FLAG_NAMES if flag in argv]
-    check('static: the default Core argv carries no test flag and no Hub catalog', not on, on)
+    # WP-19: the package passes its own perception Hub catalog (catalog/hub-perception.json); no other catalog, no test flag.
+    catalog_ok = '--hub-catalog' in argv and argv[argv.index('--hub-catalog') + 1].endswith('/catalog/hub-perception.json')
+    on = [flag for flag in TEST_FLAG_NAMES if flag in argv and flag != '--hub-catalog']
+    check('static: the default Core argv carries no test flag; its only Hub catalog is the package perception catalog',
+          not on and catalog_ok, on)
     check('static: the default Core argv pins --home, --data-dir and the bundled plugin runtime',
           '--home' in argv and '--data-dir' in argv and '--plugin-python' in argv, argv)
     for extra in ('--agent-synthetic', '--connections-fake=github=http://127.0.0.1:1'):
@@ -756,11 +762,21 @@ def sec_noflag(args):
     core_start(p, 'noflag', hub_args(p))
     root = core_root(p)
     s1_check(p, 'noflag S1')
-    for prov in ('github', 'google', 'homeassistant', 'mcp'):
+    # MCP needs an owner-registered server (mcp-servers.json): without one, adding is refused (checked below).
+    check('noflag: mcp add without a registered server is invalid_connection (no fake, no server)',
+          rq(p, 'connection_add', provider='mcp', label='sem fake mcp')['code'] == 'invalid_connection')
+    for prov in ('github', 'google', 'homeassistant'):
         code = rq(p, 'connection_add', provider=prov, label=f'sem fake {prov}')['code']
         need(f'add {prov}', code == 'ok', code)
         cid = next(i['id'] for i in e1.conn_items(root) if i['label'] == f'sem fake {prov}')
         code = rq(p, 'connection_connect', id=cid)['code']
+        if prov == 'github':
+            # WP-11: GitHub has a real API backend (owner token, device flow). Without a fake the Core only starts that
+            # real flow: the account waits for the owner and is never served by a fake, never connected here.
+            check('noflag: connecting github without a fake starts only the real device flow (no fake, not connected)',
+                  code == 'ok' and e1.find(root, cid)['status'] in ('connecting', 'disconnected')
+                  and not e1.find(root, cid).get('fake'), code)
+            continue
         check(f'noflag: connecting {prov} without a fake is real_backend_unsupported (nothing contacted)',
               code == 'real_backend_unsupported', code)
         check(f'noflag: the {prov} account stays disconnected', e1.find(root, cid)['status'] == 'disconnected')
@@ -781,15 +797,19 @@ def sec_noflag(args):
     rid, s = e3.run_tool(root, [e1.step(calls=names[:4]), e1.step(calls=names[4:8]), e1.step(calls=names[8:]), e1.step(text='Nada disponivel.')],
                          'Tente todas as ferramentas de teste', 'done', secs=60)
     codes = [st.get('code') for st in e3.tool_steps(s)]
-    check('noflag: every synthetic or fake-backed agent tool answers unknown_tool (11 calls, none proposed or run)',
-          codes == ['unknown_tool'] * 11 and not e1.run_props(s, rid), codes)
+    # WP-19: the GitHub account is a real one that waits for the owner (connecting), so its tools exist and answer
+    # not_connected; the route tool answers route_unavailable. Synthetic and fake-backed tools stay unknown_tool.
+    expected_codes = [{'not_connected'} if name.startswith('github_') else {'route_unavailable'} if name == 'route_create_issue'
+                      else {'unknown_tool'} for _, name, _ in names]
+    check('noflag: synthetic and fake-backed agent tools answer unknown_tool; the real github tools answer not_connected (11 calls, none proposed or run)',
+          len(codes) == 11 and all(c in allowed for c, allowed in zip(codes, expected_codes)) and not e1.run_props(s, rid), codes)
     res = sh.capability(root, 'screen_observe.capture', {})
     check('noflag: the synthetic host service does not exist (screen_observe.capture answers unknown_service)',
           res.get('ok') is False and res.get('error') == 'unknown_service', res)
     reg = rq(p)['registry']
     create = next(x for x in reg['purposes'] if x['id'] == 'create_issue')
     check('noflag: the registry has no usable route (API no_api, visual disabled), no route chosen',
-          'route_chosen' not in create and {c['route']: c['status'] for c in create['candidates']}.get('connection') in ('no_api', 'not_connected')
+          'route_chosen' not in create and {c['route']: c['status'] for c in create['candidates']}.get('connection') in ('no_api', 'not_connected', 'disabled')
           and {c['route']: c['status'] for c in create['candidates']}.get('visual') in ('disabled', 'visual_not_allowed'), create)
     check('noflag: no connection item is served by a fake', all(not i.get('fake') for i in e1.conn_items(root)))
     check('noflag: no synthetic world was created in the profile data directory',

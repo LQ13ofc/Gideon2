@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "purpose": "WP-6 local LLM engine: llama.cpp server build and one small GGUF instruct model. Owner approved these two downloads. Verified with the publisher's published sha256 before use (scripts/llm_local.py verify).",
+  "engine": {
+    "name": "llama.cpp",
+    "release_tag": "b11552",
+    "release_date": "2026-10-10",
+    "server_version": "0.6.0-dev (build 11552, commit 23b0202a1)",
+    "license": "MIT",
+    "license_source": "https://github.com/ggml-org/llama.cpp (LICENSE file in the archive)",
+    "asset": "llama-b11552-bin-ubuntu-x64.tar.gz",
+    "asset_url": "https://github.com/ggml-org/llama.cpp/releases/download/b11552/llama-b11552-bin-ubuntu-x64.tar.gz",
+    "asset_size": 17824766,
+    "asset_sha256": "a45a6afda05d08028bd37998072ab602c96799bccde126835941623cb99bb727",
+    "asset_sha256_source": "GitHub releases API, asset field digest (sha256:a45a6afd...), checked against the downloaded file",
+    "build": "CPU, x86_64 Linux, GCC 11.4.0; no CUDA/ROCm/Vulkan/SYCL backend",
+    "extracted_server": "llama-b11552/llama-server",
+    "extract_into": "the archive top folder is llama-b11552/; extract into <bin-dir> so the server is at <bin-dir>/llama-b11552/llama-server"
+  },
+  "model": {
+    "id": "qwen2.5-1.5b-instruct-q4_k_m",
+    "label": "Qwen2.5 1.5B Instruct (Q4_K_M GGUF)",
+    "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "publisher": "Qwen (Alibaba Cloud), GGUF conversion published by the Qwen organisation",
+    "file": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "size": 1117320736,
+    "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+    "sha256_source": "Hugging Face LFS oid of the file in the Qwen repository (api/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/tree/main), checked against the downloaded file",
+    "quantization": "Q4_K_M",
+    "license": "apache-2.0",
+    "license_source": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF (README front matter and LICENSE)",
+    "context_length_configured": 4096,
+    "chat_template": "embedded in the GGUF (used through llama-server --jinja)"
+  }
+}

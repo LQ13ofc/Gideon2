@@ -17,6 +17,8 @@ Card {
     readonly property string status: account.status || ""
     readonly property var pending: account.pending_scopes || []
     readonly property var granted: account.granted_scopes || []
+    // WP-18b: `core` is a context property that is null when the card loads alone (the QML test host).
+    readonly property bool connBusy: !!core && core.connectionsBusy === true
     // The live item by id from the Core snapshot: a refresh that discovers MCP tools replaces the item, and the delegate's
     // account object is not always re-bound to it. Reading core.connectionsItems re-evaluates on every connections change.
     readonly property var live: {
@@ -71,8 +73,8 @@ Card {
         return best
     }
     function connectReason() {
-        if (L.connCan(core.connectionsBusy, "connect", account)) return ""
-        if (core.connectionsBusy) return "Aguarde: outra operação de conexão está em andamento."
+        if (L.connCan(card.connBusy, "connect", account)) return ""
+        if (card.connBusy) return "Aguarde: outra operação de conexão está em andamento."
         if (status === "connected") return "Indisponível: a conta já está conectada."
         return "Indisponível: conexão em andamento."
     }
@@ -163,7 +165,7 @@ Card {
             delegate: CScopeChip {
                 required property string modelData
                 text: L.connScopeLabel(core.connectionsProviders, card.account.provider, modelData) + " (" + modelData + ")"
-                revocable: L.connCan(core.connectionsBusy, "revoke", card.account)
+                revocable: L.connCan(card.connBusy, "revoke", card.account)
                 onRevokeRequested: card.scopeRevokeRequested(modelData)
             }
         }
@@ -249,7 +251,7 @@ Card {
             variant: "primary"
             text: "Enviar token"
             Accessible.name: "Enviar token de " + card.label
-            enabled: !core.connectionsBusy && tokenField.text.length >= 16 && tokenField.text.length <= 256
+            enabled: !card.connBusy && tokenField.text.length >= 16 && tokenField.text.length <= 256
             onClicked: { core.connectionSetToken(card.cid, tokenField.text); tokenField.clear() }
         }
     }
@@ -264,7 +266,7 @@ Card {
             variant: "primary"
             text: "Consentir escopos marcados"
             Accessible.name: "Consentir escopos marcados de " + card.label
-            enabled: !core.connectionsBusy && card.consentList().length > 0
+            enabled: !card.connBusy && card.consentList().length > 0
             onClicked: core.connectionConsent(card.cid, JSON.stringify(card.consentList()))
         }
         GButton {
@@ -272,7 +274,7 @@ Card {
             variant: card.status === "connected" ? "secondary" : "primary"
             text: "Conectar"
             Accessible.name: "Conectar " + card.label
-            enabled: L.connCan(core.connectionsBusy, "connect", card.account)
+            enabled: L.connCan(card.connBusy, "connect", card.account)
             onClicked: core.connectionConnect(card.cid)
         }
         IconButton {
@@ -345,7 +347,7 @@ Card {
                     variant: "secondary"
                     text: "Confiar"
                     Accessible.name: "Confiar na ferramenta " + toolRow.modelData.name + " de " + card.label
-                    enabled: !core.connectionsBusy
+                    enabled: !card.connBusy
                     onClicked: card.trustRequested(toolRow.modelData.name)
                 }
             }
@@ -370,10 +372,10 @@ Card {
         Flow {
             Layout.fillWidth: true
             spacing: Theme.space(8)
-            GButton { objectName: "connRefresh_" + card.cid; variant: "ghost"; text: "Atualizar"; Accessible.name: "Atualizar " + card.label; enabled: L.connCan(core.connectionsBusy, "refresh", card.account); onClicked: core.connectionRefresh(card.cid) }
-            GButton { objectName: "connDisconnect_" + card.cid; variant: "secondary"; text: "Desconectar"; Accessible.name: "Desconectar " + card.label; enabled: L.connCan(core.connectionsBusy, "disconnect", card.account); onClicked: core.connectionDisconnect(card.cid) }
-            GButton { objectName: "connRevoke_" + card.cid; variant: "danger"; text: "Revogar"; Accessible.name: "Revogar acesso de " + card.label; enabled: L.connCan(core.connectionsBusy, "revoke", card.account); onClicked: card.revokeRequested() }
-            GButton { objectName: "connRemove_" + card.cid; variant: "danger"; text: "Remover"; Accessible.name: "Remover " + card.label; enabled: L.connCan(core.connectionsBusy, "remove", card.account); onClicked: card.removeRequested() }
+            GButton { objectName: "connRefresh_" + card.cid; variant: "ghost"; text: "Atualizar"; Accessible.name: "Atualizar " + card.label; enabled: L.connCan(card.connBusy, "refresh", card.account); onClicked: core.connectionRefresh(card.cid) }
+            GButton { objectName: "connDisconnect_" + card.cid; variant: "secondary"; text: "Desconectar"; Accessible.name: "Desconectar " + card.label; enabled: L.connCan(card.connBusy, "disconnect", card.account); onClicked: core.connectionDisconnect(card.cid) }
+            GButton { objectName: "connRevoke_" + card.cid; variant: "danger"; text: "Revogar"; Accessible.name: "Revogar acesso de " + card.label; enabled: L.connCan(card.connBusy, "revoke", card.account); onClicked: card.revokeRequested() }
+            GButton { objectName: "connRemove_" + card.cid; variant: "danger"; text: "Remover"; Accessible.name: "Remover " + card.label; enabled: L.connCan(card.connBusy, "remove", card.account); onClicked: card.removeRequested() }
         }
 
         Text {
@@ -412,11 +414,11 @@ Card {
                 }
                 GButton {
                     objectName: "connTest_" + card.cid + "_" + modelData.name
-                    visible: modelData.risk === "read" && modelData.name !== "state.get"
+                    visible: modelData.risk === "read" && modelData.name !== "state.get" && modelData.needs_args === false
                     variant: "ghost"
                     text: "Testar leitura"
                     Accessible.name: "Testar leitura " + modelData.name + " de " + card.label
-                    enabled: L.connCanTest(core.connectionsBusy, card.account, modelData)
+                    enabled: L.connCanTest(card.connBusy, card.account, modelData)
                     onClicked: core.connectionCall(card.cid, modelData.name, "{}")
                 }
             }

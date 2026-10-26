@@ -410,7 +410,7 @@ def scen_setup(td, fake):
     wait_running(root)
     check('llm_engine running', item(req(root))['state'] == 'running')
     check('no key configured at start (secrets flags all false)',
-          req(root)['llm']['secrets'] == {'openrouter': False, 'opencode': False, 'google': False, 'custom': False})
+          req(root)['llm']['secrets'] == {'openrouter': False, 'opencode': False, 'google': False, 'anthropic': False, 'custom': False})
     native_effect(root, 'S1 native still answers with llm_engine running (replay state of this boot)')
 
 

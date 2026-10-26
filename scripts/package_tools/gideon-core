@@ -34,6 +34,18 @@ done
 if [ -f "$PY" ]; then
     set -- --plugin-python "$PY" "$@"
 fi
+# Perception Hub catalog shipped with the package (WP-19): the digest is written beside it at build time.
+# A caller-supplied --hub-catalog replaces it (the Core accepts one catalog only).
+USER_HUB=0
+for arg in "$@"; do
+    case "$arg" in
+        --hub-catalog|--hub-catalog=*) USER_HUB=1 ;;
+    esac
+done
+if [ "$USER_HUB" = 0 ]; then
+    HUB_CATALOG_DIGEST=$(cat "$HERE/catalog/hub-perception.sha256") || { echo "gideon-core: catalog/hub-perception.sha256 missing" >&2; exit 1; }
+    set -- --hub-catalog "$HERE/catalog/hub-perception.json" "$HUB_CATALOG_DIGEST" "$@"
+fi
 set -- "$HERE/bin/gideon-base" --root "$STATE/core" --home "$HERE" \
     --commands-sandbox --data-dir "$STATE/data" \
     --base-pack "$STATE/profile/pack.json" \

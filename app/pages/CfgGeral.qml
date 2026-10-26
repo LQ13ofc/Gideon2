@@ -251,6 +251,65 @@ PageFrame {
         }
     }
 
+    // WP-17 / item 2: push-to-talk through the global shortcut. Turning it on asks for consent; the state is always shown.
+    Section {
+        title: "Pressionar para falar"
+        caption: "Um atalho do sistema inicia a escuta, como o Ctrl+M. O microfone só abre se a escuta ao vivo estiver liberada em Privacidade."
+        Text {
+            objectName: "pttState"
+            Layout.fillWidth: true
+            text: AppState.uiGet("shortcut.pushToTalk", false) === true
+                ? "Ligado: atalho " + core.pushToTalkTrigger + " · estado: " + ({
+                    "binding": "registrando", "bound": "pronto", "offline": "Core offline",
+                    "plugin_unavailable": "plugin sem execução", "error": "erro"
+                }[core.pushToTalkState] || core.pushToTalkState)
+                : "Desligado. Nenhum atalho global é registrado."
+            textFormat: Text.PlainText
+            color: core.pushToTalkState === "error" ? Theme.error : Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontHelp
+            wrapMode: Text.WordWrap
+        }
+        Text {
+            objectName: "pttMessage"
+            visible: core.pushToTalkMessage.length > 0
+            Layout.fillWidth: true
+            text: core.pushToTalkMessage
+            textFormat: Text.PlainText
+            color: Theme.textMuted
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontCaption
+            wrapMode: Text.WordWrap
+        }
+        GButton {
+            objectName: "pttSwitchButton"
+            variant: AppState.uiGet("shortcut.pushToTalk", false) === true ? "secondary" : "primary"
+            text: AppState.uiGet("shortcut.pushToTalk", false) === true ? "Desligar atalho" : "Ligar atalho (pede consentimento)"
+            Accessible.name: text
+            onClicked: {
+                if (AppState.uiGet("shortcut.pushToTalk", false) === true) {
+                    AppState.uiSet("shortcut.pushToTalk", false)
+                    core.setPushToTalk(false, "")
+                } else {
+                    pttConsent.open()
+                }
+            }
+        }
+        PConfirm {
+            id: pttConsent
+            objectName: "pttConsent"
+            title: "Ligar pressionar para falar?"
+            message: "O atalho global "
+                + AppState.uiGet("shortcut.pushToTalkTrigger", "CTRL+ALT+G")
+                + " passa a iniciar a escuta do Gideon, mesmo com outro app em foco. Precisa do plugin shortcut_global aprovado no Gideon Hub. Nenhum áudio é guardado por este atalho."
+            actionText: "Ligar atalho"
+            onConfirmed: {
+                AppState.uiSet("shortcut.pushToTalk", true)
+                core.setPushToTalk(true, AppState.uiGet("shortcut.pushToTalkTrigger", "CTRL+ALT+G"))
+            }
+        }
+    }
+
     Section {
         title: "Atalhos de teclado"
         Text {

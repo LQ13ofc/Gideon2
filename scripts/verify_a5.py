@@ -9,9 +9,12 @@ BINARY_ID=hashlib.sha256(BIN.read_bytes()).hexdigest()
 # so a long voice session can rotate it; it holds metadata lines only, like audit.log. Any other file still fails.
 def artifact_names_ok(root):
     names=set(x.name for x in root.iterdir())
+    # WP-19: the personal store (WP-10a) is created empty at boot under the same root; it is allowed only while empty.
+    if 'personal' in names and not any((root/'personal').iterdir()):names.discard('personal')
     base={'core.sock','core.lock','config.json','audit.log'}
     if names=={*base,'audit.log.1'}:
-        return all(set(json.loads(line))=={'version','sequence'} for line in (root/'audit.log.1').read_text().splitlines())
+        # WP-19: audit lines carry at_ms since CFG-04 (storage.rs audit writer): version, sequence and an integer at_ms only.
+        return all(set(record:=json.loads(line))=={'version','sequence','at_ms'} and type(record['at_ms']) is int for line in (root/'audit.log.1').read_text().splitlines())
     return names==base
 def run():
     checks=[];rows=[];manifest=json.loads(MANIFEST.read_text())

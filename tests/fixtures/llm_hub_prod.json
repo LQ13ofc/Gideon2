@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "repository": "https://github.com/LQ13ofc/Gideon2",
+  "plugins": [
+    {
+      "plugin_id": "llm_engine",
+      "api_version": 1,
+      "publisher": "Gideon WP-6 local build (unsigned)",
+      "semver": "1.3.0",
+      "targets": [
+        "linux_x86_64"
+      ],
+      "binaries": [
+        {
+          "target": "linux_x86_64",
+          "url": "https://github.com/LQ13ofc/Gideon2/blob/main/scripts/llm_engine_plugin.py",
+          "sha256": "cb0e7280834449ff75afd7b30e802ad568c53e979c2c16985fb66b1441bd2ce9",
+          "size": 63032
+        }
+      ],
+      "license": "MIT",
+      "permissions": [
+        "network_llm",
+        "storage_settings",
+        "skills_author"
+      ],
+      "dependencies": [],
+      "conflicts": [],
+      "entrypoint": "bin/llm_engine.py",
+      "build_source": "https://github.com/LQ13ofc/Gideon2/tree/c2-v1",
+      "support_policy": "Build local WP-6 (scripts/llm_engine_plugin.py); sem assinatura publicada; ver docs/WP6.md",
+      "signature": null,
+      "runtime": "python3_script",
+      "capabilities": [
+        "llm_engine.chat",
+        "llm_engine.models",
+        "llm_engine.skill_draft"
+      ]
+    }
+  ]
+}

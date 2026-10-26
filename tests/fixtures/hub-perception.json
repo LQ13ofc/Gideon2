@@ -14,8 +14,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/wp12-v1/screen_observe.py",
-          "sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
-          "size": 48628
+          "sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+          "size": 50083
         }
       ],
       "license": "MIT",
@@ -46,8 +46,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/wp12-v1/computer_control.py",
-          "sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
-          "size": 48628
+          "sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+          "size": 50083
         }
       ],
       "license": "MIT",
@@ -79,8 +79,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/wp12-v1/audio_advanced.py",
-          "sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
-          "size": 48628
+          "sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+          "size": 50083
         }
       ],
       "license": "MIT",
@@ -111,8 +111,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/wp12-v1/mic_advanced.py",
-          "sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
-          "size": 48628
+          "sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+          "size": 50083
         }
       ],
       "license": "MIT",
@@ -145,8 +145,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/wp12-v1/camera_gesture.py",
-          "sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
-          "size": 48628
+          "sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+          "size": 50083
         }
       ],
       "license": "MIT",
@@ -179,8 +179,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/wp12-v1/display_manipulate.py",
-          "sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
-          "size": 48628
+          "sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+          "size": 50083
         }
       ],
       "license": "MIT",
@@ -212,8 +212,8 @@
         {
           "target": "linux_x86_64",
           "url": "https://github.com/LQ13ofc/Gideon2/releases/download/wp12-v1/shortcut_global.py",
-          "sha256": "f2546934ae7db655c2acca3d051e99d4b447353974a9f4da40ae905a01276016",
-          "size": 48628
+          "sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+          "size": 50083
         }
       ],
       "license": "MIT",

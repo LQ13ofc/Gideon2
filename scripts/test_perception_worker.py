@@ -233,7 +233,7 @@ class StatusCalls(unittest.TestCase):
     def test_status_shapes(self):
         for plugin, cap, keys in (
             ("screen_observe", "screen_observe.status", {"backend", "available", "reason"}),
-            ("computer_control", "computer_control.status", {"backend", "available", "reason", "input_session"}),
+            ("computer_control", "computer_control.status", {"backend", "available", "reason"}),
             ("audio_advanced", "audio_advanced.state", {"backend", "default_sink", "sinks", "streams"}),
             ("mic_advanced", "mic_advanced.state", {"backend", "source", "gain", "muted", "recording", "indicator"}),
             ("camera_gesture", "camera_gesture.state", {"backend", "device", "present", "opt_in", "indicator"}),

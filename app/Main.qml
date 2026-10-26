@@ -313,5 +313,8 @@ ApplicationWindow {
     Component.onCompleted: {
         if (!window.availability[window.pageId]) window.pageId = "hoje"
         AppState.onboardingOpen = AppState.uiLive() && !ui.noOnboarding && ui.values["behavior.onboardingDone"] !== true
+        // WP-17: push-to-talk stays on across launches only when the owner turned it on (consent was given then).
+        if (AppState.uiGet("shortcut.pushToTalk", false) === true)
+            core.setPushToTalk(true, AppState.uiGet("shortcut.pushToTalkTrigger", "CTRL+ALT+G"))
     }
 }

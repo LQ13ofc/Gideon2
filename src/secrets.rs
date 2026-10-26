@@ -43,6 +43,9 @@ pub struct Secrets {
     opencode: Option<String>,
     #[serde(default)]
     google: Option<String>,
+    /// WP-18b Anthropic key slot. Absent in older vaults (serde default); 0600 like the others.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    anthropic: Option<String>,
     #[serde(default)]
     custom: Option<String>,
     /// S5 connection tokens, keyed `conn:<account>:access|refresh`. Write-only from the Core.
@@ -56,6 +59,7 @@ pub struct Flags {
     pub openrouter: bool,
     pub opencode: bool,
     pub google: bool,
+    pub anthropic: bool,
     pub custom: bool,
 }
 
@@ -66,6 +70,7 @@ impl Default for Secrets {
             openrouter: None,
             opencode: None,
             google: None,
+            anthropic: None,
             custom: None,
             connections: BTreeMap::new(),
         }
@@ -85,6 +90,7 @@ impl Secrets {
             Provider::Openrouter => &self.openrouter,
             Provider::Opencode => &self.opencode,
             Provider::Google => &self.google,
+            Provider::Anthropic => &self.anthropic,
             Provider::Custom => &self.custom,
         }
     }
@@ -93,6 +99,7 @@ impl Secrets {
             Provider::Openrouter => &mut self.openrouter,
             Provider::Opencode => &mut self.opencode,
             Provider::Google => &mut self.google,
+            Provider::Anthropic => &mut self.anthropic,
             Provider::Custom => &mut self.custom,
         }
     }
@@ -108,14 +115,21 @@ impl Secrets {
             openrouter: self.openrouter.is_some(),
             opencode: self.opencode.is_some(),
             google: self.google.is_some(),
+            anthropic: self.anthropic.is_some(),
             custom: self.custom.is_some(),
         }
     }
     pub(crate) fn validate(&self) -> bool {
         self.version == 1
-            && [&self.openrouter, &self.opencode, &self.google, &self.custom]
-                .into_iter()
-                .all(|k| k.as_deref().is_none_or(valid_key))
+            && [
+                &self.openrouter,
+                &self.opencode,
+                &self.google,
+                &self.anthropic,
+                &self.custom,
+            ]
+            .into_iter()
+            .all(|k| k.as_deref().is_none_or(valid_key))
             && self.connections.len() <= MAX_CONNECTION_SLOTS
             && self
                 .connections
@@ -220,7 +234,7 @@ mod tests {
         assert!(vault.validate());
         assert_eq!(
             serde_json::to_value(vault.flags()).unwrap(),
-            serde_json::json!({"openrouter": false, "opencode": false, "google": true, "custom": false})
+            serde_json::json!({"openrouter": false, "opencode": false, "google": true, "anthropic": false, "custom": false})
         );
         assert!(!format!("{vault:?}").contains(FAKE));
         let unknown = format!(r#"{{"version":1,"zzz":"{FAKE}"}}"#);

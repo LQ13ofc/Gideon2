@@ -691,7 +691,7 @@ fn local_and_ollama_stream_without_key_consent_or_authorization_header() {
     assert_eq!(snap["llm"]["config"]["cloud_consent"], false);
     assert_eq!(
         snap["llm"]["secrets"],
-        json!({"openrouter": false, "opencode": false, "google": false, "custom": false})
+        json!({"openrouter": false, "opencode": false, "google": false, "anthropic": false, "custom": false})
     );
     expect_ok(&lab.core.invoke("llm2.chat", json!({"text": "hi"}), 8000));
     let first = settled(&mut lab.core, "llm2.chat");
@@ -1235,6 +1235,7 @@ fn keyless_broker_requests_are_loopback_literals_only() {
             "url": url, "method": "POST", "headers": {"Content-Type": "application/json"},
             "body": "{}", "timeout_s": 5, "expected_host": expected,
             "allow_http": true, "allow_loopback": true,
+            "auth": "bearer", "dialect": "openai",
         })
     };
     // A closed loopback port: the request reaches the network layer and is refused there.

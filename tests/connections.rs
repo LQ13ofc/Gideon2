@@ -613,7 +613,8 @@ fn real_backend_is_refused_without_a_fake_and_fakes_need_the_broker_python() {
     let (_guard, dir) = fresh();
     let mut core = Core::new(&dir);
     core.start(&[], false);
-    let id = core.add("github", "sem fake");
+    // Google has no real backend yet (pronto, aguardando credenciais): connect is refused, nothing starts.
+    let id = core.add("google", "sem fake");
     let response = core.call(json!({"op": "connection_connect", "id": id}));
     assert_eq!(response["code"], "real_backend_unsupported");
     assert_eq!(core.item(&id)["status"], "disconnected");
@@ -660,12 +661,13 @@ fn connect_flow_consents_per_scope_and_keeps_only_granted_scopes() {
         .find(|p| p["id"] == "github")
         .unwrap()
         .clone();
-    assert_eq!(provider["scopes"].as_array().unwrap().len(), 3);
+    assert_eq!(provider["scopes"].as_array().unwrap().len(), 5);
+    // WP-11: creating an issue is dangerous by default (waits for the owner's confirmation).
     assert!(provider["operations"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|o| o["name"] == "issues.create" && o["risk"] == "write"));
+        .any(|o| o["name"] == "issues.create" && o["risk"] == "public"));
     assert!(provider["operations"]
         .as_array()
         .unwrap()
@@ -2228,13 +2230,14 @@ fn mcp_without_the_fixed_registration_starts_nothing_and_the_flag_is_strict() {
     let (_guard, dir) = fresh();
     let mut core = Core::new(&dir);
     core.start(&[], false);
-    let id = core.add("mcp", "sem registro");
-    assert_eq!(
-        core.call(json!({"op": "connection_connect", "id": id}))["code"],
-        "real_backend_unsupported"
-    );
-    assert_eq!(core.item(&id)["status"], "disconnected");
-    assert_eq!(core.item(&id)["fake"], false);
+    // WP-11: without the fake and without a registry entry the account is not even created.
+    let refused =
+        core.call(json!({"op": "connection_add", "provider": "mcp", "label": "sem registro"}));
+    assert_eq!(refused["code"], "invalid_connection");
+    assert!(core.snap()["connections"]["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert!(mcp_servers().is_empty());
     drop(core);
     for args in [
@@ -2742,4 +2745,136 @@ fn a_damaged_registry_file_keeps_the_fallback_off_and_refuses_changes() {
         "registry_storage_error"
     );
     assert_eq!(core.snap()["code"], "ok", "the Core keeps running");
+}
+
+/// WP-11: a real stdio MCP server from the owner's registry, launched by the Core in the sandbox with
+/// no fake. Every tool starts dangerous (`needs_reapproval`, shown as `destructive`) until trusted per tool.
+#[test]
+fn real_mcp_registry_server_is_dangerous_until_each_tool_is_trusted() {
+    let (_guard, dir) = fresh();
+    let data = dir.join("data");
+    fs::create_dir_all(&data).unwrap();
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/connector_mcp_server.py");
+    let registry = json!({
+        "version": 1,
+        "servers": [{
+            "name": "notas",
+            "script": script.display().to_string(),
+            "scopes": ["mcp.discover", "mcp.call"]
+        }]
+    });
+    fs::write(data.join("mcp-servers.json"), registry.to_string()).unwrap();
+    let mut core = Core::new(&dir);
+    core.start_with(&[], false, &["--data-dir", data.to_str().unwrap()]);
+    // Without a registered server name the account is refused; with it, connect runs the real server.
+    assert_eq!(
+        core.call(json!({"op": "connection_add", "provider": "mcp", "label": "inexistente"}))
+            ["code"],
+        "invalid_connection"
+    );
+    let id = core.add("mcp", "notas");
+    assert!(core.item(&id)["fake"] == json!(false));
+    mcp_login(&mut core, &id, &["mcp.discover", "mcp.call"]);
+    let tools = mcp_discover(&mut core, &id);
+    for name in ["list_notes", "read_note", "delete_note"] {
+        let tool = mcp_tool(&tools, name);
+        assert_eq!(tool["state"], "needs_reapproval", "{name}");
+        assert_eq!(
+            tool["risk"], "destructive",
+            "dangerous until trusted: {name}"
+        );
+    }
+    // An untrusted tool is never called: refused before any card or request.
+    assert_eq!(
+        core.op(&id, "mcp.call", json!({"tool": "list_notes", "args": {}}))["code"],
+        "tool_not_trusted"
+    );
+    // The owner trusts list_notes only.
+    assert_eq!(
+        core.call(json!({"op": "connection_trust_tools", "id": id, "tools": ["list_notes"]}))
+            ["code"],
+        "ok"
+    );
+    let trusted = core.item(&id)["tools"].clone();
+    assert_eq!(mcp_tool(&trusted, "list_notes")["state"], "trusted");
+    assert_eq!(mcp_tool(&trusted, "list_notes")["risk"], "write");
+    assert_eq!(mcp_tool(&trusted, "delete_note")["risk"], "destructive");
+    // A trusted read still asks for its card (per-call approval); the real server answers after it.
+    let pid = mcp_call_card(&mut core, &id, "list_notes", json!({}), "write");
+    core.call(json!({"op": "tool_decide", "proposal_id": pid, "decision": "authorize"}));
+    let card = settled(&mut core, &pid);
+    assert_eq!(card["state"], "executed", "{card}");
+    let result = card["result"].as_str().unwrap();
+    assert!(result.contains("[mcp_output:list_notes]"), "{result}");
+    assert!(result.contains("ola"), "{result}");
+    // The untrusted destructive tool stays refused: not trusted, and no destructive scope granted.
+    assert_eq!(
+        core.op(
+            &id,
+            "mcp.call",
+            json!({"tool": "delete_note", "args": {"title": "ola"}})
+        )["code"],
+        "tool_not_trusted"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_disconnect", "id": id}))["code"],
+        "ok"
+    );
+    assert_eq!(core.item(&id)["status"], "disconnected");
+}
+
+/// WP-11: GitHub has a real backend. Without the owner's token nothing is sent: connect waits for consent,
+/// the token is refused in shape before any request, and the account never connects without a probe.
+#[test]
+fn real_github_asks_for_the_owner_token_and_refuses_bad_shapes_offline() {
+    let (_guard, dir) = fresh();
+    let mut core = Core::new(&dir);
+    core.start(&[], false);
+    let id = core.add("github", "pessoal");
+    assert_eq!(core.item(&id)["fake"], json!(false));
+    assert_eq!(
+        core.call(json!({"op": "connection_connect", "id": id}))["code"],
+        "ok"
+    );
+    let pending = core.wait_status(&id, "connecting");
+    assert!(
+        pending["user_code"].is_null(),
+        "no device code on a token account"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": "ghp_0123456789abcdef"}))
+            ["code"],
+        "consent_required"
+    );
+    assert_eq!(
+        core.call(
+            json!({"op": "connection_consent", "id": id, "scopes": ["repo:read", "issues:write"]})
+        )["code"],
+        "ok"
+    );
+    assert_eq!(
+        core.call(json!({"op": "connection_set_token", "id": id, "token": "curto"}))["code"],
+        "invalid_token"
+    );
+    // Consent scopes the snapshot shows are the GitHub descriptor's own (real API names).
+    let snap = core.snap();
+    let github = snap["connections"]["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "github")
+        .unwrap();
+    let scopes: Vec<&str> = github["scopes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert!(scopes.contains(&"user:read") && scopes.contains(&"notifications:read"));
+    let text = snap.to_string();
+    assert!(
+        !text.contains("ghp_0123456789abcdef"),
+        "the token never reaches the snapshot"
+    );
 }

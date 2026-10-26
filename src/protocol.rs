@@ -112,6 +112,11 @@ pub enum Operation {
         tts_language: String,
         tts_voice: String,
     },
+    /// CFG-03: verifies the packaged models of one bundled language and activates them (`languages::install_pack`).
+    /// Downloads never happen here; a language that is not bundled is refused.
+    LanguageInstall {
+        language: String,
+    },
     /// A6 consent for the live microphone. `confirmed` must be true to turn it on: the client asserts that
     /// the user accepted the consent text. Takes effect at the next Core start (`restart_required`).
     LiveAudioPreference {
@@ -212,6 +217,14 @@ pub enum Operation {
     LlmRollback {
         revision: u64,
     },
+    /// Wire: `{"op":"llm_describe","version":1,"request_id":ID,"id":MODEL_ID}` (WP-19). The Core asks the llm_engine
+    /// plugin to describe one model; the answer arrives as the `capability_result` of `llm_engine.models`.
+    LlmDescribe {
+        id: String,
+    },
+    /// Wire: `{"op":"skill_index_fetch","version":1,"request_id":ID}` (SKILL-03, WP-19). Starts one fetch of the public
+    /// skills index through the broker; the outcome is the event `skill_index_saved` or `skill_index_failed`.
+    SkillIndexFetch,
     /// Wire: `{"op":"plugin_settings_clear","version":1,"request_id":ID,"plugin_id":PLUGIN}`.
     /// No revision: removes only that plugin's settings file; unknown fields are refused.
     PluginSettingsClear {
@@ -661,6 +674,11 @@ enum WireRequest {
         tts_language: String,
         tts_voice: String,
     },
+    LanguageInstall {
+        version: u16,
+        request_id: String,
+        language: String,
+    },
     LiveAudioPreference {
         version: u16,
         request_id: String,
@@ -824,6 +842,15 @@ enum WireRequest {
         version: u16,
         request_id: String,
         revision: u64,
+    },
+    LlmDescribe {
+        version: u16,
+        request_id: String,
+        id: String,
+    },
+    SkillIndexFetch {
+        version: u16,
+        request_id: String,
     },
     PluginSettingsClear {
         version: u16,
@@ -1258,6 +1285,11 @@ impl<'de> Deserialize<'de> for Request {
                     tts_voice,
                 },
             ),
+            WireRequest::LanguageInstall {
+                version,
+                request_id,
+                language,
+            } => (version, request_id, Operation::LanguageInstall { language }),
             WireRequest::LiveAudioPreference {
                 version,
                 request_id,
@@ -1518,6 +1550,15 @@ impl<'de> Deserialize<'de> for Request {
                 request_id,
                 revision,
             } => (version, request_id, Operation::LlmRollback { revision }),
+            WireRequest::LlmDescribe {
+                version,
+                request_id,
+                id,
+            } => (version, request_id, Operation::LlmDescribe { id }),
+            WireRequest::SkillIndexFetch {
+                version,
+                request_id,
+            } => (version, request_id, Operation::SkillIndexFetch),
             WireRequest::PluginSettingsClear {
                 version,
                 request_id,

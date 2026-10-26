@@ -1,0 +1,415 @@
+{
+  "generated_by": "scripts/perception_live.py --core",
+  "counts": {
+    "pass": 28,
+    "fail": 0,
+    "info": 1
+  },
+  "checks": [
+    {
+      "name": "core:display_before",
+      "status": "info",
+      "detail": {
+        "name": "DP-1",
+        "scale": 100,
+        "brightness": 95
+      }
+    },
+    {
+      "name": "core:plugins_running",
+      "status": "pass",
+      "detail": {
+        "plugins": [
+          "screen_observe",
+          "computer_control",
+          "audio_advanced",
+          "mic_advanced",
+          "camera_gesture",
+          "display_manipulate",
+          "shortcut_global"
+        ]
+      }
+    },
+    {
+      "name": "core:screen_observe.status",
+      "status": "pass",
+      "detail": {
+        "capability": "screen_observe.status",
+        "output": {
+          "available": true,
+          "backend": "portal",
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "name": "core:computer_control.status",
+      "status": "pass",
+      "detail": {
+        "capability": "computer_control.status",
+        "output": {
+          "available": true,
+          "backend": "atspi",
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "name": "core:audio_advanced.state",
+      "status": "pass",
+      "detail": {
+        "capability": "audio_advanced.state",
+        "output": {
+          "backend": "pipewire",
+          "default_sink": 50,
+          "sinks": [
+            {
+              "id": 50,
+              "name": "Navi 21/23 HDMI/DP Audio Controller Digital Stereo (HDMI 5) [VG2"
+            },
+            {
+              "id": 51,
+              "name": "fifine Microphone Estéreo analógico"
+            },
+            {
+              "id": 59,
+              "name": "Áudio interno Estéreo analógico"
+            }
+          ],
+          "streams": []
+        }
+      }
+    },
+    {
+      "name": "core:mic_advanced.state",
+      "status": "pass",
+      "detail": {
+        "capability": "mic_advanced.state",
+        "output": {
+          "backend": "pipewire",
+          "gain": 100,
+          "indicator": "off",
+          "muted": false,
+          "recording": false,
+          "source": 58
+        }
+      }
+    },
+    {
+      "name": "core:camera_gesture.state",
+      "status": "pass",
+      "detail": {
+        "capability": "camera_gesture.state",
+        "output": {
+          "backend": "v4l2",
+          "device": "video0",
+          "indicator": "off",
+          "opt_in": false,
+          "present": true
+        }
+      }
+    },
+    {
+      "name": "core:camera_gesture.gestures",
+      "status": "pass",
+      "detail": {
+        "capability": "camera_gesture.gestures",
+        "output": {
+          "backend": "v4l2",
+          "reason": "no_gesture_model_installed",
+          "supported": false
+        }
+      }
+    },
+    {
+      "name": "core:display_manipulate.status",
+      "status": "pass",
+      "detail": {
+        "capability": "display_manipulate.status",
+        "output": {
+          "backend": "kscreen",
+          "outputs": [
+            {
+              "brightness": 95,
+              "enabled": true,
+              "name": "DP-1",
+              "scale": 100
+            }
+          ],
+          "undo_pending": 0
+        }
+      }
+    },
+    {
+      "name": "core:shortcut_global.status",
+      "status": "pass",
+      "detail": {
+        "capability": "shortcut_global.status",
+        "output": {
+          "available": true,
+          "backend": "portal",
+          "bound": 0,
+          "reason": "ok"
+        }
+      }
+    },
+    {
+      "name": "core:shortcut_global.events",
+      "status": "pass",
+      "detail": {
+        "capability": "shortcut_global.events",
+        "output": {
+          "backend": "portal",
+          "events": []
+        }
+      }
+    },
+    {
+      "name": "core:screenshot",
+      "status": "pass",
+      "detail": {
+        "capability": "screen_observe.capture",
+        "output": {
+          "backend": "portal",
+          "epoch": 2047446403,
+          "height": 1080,
+          "regions": [],
+          "sha256": "c0c40e2702c848f5de73dca77d76235c5550db0d93d1d195b5de24f0ca8ddf66",
+          "width": 1920
+        }
+      }
+    },
+    {
+      "name": "core:screenshot_no_file_left",
+      "status": "pass",
+      "detail": {
+        "left_behind": [],
+        "image_kept": false
+      }
+    },
+    {
+      "name": "core:camera_refused_without_opt_in",
+      "status": "pass",
+      "detail": {
+        "result": {
+          "capability": "camera_gesture.capture",
+          "plugin_id": "camera_gesture",
+          "ok": false,
+          "error": "opt_in_required",
+          "elapsed_ms": 3
+        }
+      }
+    },
+    {
+      "name": "core:camera_opt_in_on",
+      "status": "pass",
+      "detail": {
+        "capability": "camera_gesture.optin",
+        "output": {
+          "backend": "v4l2",
+          "indicator": "on",
+          "opt_in": true
+        }
+      }
+    },
+    {
+      "name": "core:camera_frame",
+      "status": "pass",
+      "detail": {
+        "capability": "camera_gesture.capture",
+        "output": {
+          "backend": "v4l2",
+          "height": 120,
+          "indicator": "on",
+          "mean_luma": 0,
+          "sha256": "b5f25c1334ce1974d8b859cf005073b8f1bb30fbe088de2180dfa41f2f5d50aa",
+          "width": 160
+        }
+      }
+    },
+    {
+      "name": "core:camera_opt_in_off",
+      "status": "pass",
+      "detail": {
+        "capability": "camera_gesture.optin",
+        "output": {
+          "backend": "v4l2",
+          "indicator": "off",
+          "opt_in": false
+        }
+      }
+    },
+    {
+      "name": "core:display_status",
+      "status": "pass",
+      "detail": {
+        "capability": "display_manipulate.status",
+        "output": {
+          "backend": "kscreen",
+          "outputs": [
+            {
+              "brightness": 95,
+              "enabled": true,
+              "name": "DP-1",
+              "scale": 100
+            }
+          ],
+          "undo_pending": 0
+        }
+      }
+    },
+    {
+      "name": "core:display_scale_125",
+      "status": "pass",
+      "detail": {
+        "capability": "display_manipulate.act",
+        "output": {
+          "backend": "kscreen",
+          "op": "scale",
+          "output": "DP-1",
+          "previous": 100,
+          "value": 125,
+          "verified": true
+        }
+      }
+    },
+    {
+      "name": "core:display_brightness_90",
+      "status": "pass",
+      "detail": {
+        "capability": "display_manipulate.act",
+        "output": {
+          "backend": "kscreen",
+          "op": "brightness",
+          "output": "DP-1",
+          "previous": 95,
+          "value": 90,
+          "verified": true
+        }
+      }
+    },
+    {
+      "name": "core:display_restore",
+      "status": "pass",
+      "detail": {
+        "capability": "display_manipulate.restore",
+        "output": {
+          "backend": "kscreen",
+          "restored": 2,
+          "verified": true
+        }
+      }
+    },
+    {
+      "name": "core:display_restored",
+      "status": "pass",
+      "detail": {
+        "before": {
+          "scale": 100,
+          "brightness": 95
+        },
+        "after": {
+          "name": "DP-1",
+          "scale": 100,
+          "brightness": 95
+        }
+      }
+    },
+    {
+      "name": "core:shortcut_bind",
+      "status": "pass",
+      "detail": {
+        "capability": "shortcut_global.bind",
+        "output": {
+          "backend": "portal",
+          "bound": 1,
+          "id": "wp18a_probe",
+          "trigger": "CTRL+ALT+G"
+        }
+      }
+    },
+    {
+      "name": "core:shortcut_events_before_press",
+      "status": "pass",
+      "detail": {
+        "capability": "shortcut_global.events",
+        "output": {
+          "backend": "portal",
+          "events": []
+        }
+      }
+    },
+    {
+      "name": "core:shortcut_press",
+      "status": "pass",
+      "detail": {
+        "invoked_on": "com_anthropic_Claude",
+        "id": "wp18a_probe"
+      }
+    },
+    {
+      "name": "core:shortcut_events_after_press",
+      "status": "pass",
+      "detail": {
+        "capability": "shortcut_global.events",
+        "output": {
+          "backend": "portal",
+          "events": [
+            {
+              "at_ms": 1793048817951,
+              "id": "wp18a_probe"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "core:shortcut_event_received",
+      "status": "pass",
+      "detail": {
+        "events": {
+          "backend": "portal",
+          "events": [
+            {
+              "at_ms": 1793048817951,
+              "id": "wp18a_probe"
+            }
+          ]
+        },
+        "expected_id": "wp18a_probe"
+      }
+    },
+    {
+      "name": "core:display_scale_125_before_exit",
+      "status": "pass",
+      "detail": {
+        "capability": "display_manipulate.act",
+        "output": {
+          "backend": "kscreen",
+          "op": "scale",
+          "output": "DP-1",
+          "previous": 100,
+          "value": 125,
+          "verified": true
+        }
+      }
+    },
+    {
+      "name": "core:display_restored_on_core_exit",
+      "status": "pass",
+      "detail": {
+        "before": {
+          "scale": 100,
+          "brightness": 95
+        },
+        "after_core_exit": {
+          "name": "DP-1",
+          "scale": 100,
+          "brightness": 95
+        }
+      }
+    }
+  ],
+  "worker_sha256": "1831392d1c0b7347dc18cc3f9006d71db85296f2059c1342d5d07daa71d2f725",
+  "core": "target/release/gideon-base (real Core, session env from the owner's PC)"
+}

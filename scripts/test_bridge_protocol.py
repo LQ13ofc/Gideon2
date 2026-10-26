@@ -4,8 +4,8 @@ import copy,datetime,json,os,re,subprocess,sys,tempfile,time,unittest
 from collections import Counter
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'app'))
-from bridge import Bridge,CHAT_STATE_LABELS,CODE_MESSAGES,PREFS_DONE,SECTION_SIGNALS,STALE_MESSAGE,bounded_output,chat_input_size,chat_messages_for,chat_problem,llm_url_ok,text_problem,valid_key,validate_snapshot
-from bridge import CERT_BADGES,FEATURE_LABELS,MODEL_CAPABILITY,custom_form_problem,custom_model,fallback_for,model_status,target_for,valid_model,valid_models_page,valid_selftest
+from bridge import Bridge,CHAT_STATE_LABELS,CODE_MESSAGES,PREFS_DONE,SECTION_SIGNALS,STALE_MESSAGE,bounded_output,chat_input_size,chat_messages_for,chat_problem,llm_url_ok,text_problem,valid_key,validate_snapshot,perception_deadline
+from bridge import CERT_BADGES,FEATURE_LABELS,MODEL_CAPABILITY,custom_form_problem,custom_model,fallback_for,model_status,target_for,valid_describe,valid_model,valid_models_page,valid_selftest
 from bridge import AGENT_CODES,AGENT_STATE_LABELS,AGENT_STATES,OPS,PENDING,SNAPSHOT_SECTION_KEYS,agent_goal_problem,valid_agent,valid_tools
 from bridge import CAPABILITY_ERRORS,PERCEPTION_CAPABILITIES,PERCEPTION_DEADLINE_MS,PERCEPTION_INPUT_LIMIT,PERCEPTION_MESSAGES,PERCEPTION_OUTPUTS,PERCEPTION_PLUGINS,perception_code_message,perception_input_problem,perception_text
 from bridge import PENDING_SKILL_DRAFT,SKILL_CODES,SKILL_DRAFT_CAPABILITY,SKILL_DRAFT_DEADLINE_MS,SKILL_HISTORY_LIMIT,SKILL_ITEMS_LIMIT,SKILL_JSON_LIMIT,SKILL_OP_CODES,SKILL_OP_MESSAGES,SKILL_REASON_MESSAGES,SKILL_REASONS,SKILL_SOURCES,SKILL_STATES,SKILL_STEPS_LIMIT,code_message,skill_code_ok,skill_json,valid_skill_draft,valid_skills
@@ -38,7 +38,7 @@ def offered(window,page_id):
     return page_id in [str(x) for x in ids]
 APP=None if (QML_CHILD or QML_CHAT_CHILD or QML_MODELS_CHILD or QML_PERCEPTION_CHILD or QML_SKILLS_CHILD or QML_CONNECTIONS_CHILD or QML_SHELL_CHILD or QML_INTRO_CHILD or QML_AUDIO_CHILD) else QCoreApplication([])
 FAKE_KEY='fake-key-0123456789abcdef'
-EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'custom':False}}
+EMPTY_LLM={'revision':0,'config':None,'secrets':{'openrouter':False,'opencode':False,'google':False,'anthropic':False,'custom':False}}
 BASE={'version':1,'request_id':'r','code':'ok','state':'idle','sequence':1,'session_id':None,'transcript':None,'command':None,'events':[],'text_input_available':True,'speech_samples':0,'speech_status':'idle','wake_status':'unavailable','stt_status':'unavailable','plugins':{'revision':0,'status':'ok','items':[]},'llm':EMPTY_LLM,'tool_proposals':[]}
 def plugins_for(hub):
     return {'revision':0,'status':'ok','items':[{'plugin_id':r['plugin_id'],'semver':r['semver'],'capabilities':[],'state':'quarantined' if r['state']=='quarantined' else 'disabled','enabled':False,'restarts':0,'last_error':None} for r in hub.get('installed',[])]}
@@ -382,7 +382,7 @@ CONFIG_TAILS={'local_port':None,'lkg':None,'fallback':None}
 LLM_CONFIG={'provider':'google','model':'gemini-3.5-flash-lite','custom_url':None,'cloud_consent':True,**CONFIG_TAILS}
 def llm_state(revision=1,config=None,secrets=None):
     # Copied: the key-material tests mutate the config they are given, and LLM_CONFIG must stay the valid fixture for every later test.
-    return {'revision':revision,'config':copy.deepcopy(config),'secrets':secrets or {'openrouter':False,'opencode':False,'google':True,'custom':False}}
+    return {'revision':revision,'config':copy.deepcopy(config),'secrets':secrets or {'openrouter':False,'opencode':False,'google':True,'anthropic':False,'custom':False}}
 def tool_item(pid='tool_1_1',tool='open_app',state='pending',args=None,reason=None,result=None):
     return {'proposal_id':pid,'plugin_id':'llm_engine','call_id':'call_'+pid,'tool':tool,'args':args if args is not None else {'desktop_id':'brave.desktop'},'state':state,'reason':reason,'result':result}
 def chat_result(text='Olá',ok=True,error=None,partial=None,extra=None):
@@ -440,7 +440,7 @@ class LlmContract(unittest.TestCase):
         with self.assertRaises(ValueError):validate_snapshot({**BASE,'llm':llm_state(revision=-1,config=LLM_CONFIG)},'r',0)
         validate_snapshot({**BASE,'llm':llm_state(revision=2**64-1,config=LLM_CONFIG)},'r',0)
         for flag in ('google','custom'):
-            secrets={'openrouter':False,'opencode':False,'google':False,'custom':False};secrets[flag]='yes'
+            secrets={'openrouter':False,'opencode':False,'google':False,'anthropic':False,'custom':False};secrets[flag]='yes'
             with self.subTest(flag=flag),self.assertRaises(ValueError):validate_snapshot({**BASE,'llm':llm_state(secrets=secrets)},'r',0)
     def test_partial_is_a_bounded_string_or_absent(self):
         for partial in ('a'*16384,'á'*8192,'linha\nDois',None):
@@ -624,7 +624,7 @@ class LlmBridge(unittest.TestCase):
         request=next_request(peer)
         self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'secret_set','provider':'openrouter','key':FAKE_KEY})
         wait_idle();self.assertFalse(peer.canReadLine())
-        answer(peer,request,chat_snapshot(llm=llm_state(revision=2,config=LLM_CONFIG,secrets={'openrouter':True,'opencode':False,'google':True,'custom':False})));settle(bridge)
+        answer(peer,request,chat_snapshot(llm=llm_state(revision=2,config=LLM_CONFIG,secrets={'openrouter':True,'opencode':False,'google':True,'anthropic':False,'custom':False})));settle(bridge)
         self.assertEqual(bridge.llmResult,'Chave salva pelo Core');self.assertTrue(bridge.llmSecretsConfigured['openrouter'])
         assert_no_key(self,bridge)
     def test_set_api_key_refusals_never_reach_the_core(self):
@@ -637,7 +637,7 @@ class LlmBridge(unittest.TestCase):
         bridge,peer=connect_bridge(self,chat_snapshot())
         bridge.clearApiKey('google');request=next_request(peer)
         self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'secret_clear','provider':'google'})
-        answer(peer,request,chat_snapshot(llm=llm_state(revision=2,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'custom':False})));settle(bridge)
+        answer(peer,request,chat_snapshot(llm=llm_state(revision=2,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'anthropic':False,'custom':False})));settle(bridge)
         self.assertEqual(bridge.llmResult,'Chave removida pelo Core');self.assertFalse(bridge.llmSecretsConfigured['google'])
     def test_saved_consent_is_visible_to_the_dialog_and_saved_back_unchanged(self):
         bridge,peer=connect_bridge(self,chat_snapshot(llm=llm_state(revision=5,config=LLM_CONFIG)))
@@ -1052,6 +1052,12 @@ class ModelsContract(unittest.TestCase):
         for name,output in cases.items():
             with self.subTest(case=name):self.assertFalse(valid_models_page(output,'recommended',0))
         self.assertFalse(valid_models_page(page_of(models_output(custom=custom),'custom',10),'custom',6))  # offset mismatch
+    def test_describe_answer_is_exactly_one_model_of_its_tier(self):
+        self.assertTrue(valid_describe({'model':local_model()}))
+        self.assertTrue(valid_describe({'model':cloud_model(tier='custom',certification={'state':'declared','evidence':None,'date':None})}))
+        model=local_model()
+        for output in ({},{'model':None},{'model':model,'extra':1},{'model':{**model,'tier':'other'}},{'model':{k:v for k,v in model.items() if k!='tier'}}):
+            with self.subTest(output=sorted(output)):self.assertFalse(valid_describe(output))
     def test_selftest_result_must_be_a_real_probe(self):
         self.assertTrue(valid_selftest(SELFTEST_OK))
         for change in ({'ok':False},{'source':'declared'},{'features':{**SELFTEST_OK['features'],'vision':'supported'}},{'latency_ms':-1},{'extra':1}):
@@ -1077,7 +1083,7 @@ class ModelsContract(unittest.TestCase):
         self.assertNotEqual(custom_model(form(model='a'))['id'],custom_model(form(model='b'))['id'])
         self.assertTrue(custom_model(form(model='a'*128))['id'].startswith('custom-'))
     def test_status_line_is_computed_from_keys_consent_and_features(self):
-        models=models_output()['recommended'];keyed={'openrouter':False,'opencode':False,'google':True,'custom':False}
+        models=models_output()['recommended'];keyed={'openrouter':False,'opencode':False,'google':True,'anthropic':False,'custom':False}
         self.assertEqual(model_status(LLM_CONFIG,models,keyed),'Disponível')
         self.assertEqual(model_status(None,models,keyed),'Sem modelo selecionado')
         self.assertEqual(model_status(LLM_CONFIG,models,keyed,testing=True),'Em teste')
@@ -1276,13 +1282,13 @@ class ModelsBridge(unittest.TestCase):
         bridge.useModel('gemini-lite','0');self.assertEqual(bridge.modelsResult,CODE_MESSAGES['stale_llm_revision']);quiet(self,peer)
         bridge.useModel('ghost','1');self.assertEqual(bridge.modelsResult,CODE_MESSAGES['model_not_found']);quiet(self,peer)
     def test_missing_key_or_consent_refuses_a_cloud_model_before_the_core(self):
-        snap=models_snapshot(revision=1,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'custom':False})
+        snap=models_snapshot(revision=1,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'anthropic':False,'custom':False})
         bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
         bridge.useModel('gemini-lite','1');self.assertTrue(bridge.modelsResult.startswith('Sem chave'));quiet(self,peer)
         apply_snap(bridge,models_snapshot(revision=1,config={**LLM_CONFIG,'cloud_consent':False}))
         bridge.useModel('gemini-lite','1');self.assertTrue(bridge.modelsResult.startswith('Sem consentimento'));quiet(self,peer)
     def test_local_model_needs_no_key_or_consent_and_sends_its_port(self):
-        snap=models_snapshot(revision=1,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'custom':False})
+        snap=models_snapshot(revision=1,config=LLM_CONFIG,secrets={'openrouter':False,'opencode':False,'google':False,'anthropic':False,'custom':False})
         bridge,peer=connect_bridge(self,snap);load_catalog(bridge,peer,models_output(),snap)
         bridge.useModel('llama-7b','1');request=next_request(peer)
         self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'llm_configure','revision':1,'provider':'local','model':'llama-7b-q4','custom_url':None,'cloud_consent':True,'local_port':8080})
@@ -1741,30 +1747,32 @@ class AgentBridge(unittest.TestCase):
         self.assertNotIn('goal',repr(bridge.agentSteps))
 # C4 perception and action (docs/C4.md). The output samples are the real C4 plugin shapes that test_snapshot_contract.py captures from the real Core.
 # Samples are the real C4 plugin output shapes (captured from the real Core by test_snapshot_contract.py).
-_REAL={'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'}
-_MIC={**_REAL,'device':'synthetic-mic','gain':40,'filter':'off','monitor':False,'recording':False,'indicator':False}
-_CAM={**_REAL,'opt_in':False,'indicator':False,'frame_seq':0}
-_AUDIO={**_REAL,'routes':[{'id':'speakers','active':True},{'id':'headphones','active':False}],'apps':[{'id':'player','volume':50}],'eq':'flat','denoise':False}
+# WP-17: the real worker shapes (scripts/perception_worker.py), as the Core relays them.
 PERC_OK={
-    'screen_observe.capture':{'backend':'synthetic','epoch':1,'width':1280,'height':720,'sha256':'c'*64,'regions':[{'role':'button','name':'OK','x':10,'y':20}]},
-    'screen_observe.status':{'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'},
-    'computer_control.tree':{'backend':'synthetic','epoch':1,'elements':[{'id':'b1','role':'button','name':'OK','x':10,'y':20,'focused':False}]},
-    'computer_control.act':{'backend':'synthetic','kind':'click','epoch':2,'verified':True,'element':'b1'},
-    'computer_control.status':{'backend':'synthetic','real_backend':'unsupported','reason':'needs_human_validation'},
-    'audio_advanced.state':dict(_AUDIO),
-    'audio_advanced.act':{**_AUDIO,'kind':'app_volume','verified':True},
-    'mic_advanced.state':dict(_MIC),
-    'mic_advanced.configure':{**_MIC,'verified':True},
-    'mic_advanced.monitor':{**_MIC,'monitor':True,'indicator':True,'verified':True},
-    'mic_advanced.record':{**_MIC,'recording':True,'indicator':True,'action':'start','verified':True},
-    'camera_gesture.state':{**_CAM,'gesture':None},
-    'camera_gesture.optin':{**_CAM,'opt_in':True,'indicator':True,'verified':True},
-    'camera_gesture.capture':{**_CAM,'opt_in':True,'indicator':True,'frame_seq':3},
-    'camera_gesture.gestures':{**_REAL,'gestures':['wave','thumbs_up']},
-    'display_manipulate.status':{'supported':False,'state':'UNSUPPORTED','reason':'no_compositor_api_in_environment','note':'overlay/captura não é manipulação de saída'},
+    'screen_observe.capture':{'backend':'portal','epoch':1,'width':1920,'height':1080,'sha256':'c'*64,'regions':[]},
+    'screen_observe.status':{'backend':'portal','available':True,'reason':'ok'},
+    'computer_control.tree':{'backend':'atspi','epoch':1,'window':'Janela de teste','elements':[{'id':1,'role':'button','name':'OK','x':10,'y':20}]},
+    'computer_control.act':{'backend':'remote_desktop','kind':'type','injected':3,'verified':True},
+    'computer_control.status':{'backend':'atspi','available':True,'reason':'ok'},
+    'audio_advanced.state':{'backend':'pipewire','default_sink':55,'sinks':[{'id':55,'name':'Saída'}],'streams':[{'id':112,'app':'player','volume':50}]},
+    'audio_advanced.act':{'backend':'pipewire','kind':'app_volume','stream':112,'previous':50,'volume':40,'verified':True},
+    'mic_advanced.state':{'backend':'pipewire','source':60,'gain':100,'muted':False,'recording':False,'indicator':'off'},
+    'mic_advanced.configure':{'backend':'pipewire','previous':100,'gain':80,'verified':True},
+    'mic_advanced.monitor':{'backend':'pipewire','supported':False,'reason':'monitor_would_feed_back_to_speakers'},
+    'mic_advanced.record':{'backend':'pipewire','recording':True,'indicator':'on','max_seconds':10},
+    'camera_gesture.state':{'backend':'v4l2','device':'video0','present':True,'opt_in':False,'indicator':'off'},
+    'camera_gesture.optin':{'backend':'v4l2','opt_in':True,'indicator':'on'},
+    'camera_gesture.capture':{'backend':'v4l2','width':160,'height':120,'sha256':'d'*64,'mean_luma':23,'indicator':'on'},
+    'camera_gesture.gestures':{'backend':'v4l2','supported':False,'reason':'no_gesture_model_installed'},
+    'display_manipulate.status':{'backend':'kscreen','outputs':[{'name':'DP-1','enabled':True,'scale':100,'brightness':95}],'undo_pending':0},
+    'display_manipulate.act':{'backend':'kscreen','output':'DP-1','op':'scale','previous':100,'value':125,'verified':True},
+    'display_manipulate.restore':{'backend':'kscreen','restored':1,'verified':True},
+    'shortcut_global.status':{'backend':'portal','available':True,'reason':'ok','bound':0},
+    'shortcut_global.bind':{'backend':'portal','id':'ptt_toggle','trigger':'CTRL+ALT+G','bound':1},
+    'shortcut_global.events':{'backend':'portal','events':[{'id':'ptt_toggle','at_ms':1700000000000}]},
 }
-PERC_INPUT_OK=[('screen_observe.capture','{}'),('computer_control.act','{"kind":"click","epoch":1,"element":"b1"}'),('audio_advanced.act','{"kind":"eq","preset":"flat"}'),('mic_advanced.configure','{"gain":40,"filter":"voice"}'),('mic_advanced.monitor','{"enabled":true}'),('mic_advanced.record','{"action":"start"}'),('camera_gesture.optin','{"enabled":true}')]
-PERC_INPUT_BAD=[('screen_observe.capture','{"x":1}'),('screen_observe.capture','[]'),('screen_observe.capture','null'),('screen_observe.capture','{"a":NaN}'),('screen_observe.capture','{'),('screen_observe.capture','{"a":"'+'x'*8200+'"}'),('screen_observe.capture','{"a":"'+'é'*4096+'"}'),('computer_control.act','{"kind":"drag","epoch":1}'),('computer_control.act','{"kind":"click"}'),('computer_control.act','{"kind":"click","epoch":0}'),('audio_advanced.act','{"kind":"mute"}'),('mic_advanced.configure','{"gain":101}'),('mic_advanced.configure','{"gain":true}'),('mic_advanced.record','{"action":"start","extra":1}'),('mic_advanced.record','{"action":"loop"}'),('mic_advanced.configure','{"filter":true}'),('mic_advanced.configure','{"filter":"noise_gate"}'),('audio_advanced.act','{"kind":"eq","preset":"treble"}'),('camera_gesture.optin','{"enabled":"yes"}'),('display_manipulate.status','{"force":true}'),('os.exec','{}'),('screen_observe.capture_all','{}'),('llm_engine.chat','{"text":"x"}')]
+PERC_INPUT_OK=[('screen_observe.capture','{}'),('computer_control.act','{"kind":"type","text":"gid","epoch":1}'),('audio_advanced.act','{"kind":"app_volume","stream":112,"volume":40}'),('mic_advanced.configure','{"gain":40}'),('mic_advanced.monitor','{"enabled":true}'),('mic_advanced.record','{"action":"start"}'),('camera_gesture.optin','{"enabled":true}'),('display_manipulate.act','{"output":"DP-1","op":"scale","value":125}'),('display_manipulate.restore','{}'),('shortcut_global.bind','{"id":"ptt_toggle","trigger":"CTRL+ALT+G"}'),('shortcut_global.events','{}')]
+PERC_INPUT_BAD=[('screen_observe.capture','{"x":1}'),('screen_observe.capture','[]'),('screen_observe.capture','null'),('screen_observe.capture','{"a":NaN}'),('screen_observe.capture','{'),('screen_observe.capture','{"a":"'+'x'*8200+'"}'),('screen_observe.capture','{"a":"'+'é'*4096+'"}'),('computer_control.act','{"kind":"drag","epoch":1}'),('computer_control.act','{"kind":"click"}'),('computer_control.act','{"kind":"click","epoch":0}'),('audio_advanced.act','{"kind":"mute"}'),('mic_advanced.configure','{"gain":151}'),('mic_advanced.configure','{"gain":true}'),('mic_advanced.record','{"action":"start","extra":1}'),('mic_advanced.record','{"action":"loop"}'),('mic_advanced.configure','{"filter":true}'),('mic_advanced.configure','{"filter":"noise_gate"}'),('audio_advanced.act','{"kind":"eq","preset":"treble"}'),('camera_gesture.optin','{"enabled":"yes"}'),('display_manipulate.status','{"force":true}'),('os.exec','{}'),('screen_observe.capture_all','{}'),('llm_engine.chat','{"text":"x"}')]
 def perception_snapshot(plugins=(('screen_observe','running'),),result=None,approved=True):
     """Installed, approved C4 plugins in the given states; each exposes its allowlisted capabilities only."""
     digest='a'*64;entries=[];records=[];items=[]
@@ -1789,18 +1797,25 @@ def perception_call(bridge,peer,capability,result,plugins=(('screen_observe','ru
     bridge.refresh();answer(peer,next_request(peer),perception_snapshot(plugins,result=result));settle(bridge)
     return request
 class PerceptionContract(unittest.TestCase):
-    def test_allowlist_is_exactly_the_sixteen_documented_capabilities(self):
-        expected={'screen_observe.capture','screen_observe.status','computer_control.tree','computer_control.act','computer_control.status','audio_advanced.state','audio_advanced.act','mic_advanced.state','mic_advanced.configure','mic_advanced.monitor','mic_advanced.record','camera_gesture.state','camera_gesture.optin','camera_gesture.capture','camera_gesture.gestures','display_manipulate.status'}
+    def test_allowlist_is_exactly_the_documented_capabilities(self):
+        # WP-17: 16 C4 capabilities plus display_manipulate.act/restore and shortcut_global.status/bind/events.
+        expected={'screen_observe.capture','screen_observe.status','computer_control.tree','computer_control.act','computer_control.status','audio_advanced.state','audio_advanced.act','mic_advanced.state','mic_advanced.configure','mic_advanced.monitor','mic_advanced.record','camera_gesture.state','camera_gesture.optin','camera_gesture.capture','camera_gesture.gestures','display_manipulate.status','display_manipulate.act','display_manipulate.restore','shortcut_global.status','shortcut_global.bind','shortcut_global.events'}
         self.assertEqual(PERCEPTION_CAPABILITIES,expected);self.assertEqual(set(PERCEPTION_OUTPUTS),expected);self.assertEqual(set(PERC_OK),expected)
-        self.assertEqual(PERCEPTION_PLUGINS,('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate'))
+        self.assertEqual(PERCEPTION_PLUGINS,('screen_observe','computer_control','audio_advanced','mic_advanced','camera_gesture','display_manipulate','shortcut_global'))
         self.assertEqual({c.split('.')[0] for c in expected},set(PERCEPTION_PLUGINS))
         self.assertEqual((PERCEPTION_INPUT_LIMIT,PERCEPTION_DEADLINE_MS),(8192,5000))
+        # Per-capability deadlines: the portal consent of computer_control.act may wait 60 s; the rest keep 5 s.
+        self.assertEqual(perception_deadline('computer_control.act'),60000)
+        self.assertEqual(perception_deadline('screen_observe.capture'),30000)
+        self.assertEqual(perception_deadline('audio_advanced.act'),5000)
     def test_input_rules_are_strict_and_bounded(self):
         for capability,text in PERC_INPUT_OK:
             with self.subTest(ok=capability,text=text[:40]):self.assertIsNone(perception_input_problem(capability,text))
         for capability,text in PERC_INPUT_BAD:
             with self.subTest(bad=capability,text=text[:40]):self.assertIsNotNone(perception_input_problem(capability,text))
-        self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"denoise","a":"'+'x'*8100+'"}'),None)
+        # Size passes the 8 KiB rule, but the extra key is still refused by the exact-key rule.
+        self.assertIsNotNone(perception_input_problem('audio_advanced.act','{"kind":"app_volume","stream":112,"volume":40,"a":"'+'x'*8100+'"}'))
+        self.assertIsNone(perception_input_problem('audio_advanced.act','{"kind":"app_volume","stream":112,"volume":40}'))
         self.assertEqual(perception_input_problem('audio_advanced.act','{"kind":"denoise","a":"'+'x'*8200+'"}'),'Entrada acima de 8 KiB')
         self.assertEqual(perception_input_problem('os.exec','{}'),'Capability de percepção desconhecida')
         self.assertEqual(perception_input_problem('screen_observe.capture','{"x":1}'),'Esta capability não aceita entrada')
@@ -1815,24 +1830,27 @@ class PerceptionContract(unittest.TestCase):
                 if 'backend' in sample:self.assertFalse(PERCEPTION_OUTPUTS[capability]({**sample,'backend':'real'}),'real backend claimed')
                 self.assertFalse(PERCEPTION_OUTPUTS[capability](None))
         status=PERC_OK['screen_observe.status']
-        self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.status']({**status,'reason':'ok'}))
-        self.assertFalse(PERCEPTION_OUTPUTS['computer_control.status']({**status,'real_backend':'portal'}))
+        self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.status']({**status,'available':'yes'}),'available must be a bool')
+        self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.status']({**status,'backend':'synthetic'}),'synthetic backend refused')
+        self.assertFalse(PERCEPTION_OUTPUTS['computer_control.status']({**status,'backend':'portal'}),'AT-SPI status needs its own backend')
         display=PERC_OK['display_manipulate.status']
-        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'supported':True}))
-        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'state':'OK'}))
-        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'note':'manipulação de saída'}))
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'outputs':[{'name':'DP-1','enabled':True,'scale':100,'brightness':101}]}),'brightness above 100')
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.status']({**display,'supported':False}),'old UNSUPPORTED shape refused')
+        self.assertFalse(PERCEPTION_OUTPUTS['display_manipulate.act']({**PERC_OK['display_manipulate.act'],'op':'rotate'}))
         self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.capture']({**PERC_OK['screen_observe.capture'],'regions':[{'role':'button','name':'OK','x':-1,'y':0}]}))
         self.assertFalse(PERCEPTION_OUTPUTS['screen_observe.capture']({**PERC_OK['screen_observe.capture'],'sha256':'C'*64}))
-        self.assertFalse(PERCEPTION_OUTPUTS['audio_advanced.state']({**PERC_OK['audio_advanced.state'],'apps':[{'id':'p','volume':101}]}))
+        self.assertFalse(PERCEPTION_OUTPUTS['audio_advanced.state']({**PERC_OK['audio_advanced.state'],'streams':[{'id':112,'app':'p','volume':151}]}))
         self.assertFalse(PERCEPTION_OUTPUTS['mic_advanced.state']({**PERC_OK['mic_advanced.state'],'gain':-1}))
         self.assertFalse(PERCEPTION_OUTPUTS['camera_gesture.gestures']({**PERC_OK['camera_gesture.gestures'],'gestures':['x']*17}))
-        self.assertFalse(PERCEPTION_OUTPUTS['mic_advanced.monitor']({**PERC_OK['mic_advanced.monitor'],'indicator':False}),'indicator must follow monitor')
-        self.assertFalse(PERCEPTION_OUTPUTS['camera_gesture.optin']({**PERC_OK['camera_gesture.optin'],'indicator':False}),'indicator must equal opt-in')
+        self.assertFalse(PERCEPTION_OUTPUTS['mic_advanced.state']({**PERC_OK['mic_advanced.state'],'indicator':'on'}),'indicator must follow recording')
+        self.assertFalse(PERCEPTION_OUTPUTS['camera_gesture.optin']({**PERC_OK['camera_gesture.optin'],'indicator':'off'}),'indicator must equal opt-in')
+        self.assertFalse(PERCEPTION_OUTPUTS['shortcut_global.events']({'backend':'portal','events':[{'id':'x'*40,'at_ms':1}]}),'event id too long')
+        self.assertFalse(PERCEPTION_OUTPUTS['mic_advanced.record'](None))
     def test_perception_text_is_plain_bounded_and_portuguese(self):
         text=perception_text(PERC_OK['screen_observe.capture'])
-        self.assertTrue(text.startswith('backend: sintético'));self.assertNotIn('\x00',text)
+        self.assertTrue(text.startswith('backend: portal XDG'));self.assertNotIn('\x00',text)
         self.assertLessEqual(len(perception_text({'backend':'synthetic','elements':[{'id':'x'*60,'role':'r','name':'n'*200,'x':1,'y':1}]*64})),2048)
-        self.assertEqual(perception_text(PERC_OK['display_manipulate.status']).splitlines()[0],'suportado: não')
+        self.assertEqual(perception_text(PERC_OK['display_manipulate.status']).splitlines()[0],'backend: KScreen (Plasma)')
     def test_perception_codes_are_allowed_and_have_portuguese_messages(self):
         for code in ('opt_in_required','stale_screen','unsupported','unknown_service','permission_denied'):
             with self.subTest(code=code):
@@ -1852,19 +1870,19 @@ class PerceptionBridge(unittest.TestCase):
         bridge._apply(validate_snapshot(perception_snapshot((('screen_observe','running'),),approved=False),'r',0));self.assertFalse(bridge.perceptionPlugins[0]['approved'])
     def test_invoke_is_refused_before_the_core_for_every_bad_request(self):
         bridge,peer=connect_bridge(self,perception_snapshot())
-        cases=[('os.exec','{}','Capability de percepção desconhecida'),('screen_observe.capture','{"x":1}','Esta capability não aceita entrada'),('screen_observe.capture','{',"Entrada não é JSON válido"),('computer_control.act','{"kind":"click","epoch":1}',CODE_MESSAGES['capability_unavailable'])]
+        cases=[('os.exec','{}','Capability de percepção desconhecida'),('screen_observe.capture','{"x":1}','Esta capability não aceita entrada'),('screen_observe.capture','{',"Entrada não é JSON válido"),('computer_control.act','{"kind":"type","text":"gid","epoch":1}',CODE_MESSAGES['capability_unavailable'])]
         for capability,text,message in cases:
             with self.subTest(capability=capability,text=text):
                 bridge.perceptionInvoke(capability,text);wait_idle();self.assertFalse(peer.canReadLine());self.assertEqual(bridge.perceptionResult,message);self.assertFalse(bridge.perceptionBusy)
     def test_invoke_sends_the_exact_request_and_shows_the_checked_result(self):
         bridge,peer=connect_bridge(self,perception_snapshot());changes=Counter();bridge.perceptionChanged.connect(lambda:changes.update(['p']))
         bridge.perceptionInvoke('screen_observe.capture','{}');request=next_request(peer)
-        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'capability_invoke','capability':'screen_observe.capture','input':{},'deadline_ms':PERCEPTION_DEADLINE_MS})
+        self.assertEqual(request,{'version':1,'request_id':request['request_id'],'op':'capability_invoke','capability':'screen_observe.capture','input':{},'deadline_ms':30000})
         self.assertTrue(bridge.perceptionBusy)
         answer(peer,request,perception_snapshot());settle(bridge)
         self.assertEqual((bridge.perceptionResult,bridge.perceptionBusy),('Invocando capability…',True))
         bridge.refresh();answer(peer,next_request(peer),perception_snapshot(result=perception_answer('screen_observe.capture',PERC_OK['screen_observe.capture'])));settle(bridge)
-        self.assertEqual((bridge.perceptionBusy,bridge.perceptionResult.splitlines()[0]),(False,'backend: sintético'))
+        self.assertEqual((bridge.perceptionBusy,bridge.perceptionResult.splitlines()[0]),(False,'backend: portal XDG'))
         self.assertGreaterEqual(changes['p'],3)
     def test_second_invoke_is_refused_while_one_is_in_flight(self):
         bridge,peer=connect_bridge(self,perception_snapshot())
@@ -1892,9 +1910,11 @@ class PerceptionBridge(unittest.TestCase):
         self.assertEqual((bridge.perceptionMicIndicator,bridge.perceptionCameraIndicator),('não lido','não lido'))
         perception_call(bridge,peer,'mic_advanced.record',perception_answer('mic_advanced.record',{**PERC_OK['mic_advanced.record']}),plugins=both,text='{"action":"start"}')
         self.assertEqual(bridge.perceptionMicIndicator,'ligado')
-        perception_call(bridge,peer,'camera_gesture.optin',perception_answer('camera_gesture.optin',{**PERC_OK['camera_gesture.optin'],'opt_in':False,'indicator':False}),plugins=both,text='{"enabled":false}')
+        perception_call(bridge,peer,'camera_gesture.optin',perception_answer('camera_gesture.optin',{**PERC_OK['camera_gesture.optin'],'opt_in':False,'indicator':'off'}),plugins=both,text='{"enabled":false}')
         self.assertEqual(bridge.perceptionCameraIndicator,'desligado')
-        perception_call(bridge,peer,'mic_advanced.monitor',perception_answer('mic_advanced.monitor',{**PERC_OK['mic_advanced.monitor'],'monitor':False,'indicator':False}),plugins=both,text='{"enabled":false}')
+        # The worker refuses monitoring (no indicator). The microphone indicator follows the recording stop.
+        stop={'backend':'pipewire','recording':False,'indicator':'off','seconds':2,'peak':40,'rms':11,'samples':32000}
+        perception_call(bridge,peer,'mic_advanced.record',perception_answer('mic_advanced.record',stop),plugins=both,text='{"action":"stop"}')
         self.assertEqual(bridge.perceptionMicIndicator,'desligado')
         bridge._apply(validate_snapshot(perception_snapshot((('mic_advanced','disabled'),)),'r',0))
         self.assertEqual(bridge.perceptionMicIndicator,'plugin inativo')
@@ -1935,8 +1955,9 @@ def qml_perception_child():
             check('nav9 offered while a C4 plugin runs',offered(window,'percepcao'))
             window.setProperty('pageId','percepcao');QTest.qWait(50)
             check('perception panel visible on its page',find('perceptionPanel').property('visible'))
-            check('synthetic label on screen_observe card',find('perceptionBadge_screen_observe').property('text')=='SINTÉTICO — sem hardware real')
-            check('display card shows UNSUPPORTED badge',find('perceptionBadge_display_manipulate').property('text')=='UNSUPPORTED')
+            check('screen_observe card names its real backend',find('perceptionBackend_screen_observe').property('text')=='Backend: portal XDG (captura de tela)')
+            check('display card names KScreen and shows the restore button',find('perceptionBackend_display_manipulate').property('text')=='Backend: KScreen (kscreen-doctor)' and find('displayRestoreButton') is not None)
+            check('no synthetic label is left on the page',not find('perceptionBackend_screen_observe').property('text').count('SINTÉTICO'))
             check('mic indicator visible before any read',find('micIndicator').property('text')=='Microfone · indicador: não lido')
             check('capture button enabled for a running plugin',find('perception_screen_observe.capture').property('enabled'))
             check('display status button stays disabled while its plugin is not running',find('perception_display_manipulate.status').property('enabled') is False)
@@ -2202,8 +2223,8 @@ def qml_skills_child():
     print(f'qml skills checks ok: {len(checks)}',flush=True)
     return 0
 # S5 connections (docs/S5.md E1, UI). Catalog and accounts are shaped as the Core snapshot block: providers carry scopes and operations; accounts carry granted and pending scopes only.
-CONN_GITHUB={'id':'github','scopes':[{'id':'repo:read','label':'Ler repositórios','access':'read'},{'id':'issues:write','label':'Criar issues','access':'write'}],'operations':[{'name':'repos.list','scope':'repo:read','risk':'read'},{'name':'issues.create','scope':'issues:write','risk':'write'}]}
-CONN_HA={'id':'homeassistant','scopes':[{'id':'states:read','label':'Ler estados','access':'read'},{'id':'service:call','label':'Chamar serviços','access':'destructive'}],'operations':[{'name':'states.list','scope':'states:read','risk':'read'},{'name':'service.call','scope':'service:call','risk':'destructive'}]}
+CONN_GITHUB={'id':'github','scopes':[{'id':'repo:read','label':'Ler repositórios','access':'read'},{'id':'issues:write','label':'Criar issues','access':'write'}],'operations':[{'name':'repos.list','scope':'repo:read','risk':'read','needs_args':False},{'name':'issues.create','scope':'issues:write','risk':'write','needs_args':True}]}
+CONN_HA={'id':'homeassistant','scopes':[{'id':'states:read','label':'Ler estados','access':'read'},{'id':'service:call','label':'Chamar serviços','access':'destructive'}],'operations':[{'name':'states.list','scope':'states:read','risk':'read','needs_args':False},{'name':'service.call','scope':'service:call','risk':'destructive','needs_args':True}]}
 def conn_item(ident='gh_1',provider='github',label='Trabalho',status='connected',granted=('repo:read',),pending=('issues:write',),**extra):
     return {'id':ident,'provider':provider,'label':label,'status':status,'granted_scopes':list(granted),'pending_scopes':list(pending),**extra}
 def conns_block(items=None,providers=None,revision=4,last_call=None):
@@ -2225,7 +2246,7 @@ class ConnectionsContract(unittest.TestCase):
     def test_google_catalog_and_public_destructive_proposals_validate(self):
         # S5 E2.2: the fixed google catalog (seven scopes, seven operations, every access class) and its proposals.
         scopes=[{'id':'gmail.read','label':'Ler','access':'read'},{'id':'gmail.send','label':'Enviar','access':'public'},{'id':'gmail.delete','label':'Apagar','access':'destructive'},{'id':'calendar.read','label':'Ler agenda','access':'read'},{'id':'calendar.write','label':'Criar evento','access':'write'},{'id':'drive.read','label':'Listar','access':'read'},{'id':'drive.write','label':'Criar arquivo','access':'write'}]
-        ops=[{'name':'gmail.messages.list','scope':'gmail.read','risk':'read'},{'name':'gmail.send','scope':'gmail.send','risk':'public'},{'name':'gmail.messages.delete','scope':'gmail.delete','risk':'destructive'},{'name':'calendar.events.list','scope':'calendar.read','risk':'read'},{'name':'calendar.events.create','scope':'calendar.write','risk':'write'},{'name':'drive.files.list','scope':'drive.read','risk':'read'},{'name':'drive.files.create','scope':'drive.write','risk':'write'}]
+        ops=[{'name':'gmail.messages.list','scope':'gmail.read','risk':'read','needs_args':False},{'name':'gmail.send','scope':'gmail.send','risk':'public','needs_args':True},{'name':'gmail.messages.delete','scope':'gmail.delete','risk':'destructive','needs_args':True},{'name':'calendar.events.list','scope':'calendar.read','risk':'read','needs_args':False},{'name':'calendar.events.create','scope':'calendar.write','risk':'write','needs_args':True},{'name':'drive.files.list','scope':'drive.read','risk':'read','needs_args':False},{'name':'drive.files.create','scope':'drive.write','risk':'write','needs_args':True}]
         google={'id':'google','scopes':scopes,'operations':ops}
         item=conn_item('g_1','google','Pessoal',granted=('gmail.read','gmail.send','gmail.delete'),pending=(),fake=True)
         proposals=[conn_proposal('p_send','g_1','gmail.send','public'),conn_proposal('p_del','g_1','gmail.messages.delete','destructive')]
@@ -2272,6 +2293,7 @@ class ConnectionsContract(unittest.TestCase):
             'operation risk unknown':conns_block(providers=[{**CONN_GITHUB,'operations':[{'name':'repos.list','scope':'repo:read','risk':'admin'}]}]),
             'operation name repeated':conns_block(providers=[{**CONN_GITHUB,'operations':[CONN_GITHUB['operations'][0],CONN_GITHUB['operations'][0]]}]),
             'operation extra key':conns_block(providers=[{**CONN_GITHUB,'operations':[{**CONN_GITHUB['operations'][0],'method':'GET'}]}]),
+            'operation needs_args not a bool':conns_block(providers=[{**CONN_GITHUB,'operations':[{**CONN_GITHUB['operations'][0],'needs_args':'no'}]}]),
             'too many operations':conns_block(providers=[{**CONN_GITHUB,'operations':[{'name':f'op.n{i}','scope':'repo:read','risk':'read'} for i in range(17)]}]),
             'last_call outcome not snake':conns_block(last_call={'operation':'repos.list','outcome':'Fail'}),
             'last_call code not snake':conns_block(last_call={'operation':'repos.list','outcome':'denied','code':'Scope Not'}),
@@ -2373,7 +2395,7 @@ class ConnectionsBridge(unittest.TestCase):
         self.assertEqual(bridge.connectionLastCall,last);self.assertEqual(bridge.connectionsRevision,'5')
         self.assertEqual([i['id'] for i in bridge.connectionsItems],['gh_1','ha_1','gh_2']);self.assertEqual([p['id'] for p in bridge.connectionsProviders],['github','homeassistant'])
         self.assertFalse(any(k in str(bridge.connectionsItems) for k in ('token','secret','refresh')))
-CONN_MCP={'id':'mcp','scopes':[{'id':'mcp.discover','label':'Listar ferramentas','access':'read'},{'id':'mcp.call','label':'Chamar ferramentas','access':'write'},{'id':'mcp.call_destructive','label':'Apagar','access':'destructive'}],'operations':[{'name':'mcp.discover','scope':'mcp.discover','risk':'read'},{'name':'mcp.call','scope':'mcp.call','risk':'write'}]}
+CONN_MCP={'id':'mcp','scopes':[{'id':'mcp.discover','label':'Listar ferramentas','access':'read'},{'id':'mcp.call','label':'Chamar ferramentas','access':'write'},{'id':'mcp.call_destructive','label':'Apagar','access':'destructive'}],'operations':[{'name':'mcp.discover','scope':'mcp.discover','risk':'read','needs_args':False},{'name':'mcp.call','scope':'mcp.call','risk':'write','needs_args':True}]}
 def mcp_tool(name='echo_note',risk='write',state='trusted',description='Return the given note text.',**extra):
     return {'name':name,'risk':risk,'state':state,'description':description,**extra}
 def mcp_item(tools,ident='mcp_1',**extra):

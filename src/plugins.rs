@@ -584,7 +584,11 @@ impl PluginView {
         }
         let object_ok = input.is_object();
         let size_ok = serde_json::to_vec(&input).is_ok_and(|b| b.len() <= MAX_INPUT);
-        if !object_ok || !size_ok || !depth_ok(&input, 0) || !(1..=30000).contains(&deadline_ms) {
+        if !object_ok
+            || !size_ok
+            || !depth_ok(&input, 0)
+            || !(1..=capability_deadline_max(capability)).contains(&deadline_ms)
+        {
             return Err("invalid_input");
         }
         if self.active.is_some() {
@@ -1514,6 +1518,215 @@ pub(crate) fn sandbox_command(
     sandbox_command_with(python, payload, processes, &[])
 }
 
+/// Longest deadline (ms) a capability may ask for. The portal consent of `computer_control.act` can take a
+/// minute (docs/WP12p.md 6.1); every other capability keeps the 30 s C0 ceiling.
+pub(crate) fn capability_deadline_max(capability: &str) -> u64 {
+    match capability {
+        "computer_control.act" => 60_000,
+        _ => 30_000,
+    }
+}
+
+/// Host interpreter of the perception worker (WP-17). It needs PyGObject (AT-SPI, portals) that the packaged
+/// runtime does not have, so only the perception plugins use it; `/usr` is bound read-only in the sandbox.
+pub(crate) const PERCEPTION_PYTHON: &str = "/usr/bin/python3";
+
+/// The plugins whose payload is `scripts/perception_worker.py` (WP-12p; catalog `hub-perception.json`).
+pub(crate) const PERCEPTION_PLUGINS: [&str; 7] = [
+    "screen_observe",
+    "computer_control",
+    "audio_advanced",
+    "mic_advanced",
+    "camera_gesture",
+    "display_manipulate",
+    "shortcut_global",
+];
+
+/// One extra bind mount of a sandbox profile: `device` uses bwrap `--dev-bind`, `writable` uses `--bind`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Mount {
+    pub src: PathBuf,
+    pub dst: PathBuf,
+    pub writable: bool,
+    pub device: bool,
+}
+
+/// Fixed mounts and environment of one plugin's sandbox (least privilege per plugin, chosen by the Core).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Profile {
+    pub mounts: Vec<Mount>,
+    pub env: Vec<(String, String)>,
+    /// Address-space cap for this profile's processes; `None` keeps `MAX_ADDRESS_SPACE`.
+    pub address_space: Option<u64>,
+}
+
+/// Address space for the camera profile (WP-18a). The worker runs ffmpeg for one frame, and ffmpeg cannot open its
+/// encoder under the 512 MiB base cap (measured: rc 245 at 512 MiB, one frame at 1 GiB). Only the camera gets it.
+pub(crate) const CAMERA_ADDRESS_SPACE: u64 = 1024 * 1024 * 1024;
+
+/// The session paths the perception profiles are cut from (WP-18a). `bus` is the session D-Bus socket
+/// (`DBUS_SESSION_BUS_ADDRESS`, else `$XDG_RUNTIME_DIR/bus`); `wayland` is the `WAYLAND_DISPLAY` socket name that
+/// KScreen needs to reach KWin; `sysfs` holds the resolved sysfs directories of `devices` (their `index` file is
+/// what tells the capture node from the metadata node, and the symlink target is outside the sandbox otherwise).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionEnv {
+    pub runtime: PathBuf,
+    pub home: PathBuf,
+    pub bus: PathBuf,
+    pub wayland: Option<String>,
+    pub devices: Vec<PathBuf>,
+    pub sysfs: Vec<PathBuf>,
+}
+
+/// Session D-Bus socket of the user session. Only a plain `unix:path=` address counts; anything else falls back to
+/// the runtime directory's `bus`, the path every systemd user session uses.
+pub(crate) fn session_bus_path(address: Option<&str>, runtime: &Path) -> PathBuf {
+    address
+        .and_then(|value| value.strip_prefix("unix:path="))
+        .and_then(|path| path.split(',').next())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && !path.components().any(|c| c.as_os_str() == ".."))
+        .unwrap_or_else(|| runtime.join("bus"))
+}
+
+/// A `WAYLAND_DISPLAY` value that names a socket inside the runtime directory (no path, no traversal).
+pub(crate) fn wayland_socket_name(value: Option<&str>) -> Option<String> {
+    let name = value?;
+    let plain = !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
+    plain.then(|| name.to_owned())
+}
+
+/// The sysfs directory behind each `/dev/videoN` node (the resolved `/sys/class/video4linux` link). Devices without
+/// one are skipped; a path outside `/sys` is never returned.
+pub(crate) fn video_sysfs_dirs(devices: &[PathBuf]) -> Vec<PathBuf> {
+    devices
+        .iter()
+        .filter_map(|device| device.file_name())
+        .filter_map(|name| fs::canonicalize(Path::new("/sys/class/video4linux").join(name)).ok())
+        .filter(|real| real.starts_with("/sys/"))
+        .collect()
+}
+
+/// Mounts and environment for the perception plugins (WP-12p 6.1), computed from the session paths. Only a path that
+/// exists is mounted; a missing one makes the worker answer `backend_unavailable`. Other plugins get `None`.
+pub(crate) fn perception_profile_in(plugin_id: &str, session: &SessionEnv) -> Option<Profile> {
+    let runtime = session.runtime.as_path();
+    let bus = session.bus.clone();
+    let pipewire = runtime.join("pipewire-0");
+    let at_spi = runtime.join("at-spi");
+    let pictures = session.home.join("Imagens");
+    let mut mounts = Vec::new();
+    let mut address_space = None;
+    let mut add = |src: PathBuf, writable: bool, device: bool| {
+        if src.exists() {
+            mounts.push(Mount {
+                dst: src.clone(),
+                src,
+                writable,
+                device,
+            });
+        }
+    };
+    // Each plugin gets only the sockets its backend talks to: bus (portals, KDE), AT-SPI, PipeWire, Pictures, video.
+    match plugin_id {
+        "screen_observe" => {
+            add(bus.clone(), true, false);
+            add(pictures, true, false);
+        }
+        "computer_control" => {
+            add(bus.clone(), true, false);
+            add(at_spi, true, false);
+        }
+        "audio_advanced" | "mic_advanced" => add(pipewire, true, false),
+        "display_manipulate" => {
+            add(bus.clone(), true, false);
+            // KScreen talks to KWin through the Wayland socket; without it kscreen-doctor aborts (WP-18a).
+            if let Some(name) = &session.wayland {
+                add(runtime.join(name), true, false);
+            }
+        }
+        "shortcut_global" => add(bus.clone(), true, false),
+        "camera_gesture" => {
+            for device in &session.devices {
+                add(device.clone(), true, true);
+            }
+            add(PathBuf::from("/sys/class/video4linux"), false, false);
+            for dir in &session.sysfs {
+                add(dir.clone(), false, false);
+            }
+            address_space = Some(CAMERA_ADDRESS_SPACE);
+        }
+        _ => return None,
+    }
+    let mut env = vec![
+        (
+            "XDG_RUNTIME_DIR".to_owned(),
+            runtime.to_string_lossy().into_owned(),
+        ),
+        (
+            "DBUS_SESSION_BUS_ADDRESS".to_owned(),
+            format!("unix:path={}", bus.display()),
+        ),
+        ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+        (
+            "HOME".to_owned(),
+            session.home.to_string_lossy().into_owned(),
+        ),
+    ];
+    if plugin_id == "display_manipulate" {
+        if let Some(name) = &session.wayland {
+            env.push(("WAYLAND_DISPLAY".to_owned(), name.clone()));
+        }
+    }
+    Some(Profile {
+        mounts,
+        env,
+        address_space,
+    })
+}
+
+/// The live session of this Core: runtime directory, D-Bus socket, Wayland socket name, the video devices present now
+/// and their sysfs directories. Nothing here is taken from a plugin, a skill or the UI.
+pub(crate) fn perception_session() -> Option<SessionEnv> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })));
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let bus = session_bus_path(
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").ok().as_deref(),
+        &runtime,
+    );
+    let wayland = wayland_socket_name(std::env::var("WAYLAND_DISPLAY").ok().as_deref());
+    let devices: Vec<PathBuf> = fs::read_dir("/dev")
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.to_string_lossy().starts_with("/dev/video"))
+                .collect()
+        })
+        .unwrap_or_default();
+    let sysfs = video_sysfs_dirs(&devices);
+    Some(SessionEnv {
+        runtime,
+        home,
+        bus,
+        wayland,
+        devices,
+        sysfs,
+    })
+}
+
+/// The live profile of one plugin (see `perception_session`).
+pub(crate) fn perception_profile(plugin_id: &str) -> Option<Profile> {
+    perception_profile_in(plugin_id, &perception_session()?)
+}
+
 /// Same sandbox with fixed extra arguments after the script (S5 MCP: `--profile <name>`). The
 /// arguments come from Core constants, never from the UI, a skill or the service.
 pub(crate) fn sandbox_command_with(
@@ -1521,6 +1734,17 @@ pub(crate) fn sandbox_command_with(
     payload: &Path,
     processes: u64,
     extra: &[&str],
+) -> io::Result<Command> {
+    sandbox_command_profiled(python, payload, processes, extra, &Profile::default())
+}
+
+/// The sandbox with a plugin profile (WP-17): extra mounts and environment, applied after the fixed base.
+pub(crate) fn sandbox_command_profiled(
+    python: &Path,
+    payload: &Path,
+    processes: u64,
+    extra: &[&str],
+    profile: &Profile,
 ) -> io::Result<Command> {
     if !python.is_absolute() || !payload.is_absolute() {
         return Err(io::Error::other("absolute paths required"));
@@ -1532,8 +1756,9 @@ pub(crate) fn sandbox_command_with(
         .ok_or_else(|| io::Error::other("python runtime missing"))?;
     let canonical = fs::canonicalize(runtime)?;
     let sized = bwrap_supports_size();
+    let address_space = profile.address_space.unwrap_or(MAX_ADDRESS_SPACE);
     let mut limits = vec![
-        format!("--as={MAX_ADDRESS_SPACE}"),
+        format!("--as={address_space}"),
         format!("--cpu={MAX_CPU_SECONDS}"),
         format!("--nofile={MAX_OPEN_FILES}"),
         format!("--nproc={processes}"),
@@ -1576,8 +1801,20 @@ pub(crate) fn sandbox_command_with(
         .arg(runtime)
         .arg("--ro-bind")
         .arg(payload)
-        .arg("/plugin/main.py")
-        // bwrap's root is a writable tmpfs; make it read-only after all mount points exist.
+        .arg("/plugin/main.py");
+    for mount in &profile.mounts {
+        let flag = match (mount.device, mount.writable) {
+            (true, _) => "--dev-bind",
+            (false, true) => "--bind",
+            (false, false) => "--ro-bind",
+        };
+        command.arg(flag).arg(&mount.src).arg(&mount.dst);
+    }
+    for (name, value) in &profile.env {
+        command.args(["--setenv", name.as_str(), value.as_str()]);
+    }
+    // bwrap's root is a writable tmpfs; make it read-only after all mount points exist.
+    command
         .args(["--remount-ro", "/", "--chdir", "/tmp", "--"])
         .arg(&interpreter)
         .args(["-I", "/plugin/main.py"])
@@ -1596,8 +1833,16 @@ async fn spawn_sandboxed(ctx: &Ctx, payload: &Path) -> Result<Child, &'static st
         let budget = tokio::task::spawn_blocking(process_budget)
             .await
             .map_err(|_| "plugin_start_failed")?;
-        let mut command =
-            sandbox_command(&ctx.python, payload, budget).map_err(|_| "plugin_not_runnable")?;
+        // WP-17: perception plugins run the worker with the host interpreter and their own mounts/environment.
+        let perception = PERCEPTION_PLUGINS.contains(&ctx.plugin_id.as_str());
+        let mut command = if perception {
+            let python = Path::new(PERCEPTION_PYTHON);
+            let profile = perception_profile(&ctx.plugin_id).ok_or("plugin_not_runnable")?;
+            sandbox_command_profiled(python, payload, budget, &[], &profile)
+        } else {
+            sandbox_command(&ctx.python, payload, budget)
+        }
+        .map_err(|_| "plugin_not_runnable")?;
         match command.spawn() {
             Ok(child) => return Ok(child),
             Err(error) if attempt == 0 && error.raw_os_error() == Some(libc::EAGAIN) => continue,
@@ -1923,6 +2168,9 @@ impl Session {
     }
     async fn shutdown(mut self) {
         self.stop_host();
+        if self.plugin_id == "display_manipulate" {
+            self.restore_display().await;
+        }
         let id = self.next_id;
         let _ = self
             .write(&serde_json::json!({"v": 1, "id": id, "op": "shutdown"}))
@@ -1939,6 +2187,37 @@ impl Session {
         self.stop_host();
         let _ = self.child.kill().await;
         self.reader.abort();
+    }
+    /// WP-18a (docs/WP12p.md 6.1): before a display plugin stops, the Core asks the worker to undo its scale and
+    /// brightness changes and waits for that answer (3 s at most). The worker also restores at its own shutdown, but
+    /// a SIGKILL skips that, so the Core does not rely on it. A worker that is already gone has nothing to restore.
+    async fn restore_display(&mut self) {
+        let id = self.next_id;
+        self.next_id += 1;
+        let message = serde_json::json!({
+            "v": 1,
+            "id": id,
+            "op": "invoke",
+            "capability": "display_manipulate.restore",
+            "input": {},
+            "deadline_ms": 3000,
+        });
+        if self.write(&message).await.is_err() {
+            return;
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(line) = self.lines.recv().await {
+                if let Line::Frame(bytes) = line {
+                    let answered = serde_json::from_slice::<Value>(&bytes)
+                        .ok()
+                        .and_then(|value| value.get("id").and_then(Value::as_u64));
+                    if answered == Some(id) {
+                        return;
+                    }
+                }
+            }
+        })
+        .await;
     }
     fn stop_host(&mut self) {
         if let Some(call) = self.host.take() {
@@ -2257,7 +2536,9 @@ fn bounded_object(output: Value) -> Option<Value> {
     fits.then_some(output)
 }
 /// Plugin error codes that reach clients unchanged (C1, C4 host codes of docs/C4.md). Any other plugin code reads `plugin_error`.
-const PASS_THROUGH_ERRORS: [&str; 31] = [
+const PASS_THROUGH_ERRORS: [&str; 32] = [
+    // WP-17: a perception backend missing on this session (portal, AT-SPI, PipeWire, camera, kscreen).
+    "backend_unavailable",
     "key_missing",
     "cloud_not_authorized",
     "provider_not_configured",
@@ -2351,5 +2632,144 @@ async fn sleep_until(instant: Option<Instant>) {
     match instant {
         Some(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
         None => std::future::pending().await,
+    }
+}
+
+#[cfg(test)]
+mod perception_profile_tests {
+    use super::*;
+
+    #[test]
+    fn each_perception_plugin_gets_only_its_own_sockets() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = dir.path().join("run");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(runtime.join("at-spi")).unwrap();
+        std::fs::create_dir_all(home.join("Imagens")).unwrap();
+        std::fs::write(runtime.join("bus"), b"").unwrap();
+        std::fs::write(runtime.join("pipewire-0"), b"").unwrap();
+        std::fs::write(runtime.join("wayland-1"), b"").unwrap();
+        // A real file stands in for /dev/videoN: the profile mounts only paths that exist.
+        let video = dir.path().join("video0");
+        std::fs::write(&video, b"").unwrap();
+        let session = SessionEnv {
+            runtime: runtime.clone(),
+            home: home.clone(),
+            bus: runtime.join("bus"),
+            wayland: Some("wayland-1".to_owned()),
+            devices: vec![video.clone()],
+            sysfs: Vec::new(),
+        };
+        let dsts = |id: &str| -> Vec<PathBuf> {
+            perception_profile_in(id, &session)
+                .unwrap()
+                .mounts
+                .into_iter()
+                .map(|m| m.dst)
+                .collect()
+        };
+        assert_eq!(dsts("audio_advanced"), vec![runtime.join("pipewire-0")]);
+        assert!(!dsts("audio_advanced").contains(&runtime.join("bus")));
+        assert!(dsts("computer_control").contains(&runtime.join("at-spi")));
+        assert!(!dsts("computer_control").contains(&home.join("Imagens")));
+        assert!(dsts("screen_observe").contains(&home.join("Imagens")));
+        assert!(!dsts("screen_observe").contains(&runtime.join("pipewire-0")));
+        assert!(dsts("shortcut_global").contains(&runtime.join("bus")));
+        assert!(!dsts("shortcut_global").contains(&home.join("Imagens")));
+        // The display plugin gets the bus and the Wayland socket (KScreen), nothing else.
+        assert!(dsts("display_manipulate").contains(&runtime.join("wayland-1")));
+        assert!(!dsts("display_manipulate").contains(&runtime.join("pipewire-0")));
+        let display = perception_profile_in("display_manipulate", &session).unwrap();
+        assert!(display
+            .env
+            .contains(&("WAYLAND_DISPLAY".to_owned(), "wayland-1".to_owned())));
+        assert!(!perception_profile_in("shortcut_global", &session)
+            .unwrap()
+            .env
+            .iter()
+            .any(|(k, _)| k == "WAYLAND_DISPLAY"));
+        // The camera plugin reaches the video devices only (no bus, no pictures).
+        let camera = perception_profile_in("camera_gesture", &session).unwrap();
+        assert!(camera.mounts.iter().any(|m| m.device && m.src == video));
+        assert!(!camera.mounts.iter().any(|m| m.src == runtime.join("bus")));
+        // Non-perception plugins get no profile; a missing socket is not mounted at all.
+        assert!(perception_profile_in("llm_engine", &session).is_none());
+        let camera_limit = perception_profile_in("camera_gesture", &session).unwrap();
+        assert_eq!(camera_limit.address_space, Some(CAMERA_ADDRESS_SPACE));
+        assert_eq!(
+            perception_profile_in("screen_observe", &session)
+                .unwrap()
+                .address_space,
+            None
+        );
+        let bare = perception_profile_in(
+            "computer_control",
+            &SessionEnv {
+                runtime: dir.path().join("empty"),
+                home: home.clone(),
+                bus: dir.path().join("empty/bus"),
+                ..SessionEnv::default()
+            },
+        )
+        .unwrap();
+        assert!(bare.mounts.iter().all(|m| m.src.exists()));
+        assert!(bare.env.iter().any(|(k, _)| k == "XDG_RUNTIME_DIR"));
+    }
+
+    #[test]
+    fn session_bus_comes_from_the_session_address_then_the_runtime_dir() {
+        let runtime = Path::new("/run/user/1000");
+        assert_eq!(
+            session_bus_path(Some("unix:path=/run/user/1000/bus"), runtime),
+            PathBuf::from("/run/user/1000/bus")
+        );
+        // Extra address options after the path are ignored; the path must be absolute and not traverse.
+        assert_eq!(
+            session_bus_path(Some("unix:path=/run/user/1/bus,guid=abc"), runtime),
+            PathBuf::from("/run/user/1/bus")
+        );
+        assert_eq!(
+            session_bus_path(Some("unix:path=../evil"), runtime),
+            runtime.join("bus")
+        );
+        assert_eq!(
+            session_bus_path(Some("unix:abstract=/tmp/x"), runtime),
+            runtime.join("bus")
+        );
+        assert_eq!(session_bus_path(None, runtime), runtime.join("bus"));
+    }
+
+    #[test]
+    fn wayland_name_must_be_a_plain_socket_name() {
+        assert_eq!(
+            wayland_socket_name(Some("wayland-1")),
+            Some("wayland-1".to_owned())
+        );
+        let long = "w".repeat(65);
+        for bad in ["", "../x", "/run/x", ".hidden", "a b", long.as_str()] {
+            assert_eq!(wayland_socket_name(Some(bad)), None, "{bad}");
+        }
+        assert_eq!(wayland_socket_name(None), None);
+    }
+
+    #[test]
+    fn video_nodes_map_to_their_sysfs_directories_only() {
+        // Missing devices and names without a sysfs entry map to nothing (never a path outside /sys).
+        let none = video_sysfs_dirs(&[PathBuf::from("/dev/video-no-such-node")]);
+        assert!(none.is_empty());
+        assert!(video_sysfs_dirs(&[]).is_empty());
+    }
+
+    #[test]
+    fn computer_control_act_may_wait_for_portal_consent() {
+        assert_eq!(capability_deadline_max("computer_control.act"), 60_000);
+        assert_eq!(capability_deadline_max("screen_observe.capture"), 30_000);
+        assert_eq!(capability_deadline_max("audio_advanced.act"), 30_000);
+    }
+
+    #[test]
+    fn backend_unavailable_passes_to_the_client_unchanged() {
+        assert_eq!(pass_through("backend_unavailable"), "backend_unavailable");
+        assert_eq!(pass_through("worker_secret_detail"), "plugin_error");
     }
 }

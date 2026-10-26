@@ -463,7 +463,8 @@ elif args.phase=='connections':
     check('every fake-served account is covered by the page notice; its card badge shows only where accounts differ',bool(fake_accounts) and all(visual_item('connFake_'+c['id']).property('visible')==mixed and visual_item('connFake_'+c['id']).property('text')=='SERVIDOR FALSO' for c in fake_accounts))
     Path(args.artifacts,'connections-ready').touch()
     providers={p['id']:p for p in bridge.connectionsProviders}
-    readable=next(((c,o) for c in bridge.connectionsItems if c['status']=='connected' for o in providers[c['provider']]['operations'] if o['risk']=='read' and o['scope'] in c['granted_scopes']),None)
+    # The one-click read test sends no arguments, so only operations that need none are offered it (needs_args false).
+    readable=next(((c,o) for c in bridge.connectionsItems if c['status']=='connected' for o in providers[c['provider']]['operations'] if o['risk']=='read' and o['scope'] in c['granted_scopes'] and o['needs_args'] is False),None)
     check('a connected account has a granted read operation for the test',readable is not None)
     account,operation=readable
     test_button=visual_item('connTest_'+account['id']+'_'+operation['name']);test_button.forceActiveFocus();QTest.keyClick(window,Qt.Key.Key_Space)
@@ -505,7 +506,8 @@ elif args.phase=='connections':
         wait(lambda:title.property('visible') is True,5)
         check('the tools section is visible and PlainText',title.property('visible') and plain_of(title))
         row=visual_item('connTool_'+mcp['id']+'_'+tool['name'])
-        check('the tool row names the tool, its risk and the re-approval state as PlainText',plain_of(row) and tool['name'] in row.property('text') and 'precisa de nova aprovação' in row.property('text') and 'escrita' in row.property('text'))
+        risk_label='destrutiva' if tool['risk']=='destructive' else 'escrita'
+        check('the tool row names the tool, its risk and the re-approval state as PlainText',plain_of(row) and tool['name'] in row.property('text') and 'precisa de nova aprovação' in row.property('text') and risk_label in row.property('text'))
         trusted=[t for t in mcp['tools'] if t['state']=='trusted']
         check('a trusted tool is listed as confiável and offers no Confiar',bool(trusted) and 'confiável' in visual_item('connTool_'+mcp['id']+'_'+trusted[0]['name']).property('text') and not visual_item('connTrust_'+mcp['id']+'_'+trusted[0]['name']).property('visible'))
         destructive=[t for t in mcp['tools'] if t['risk']=='destructive']
