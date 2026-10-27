@@ -41,7 +41,7 @@ Rectangle {
         IconButton {
             iconName: "close"
             size: 14
-            ToolTip.text: "Fechar aviso"
+            ToolTip.text: qsTr("Fechar aviso")
             onClicked: toast.dismissed()
         }
     }

@@ -18,7 +18,9 @@ PageFrame {
     onVisibleChanged: if (visible) { readAutostart(); refreshProfiles() }
 
     // The name of the settings profile in use; the danger zone asks for it.
-    readonly property string profileName: AppState.uiLive() ? String(ui.activeProfile) : "Padrão"
+    readonly property string profileName: AppState.uiLive() ? String(ui.activeProfile) : qsTr("Padrão")
+    // WP-20: the interface language in its own name (endonym), as the Idiomas page shows it.
+    readonly property string uiLanguageName: core.uiLanguage === "en" ? "English" : (core.uiLanguage === "fr" ? "Français" : "Português (Brasil)")
     readonly property bool safeMode: core.configurationStatus === "safe_mode"
     // CFG-02: the speech languages the Core has installed (state bundled) and selectable, one entry per language with its first voice.
     readonly property var speechOptions: {
@@ -36,7 +38,7 @@ PageFrame {
     }
 
     // Iniciar no login: what the file says now (read on page load and after each change).
-    property var autostart: ({supported: false, reason: "configurações do app indisponíveis", enabled: false, exists: false, managed: false, path: ""})
+    property var autostart: ({supported: false, reason: qsTr("configurações do app indisponíveis"), enabled: false, exists: false, managed: false, path: ""})
     property bool autostartWanted: false
     // Perfis de configurações: the list as the app reports it now.
     property var profileList: []
@@ -55,7 +57,7 @@ PageFrame {
     function applyAutostart() {
         if (!AppState.uiLive()) return
         var result = ui.setAutostart(autostartWanted)
-        AppState.toast(result.ok ? (autostartWanted ? "O Gideon abre no login." : "O Gideon não abre mais no login.") : result.error)
+        AppState.toast(result.ok ? (autostartWanted ? qsTr("O Gideon abre no login.") : qsTr("O Gideon não abre mais no login.")) : result.error)
         readAutostart()
     }
 
@@ -75,20 +77,20 @@ PageFrame {
         else if (profileMode === "duplicate") result = ui.duplicateProfile(profileSource, name)
         else result = ui.renameProfile(profileSource, name)
         if (!result.ok) { profileNameError.text = result.error; return }
-        AppState.toast(profileMode === "create" ? "Perfil criado." : profileMode === "duplicate" ? "Perfil duplicado." : "Perfil renomeado.")
+        AppState.toast(profileMode === "create" ? qsTr("Perfil criado.") : profileMode === "duplicate" ? qsTr("Perfil duplicado.") : qsTr("Perfil renomeado."))
         refreshProfiles()
         profileNameDialog.close()
     }
     function switchProfile(name) {
         if (!AppState.uiLive()) return
         var result = ui.switchProfile(name)
-        AppState.toast(result.ok ? "Perfil " + name + " em uso." : result.error)
+        AppState.toast(result.ok ? qsTr("Perfil %1 em uso.").arg(name) : result.error)
         refreshProfiles()
     }
     function deleteProfile() {
         if (!AppState.uiLive()) return
         var result = ui.deleteProfile(pendingProfile)
-        AppState.toast(result.ok ? "Perfil excluído." : result.error)
+        AppState.toast(result.ok ? qsTr("Perfil excluído.") : result.error)
         refreshProfiles()
         profileDeleteConfirm.close()
     }
@@ -102,19 +104,19 @@ PageFrame {
     function restoreApp() {
         if (!AppState.uiLive()) return
         var result = ui.resetAll()
-        AppState.toast(result.ok ? "Padrões do app restaurados." : result.error)
+        AppState.toast(result.ok ? qsTr("Padrões do app restaurados.") : result.error)
         profileConfirm.text = ""
     }
 
     PageHeader {
-        title: "Geral"
-        subtitle: "Idioma, inicialização, perfis, atalhos e restauração da configuração."
+        title: qsTr("Geral")
+        subtitle: qsTr("Idioma, inicialização, perfis, atalhos e restauração da configuração.")
     }
     ECfgSearch {}
     ECfgNotice {}
 
     Section {
-        title: "Opções"
+        title: qsTr("Opções")
         SettingRow {
             settingKey: "behavior.advanced"
             EToggleSetting { settingKey: "behavior.advanced" }
@@ -126,7 +128,7 @@ PageFrame {
                 objectName: "devModeToggle"
                 readonly property bool stored: AppState.uiGet("behavior.devMode", false) === true
                 checked: stored
-                Accessible.name: "Modo desenvolvedor"
+                Accessible.name: qsTr("Modo desenvolvedor")
                 onToggled: {
                     if (devToggle.checked) devModeConfirm.open()
                     else AppState.setSetting("behavior.devMode", false)
@@ -153,7 +155,7 @@ PageFrame {
     }
 
     Section {
-        title: "Avisos e movimento"
+        title: qsTr("Avisos e movimento")
         SettingRow {
             settingKey: "behavior.toastSeconds"
             ESliderSetting { settingKey: "behavior.toastSeconds"; from: 2; to: 10; stepSize: 1; unit: " s" }
@@ -169,7 +171,7 @@ PageFrame {
     }
 
     Section {
-        title: "Desempenho"
+        title: qsTr("Desempenho")
         SettingRow {
             settingKey: "perf.lowPower"
             EToggleSetting { settingKey: "perf.lowPower" }
@@ -177,17 +179,17 @@ PageFrame {
     }
 
     Section {
-        title: "Idioma e inicialização"
+        title: qsTr("Idioma e inicialização")
+        // WP-20: the interface language is chosen on the Idiomas page (shown here, not changed here). The language the assistant
+        // speaks is a real Core choice (preferences via language_preference); only installed languages are offered.
         EValueRow {
-            label: "Idioma da interface"
-            value: "Português (fixo)"
+            label: qsTr("Idioma da interface")
+            value: page.uiLanguageName
         }
-        // CFG-02: the interface stays in Portuguese (its translation is not built yet). The language the assistant speaks is a
-        // real Core choice (preferences via language_preference); only installed languages are offered.
         SettingRow {
-            label: "Idioma da fala"
-            help: "Em que idioma o Gideon fala. A tradução da interface ainda não existe: ela continua em português. Vale no próximo início do Core."
-            disabledReason: page.speechOptions.length > 0 ? "" : "nenhum outro idioma de fala instalado"
+            label: qsTr("Idioma da fala")
+            help: qsTr("Em que idioma o Gideon fala. Vale no próximo início do Core.")
+            disabledReason: page.speechOptions.length > 0 ? "" : qsTr("nenhum outro idioma de fala instalado")
             Select {
                 id: speechBox
                 objectName: "speechLanguageSelect"
@@ -196,7 +198,7 @@ PageFrame {
                 model: page.speechOptions
                 enabled: page.speechOptions.length > 0 && core.preferencesAvailable
                 currentIndex: page.speechIndex
-                Accessible.name: "Idioma da fala: " + displayText
+                Accessible.name: qsTr("Idioma da fala: %1").arg(displayText)
                 onActivated: function (index) {
                     var item = page.speechOptions[index]
                     core.setLanguages(JSON.stringify(core.languageSttSelected), item.value, item.voice)
@@ -205,16 +207,16 @@ PageFrame {
             }
         }
         SettingRow {
-            label: "Iniciar no login"
+            label: qsTr("Iniciar no login")
             help: page.autostart.exists && !page.autostart.managed
-                ? "Já existe um atalho de inicialização que o Gideon não criou; ele não será alterado."
-                : "Abre o Gideon ao entrar no computador. Cria um atalho do usuário no sistema."
+                ? qsTr("Já existe um atalho de inicialização que o Gideon não criou; ele não será alterado.")
+                : qsTr("Abre o Gideon ao entrar no computador. Cria um atalho do usuário no sistema.")
             disabledReason: page.autostart.supported ? "" : page.autostart.reason
             Toggle {
                 id: autostartToggle
                 objectName: "autostartToggle"
                 checked: page.autostart.enabled === true
-                Accessible.name: "Iniciar no login"
+                Accessible.name: qsTr("Iniciar no login")
                 onToggled: {
                     var want = autostartToggle.checked
                     autostartToggle.checked = Qt.binding(function () { return page.autostart.enabled === true })
@@ -224,7 +226,7 @@ PageFrame {
         }
         Text {
             visible: page.autostart.supported && page.autostart.path.length > 0
-            text: "Arquivo: " + page.autostart.path + (page.autostart.enabled ? " (ativo)" : " (inativo)")
+            text: page.autostart.enabled ? qsTr("Arquivo: %1 (ativo)").arg(page.autostart.path) : qsTr("Arquivo: %1 (inativo)").arg(page.autostart.path)
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -235,16 +237,16 @@ PageFrame {
     }
 
     Section {
-        title: "Introdução"
+        title: qsTr("Introdução")
         SettingRow {
-            label: "Refazer introdução"
-            help: "Revê os quatro passos: privacidade, frase de despertar, dispositivos e volume, e atalhos."
+            label: qsTr("Refazer introdução")
+            help: qsTr("Revê os quatro passos: privacidade, frase de despertar, dispositivos e volume, e atalhos.")
             disabledReason: AppState.introBlockReason()
             GButton {
                 objectName: "redoOnboardingButton"
                 variant: "secondary"
-                text: "Refazer introdução"
-                Accessible.name: "Refazer a introdução"
+                text: qsTr("Refazer introdução")
+                Accessible.name: qsTr("Refazer a introdução")
                 enabled: AppState.introBlockReason().length === 0
                 onClicked: AppState.openOnboarding()
             }
@@ -253,17 +255,17 @@ PageFrame {
 
     // WP-17 / item 2: push-to-talk through the global shortcut. Turning it on asks for consent; the state is always shown.
     Section {
-        title: "Pressionar para falar"
-        caption: "Um atalho do sistema inicia a escuta, como o Ctrl+M. O microfone só abre se a escuta ao vivo estiver liberada em Privacidade."
+        title: qsTr("Pressionar para falar")
+        caption: qsTr("Um atalho do sistema inicia a escuta, como o Ctrl+M. O microfone só abre se a escuta ao vivo estiver liberada em Privacidade.")
         Text {
             objectName: "pttState"
             Layout.fillWidth: true
             text: AppState.uiGet("shortcut.pushToTalk", false) === true
-                ? "Ligado: atalho " + core.pushToTalkTrigger + " · estado: " + ({
-                    "binding": "registrando", "bound": "pronto", "offline": "Core offline",
-                    "plugin_unavailable": "plugin sem execução", "error": "erro"
-                }[core.pushToTalkState] || core.pushToTalkState)
-                : "Desligado. Nenhum atalho global é registrado."
+                ? qsTr("Ligado: atalho %1 · estado: %2").arg(core.pushToTalkTrigger).arg(({
+                    "binding": qsTr("registrando"), "bound": qsTr("pronto"), "offline": qsTr("Core offline"),
+                    "plugin_unavailable": qsTr("plugin sem execução"), "error": qsTr("erro")
+                }[core.pushToTalkState] || core.pushToTalkState))
+                : qsTr("Desligado. Nenhum atalho global é registrado.")
             textFormat: Text.PlainText
             color: core.pushToTalkState === "error" ? Theme.error : Theme.textMuted
             font.family: Theme.fontFamily
@@ -284,7 +286,7 @@ PageFrame {
         GButton {
             objectName: "pttSwitchButton"
             variant: AppState.uiGet("shortcut.pushToTalk", false) === true ? "secondary" : "primary"
-            text: AppState.uiGet("shortcut.pushToTalk", false) === true ? "Desligar atalho" : "Ligar atalho (pede consentimento)"
+            text: AppState.uiGet("shortcut.pushToTalk", false) === true ? qsTr("Desligar atalho") : qsTr("Ligar atalho (pede consentimento)")
             Accessible.name: text
             onClicked: {
                 if (AppState.uiGet("shortcut.pushToTalk", false) === true) {
@@ -298,11 +300,10 @@ PageFrame {
         PConfirm {
             id: pttConsent
             objectName: "pttConsent"
-            title: "Ligar pressionar para falar?"
-            message: "O atalho global "
-                + AppState.uiGet("shortcut.pushToTalkTrigger", "CTRL+ALT+G")
-                + " passa a iniciar a escuta do Gideon, mesmo com outro app em foco. Precisa do plugin shortcut_global aprovado no Gideon Hub. Nenhum áudio é guardado por este atalho."
-            actionText: "Ligar atalho"
+            title: qsTr("Ligar pressionar para falar?")
+            message: qsTr("O atalho global %1 passa a iniciar a escuta do Gideon, mesmo com outro app em foco. Precisa do plugin shortcut_global aprovado no Gideon Hub. Nenhum áudio é guardado por este atalho.")
+                .arg(AppState.uiGet("shortcut.pushToTalkTrigger", "CTRL+ALT+G"))
+            actionText: qsTr("Ligar atalho")
             onConfirmed: {
                 AppState.uiSet("shortcut.pushToTalk", true)
                 core.setPushToTalk(true, AppState.uiGet("shortcut.pushToTalkTrigger", "CTRL+ALT+G"))
@@ -311,11 +312,11 @@ PageFrame {
     }
 
     Section {
-        title: "Atalhos de teclado"
+        title: qsTr("Atalhos de teclado")
         Text {
             text: AppState.uiGet("behavior.shortcuts", true) === true
-                ? "Ligados. Para desligá-los, use o interruptor 'Atalhos de teclado' nesta página."
-                : "Desligados neste app: nenhum atalho desta lista responde até você ligá-los de novo."
+                ? qsTr("Ligados. Para desligá-los, use o interruptor 'Atalhos de teclado' nesta página.")
+                : qsTr("Desligados neste app: nenhum atalho desta lista responde até você ligá-los de novo.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -325,11 +326,11 @@ PageFrame {
         }
         Repeater {
             model: [
-                {keys: "Ctrl+K", text: "Paleta: vá a páginas, configurações e comandos."},
-                {keys: "Ctrl+1 … Ctrl+5", text: "Troca de aba de nível 1."},
-                {keys: "Ctrl+Tab", text: "Próxima sub-aba. Ctrl+Shift+Tab, a anterior."},
-                {keys: "Ctrl+M", text: "Encerra a escuta quando há uma; sem escuta, avisa que o microfone não está disponível."},
-                {keys: "Esc", text: "Cancela a escuta, ou fecha a caixa aberta (nunca as duas coisas)."}
+                {keys: "Ctrl+K", text: qsTr("Paleta: vá a páginas, configurações e comandos.")},
+                {keys: "Ctrl+1 … Ctrl+5", text: qsTr("Troca de aba de nível 1.")},
+                {keys: "Ctrl+Tab", text: qsTr("Próxima sub-aba. Ctrl+Shift+Tab, a anterior.")},
+                {keys: "Ctrl+M", text: qsTr("Encerra a escuta quando há uma; sem escuta, avisa que o microfone não está disponível.")},
+                {keys: "Esc", text: qsTr("Cancela a escuta, ou fecha a caixa aberta (nunca as duas coisas).")}
             ]
             delegate: Rectangle {
                 required property var modelData
@@ -361,9 +362,9 @@ PageFrame {
     }
 
     Section {
-        title: "Perfis de configurações"
+        title: qsTr("Perfis de configurações")
         Text {
-            text: "Cada perfil guarda o seu conjunto de opções do app. Trocar aplica o perfil na hora. Até 20 perfis."
+            text: qsTr("Cada perfil guarda o seu conjunto de opções do app. Trocar aplica o perfil na hora. Até 20 perfis.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -377,37 +378,37 @@ PageFrame {
                 required property var modelData
                 objectName: "profileRow_" + modelData.name
                 title: modelData.name
-                detail: modelData.active ? "Em uso" : (modelData.default ? "Perfil inicial" : "Pronto para usar")
+                detail: modelData.active ? qsTr("Em uso") : (modelData.default ? qsTr("Perfil inicial") : qsTr("Pronto para usar"))
                 selected: modelData.active === true
                 GButton {
                     objectName: "profileUse_" + modelData.name
                     variant: "ghost"
-                    text: "Usar"
+                    text: qsTr("Usar")
                     enabled: !modelData.active
-                    Accessible.name: "Usar o perfil " + modelData.name
+                    Accessible.name: qsTr("Usar o perfil %1").arg(modelData.name)
                     onClicked: page.switchProfile(modelData.name)
                 }
                 GButton {
                     objectName: "profileDuplicate_" + modelData.name
                     variant: "ghost"
-                    text: "Duplicar"
-                    Accessible.name: "Duplicar o perfil " + modelData.name
+                    text: qsTr("Duplicar")
+                    Accessible.name: qsTr("Duplicar o perfil %1").arg(modelData.name)
                     onClicked: page.openProfileName("duplicate", modelData.name)
                 }
                 GButton {
                     objectName: "profileRename_" + modelData.name
                     variant: "ghost"
-                    text: "Renomear"
+                    text: qsTr("Renomear")
                     enabled: !modelData.default
-                    Accessible.name: "Renomear o perfil " + modelData.name
+                    Accessible.name: qsTr("Renomear o perfil %1").arg(modelData.name)
                     onClicked: page.openProfileName("rename", modelData.name)
                 }
                 GButton {
                     objectName: "profileDelete_" + modelData.name
                     variant: "danger"
-                    text: "Excluir"
+                    text: qsTr("Excluir")
                     enabled: !modelData.default && !modelData.active
-                    Accessible.name: "Excluir o perfil " + modelData.name
+                    Accessible.name: qsTr("Excluir o perfil %1").arg(modelData.name)
                     onClicked: { page.pendingProfile = modelData.name; profileDeleteConfirm.open() }
                 }
             }
@@ -415,32 +416,32 @@ PageFrame {
         GButton {
             objectName: "newProfileButton"
             variant: "secondary"
-            text: "Novo perfil…"
+            text: qsTr("Novo perfil…")
             enabled: AppState.uiLive()
             onClicked: page.openProfileName("create", "")
         }
     }
 
     Section {
-        title: "Arquivo de configurações"
+        title: qsTr("Arquivo de configurações")
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.space(10)
             GButton {
                 objectName: "openExportSettingsButton"
                 variant: "secondary"
-                text: "Exportar configurações…"
+                text: qsTr("Exportar configurações…")
                 onClicked: settingsExport.open()
             }
             GButton {
                 objectName: "openImportSettingsButton"
                 variant: "secondary"
-                text: "Importar configurações…"
+                text: qsTr("Importar configurações…")
                 onClicked: settingsImport.open()
             }
         }
         Text {
-            text: "Arquivo JSON sem segredos, do perfil em uso. Importar valida cada opção antes de aplicar; as que não passam são listadas."
+            text: qsTr("Arquivo JSON sem segredos, do perfil em uso. Importar valida cada opção antes de aplicar; as que não passam são listadas.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -451,10 +452,10 @@ PageFrame {
     }
 
     Section {
-        title: "Configuração do Core"
+        title: qsTr("Configuração do Core")
         visible: page.safeMode
         Text {
-            text: "Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões. A recuperação fica em Diagnóstico › Recuperação."
+            text: qsTr("Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões. A recuperação fica em Diagnóstico › Recuperação.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -465,29 +466,29 @@ PageFrame {
         GButton {
             objectName: "openRecoveryButton"
             variant: "secondary"
-            text: "Abrir Diagnóstico › Recuperação"
+            text: qsTr("Abrir Diagnóstico › Recuperação")
             onClicked: Window.window.goPage("diag_recuperacao")
         }
     }
 
     Section {
-        title: "Revisão e anterior"
+        title: qsTr("Revisão e anterior")
         SettingRow {
             advanced: true
-            label: "Restaurar anterior"
-            help: "Desfaz a última alteração de preferências do Core (uma etapa). Se a frase mudar, reinicie o Core."
-            disabledReason: core.rollbackAvailable ? "" : "não há configuração anterior"
+            label: qsTr("Restaurar anterior")
+            help: qsTr("Desfaz a última alteração de preferências do Core (uma etapa). Se a frase mudar, reinicie o Core.")
+            disabledReason: core.rollbackAvailable ? "" : qsTr("não há configuração anterior")
             GButton {
                 objectName: "rollbackPreferencesButton"
                 variant: "secondary"
-                text: "Restaurar anterior"
-                Accessible.name: "Restaurar a configuração anterior do Core"
+                text: qsTr("Restaurar anterior")
+                Accessible.name: qsTr("Restaurar a configuração anterior do Core")
                 enabled: core.rollbackAvailable
                 onClicked: core.rollbackPreferences()
             }
         }
         EValueRow {
-            label: "Revisão da configuração"
+            label: qsTr("Revisão da configuração")
             value: core.preferencesRevision
             advanced: true
         }
@@ -495,9 +496,9 @@ PageFrame {
 
     // B16: the Core's preferences back to their defaults. Separate from the app-settings reset below (that one is only app values).
     Section {
-        title: "Padrões do Core"
+        title: qsTr("Padrões do Core")
         Text {
-            text: "Volta as preferências do Core ao padrão: frase de despertar, volume da resposta, prazo, sensibilidade e dispositivos. Antes, config.json é copiado para config.json.bak."
+            text: qsTr("Volta as preferências do Core ao padrão: frase de despertar, volume da resposta, prazo, sensibilidade e dispositivos. Antes, config.json é copiado para config.json.bak.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -508,18 +509,18 @@ PageFrame {
         GButton {
             objectName: "restoreCoreDefaultsButton"
             variant: "danger"
-            text: "Restaurar padrões do Core…"
-            Accessible.name: "Restaurar os padrões do Core"
+            text: qsTr("Restaurar padrões do Core…")
+            Accessible.name: qsTr("Restaurar os padrões do Core")
             enabled: core.preferencesAvailable
             onClicked: coreDefaultsConfirm.open()
         }
         Text {
             objectName: "restoreCoreDefaultsReason"
             visible: !core.preferencesAvailable
-            text: !core.connected ? "Indisponível: Core desconectado."
-                : core.configurationStatus === "safe_mode" ? "Indisponível: o Core está em modo seguro."
-                : core.sessionId.length > 0 ? "Indisponível: sessão de voz em andamento."
-                : "Indisponível agora: o Core está ocupado com outra alteração."
+            text: !core.connected ? qsTr("Indisponível: Core desconectado.")
+                : core.configurationStatus === "safe_mode" ? qsTr("Indisponível: o Core está em modo seguro.")
+                : core.sessionId.length > 0 ? qsTr("Indisponível: sessão de voz em andamento.")
+                : qsTr("Indisponível agora: o Core está ocupado com outra alteração.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -541,7 +542,7 @@ PageFrame {
     }
 
     Section {
-        title: "Zona de perigo"
+        title: qsTr("Zona de perigo")
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: dangerBody.implicitHeight + Theme.space(32)
@@ -556,7 +557,7 @@ PageFrame {
                 anchors.margins: Theme.space(16)
                 spacing: Theme.space(10)
                 Text {
-                    text: "Restaurar padrões do app"
+                    text: qsTr("Restaurar padrões do app")
                     textFormat: Text.PlainText
                     color: Theme.error
                     font.family: Theme.fontFamily
@@ -565,7 +566,7 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "Tema, cores, densidade, fonte, atalhos e avisos do perfil " + page.profileName + " voltam ao padrão. A frase de despertar, o volume e o prazo do Core não mudam. Pede o nome do perfil."
+                    text: qsTr("Tema, cores, densidade, fonte, atalhos e avisos do perfil %1 voltam ao padrão. A frase de despertar, o volume e o prazo do Core não mudam. Pede o nome do perfil.").arg(page.profileName)
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -576,8 +577,8 @@ PageFrame {
                 GButton {
                     objectName: "restoreAppSettings"
                     variant: "danger"
-                    text: "Restaurar padrões…"
-                    Accessible.name: "Restaurar padrões do app"
+                    text: qsTr("Restaurar padrões…")
+                    Accessible.name: qsTr("Restaurar padrões do app")
                     enabled: AppState.uiLive()
                     onClicked: restoreConfirm.open()
                 }
@@ -588,10 +589,10 @@ PageFrame {
     EAdvancedNote { subtab: "Geral" }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões."
+        title: qsTr("Como funciona")
+        summary: qsTr("Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões.")
         Text {
-            text: "Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões. Restaurar os padrões do app não apaga o arquivo anterior. Cada perfil tem o seu arquivo; excluir um perfil apaga só o dele."
+            text: qsTr("Em modo seguro, o arquivo inválido é preservado antes de ser substituído pelos padrões. Restaurar os padrões do app não apaga o arquivo anterior. Cada perfil tem o seu arquivo; excluir um perfil apaga só o dele.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -604,11 +605,11 @@ PageFrame {
     Modal {
         id: autostartConfirm
         objectName: "autostartConfirm"
-        title: page.autostartWanted ? "Iniciar o Gideon no login?" : "Parar de iniciar no login?"
+        title: page.autostartWanted ? qsTr("Iniciar o Gideon no login?") : qsTr("Parar de iniciar no login?")
         Text {
             text: page.autostartWanted
-                ? "Cria o arquivo " + page.autostart.path + " para abrir o Gideon ao entrar no computador. Nada mais muda."
-                : "Remove o arquivo " + page.autostart.path + ". O Gideon só abre quando você o iniciar."
+                ? qsTr("Cria o arquivo %1 para abrir o Gideon ao entrar no computador. Nada mais muda.").arg(page.autostart.path)
+                : qsTr("Remove o arquivo %1. O Gideon só abre quando você o iniciar.").arg(page.autostart.path)
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -619,7 +620,7 @@ PageFrame {
         GButton {
             objectName: "confirmAutostartButton"
             variant: "primary"
-            text: page.autostartWanted ? "Iniciar no login" : "Parar no login"
+            text: page.autostartWanted ? qsTr("Iniciar no login") : qsTr("Parar no login")
             Layout.alignment: Qt.AlignRight
             onClicked: {
                 page.applyAutostart()
@@ -631,20 +632,20 @@ PageFrame {
     Modal {
         id: profileNameDialog
         objectName: "profileNameDialog"
-        title: page.profileMode === "create" ? "Novo perfil"
-            : page.profileMode === "duplicate" ? "Duplicar o perfil " + page.profileSource
-            : "Renomear o perfil " + page.profileSource
-        FieldLabel { text: "Nome do perfil: letras sem acento, números, espaço, _ ou -; até 32 caracteres" }
+        title: page.profileMode === "create" ? qsTr("Novo perfil")
+            : page.profileMode === "duplicate" ? qsTr("Duplicar o perfil %1").arg(page.profileSource)
+            : qsTr("Renomear o perfil %1").arg(page.profileSource)
+        FieldLabel { text: qsTr("Nome do perfil: letras sem acento, números, espaço, _ ou -; até 32 caracteres") }
         TextField {
             id: profileNameField
             objectName: "profileNameField"
             Layout.fillWidth: true
-            placeholderText: "Nome do perfil"
+            placeholderText: qsTr("Nome do perfil")
             color: Theme.text
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             selectByMouse: true
-            Accessible.name: "Nome do perfil"
+            Accessible.name: qsTr("Nome do perfil")
             onAccepted: page.submitProfileName()
             background: Rectangle {
                 radius: Theme.radius
@@ -668,7 +669,7 @@ PageFrame {
         GButton {
             objectName: "confirmProfileNameButton"
             variant: "primary"
-            text: page.profileMode === "create" ? "Criar perfil" : page.profileMode === "duplicate" ? "Duplicar" : "Renomear"
+            text: page.profileMode === "create" ? qsTr("Criar perfil") : page.profileMode === "duplicate" ? qsTr("Duplicar") : qsTr("Renomear")
             Layout.alignment: Qt.AlignRight
             enabled: profileNameField.text.trim().length > 0
             onClicked: page.submitProfileName()
@@ -678,9 +679,9 @@ PageFrame {
     Modal {
         id: profileDeleteConfirm
         objectName: "profileDeleteConfirm"
-        title: "Excluir o perfil " + page.pendingProfile + "?"
+        title: qsTr("Excluir o perfil %1?").arg(page.pendingProfile)
         Text {
-            text: "Os ajustes deste perfil são apagados do disco. Os outros perfis não mudam. Não é possível desfazer."
+            text: qsTr("Os ajustes deste perfil são apagados do disco. Os outros perfis não mudam. Não é possível desfazer.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -691,7 +692,7 @@ PageFrame {
         GButton {
             objectName: "confirmDeleteProfileButton"
             variant: "danger"
-            text: "Excluir perfil"
+            text: qsTr("Excluir perfil")
             Layout.alignment: Qt.AlignRight
             onClicked: page.deleteProfile()
         }
@@ -700,9 +701,9 @@ PageFrame {
     Modal {
         id: restoreConfirm
         objectName: "restoreConfirm"
-        title: "Restaurar padrões do perfil " + page.profileName + "?"
+        title: qsTr("Restaurar padrões do perfil %1?").arg(page.profileName)
         Text {
-            text: "Estes valores voltam ao padrão do app. A frase de despertar, o volume e o prazo do Core não mudam."
+            text: qsTr("Estes valores voltam ao padrão do app. A frase de despertar, o volume e o prazo do Core não mudam.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -710,7 +711,7 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-        FieldLabel { text: "Digite o nome do perfil para confirmar" }
+        FieldLabel { text: qsTr("Digite o nome do perfil para confirmar") }
         TextField {
             id: profileConfirm
             objectName: "restoreProfileName"
@@ -720,7 +721,7 @@ PageFrame {
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
             selectByMouse: true
-            Accessible.name: "Nome do perfil para confirmar"
+            Accessible.name: qsTr("Nome do perfil para confirmar")
             background: Rectangle {
                 radius: Theme.radius
                 color: Theme.bg
@@ -729,7 +730,7 @@ PageFrame {
             }
         }
         Text {
-            text: "Digite " + page.profileName + " exatamente. O botão libera depois."
+            text: qsTr("Digite %1 exatamente. O botão libera depois.").arg(page.profileName)
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -740,7 +741,7 @@ PageFrame {
         GButton {
             objectName: "confirmRestoreAppSettings"
             variant: "danger"
-            text: "Restaurar padrões"
+            text: qsTr("Restaurar padrões")
             Layout.alignment: Qt.AlignRight
             enabled: profileConfirm.text === page.profileName
             onClicked: {
@@ -753,9 +754,9 @@ PageFrame {
     Modal {
         id: devModeConfirm
         objectName: "devModeConfirm"
-        title: "Ligar modo desenvolvedor?"
+        title: qsTr("Ligar modo desenvolvedor?")
         Text {
-            text: "Mostra ferramentas de desenvolvimento em Diagnóstico. Não muda a conexão com o Core nem os dados."
+            text: qsTr("Mostra ferramentas de desenvolvimento em Diagnóstico. Não muda a conexão com o Core nem os dados.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -766,7 +767,7 @@ PageFrame {
         GButton {
             objectName: "confirmDevModeButton"
             variant: "primary"
-            text: "Ligar modo desenvolvedor"
+            text: qsTr("Ligar modo desenvolvedor")
             Layout.alignment: Qt.AlignRight
             onClicked: {
                 AppState.setSetting("behavior.devMode", true)
@@ -778,9 +779,9 @@ PageFrame {
     Modal {
         id: coreDefaultsConfirm
         objectName: "coreDefaultsConfirm"
-        title: "Restaurar os padrões do Core?"
+        title: qsTr("Restaurar os padrões do Core?")
         Text {
-            text: "Antes de trocar, o config.json atual é copiado para config.json.bak. Depois, a frase de despertar, o volume, o prazo, a sensibilidade e os dispositivos voltam ao padrão."
+            text: qsTr("Antes de trocar, o config.json atual é copiado para config.json.bak. Depois, a frase de despertar, o volume, o prazo, a sensibilidade e os dispositivos voltam ao padrão.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -789,7 +790,7 @@ PageFrame {
             Layout.fillWidth: true
         }
         Text {
-            text: "Restaurar anterior desfaz esta troca, uma etapa. A frase de despertar só muda depois que o Core for reiniciado."
+            text: qsTr("Restaurar anterior desfaz esta troca, uma etapa. A frase de despertar só muda depois que o Core for reiniciado.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -800,7 +801,7 @@ PageFrame {
         GButton {
             objectName: "confirmCoreDefaultsButton"
             variant: "danger"
-            text: "Restaurar padrões do Core"
+            text: qsTr("Restaurar padrões do Core")
             Layout.alignment: Qt.AlignRight
             onClicked: {
                 core.restoreCoreDefaults()

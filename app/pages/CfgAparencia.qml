@@ -22,13 +22,13 @@ PageFrame {
     readonly property real textMin: Theme.highContrast ? 7 : 4.5
     readonly property var roleRows: CS.themeRoles.map(function (role) { return { role: role } })
     readonly property var pairRows: [
-        { label: "Texto sobre fundo", fg: "text", bg: "bg", min: textMin },
-        { label: "Texto sobre superfície", fg: "text", bg: "surface", min: textMin },
-        { label: "Texto secundário / superfície", fg: "textMuted", bg: "surface", min: textMin },
-        { label: "Texto sobre destaque", fg: "onAccent", bg: "accent", min: textMin },
-        { label: "Destaque sobre fundo", fg: "accent", bg: "bg", min: 3 },
-        { label: "Contorno sobre superfície", fg: "outline", bg: "surface", min: 3 },
-        { label: "Erro como texto", fg: "error", bg: "bg", min: textMin }
+        { label: qsTr("Texto sobre fundo"), fg: "text", bg: "bg", min: textMin },
+        { label: qsTr("Texto sobre superfície"), fg: "text", bg: "surface", min: textMin },
+        { label: qsTr("Texto secundário / superfície"), fg: "textMuted", bg: "surface", min: textMin },
+        { label: qsTr("Texto sobre destaque"), fg: "onAccent", bg: "accent", min: textMin },
+        { label: qsTr("Destaque sobre fundo"), fg: "accent", bg: "bg", min: 3 },
+        { label: qsTr("Contorno sobre superfície"), fg: "outline", bg: "surface", min: 3 },
+        { label: qsTr("Erro como texto"), fg: "error", bg: "bg", min: textMin }
     ]
 
     // Contrast ratio of a pair of roles, as the settings object measures it (ui.contrast).
@@ -48,8 +48,8 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Aparência"
-        subtitle: "Tema e cor de destaque, com prévia ao vivo."
+        title: qsTr("Aparência")
+        subtitle: qsTr("Tema e cor de destaque, com prévia ao vivo.")
     }
     ECfgSearch {}
     ECfgNotice {}
@@ -66,7 +66,7 @@ PageFrame {
             spacing: Theme.space(24)
 
             Section {
-                title: "Tema"
+                title: qsTr("Tema")
                 Flow {
                     Layout.fillWidth: true
                     spacing: Theme.space(10)
@@ -82,26 +82,26 @@ PageFrame {
                         }
                     }
                 }
-                FieldLabel { text: "Modo" }
+                FieldLabel { text: qsTr("Modo") }
                 ESegmentSetting {
                     objectName: "modeChoice"
                     settingKey: "theme.mode"
-                    options: [{ id: "system", text: "Sistema" }, { id: "dark", text: "Escuro" }, { id: "light", text: "Claro" }]
+                    options: [{ id: "system", text: qsTr("Sistema") }, { id: "dark", text: qsTr("Escuro") }, { id: "light", text: qsTr("Claro") }]
                 }
             }
 
             Section {
-                title: "Cor de destaque"
+                title: qsTr("Cor de destaque")
                 Flow {
                     Layout.fillWidth: true
                     spacing: Theme.space(6)
                     Repeater {
                         model: [
-                            { value: "", label: "Padrão do tema", name: "accentPadrao" },
-                            { value: "#7693ff", label: "Azul", name: "accentAzul" },
-                            { value: "#b386ff", label: "Violeta", name: "accentVioleta" },
-                            { value: "#66dcf4", label: "Ciano", name: "accentCiano" },
-                            { value: "#f28bd7", label: "Rosa", name: "accentRosa" }
+                            { value: "", label: qsTr("Padrão do tema"), name: "accentPadrao" },
+                            { value: "#7693ff", label: qsTr("Azul"), name: "accentAzul" },
+                            { value: "#b386ff", label: qsTr("Violeta"), name: "accentVioleta" },
+                            { value: "#66dcf4", label: qsTr("Ciano"), name: "accentCiano" },
+                            { value: "#f28bd7", label: qsTr("Rosa"), name: "accentRosa" }
                         ]
                         delegate: EAccentDot {
                             required property var modelData
@@ -116,13 +116,13 @@ PageFrame {
             }
 
             Section {
-                title: "Forma e texto"
+                title: qsTr("Forma e texto")
                 SettingRow {
                     settingKey: "theme.density"
                     ESegmentSetting {
                         objectName: "densityChoice"
                         settingKey: "theme.density"
-                        options: [{ id: "compact", text: "Compacta", value: 0.9 }, { id: "normal", text: "Normal", value: 1.0 }, { id: "spacious", text: "Espaçosa", value: 1.15 }]
+                        options: [{ id: "compact", text: qsTr("Compacta"), value: 0.9 }, { id: "normal", text: qsTr("Normal"), value: 1.0 }, { id: "spacious", text: qsTr("Espaçosa"), value: 1.15 }]
                     }
                 }
                 SettingRow {
@@ -141,13 +141,13 @@ PageFrame {
                     settingKey: "theme.contrast"
                     ESegmentSetting {
                         settingKey: "theme.contrast"
-                        options: [{ id: "normal", text: "Normal" }, { id: "high", text: "Alto contraste" }]
+                        options: [{ id: "normal", text: qsTr("Normal") }, { id: "high", text: qsTr("Alto contraste") }]
                     }
                 }
             }
 
             Section {
-                title: "Presença"
+                title: qsTr("Presença")
                 SettingRow {
                     settingKey: "theme.orb"
                     EToggleSetting { settingKey: "theme.orb" }
@@ -160,7 +160,7 @@ PageFrame {
                     settingKey: "theme.orbSize"
                     ESegmentSetting {
                         settingKey: "theme.orbSize"
-                        options: [{ id: "small", text: "Pequeno" }, { id: "medium", text: "Médio" }]
+                        options: [{ id: "small", text: qsTr("Pequeno") }, { id: "medium", text: qsTr("Médio") }]
                     }
                 }
             }
@@ -176,8 +176,8 @@ PageFrame {
 
     Collapsible {
         objectName: "customizeBlock"
-        title: "Personalizar"
-        summary: "Cores por papel, contraste dos pares, animação, sombra e arquivo do tema."
+        title: qsTr("Personalizar")
+        summary: qsTr("Cores por papel, contraste dos pares, animação, sombra e arquivo do tema.")
         ColumnLayout {
             Layout.fillWidth: true
             spacing: Theme.space(24)
@@ -188,9 +188,9 @@ PageFrame {
                 spacing: Theme.space(24)
 
                 Section {
-                    title: "Cores por papel"
+                    title: qsTr("Cores por papel")
                     Text {
-                        text: "Cada cor é conferida com o fundo onde aparece. Hex inválido é recusado; uma cor que precisa de correção mostra a correção antes de valer."
+                        text: qsTr("Cada cor é conferida com o fundo onde aparece. Hex inválido é recusado; uma cor que precisa de correção mostra a correção antes de valer.")
                         textFormat: Text.PlainText
                         color: Theme.textMuted
                         font.family: Theme.fontFamily
@@ -215,9 +215,9 @@ PageFrame {
                 }
 
                 Section {
-                    title: "Contraste dos pares"
+                    title: qsTr("Contraste dos pares")
                     Text {
-                        text: "Mínimo: texto " + CS.ratioText(page.textMin) + " · contornos e destaques 3:1."
+                        text: qsTr("Mínimo: texto %1 · contornos e destaques 3:1.").arg(CS.ratioText(page.textMin))
                         textFormat: Text.PlainText
                         color: Theme.textMuted
                         font.family: Theme.fontFamily
@@ -251,7 +251,7 @@ PageFrame {
                                 horizontalAlignment: Text.AlignRight
                             }
                             Badge {
-                                text: ratio >= modelData.min ? "OK" : "Abaixo"
+                                text: ratio >= modelData.min ? qsTr("OK") : qsTr("Abaixo")
                                 tone: ratio >= modelData.min ? "success" : "error"
                             }
                         }
@@ -259,17 +259,17 @@ PageFrame {
                 }
 
                 Section {
-                    title: "Animação, translucidez e sombra"
+                    title: qsTr("Animação, translucidez e sombra")
                     SettingRow {
                         settingKey: "theme.animation"
                         ESegmentSetting {
                             settingKey: "theme.animation"
-                            options: [{ id: "off", text: "Desligada" }, { id: "reduced", text: "Reduzida" }, { id: "normal", text: "Normal" }]
+                            options: [{ id: "off", text: qsTr("Desligada") }, { id: "reduced", text: qsTr("Reduzida") }, { id: "normal", text: qsTr("Normal") }]
                         }
                     }
                     SettingRow {
                         settingKey: "theme.translucency"
-                        ESliderSetting { settingKey: "theme.translucency"; from: 0; to: 24; stepSize: 1; unit: " px"; zeroText: "Desligada" }
+                        ESliderSetting { settingKey: "theme.translucency"; from: 0; to: 24; stepSize: 1; unit: " px"; zeroText: qsTr("Desligada") }
                     }
                     SettingRow {
                         settingKey: "theme.shadow"
@@ -287,32 +287,32 @@ PageFrame {
             }
 
             Section {
-                title: "Tema em arquivo"
+                title: qsTr("Tema em arquivo")
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Theme.space(10)
                     GButton {
                         objectName: "exportThemeButton"
                         variant: "secondary"
-                        text: "Exportar tema…"
+                        text: qsTr("Exportar tema…")
                         onClicked: themeExport.open()
                     }
                     GButton {
                         objectName: "importThemeButton"
                         variant: "secondary"
-                        text: "Importar tema…"
+                        text: qsTr("Importar tema…")
                         onClicked: themeImport.open()
                     }
                     GButton {
                         objectName: "resetThemeButton"
                         variant: "ghost"
-                        text: "Restaurar padrão do tema"
+                        text: qsTr("Restaurar padrão do tema")
                         enabled: page.themeChanged()
                         onClicked: page.resetTheme()
                     }
                 }
                 Text {
-                    text: "Arquivo JSON versionado, validado ao importar. Exporta e importa todas as opções do app."
+                    text: qsTr("Arquivo JSON versionado, validado ao importar. Exporta e importa todas as opções do app.")
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -327,10 +327,10 @@ PageFrame {
     EAdvancedNote { subtab: "Aparência" }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "Tema e cor são da janela. A esfera é a única escolha desta aba que o Core guarda hoje."
+        title: qsTr("Como funciona")
+        summary: qsTr("Tema e cor são da janela. A esfera é a única escolha desta aba que o Core guarda hoje.")
         Text {
-            text: "Tema, cor de destaque e forma são da janela e valem na hora. Contraste é checado nos pares de texto e de contorno: um valor que não atende é corrigido e a correção é mostrada antes de valer."
+            text: qsTr("Tema, cor de destaque e forma são da janela e valem na hora. Contraste é checado nos pares de texto e de contorno: um valor que não atende é corrigido e a correção é mostrada antes de valer.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

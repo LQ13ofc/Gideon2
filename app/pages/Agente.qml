@@ -23,8 +23,8 @@ PageFrame {
     readonly property string startReason: {
         if (core.sessionId.length > 0) return core.chatBlockedText
         if (page.goalProblem.length > 0) return page.goalProblem
-        if (core.agentActive) return "Já existe um agente em execução; aguarde ou aborte."
-        if (page.chatInFlight) return "Aguarde a conversa terminar."
+        if (core.agentActive) return qsTr("Já existe um agente em execução; aguarde ou aborte.")
+        if (page.chatInFlight) return qsTr("Aguarde a conversa terminar.")
         return ""
     }
 
@@ -47,8 +47,8 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Agente"
-        subtitle: "Descreva um objetivo; o Gideon propõe passos e pede sua aprovação."
+        title: qsTr("Agente")
+        subtitle: qsTr("Descreva um objetivo; o Gideon propõe passos e pede sua aprovação.")
     }
 
     // The run state in words. Without a run, the page says so and nothing else is shown.
@@ -56,7 +56,7 @@ PageFrame {
         Layout.fillWidth: true
         spacing: Theme.space(12)
         Text {
-            text: "Estado:"
+            text: qsTr("Estado:")
             visible: core.agentState.length > 0
             textFormat: Text.PlainText
             color: Theme.textMuted
@@ -74,12 +74,12 @@ PageFrame {
             font.weight: 600
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Accessible.name: "Estado do agente: " + text
+            Accessible.name: qsTr("Estado do agente: %1").arg(text)
         }
         Text {
             objectName: "agentIdle"
             visible: core.agentState.length === 0
-            text: "Nenhum agente ativo"
+            text: qsTr("Nenhum agente ativo")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -88,7 +88,7 @@ PageFrame {
         }
         Text {
             visible: page.agentPending > 0
-            text: page.agentPending === 1 ? "1 proposta pendente" : page.agentPending + " propostas pendentes"
+            text: page.agentPending === 1 ? qsTr("1 proposta pendente") : qsTr("%1 propostas pendentes").arg(page.agentPending)
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -98,14 +98,14 @@ PageFrame {
     }
 
     Section {
-        title: "Objetivo"
+        title: qsTr("Objetivo")
         GTextField {
             id: agentGoal
             objectName: "agentGoal"
             Layout.fillWidth: true
             maximumLength: 1024
-            placeholderText: "Descreva o objetivo em uma frase"
-            Accessible.name: "Objetivo para o agente"
+            placeholderText: qsTr("Descreva o objetivo em uma frase")
+            Accessible.name: qsTr("Objetivo para o agente")
             enabled: !core.agentActive
             Component.onCompleted: text = AppState.draftValue("#agent", "goal")
             onTextEdited: AppState.setDraft("#agent", "goal", text)
@@ -120,7 +120,7 @@ PageFrame {
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontHelp
             Layout.fillWidth: true
-            Accessible.name: "Tamanho do objetivo: " + text
+            Accessible.name: qsTr("Tamanho do objetivo: %1").arg(text)
         }
         RowLayout {
             Layout.fillWidth: true
@@ -139,16 +139,16 @@ PageFrame {
             GButton {
                 objectName: "agentAbort"
                 variant: "danger"
-                text: "Abortar"
-                Accessible.name: "Abortar agente"
+                text: qsTr("Abortar")
+                Accessible.name: qsTr("Abortar agente")
                 enabled: core.agentActive
                 onClicked: abortDialog.open()
             }
             GButton {
                 objectName: "agentStart"
                 variant: "primary"
-                text: "Iniciar"
-                Accessible.name: "Iniciar agente"
+                text: qsTr("Iniciar")
+                Accessible.name: qsTr("Iniciar agente")
                 enabled: page.canStart
                 onClicked: core.agentStart(agentGoal.text)
             }
@@ -163,7 +163,7 @@ PageFrame {
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Accessible.name: "Aviso do agente: " + text
+            Accessible.name: qsTr("Aviso do agente: %1").arg(text)
         }
     }
 
@@ -176,12 +176,13 @@ PageFrame {
     }
     function budgetLine() {
         var b = core.agentBudget
-        return "Passos " + (b.steps || 0) + "/" + (b.max_steps || 6)
-            + " · Tempo " + page.clock(b.elapsed_ms !== undefined ? b.elapsed_ms : 0) + "/" + page.clock(b.max_run_ms)
-            + " · Tokens " + (b.tokens_used || 0) + "/" + (b.tokens_max || 4096)
+        return qsTr("Passos %1/%2 · Tempo %3/%4 · Tokens %5/%6")
+            .arg(b.steps || 0).arg(b.max_steps || 6)
+            .arg(page.clock(b.elapsed_ms !== undefined ? b.elapsed_ms : 0)).arg(page.clock(b.max_run_ms))
+            .arg(b.tokens_used || 0).arg(b.tokens_max || 4096)
     }
     Section {
-        title: "Passos e orçamento"
+        title: qsTr("Passos e orçamento")
         Text {
             objectName: "agentBudget"
             text: page.budgetLine()
@@ -193,7 +194,7 @@ PageFrame {
         }
         Text {
             visible: core.agentSteps.length === 0
-            text: "Descreva um objetivo; o Gideon propõe passos e pede sua aprovação."
+            text: qsTr("Descreva um objetivo; o Gideon propõe passos e pede sua aprovação.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -217,7 +218,7 @@ PageFrame {
                     Layout.preferredWidth: Theme.space(24)
                 }
                 Text {
-                    text: modelData.kind === "tool" ? "Ferramenta" : "Conversa"
+                    text: modelData.kind === "tool" ? qsTr("Ferramenta") : qsTr("Conversa")
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -251,7 +252,10 @@ PageFrame {
                     font.pixelSize: Theme.fontBody
                     font.weight: 600
                     Layout.fillWidth: !Theme.advanced
-                    Accessible.name: "Passo " + modelData.n + ", " + (modelData.kind === "tool" ? "ferramenta" : "conversa") + ", " + text
+                    Accessible.name: qsTr("Passo %1, %2, %3")
+                        .arg(modelData.n)
+                        .arg(modelData.kind === "tool" ? qsTr("ferramenta") : qsTr("conversa"))
+                        .arg(text)
                 }
                 Text {
                     visible: Theme.advanced && modelData.code
@@ -269,11 +273,11 @@ PageFrame {
 
     // The final answer (plain text only; it exists only once the run is done) and the approvals of the agent.
     Section {
-        title: "Resposta final"
+        title: qsTr("Resposta final")
         Text {
             objectName: "agentAnswerEmpty"
             visible: core.agentAnswer.length === 0
-            text: "A resposta aparece aqui quando o agente concluir."
+            text: qsTr("A resposta aparece aqui quando o agente concluir.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -291,12 +295,12 @@ PageFrame {
             font.pixelSize: Theme.fontBody
             wrapMode: Text.Wrap
             Layout.fillWidth: true
-            Accessible.name: "Resposta final do agente"
+            Accessible.name: qsTr("Resposta final do agente")
         }
     }
 
     Section {
-        title: "Aprovações do agente"
+        title: qsTr("Aprovações do agente")
         visible: page.agentProposals.length > 0
         Repeater {
             model: page.agentProposals
@@ -316,9 +320,9 @@ PageFrame {
     Modal {
         id: abortDialog
         objectName: "agentAbortDialog"
-        title: "Abortar o agente?"
+        title: qsTr("Abortar o agente?")
         Text {
-            text: "O chat em andamento e as propostas pendentes deste agente serão cancelados. Ações já executadas não são desfeitas."
+            text: qsTr("O chat em andamento e as propostas pendentes deste agente serão cancelados. Ações já executadas não são desfeitas.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -333,8 +337,8 @@ PageFrame {
             GButton {
                 objectName: "agentAbortConfirm"
                 variant: "danger"
-                text: "Abortar agente"
-                Accessible.name: "Confirmar aborto do agente"
+                text: qsTr("Abortar agente")
+                Accessible.name: qsTr("Confirmar aborto do agente")
                 onClicked: abortDialog.accept()
             }
         }

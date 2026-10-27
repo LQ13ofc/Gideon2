@@ -15,29 +15,30 @@ PageFrame {
     visible: Window.window && Window.window.pageId === "diag_recuperacao"
 
     readonly property bool restartNeeded: core.connected && core.configurationStatus === "restart_required"
-    readonly property string restartBadge: !core.connected ? "Indisponível" : restartNeeded ? "Necessário agora" : "Não necessário"
+    readonly property string restartBadge: !core.connected ? qsTr("Indisponível") : restartNeeded ? qsTr("Necessário agora") : qsTr("Não necessário")
     readonly property string restartTone: !core.connected ? "neutral" : restartNeeded ? "warning" : "neutral"
     // B9: catalog storage (core.hubStorage: state none | verified | quarantined, reason, orphans, repository, first 12 hex of the catalog SHA-256).
     readonly property var store: core.hubStorage
-    readonly property string storageText: !core.connected ? "—" : store.state === "none" ? "catálogo não configurado"
-        : store.state === "quarantined" ? "em quarentena" + (store.reason ? ": " + store.reason : "") : "ok"
+    readonly property string storageText: !core.connected ? "—" : store.state === "none" ? qsTr("catálogo não configurado")
+        : store.state === "quarantined" ? (store.reason ? qsTr("em quarentena: %1").arg(store.reason) : qsTr("em quarentena")) : qsTr("ok")
+    // Comandos de terminal: the CLI text is copied as is (technical); only the labels are translated.
     readonly property var commands: [
-        {label: "Instalar", command: "gideon-install --install-root <RAIZ> install <PACOTE>"},
-        {label: "Atualizar", command: "gideon-install --install-root <RAIZ> update <PACOTE>"},
-        {label: "Reverter", command: "gideon-install --install-root <RAIZ> rollback"},
-        {label: "Reparar", command: "gideon-install --install-root <RAIZ> repair"},
-        {label: "Criar perfil", command: "gideon-install --install-root <RAIZ> profile create <NOME>"},
-        {label: "Abrir perfil", command: "gideon-launch --install-root <RAIZ> <PERFIL>"}
+        {label: qsTr("Instalar"), command: "gideon-install --install-root <RAIZ> install <PACOTE>"},
+        {label: qsTr("Atualizar"), command: "gideon-install --install-root <RAIZ> update <PACOTE>"},
+        {label: qsTr("Reverter"), command: "gideon-install --install-root <RAIZ> rollback"},
+        {label: qsTr("Reparar"), command: "gideon-install --install-root <RAIZ> repair"},
+        {label: qsTr("Criar perfil"), command: "gideon-install --install-root <RAIZ> profile create <NOME>"},
+        {label: qsTr("Abrir perfil"), command: "gideon-launch --install-root <RAIZ> <PERFIL>"}
     ]
 
     function copyCommand(text, label) {
-        if (core.copyText(text)) AppState.toast("Comando copiado.")
-        else AppState.toast("Não foi possível copiar o comando " + label + ".")
+        if (core.copyText(text)) AppState.toast(qsTr("Comando copiado."))
+        else AppState.toast(qsTr("Não foi possível copiar o comando %1.").arg(label))
     }
 
     PageHeader {
-        title: "Recuperação"
-        subtitle: "Reinício, restauração de configuração e comandos para o terminal."
+        title: qsTr("Recuperação")
+        subtitle: qsTr("Reinício, restauração de configuração e comandos para o terminal.")
     }
 
     GridLayout {
@@ -48,33 +49,33 @@ PageFrame {
 
         // Bloco 1 (Básico): reinício e restauração de configuração.
         Section {
-            title: "Reiniciar e restaurar"
+            title: qsTr("Reiniciar e restaurar")
             Layout.alignment: Qt.AlignTop
             Badge { text: page.restartBadge; tone: page.restartTone }
-            FNote { tone: "text"; text: "Reinício exigido ao trocar a frase de despertar, mudar o feedback ou alterar plugins." }
-            FNote { visible: page.restartNeeded; tone: "warn"; text: "A configuração salva só vale depois do reinício." }
+            FNote { tone: "text"; text: qsTr("Reinício exigido ao trocar a frase de despertar, mudar o feedback ou alterar plugins.") }
+            FNote { visible: page.restartNeeded; tone: "warn"; text: qsTr("A configuração salva só vale depois do reinício.") }
             // Reinício pelo app: o Core responde e sai com código 75; gideon-launch o inicia de novo. Confirmação antes; sessões ativas bloqueiam.
             GButton {
                 objectName: "restartCoreButton"
                 variant: "secondary"
-                text: "Reiniciar Core"
+                text: qsTr("Reiniciar Core")
                 enabled: core.coreRestartAvailable
-                Accessible.name: "Reiniciar o Core"
+                Accessible.name: qsTr("Reiniciar o Core")
                 onClicked: restartConfirm.open()
             }
             FNote {
                 small: true
                 visible: !core.coreRestartAvailable && !core.coreRestartBusy
-                text: !core.connected ? "Indisponível: Core desconectado."
-                    : core.sessionId.length > 0 ? "Indisponível: sessão de voz em andamento."
-                    : "Indisponível agora."
+                text: !core.connected ? qsTr("Indisponível: Core desconectado.")
+                    : core.sessionId.length > 0 ? qsTr("Indisponível: sessão de voz em andamento.")
+                    : qsTr("Indisponível agora.")
             }
             GProgressBar {
                 objectName: "restartProgress"
                 visible: core.coreRestartBusy
                 indeterminate: true
                 Layout.fillWidth: true
-                Accessible.name: "Reinício do Core em andamento"
+                Accessible.name: qsTr("Reinício do Core em andamento")
             }
             Text {
                 objectName: "restartResult"
@@ -86,11 +87,11 @@ PageFrame {
                 font.pixelSize: Theme.fontHelp
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
-                Accessible.name: "Reinício do Core: " + text
+                Accessible.name: qsTr("Reinício do Core: %1").arg(text)
             }
 
             Text {
-                text: "Configuração"
+                text: qsTr("Configuração")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -101,8 +102,8 @@ PageFrame {
             FNote {
                 tone: "text"
                 text: core.configurationStatus === "safe_mode"
-                    ? "Preserva o arquivo inválido e volta aos padrões. Depois, reinicie o Core."
-                    : "Volta às preferências anteriores salvas pelo Core."
+                    ? qsTr("Preserva o arquivo inválido e volta aos padrões. Depois, reinicie o Core.")
+                    : qsTr("Volta às preferências anteriores salvas pelo Core.")
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -111,7 +112,7 @@ PageFrame {
                     objectName: "rollbackPreferencesButtonRecovery"
                     visible: core.rollbackAvailable
                     variant: "secondary"
-                    text: "Restaurar anterior"
+                    text: qsTr("Restaurar anterior")
                     enabled: core.rollbackAvailable
                     onClicked: core.rollbackPreferences()
                 }
@@ -119,7 +120,7 @@ PageFrame {
                     objectName: "recoverConfigurationButton"
                     visible: core.recoveryAvailable
                     variant: "secondary"
-                    text: "Preservar arquivo e restaurar padrões"
+                    text: qsTr("Preservar arquivo e restaurar padrões")
                     enabled: core.recoveryAvailable
                     Accessible.name: text
                     onClicked: recoverConfirm.open()
@@ -141,10 +142,10 @@ PageFrame {
         // Bloco 2 (Avançado): última configuração boa do motor LLM e catálogo.
         Section {
             visible: Theme.advanced
-            title: "Motor LLM e catálogo"
+            title: qsTr("Motor LLM e catálogo")
             Layout.alignment: Qt.AlignTop
             Text {
-                text: "Motor LLM"
+                text: qsTr("Motor LLM")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -152,22 +153,22 @@ PageFrame {
                 font.weight: 600
             }
             // The last good config is saved by the Core when a model passes its test; without one the button stays disabled, with the reason.
-            FNote { tone: "text"; text: "Guardada quando um modelo passa no teste em Modelos LLM. Voltar troca a configuração do motor." }
+            FNote { tone: "text"; text: qsTr("Guardada quando um modelo passa no teste em Modelos LLM. Voltar troca a configuração do motor.") }
             GButton {
                 objectName: "rollbackLlmButton"
                 variant: "secondary"
-                text: "Voltar à última configuração boa"
+                text: qsTr("Voltar à última configuração boa")
                 enabled: core.llmRollbackAvailable
-                Accessible.name: "Voltar à última configuração boa do motor LLM"
+                Accessible.name: qsTr("Voltar à última configuração boa do motor LLM")
                 onClicked: core.llmRollback()
             }
             FNote {
                 small: true
                 visible: !core.llmRollbackAvailable
-                text: (core.llmConfig.lkg ? "Indisponível agora: o motor LLM está ocupado ou o Core não responde." : "Indisponível: nenhuma configuração boa foi salva ainda.")
+                text: core.llmConfig.lkg ? qsTr("Indisponível agora: o motor LLM está ocupado ou o Core não responde.") : qsTr("Indisponível: nenhuma configuração boa foi salva ainda.")
             }
             Text {
-                text: "Catálogo de plugins"
+                text: qsTr("Catálogo de plugins")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -178,7 +179,7 @@ PageFrame {
             // B9: the catalog storage as the Core reports it in the hub view. Values the Core does not send read "não informado".
             Text {
                 objectName: "catalogStorageText"
-                text: "Situação de armazenamento: " + page.storageText
+                text: qsTr("Situação de armazenamento: %1").arg(page.storageText)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -187,7 +188,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Itens órfãos: " + (page.store.orphans === null || page.store.orphans === undefined ? "—" : page.store.orphans)
+                text: qsTr("Itens órfãos: %1").arg(page.store.orphans === null || page.store.orphans === undefined ? "—" : page.store.orphans)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -195,7 +196,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Repositório: " + (page.store.repository || "não informado")
+                text: qsTr("Repositório: %1").arg(page.store.repository || qsTr("não informado"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -204,25 +205,25 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "SHA-256 do catálogo: " + (page.store.catalogSha ? page.store.catalogSha + "…" : "não informado")
+                text: qsTr("SHA-256 do catálogo: %1").arg(page.store.catalogSha ? page.store.catalogSha + "…" : qsTr("não informado"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: "monospace"
                 font.pixelSize: Theme.fontHelp
                 Layout.fillWidth: true
             }
-            FNote { small: true; text: "Erro de armazenamento do catálogo: não informado pelo Core." }
-            FNote { small: true; text: "O catálogo é verificado por SHA-256; o valor completo aparece em Desenvolvedor." }
+            FNote { small: true; text: qsTr("Erro de armazenamento do catálogo: não informado pelo Core.") }
+            FNote { small: true; text: qsTr("O catálogo é verificado por SHA-256; o valor completo aparece em Desenvolvedor.") }
         }
     }
 
     // Bloco 3 (Avançado): comandos de terminal. Copiar escreve o texto na área de transferência; nada é executado.
     Section {
         visible: Theme.advanced
-        title: "Comandos no terminal"
+        title: qsTr("Comandos no terminal")
         FNote {
             tone: "text"
-            text: "Rodam fora do aplicativo, no terminal. Troque <RAIZ> pelo caminho absoluto da instalação; <PACOTE> pelo diretório do pacote; <NOME> pelo nome do perfil; <PERFIL> pelo perfil criado."
+            text: qsTr("Rodam fora do aplicativo, no terminal. Troque <RAIZ> pelo caminho absoluto da instalação; <PACOTE> pelo diretório do pacote; <NOME> pelo nome do perfil; <PERFIL> pelo perfil criado.")
         }
         Repeater {
             model: page.commands
@@ -233,21 +234,21 @@ PageFrame {
                 onCopyRequested: page.copyCommand(modelData.command, modelData.label)
             }
         }
-        FNote { small: true; text: "Com o Core ativo, instalar, atualizar, reverter e reparar são recusados (código de saída 3)." }
-        FNote { small: true; text: "Se o terminal mostrar \"run: gideon-install --install-root <RAIZ> repair\", execute o comando de reparo." }
+        FNote { small: true; text: qsTr("Com o Core ativo, instalar, atualizar, reverter e reparar são recusados (código de saída 3).") }
+        FNote { small: true; text: qsTr("Se o terminal mostrar \"run: gideon-install --install-root <RAIZ> repair\", execute o comando de reparo.") }
         Collapsible {
-            title: "Códigos de saída"
-            FNote { small: true; tone: "text"; text: "0 ok · 2 uso incorreto · 3 perfil com Core ativo · 4 verificação do pacote falhou · 5 estado inválido ou reparo necessário · 6 bloqueado ou outro erro" }
+            title: qsTr("Códigos de saída")
+            FNote { small: true; tone: "text"; text: qsTr("0 ok · 2 uso incorreto · 3 perfil com Core ativo · 4 verificação do pacote falhou · 5 estado inválido ou reparo necessário · 6 bloqueado ou outro erro") }
         }
-        FNote { small: true; text: "Reparo e atualização ficam no terminal: esta tela não executa instalador." }
+        FNote { small: true; text: qsTr("Reparo e atualização ficam no terminal: esta tela não executa instalador.") }
     }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "Reinícios e restaurações não apagam dados do usuário. Instalação e pacotes só pelo terminal."
+        title: qsTr("Como funciona")
+        summary: qsTr("Reinícios e restaurações não apagam dados do usuário. Instalação e pacotes só pelo terminal.")
         FNote {
             tone: "text"
-            text: "Reiniciar o Core encerra os plugins em execução e refaz a conexão. A instalação versionada (gideon-install) não é executada por esta tela."
+            text: qsTr("Reiniciar o Core encerra os plugins em execução e refaz a conexão. A instalação versionada (gideon-install) não é executada por esta tela.")
         }
     }
 
@@ -255,12 +256,12 @@ PageFrame {
     Modal {
         id: restartConfirm
         objectName: "restartConfirm"
-        title: "Reiniciar o Core agora?"
+        title: qsTr("Reiniciar o Core agora?")
         standardButtons: Dialog.NoButton
         onOpened: restartCancel.forceActiveFocus()
         onAccepted: core.coreRestart()
         Text {
-            text: "O Core será reiniciado. Sessões ativas bloqueiam o reinício."
+            text: qsTr("O Core será reiniciado. Sessões ativas bloqueiam o reinício.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -276,14 +277,14 @@ PageFrame {
                 id: restartCancel
                 objectName: "cancelRestartButton"
                 variant: "secondary"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 onClicked: restartConfirm.reject()
             }
             GButton {
                 objectName: "confirmRestartButton"
                 variant: "primary"
-                text: "Reiniciar Core"
-                Accessible.name: "Reiniciar o Core"
+                text: qsTr("Reiniciar Core")
+                Accessible.name: qsTr("Reiniciar o Core")
                 onClicked: restartConfirm.accept()
             }
         }
@@ -291,12 +292,12 @@ PageFrame {
     Modal {
         id: recoverConfirm
         objectName: "recoverConfirm"
-        title: "Preservar o arquivo e restaurar os padrões?"
+        title: qsTr("Preservar o arquivo e restaurar os padrões?")
         standardButtons: Dialog.NoButton
         onOpened: recoverCancel.forceActiveFocus()
         onAccepted: core.recoverConfiguration()
         Text {
-            text: "O arquivo inválido fica guardado e as preferências voltam aos padrões. Reinicie o Core depois."
+            text: qsTr("O arquivo inválido fica guardado e as preferências voltam aos padrões. Reinicie o Core depois.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -311,13 +312,13 @@ PageFrame {
             GButton {
                 id: recoverCancel
                 variant: "secondary"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 onClicked: recoverConfirm.reject()
             }
             GButton {
                 objectName: "confirmRecoverButton"
                 variant: "primary"
-                text: "Restaurar padrões"
+                text: qsTr("Restaurar padrões")
                 Accessible.name: text
                 onClicked: recoverConfirm.accept()
             }

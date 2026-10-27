@@ -37,9 +37,21 @@ PageFrame {
         return null
     }
     // B8 formatting. Capture times are microseconds from the Core (shown as ms); peak and RMS are 0 to 1 (shown with a comma, 3 decimals).
-    readonly property var captureReasons: ({capture_completed: "captura concluída", cancelled: "cancelada", audio_error: "erro de áudio",
-        stt_failed: "falha na transcrição", stt_unavailable: "transcrição indisponível", transcript_final: "transcrição final",
-        no_speech: "sem fala detectada", capture_too_long: "captura longa demais"})
+    function captureReasonText(code) {
+        switch (code) {
+        case "capture_completed": return qsTr("captura concluída")
+        case "cancelled": return qsTr("cancelada")
+        case "audio_error": return qsTr("erro de áudio")
+        case "stt_failed": return qsTr("falha na transcrição")
+        case "stt_unavailable": return qsTr("transcrição indisponível")
+        case "transcript_final": return qsTr("transcrição final")
+        case "no_speech": return qsTr("sem fala detectada")
+        case "capture_too_long": return qsTr("captura longa demais")
+        }
+        return ""
+    }
+    function samplesText(n) { return n === 1 ? qsTr("%1 amostra").arg(n) : qsTr("%1 amostras").arg(n) }
+    function chunksText(n) { return n === 1 ? qsTr("%1 pedaço").arg(n) : qsTr("%1 pedaços").arg(n) }
     function msOf(us) { return Math.round(Number(us) / 1000) + " ms" }
     function fixed3(x) { return Number(x).toFixed(3).replace(".", ",") }
     function shortHash(h) { return String(h || "").slice(0, 12) }
@@ -47,22 +59,22 @@ PageFrame {
         var c = core.captureSummary
         var t = core.transcriptSummary
         var out = []
-        if (c.session_id === undefined) out.push("Captura: nenhuma nesta sessão do Core.")
+        if (c.session_id === undefined) out.push(qsTr("Captura: nenhuma nesta sessão do Core."))
         else {
-            out.push("Captura: início " + page.msOf(c.start_us) + " · fim " + page.msOf(c.end_us))
-            out.push("Amostras: " + c.samples + " · SHA-256 " + page.shortHash(c.pcm_sha256) + " · motivo: " + (page.captureReasons[c.reason] || "não informado"))
+            out.push(qsTr("Captura: início %1 · fim %2").arg(page.msOf(c.start_us)).arg(page.msOf(c.end_us)))
+            out.push(qsTr("Amostras: %1 · SHA-256 %2 · motivo: %3").arg(c.samples).arg(page.shortHash(c.pcm_sha256)).arg(page.captureReasonText(c.reason) || qsTr("não informado")))
         }
-        if (t.session_id !== undefined) out.push("Transcrição: " + (t.is_final ? "final" : "parcial") + " · revisão " + t.revision + " · confiança desconhecida")
+        if (t.session_id !== undefined) out.push(qsTr("Transcrição: %1 · revisão %2 · confiança desconhecida").arg(t.is_final ? qsTr("final") : qsTr("parcial")).arg(t.revision))
         return out
     }
     readonly property var speechLines: {
         var s = core.speechSummary
-        if (s.session_id === undefined) return ["Resposta: nenhuma nesta sessão do Core."]
+        if (s.session_id === undefined) return [qsTr("Resposta: nenhuma nesta sessão do Core.")]
         return [
-            "Resposta: " + s.samples + " amostras a " + s.sample_rate + " Hz · " + s.chunks + " pedaços",
-            "Pico " + page.fixed3(s.peak) + " · RMS " + page.fixed3(s.rms),
-            "Primeiro áudio em " + s.first_pcm_ms + " ms · tempo total " + s.elapsed_ms + " ms",
-            "Saída: " + E.audioOutputLabel(s.sink) + " · SHA-256 " + page.shortHash(s.pcm_sha256)
+            qsTr("Resposta: %1 a %2 Hz · %3").arg(page.samplesText(s.samples)).arg(s.sample_rate).arg(page.chunksText(s.chunks)),
+            qsTr("Pico %1 · RMS %2").arg(page.fixed3(s.peak)).arg(page.fixed3(s.rms)),
+            qsTr("Primeiro áudio em %1 ms · tempo total %2 ms").arg(s.first_pcm_ms).arg(s.elapsed_ms),
+            qsTr("Saída: %1 · SHA-256 %2").arg(E.audioOutputLabel(s.sink)).arg(page.shortHash(s.pcm_sha256))
         ]
     }
     readonly property bool llmFallbackUsed: {
@@ -70,14 +82,25 @@ PageFrame {
         for (var i = 0; i < events.length; i++) if (events[i].kind === "llm_fallback_used") return true
         return false
     }
+    // "Frase: …" line: the active wake phrase and its qualification, or the offline dash.
+    function wakeLine() {
+        if (!page.linked) return page.offlineText
+        if (!page.activeWake) return qsTr("não configurada")
+        return qsTr("%1 · %2").arg(page.activeWake.text).arg(E.wakeQualificationLabel(page.activeWake.qualification))
+    }
+    // "Voz: …" line of the speech engine: voice, engine and language, or the offline dash.
+    function voiceLine() {
+        if (!page.linked) return qsTr("Voz: %1").arg(page.offlineText)
+        return qsTr("Voz: %1 · %2 · %3").arg(page.pack.voice || qsTr("não informada")).arg(E.engineLabel(page.engines.tts)).arg(E.languageLabel(page.pack.language))
+    }
 
     PageHeader {
-        title: "Motores"
-        subtitle: "Wake, transcrição e resposta em voz: o que cada motor está fazendo agora."
+        title: qsTr("Motores")
+        subtitle: qsTr("Wake, transcrição e resposta em voz: o que cada motor está fazendo agora.")
     }
 
     Section {
-        title: "Motores de voz"
+        title: qsTr("Motores de voz")
         GridLayout {
             Layout.fillWidth: true
             columns: page.width >= Theme.narrowWidth ? 3 : 1
@@ -89,7 +112,7 @@ PageFrame {
                 Layout.alignment: Qt.AlignTop
                 spacing: Theme.space(6)
                 Text {
-                    text: "Wake (frase de despertar)"
+                    text: qsTr("Wake (frase de despertar)")
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -99,7 +122,7 @@ PageFrame {
                 }
                 Badge { text: E.wakePhrase(core.wakeStatus); tone: E.toneOf(core.wakeStatus) }
                 Text {
-                    text: "Frase: " + (!page.linked ? page.offlineText : page.activeWake ? page.activeWake.text + " · " + E.wakeQualificationLabel(page.activeWake.qualification) : "não configurada")
+                    text: qsTr("Frase: %1").arg(page.wakeLine())
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -108,7 +131,7 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "Motor: " + (page.linked ? E.engineLabel(page.engines.wake) : page.offlineText)
+                    text: qsTr("Motor: %1").arg(page.linked ? E.engineLabel(page.engines.wake) : page.offlineText)
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -116,20 +139,20 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "Entrada: " + (page.linked ? E.audioInputLabel(page.pack.audio_input) : page.offlineText)
+                    text: qsTr("Entrada: %1").arg(page.linked ? E.audioInputLabel(page.pack.audio_input) : page.offlineText)
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontBody
                     Layout.fillWidth: true
                 }
-                FNote { small: true; text: "Reprodução de teste; sem microfone ao vivo." }
-                FNote { visible: core.wakeStatus === "replay_finished"; tone: "warn"; small: true; text: "Reprodução de teste encerrada: o wake não está armado para ouvir." }
-                FNote { visible: core.wakeStatus === "failed"; tone: "error"; small: true; text: "Falhou. Reinicie o Core em Recuperação." }
+                FNote { small: true; text: qsTr("Reprodução de teste; sem microfone ao vivo.") }
+                FNote { visible: core.wakeStatus === "replay_finished"; tone: "warn"; small: true; text: qsTr("Reprodução de teste encerrada: o wake não está armado para ouvir.") }
+                FNote { visible: core.wakeStatus === "failed"; tone: "error"; small: true; text: qsTr("Falhou. Reinicie o Core em Recuperação.") }
                 GButton {
                     visible: core.wakeStatus === "failed"
                     variant: "ghost"
-                    text: "Abrir Recuperação"
+                    text: qsTr("Abrir Recuperação")
                     onClicked: Window.window.goPage("diag_recuperacao")
                 }
             }
@@ -139,7 +162,7 @@ PageFrame {
                 Layout.alignment: Qt.AlignTop
                 spacing: Theme.space(6)
                 Text {
-                    text: "Transcrição (STT)"
+                    text: qsTr("Transcrição (STT)")
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -149,7 +172,7 @@ PageFrame {
                 }
                 Badge { text: E.sttPhrase(core.sttStatus); tone: E.toneOf(core.sttStatus) }
                 Text {
-                    text: "Motor: " + (page.linked ? E.engineLabel(page.engines.stt) : page.offlineText) + " · idioma " + (page.linked ? E.languageLabel(page.pack.language) : page.offlineText)
+                    text: qsTr("Motor: %1 · idioma %2").arg(page.linked ? E.engineLabel(page.engines.stt) : page.offlineText).arg(page.linked ? E.languageLabel(page.pack.language) : page.offlineText)
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -157,12 +180,12 @@ PageFrame {
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
-                FNote { small: true; text: "Português não está comprovado para transcrição." }
-                FNote { visible: core.sttStatus === "failed"; tone: "error"; small: true; text: "Falhou. Reinicie o Core em Recuperação." }
+                FNote { small: true; text: qsTr("Português não está comprovado para transcrição.") }
+                FNote { visible: core.sttStatus === "failed"; tone: "error"; small: true; text: qsTr("Falhou. Reinicie o Core em Recuperação.") }
                 GButton {
                     visible: core.sttStatus === "failed"
                     variant: "ghost"
-                    text: "Abrir Recuperação"
+                    text: qsTr("Abrir Recuperação")
                     onClicked: Window.window.goPage("diag_recuperacao")
                 }
             }
@@ -172,7 +195,7 @@ PageFrame {
                 Layout.alignment: Qt.AlignTop
                 spacing: Theme.space(6)
                 Text {
-                    text: "Resposta em voz (TTS)"
+                    text: qsTr("Resposta em voz (TTS)")
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -182,7 +205,7 @@ PageFrame {
                 }
                 Badge { text: E.speechPhrase(core.speechStatus); tone: E.toneOf(core.speechStatus) }
                 Text {
-                    text: "Voz: " + (page.linked ? (page.pack.voice || "não informada") + " · " + E.engineLabel(page.engines.tts) + " · " + E.languageLabel(page.pack.language) : page.offlineText)
+                    text: page.voiceLine()
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -191,14 +214,14 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "Saída: " + (page.linked ? E.audioOutputLabel(page.pack.audio_output) : page.offlineText)
+                    text: qsTr("Saída: %1").arg(page.linked ? E.audioOutputLabel(page.pack.audio_output) : page.offlineText)
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontBody
                     Layout.fillWidth: true
                 }
-                FNote { small: true; text: "Sem alto-falante físico comprovado." }
+                FNote { small: true; text: qsTr("Sem alto-falante físico comprovado.") }
             }
         }
 
@@ -209,7 +232,7 @@ PageFrame {
             Layout.topMargin: Theme.space(8)
             spacing: Theme.space(6)
             Text {
-                text: "Motor LLM (plugin)"
+                text: qsTr("Motor LLM (plugin)")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -221,7 +244,7 @@ PageFrame {
                 tone: page.llmItem ? E.toneOf(page.llmItem.state) : "neutral"
             }
             Text {
-                text: "Configurado: " + (core.modelsSelected.provider ? core.providerLabel(core.modelsSelected.provider) + " · " + core.modelsSelected.model : "Nenhum modelo configurado")
+                text: qsTr("Configurado: %1").arg(core.modelsSelected.provider ? qsTr("%1 · %2").arg(core.providerLabel(core.modelsSelected.provider)).arg(core.modelsSelected.model) : qsTr("Nenhum modelo configurado"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -230,7 +253,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Resposta de reserva: " + (page.llmFallbackUsed ? "nesta sessão" : "não usada nesta sessão")
+                text: qsTr("Resposta de reserva: %1").arg(page.llmFallbackUsed ? qsTr("nesta sessão") : qsTr("não usada nesta sessão"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -241,9 +264,9 @@ PageFrame {
                 visible: page.llmItem !== null && page.llmItem.state === "failed"
                 tone: "error"
                 small: true
-                text: "Falhou: " + (page.llmItem && page.llmItem.last_error ? E.codePhrase(page.llmItem.last_error) : "motivo não informado")
+                text: qsTr("Falhou: %1").arg(page.llmItem && page.llmItem.last_error ? E.codePhrase(page.llmItem.last_error) : qsTr("motivo não informado"))
             }
-            FNote { visible: Theme.advanced && page.llmItem !== null && !!page.llmItem.last_error; small: true; text: "código: " + (page.llmItem ? page.llmItem.last_error : "") }
+            FNote { visible: Theme.advanced && page.llmItem !== null && !!page.llmItem.last_error; small: true; text: qsTr("código: %1").arg(page.llmItem ? page.llmItem.last_error : "") }
         }
     }
 
@@ -254,10 +277,10 @@ PageFrame {
         rowSpacing: Theme.space(24)
 
         Section {
-            title: "Pacote de voz"
+            title: qsTr("Pacote de voz")
             Layout.alignment: Qt.AlignTop
             Text {
-                text: "Verificação: " + (!page.linked ? page.offlineText : page.pack.preflight === "verified" ? "Verificado" : "Não verificado")
+                text: qsTr("Verificação: %1").arg(!page.linked ? page.offlineText : page.pack.preflight === "verified" ? qsTr("Verificado") : qsTr("Não verificado"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -265,7 +288,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Entrada: " + (page.linked ? E.audioInputLabel(page.pack.audio_input) : page.offlineText)
+                text: qsTr("Entrada: %1").arg(page.linked ? E.audioInputLabel(page.pack.audio_input) : page.offlineText)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -273,7 +296,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Saída: " + (page.linked ? E.audioOutputLabel(page.pack.audio_output) : page.offlineText)
+                text: qsTr("Saída: %1").arg(page.linked ? E.audioOutputLabel(page.pack.audio_output) : page.offlineText)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -281,7 +304,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Qualificação: " + (!page.linked ? page.offlineText : page.pack.scope === "dev_virtual_en" ? "em desenvolvimento; validação física pendente" : "não informada")
+                text: qsTr("Qualificação: %1").arg(!page.linked ? page.offlineText : page.pack.scope === "dev_virtual_en" ? qsTr("pacote de teste virtual · validação física pendente") : qsTr("não informada"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -289,11 +312,11 @@ PageFrame {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
-            FNote { text: "Trocar a voz ou a frase exige reinício do Core." }
+            FNote { text: qsTr("Trocar a voz ou a frase exige reinício do Core.") }
         }
 
         Section {
-            title: "Última captura e resposta"
+            title: qsTr("Última captura e resposta")
             Layout.alignment: Qt.AlignTop
             // B8: the blocks capture, transcript and speech of this Core session, already validated by the bridge. Absent block = nothing this session.
             Repeater {
@@ -322,21 +345,21 @@ PageFrame {
                     Layout.fillWidth: true
                 }
             }
-            FNote { visible: Theme.advanced; small: true; text: "Confiança da transcrição: desconhecida (o motor não informa)." }
+            FNote { visible: Theme.advanced; small: true; text: qsTr("Confiança da transcrição: desconhecida (o motor não informa).") }
         }
 
         // DIAG-05: latency of the speech answer (Core timing of the last answer of this session).
         Section {
             objectName: "diagSpeechLatency"
-            title: "Latência da resposta em voz"
+            title: qsTr("Latência da resposta em voz")
             Layout.alignment: Qt.AlignTop
             EValueRow {
                 objectName: "speechFirstAudio"
-                label: "Primeiro áudio"
-                value: core.speechLatency.known ? (core.speechLatency.first_pcm_ms + " ms") : "sem resposta falada nesta sessão"
+                label: qsTr("Primeiro áudio")
+                value: core.speechLatency.known ? (core.speechLatency.first_pcm_ms + " ms") : qsTr("sem resposta falada nesta sessão")
             }
             EValueRow {
-                label: "Resposta completa"
+                label: qsTr("Resposta completa")
                 value: core.speechLatency.known ? (core.speechLatency.elapsed_ms + " ms") : "—"
             }
         }
@@ -344,23 +367,23 @@ PageFrame {
         // DIAG-03 (M27): the answer came from the fallback model. Core event llm_fallback_used; no content is shown.
         Section {
             objectName: "diagFallback"
-            title: "Motor LLM"
+            title: qsTr("Motor LLM")
             Layout.alignment: Qt.AlignTop
             EValueRow {
                 objectName: "fallbackUsedRow"
-                label: "Resposta de reserva"
-                value: core.llmFallbackUsed ? "usada nesta sessão" : "não usada nesta sessão"
+                label: qsTr("Resposta de reserva")
+                value: core.llmFallbackUsed ? qsTr("usada nesta sessão") : qsTr("não usada nesta sessão")
             }
-            FNote { small: true; text: "Quando o modelo principal falha, o Gideon usa o modelo de reserva e avisa na Conversa." }
+            FNote { small: true; text: qsTr("Quando o modelo principal falha, o Gideon usa o modelo de reserva e avisa na Conversa.") }
         }
     }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "O que cada motor está fazendo. O resumo curto fica no Assistente."
+        title: qsTr("Como funciona")
+        summary: qsTr("O que cada motor está fazendo. O resumo curto fica no Assistente.")
         FNote {
             tone: "text"
-            text: "Reprodução de teste encerrada e em andamento não indicam microfone armado. Trocar frase, voz ou dispositivo exige reinício do Core."
+            text: qsTr("Reprodução de teste encerrada e em andamento não indicam microfone armado. Trocar frase, voz ou dispositivo exige reinício do Core.")
         }
     }
 }

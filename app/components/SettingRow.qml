@@ -99,7 +99,7 @@ Rectangle {
             spacing: Theme.space(8)
             Text {
                 visible: !row.usable
-                text: "Indisponível: " + row.reason + (row.reason.slice(-1) === "." ? "" : ".")
+                text: qsTr("Indisponível: %1").arg(row.reason + (row.reason.slice(-1) === "." ? "" : "."))
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -109,7 +109,7 @@ Rectangle {
             }
             Text {
                 visible: row.usable && row.applying
-                text: "Aplicando…"
+                text: qsTr("Aplicando…")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -120,7 +120,7 @@ Rectangle {
             GButton {
                 visible: row.hasKey && row.modified && !row.coreKey
                 variant: "ghost"
-                text: "Restaurar padrão"
+                text: qsTr("Restaurar padrão")
                 onClicked: AppState.resetSetting(row.settingKey)
             }
         }

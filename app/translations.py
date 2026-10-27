@@ -9,7 +9,7 @@ non-empty of LC_ALL, LC_MESSAGES, LANG, mapped to one of the three languages, ot
 import json
 import os
 from pathlib import Path
-from PySide6.QtCore import QTranslator
+from PySide6.QtCore import QCoreApplication,QTranslator
 
 UI_LANGUAGES=('pt-BR','en','fr')
 SOURCE_LANGUAGE='pt-BR'
@@ -65,3 +65,26 @@ def apply(app,language):
     app.installTranslator(translator)
     _translator=translator
     return True
+
+
+# WP-20 G5c: the translate helpers, moved from app/bridge.py so the msgs_* modules can use them without a cycle.
+CONTEXT='Bridge'
+
+def _tr(text,*args):
+    """The text in the active UI language (translations.py); %1, %2... take `args`. Portuguese when no catalog has it."""
+    out=QCoreApplication.translate(CONTEXT,text)
+    for number,value in enumerate(args,1):out=out.replace(f'%{number}',str(value))
+    return out
+
+def _fill(text,*args):
+    """A translated text (QCoreApplication.translate, so lupdate sees the literal) with its %1, %2... replaced by `args`."""
+    for number,value in enumerate(args,1):text=text.replace(f'%{number}',str(value))
+    return text
+
+class _Messages(dict):
+    """Message table: every lookup translates at access time, so a language switch shows the new text. Keys stay codes."""
+    def __getitem__(self,key):return _tr(dict.__getitem__(self,key))
+    def get(self,key,default=None):return self[key] if key in self else default
+    def raw(self,key):
+        """The Portuguese source of one entry, not translated: stored messages keep it and translate when they are read."""
+        return dict.__getitem__(self,key)

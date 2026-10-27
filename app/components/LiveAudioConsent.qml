@@ -9,7 +9,7 @@ import "../theme"
 Modal {
     id: consent
     objectName: "liveAudioConsent"
-    title: "Ouvir o microfone?"
+    title: qsTr("Ouvir o microfone?")
     standardButtons: Dialog.NoButton
     signal agreed()
     onOpened: consentCancel.forceActiveFocus()
@@ -17,7 +17,7 @@ Modal {
 
     Text {
         objectName: "liveAudioConsentText"
-        text: "O Gideon vai ouvir continuamente o microfone selecionado, só na memória, para detectar a frase de ativação. Nada é gravado em disco. Você pode desligar a qualquer momento."
+        text: qsTr("O Gideon vai ouvir continuamente o microfone selecionado, só na memória, para detectar a frase de ativação. Nada é gravado em disco. Você pode desligar a qualquer momento.")
         textFormat: Text.PlainText
         color: Theme.text
         font.family: Theme.fontFamily
@@ -33,14 +33,14 @@ Modal {
             id: consentCancel
             objectName: "liveAudioConsentCancel"
             variant: "secondary"
-            text: "Cancelar"
+            text: qsTr("Cancelar")
             onClicked: consent.reject()
         }
         GButton {
             objectName: "liveAudioConsentConfirm"
             variant: "primary"
-            text: "Ativar escuta"
-            Accessible.name: "Ativar a escuta do microfone"
+            text: qsTr("Ativar escuta")
+            Accessible.name: qsTr("Ativar a escuta do microfone")
             onClicked: consent.accept()
         }
     }

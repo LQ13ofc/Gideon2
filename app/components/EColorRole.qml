@@ -42,7 +42,7 @@ ColumnLayout {
         message = ""
         messageIsError = false
         if (hex === "") {
-            message = "Hex inválido: use #rrggbb. O valor anterior foi mantido."
+            message = qsTr("Hex inválido: use #rrggbb. O valor anterior foi mantido.")
             messageIsError = true
             return
         }
@@ -57,8 +57,8 @@ ColumnLayout {
         }
         if (result.fixes.length > 0) {
             proposal = { color: hex }
-            message = "Corrigido automaticamente: " + CS.fixText(result.fixes[0])
-                + (result.fixes.length > 1 ? " e mais " + (result.fixes.length - 1) + " ajuste(s)" : "") + "."
+            var more = result.fixes.length > 1 ? qsTr(" e mais %1 ajuste(s)").arg(result.fixes.length - 1) : ""
+            message = qsTr("Corrigido automaticamente: %1%2.").arg(CS.fixText(result.fixes[0])).arg(more)
             return
         }
         apply(hex)
@@ -93,7 +93,7 @@ ColumnLayout {
             color: Theme.text
             selectByMouse: true
             maximumLength: 7
-            Accessible.name: editor.roleLabel + " em hexadecimal"
+            Accessible.name: qsTr("%1 em hexadecimal").arg(editor.roleLabel)
             background: Rectangle {
                 radius: Theme.radius
                 color: Theme.bg
@@ -129,12 +129,12 @@ ColumnLayout {
             GButton {
                 objectName: "acceptFixButton_" + editor.role
                 variant: "primary"
-                text: "Aceitar correção"
+                text: qsTr("Aceitar correção")
                 onClicked: editor.apply(editor.proposal.color)
             }
             GButton {
                 variant: "secondary"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 onClicked: { editor.proposal = null; editor.message = "" }
             }
         }

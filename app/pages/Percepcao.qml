@@ -20,30 +20,40 @@ PageFrame {
     readonly property int runningCount: core.perceptionPlugins.filter(function (p) { return p.state === "running" }).length
     readonly property string shownPart: (part === "resultado" && !Theme.devMode) ? "privacidade" : part
 
-    function indicatorTone(value) { return value === "ligado" ? "error" : "neutral" }
-    function indicatorColor(value) { return value === "ligado" ? Theme.error : Theme.textMuted }
+    // The indicator readings come as codes from the bridge (on, off, unread, plugin_inactive); the words are translated here.
+    function indicatorTone(state) { return state === "on" ? "error" : "neutral" }
+    function indicatorColor(state) { return state === "on" ? Theme.error : Theme.textMuted }
+    function indicatorWord(state) {
+        switch (state) {
+        case "on": return qsTr("ligado")
+        case "off": return qsTr("desligado")
+        case "unread": return qsTr("não lido")
+        case "plugin_inactive": return qsTr("plugin inativo")
+        default: return ""
+        }
+    }
 
     PageHeader {
-        title: "Percepção e ação"
-        subtitle: "Sensores e ações reais do computador. Cada plugin usa só o acesso que precisa e só funciona com permissão concedida."
+        title: qsTr("Percepção e ação")
+        subtitle: qsTr("Sensores e ações reais do computador. Cada plugin usa só o acesso que precisa e só funciona com permissão concedida.")
     }
     // The one notice of the page: the backends and what each refusal means.
     Banner {
         kind: "info"
-        text: "Backends reais: portal XDG, AT-SPI, RemoteDesktop, PipeWire, v4l2 e KScreen. Quando um recurso não existe nesta sessão, a resposta diz qual backend faltou e nada é feito."
+        text: qsTr("Backends reais: portal XDG, AT-SPI, RemoteDesktop, PipeWire, v4l2 e KScreen. Quando um recurso não existe nesta sessão, a resposta diz qual backend faltou e nada é feito.")
     }
     // The privacy indicators are always in view, whatever the part.
     CSummaryBar {
-        text: page.runningCount + (page.runningCount === 1 ? " plugin de percepção em execução" : " plugins de percepção em execução")
+        text: page.runningCount === 1 ? qsTr("%1 plugin de percepção em execução").arg(page.runningCount) : qsTr("%1 plugins de percepção em execução").arg(page.runningCount)
         Badge {
             objectName: "micBadge"
-            text: "Microfone: " + core.perceptionMicIndicator
-            tone: page.indicatorTone(core.perceptionMicIndicator)
+            text: qsTr("Microfone: %1").arg(page.indicatorWord(core.perceptionMicState))
+            tone: page.indicatorTone(core.perceptionMicState)
         }
         Badge {
             objectName: "cameraBadge"
-            text: "Câmera: " + core.perceptionCameraIndicator
-            tone: page.indicatorTone(core.perceptionCameraIndicator)
+            text: qsTr("Câmera: %1").arg(page.indicatorWord(core.perceptionCameraState))
+            tone: page.indicatorTone(core.perceptionCameraState)
         }
     }
     GProgressBar {
@@ -51,12 +61,12 @@ PageFrame {
         visible: core.perceptionBusy
         indeterminate: true
         Layout.fillWidth: true
-        Accessible.name: "Operação de percepção em andamento"
+        Accessible.name: qsTr("Operação de percepção em andamento")
     }
     Segmented {
         model: Theme.devMode
-            ? [{id: "privacidade", text: "Privacidade"}, {id: "plugins", text: "Plugins"}, {id: "resultado", text: "Último resultado"}]
-            : [{id: "privacidade", text: "Privacidade"}, {id: "plugins", text: "Plugins"}]
+            ? [{id: "privacidade", text: qsTr("Privacidade")}, {id: "plugins", text: qsTr("Plugins")}, {id: "resultado", text: qsTr("Último resultado")}]
+            : [{id: "privacidade", text: qsTr("Privacidade")}, {id: "plugins", text: qsTr("Plugins")}]
         currentId: page.shownPart
         onActivated: function (id) { page.part = id }
     }
@@ -68,43 +78,43 @@ PageFrame {
         spacing: Theme.space(24)
         Section {
             objectName: "privacyCard"
-            title: "Indicadores"
+            title: qsTr("Indicadores")
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.space(10)
-                Rectangle { Layout.alignment: Qt.AlignVCenter; implicitWidth: 8; implicitHeight: 8; radius: 4; color: page.indicatorColor(core.perceptionMicIndicator) }
+                Rectangle { Layout.alignment: Qt.AlignVCenter; implicitWidth: 8; implicitHeight: 8; radius: 4; color: page.indicatorColor(core.perceptionMicState) }
                 Text {
                     objectName: "micIndicator"
-                    text: "Microfone · indicador: " + core.perceptionMicIndicator
+                    text: qsTr("Microfone · indicador: %1").arg(page.indicatorWord(core.perceptionMicState))
                     textFormat: Text.PlainText
-                    color: page.indicatorColor(core.perceptionMicIndicator)
+                    color: page.indicatorColor(core.perceptionMicState)
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontBody
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
-                    Accessible.name: "Indicador do microfone: " + core.perceptionMicIndicator
+                    Accessible.name: qsTr("Indicador do microfone: %1").arg(page.indicatorWord(core.perceptionMicState))
                 }
             }
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.space(10)
-                Rectangle { Layout.alignment: Qt.AlignVCenter; implicitWidth: 8; implicitHeight: 8; radius: 4; color: page.indicatorColor(core.perceptionCameraIndicator) }
+                Rectangle { Layout.alignment: Qt.AlignVCenter; implicitWidth: 8; implicitHeight: 8; radius: 4; color: page.indicatorColor(core.perceptionCameraState) }
                 Text {
                     objectName: "cameraIndicator"
-                    text: "Câmera · indicador: " + core.perceptionCameraIndicator
+                    text: qsTr("Câmera · indicador: %1").arg(page.indicatorWord(core.perceptionCameraState))
                     textFormat: Text.PlainText
-                    color: page.indicatorColor(core.perceptionCameraIndicator)
+                    color: page.indicatorColor(core.perceptionCameraState)
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontBody
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
-                    Accessible.name: "Indicador da câmera: " + core.perceptionCameraIndicator
+                    Accessible.name: qsTr("Indicador da câmera: %1").arg(page.indicatorWord(core.perceptionCameraState))
                 }
             }
             // B16: the live recorder of the Core (A6 consent, Dispositivos); "Microfone ativo" only while it captures.
             Text {
                 objectName: "liveInputState"
-                text: core.micActive ? "Microfone ativo · " + core.audioLiveText : core.audioLiveText
+                text: core.micActive ? qsTr("Microfone ativo · %1").arg(core.audioLiveText) : core.audioLiveText
                 textFormat: Text.PlainText
                 color: core.micActive ? Theme.warning : Theme.textMuted
                 font.family: Theme.fontFamily
@@ -113,7 +123,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Os indicadores mostram o último estado lido. Só a leitura de estado atualiza esta tela."
+                text: qsTr("Os indicadores mostram o último estado lido. Só a leitura de estado atualiza esta tela.")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -123,9 +133,9 @@ PageFrame {
             }
         }
         Section {
-            title: "O que não é gravado"
+            title: qsTr("O que não é gravado")
             Text {
-                text: "Nada é gravado em disco. Áudio e legendas ficam só em memória."
+                text: qsTr("Nada é gravado em disco. Áudio e legendas ficam só em memória.")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -142,7 +152,7 @@ PageFrame {
         Layout.fillWidth: true
         spacing: Theme.space(16)
         Section {
-            title: "Plugins de percepção"
+            title: qsTr("Plugins de percepção")
             GridLayout {
                 Layout.fillWidth: true
                 columns: page.wide ? 2 : 1
@@ -159,7 +169,7 @@ PageFrame {
             }
         }
         Text {
-            text: "Nenhuma ação altera o computador nesta build."
+            text: qsTr("Nenhuma ação altera o computador nesta build.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -171,11 +181,11 @@ PageFrame {
     // Último resultado: developer mode only; nothing from the screen or the microphone is shown here.
     Section {
         visible: page.shownPart === "resultado"
-        title: "Último resultado"
+        title: qsTr("Último resultado")
         Text {
             objectName: "perceptionResultEmpty"
             visible: core.perceptionResult.length === 0
-            text: "Nenhuma ação executada nesta sessão."
+            text: qsTr("Nenhuma ação executada nesta sessão.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -192,7 +202,7 @@ PageFrame {
             font.pixelSize: Theme.fontBody
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Accessible.name: "Resultado da percepção: " + text
+            Accessible.name: qsTr("Resultado da percepção: %1").arg(text)
         }
     }
 }

@@ -12,7 +12,7 @@ Modal {
     property string outcome: ""
     property bool outcomeIsError: false
     width: Math.min(560, (parent ? parent.width : 560) - 32)
-    title: mode === "export" ? "Exportar configurações" : "Importar configurações"
+    title: mode === "export" ? qsTr("Exportar configurações") : qsTr("Importar configurações")
 
     onOpened: {
         outcome = ""
@@ -30,16 +30,16 @@ Modal {
             return
         }
         var rejected = result.rejected || []
-        var text = result.applied + (result.applied === 1 ? " opção aplicada." : " opções aplicadas.")
-        if (rejected.length > 0) text += " " + rejected.length + " recusada(s): " + rejected[0].key + " (" + rejected[0].error + ")."
+        var text = result.applied === 1 ? qsTr("%1 opção aplicada.").arg(result.applied) : qsTr("%1 opções aplicadas.").arg(result.applied)
+        if (rejected.length > 0) text += " " + qsTr("%1 recusada(s): %2 (%3).").arg(rejected.length).arg(rejected[0].key).arg(rejected[0].error)
         AppState.toast(text)
         dialog.close()
     }
 
     Text {
         text: dialog.mode === "export"
-            ? "Arquivo JSON com as opções do app. Não contém segredos nem valores guardados pelo Core."
-            : "Cole o conteúdo de um arquivo JSON exportado. Cada opção é validada antes de aplicar."
+            ? qsTr("Arquivo JSON com as opções do app. Não contém segredos nem valores guardados pelo Core.")
+            : qsTr("Cole o conteúdo de um arquivo JSON exportado. Cada opção é validada antes de aplicar.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -85,7 +85,7 @@ Modal {
         GButton {
             visible: dialog.mode === "export"
             variant: "secondary"
-            text: "Selecionar tudo"
+            text: qsTr("Selecionar tudo")
             onClicked: { area.selectAll(); area.forceActiveFocus() }
         }
         Item { Layout.fillWidth: true }
@@ -93,7 +93,7 @@ Modal {
             visible: dialog.mode === "import"
             objectName: "importSettingsButton"
             variant: "primary"
-            text: "Importar"
+            text: qsTr("Importar")
             enabled: area.text.trim().length > 0
             onClicked: dialog.runImport()
         }

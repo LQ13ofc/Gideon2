@@ -43,7 +43,7 @@ Popup {
             IconButton {
                 iconName: "close"
                 size: 16
-                ToolTip.text: "Fechar detalhes"
+                ToolTip.text: qsTr("Fechar detalhes")
                 onClicked: drawer.close()
             }
         }

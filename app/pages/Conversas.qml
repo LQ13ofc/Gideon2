@@ -38,6 +38,9 @@ PageFrame {
     function when(ms) {
         return ms ? Qt.formatDateTime(new Date(ms), "dd/MM/yyyy HH:mm") : ""
     }
+    function turnCount(turns) {
+        return turns === 1 ? qsTr("1 mensagem") : qsTr("%1 mensagens").arg(turns)
+    }
     function openConversation(id) {
         selectedId = id
         exporting = false
@@ -45,12 +48,12 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Histórico"
-        subtitle: "Conversas em texto guardadas pelo prazo escolhido. Áudio nunca é guardado."
+        title: qsTr("Histórico")
+        subtitle: qsTr("Conversas em texto guardadas pelo prazo escolhido. Áudio nunca é guardado.")
         GButton {
             objectName: "conversasExport"
             variant: "secondary"
-            text: "Exportar textos"
+            text: qsTr("Exportar textos")
             enabled: page.ready
             onClicked: {
                 page.exporting = true
@@ -61,7 +64,7 @@ PageFrame {
         GButton {
             objectName: "conversasForgetAll"
             variant: "danger"
-            text: "Apagar todo o histórico"
+            text: qsTr("Apagar todo o histórico")
             enabled: page.ready && page.sessions.length > 0
             onClicked: forgetAllConfirm.open()
         }
@@ -69,7 +72,7 @@ PageFrame {
 
     Text {
         visible: !page.ready
-        text: "Indisponível: o Core não respondeu ao histórico. Os controles voltam quando a conexão for restabelecida."
+        text: qsTr("Indisponível: o Core não respondeu ao histórico. Os controles voltam quando a conexão for restabelecida.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -79,35 +82,34 @@ PageFrame {
     }
 
     Section {
-        title: "Conversas"
-        caption: "Mais recentes primeiro. Mostramos até 50 aqui."
+        title: qsTr("Conversas")
+        caption: qsTr("Mais recentes primeiro. Mostramos até 50 aqui.")
         PRetentionNote {
             Layout.fillWidth: true
         }
         EmptyState {
             visible: page.sessions.length === 0
             message: page.recording
-                ? "Nenhuma conversa guardada ainda. Use a aba Conversa para começar uma."
-                : "O histórico não é guardado. Mude o prazo em Privacidade para guardar conversas."
+                ? qsTr("Nenhuma conversa guardada ainda. Use a aba Conversa para começar uma.")
+                : qsTr("O histórico não é guardado. Mude o prazo em Privacidade para guardar conversas.")
         }
         Repeater {
             model: page.sessions
             delegate: PItemRow {
                 required property var modelData
                 title: modelData.title
-                detail: modelData.turns + (modelData.turns === 1 ? " mensagem" : " mensagens")
-                    + " · atualizada em " + page.when(modelData.updated_ms)
+                detail: qsTr("%1 · atualizada em %2").arg(page.turnCount(modelData.turns)).arg(page.when(modelData.updated_ms))
                 GButton {
                     objectName: "conversaOpen"
                     variant: "secondary"
-                    text: "Abrir"
+                    text: qsTr("Abrir")
                     enabled: page.ready
                     onClicked: page.openConversation(modelData.id)
                 }
                 GButton {
                     objectName: "conversaRename"
                     variant: "ghost"
-                    text: "Renomear"
+                    text: qsTr("Renomear")
                     enabled: page.ready
                     onClicked: {
                         page.pendingId = modelData.id
@@ -118,7 +120,7 @@ PageFrame {
                 GButton {
                     objectName: "conversaDelete"
                     variant: "danger"
-                    text: "Apagar"
+                    text: qsTr("Apagar")
                     enabled: page.ready
                     onClicked: {
                         page.pendingId = modelData.id
@@ -133,7 +135,7 @@ PageFrame {
     Section {
         visible: page.openSession !== null
         title: page.openSession !== null ? page.openSession.title : ""
-        caption: "Conversa aberta. Somente leitura."
+        caption: qsTr("Conversa aberta. Somente leitura.")
         Repeater {
             model: page.openSession !== null ? page.openSession.turns : []
             delegate: ColumnLayout {
@@ -141,7 +143,7 @@ PageFrame {
                 Layout.fillWidth: true
                 spacing: Theme.space(2)
                 Text {
-                    text: modelData.role === "user" ? "Você · " + page.when(modelData.at_ms) : "Gideon · " + page.when(modelData.at_ms)
+                    text: modelData.role === "user" ? qsTr("Você · %1").arg(page.when(modelData.at_ms)) : qsTr("Gideon · %1").arg(page.when(modelData.at_ms))
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -162,15 +164,15 @@ PageFrame {
         GButton {
             objectName: "conversaClose"
             variant: "ghost"
-            text: "Fechar conversa"
+            text: qsTr("Fechar conversa")
             onClicked: page.selectedId = ""
         }
     }
 
     Section {
         visible: page.exported !== null
-        title: "Textos exportados"
-        caption: "Copie o texto abaixo para guardar um backup. Ele contém suas conversas em texto simples."
+        title: qsTr("Textos exportados")
+        caption: qsTr("Copie o texto abaixo para guardar um backup. Ele contém suas conversas em texto simples.")
         ScrollView {
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(320, exportArea.implicitHeight + Theme.space(16))
@@ -197,8 +199,8 @@ PageFrame {
 
     PConfirm {
         id: deleteConfirm
-        message: "A conversa será apagada do Core. Não é possível desfazer."
-        actionText: "Apagar conversa"
+        message: qsTr("A conversa será apagada do Core. Não é possível desfazer.")
+        actionText: qsTr("Apagar conversa")
         onConfirmed: {
             if (page.selectedId === page.pendingId) page.selectedId = ""
             page.send({op: "delete", revision: page.revision, session_id: page.pendingId})
@@ -206,8 +208,8 @@ PageFrame {
     }
     PConfirm {
         id: forgetAllConfirm
-        message: "Todas as conversas guardadas serão apagadas. Não é possível desfazer."
-        actionText: "Apagar histórico"
+        message: qsTr("Todas as conversas guardadas serão apagadas. Não é possível desfazer.")
+        actionText: qsTr("Apagar histórico")
         onConfirmed: {
             page.selectedId = ""
             page.send({op: "forget_all", revision: page.revision, confirm: true})
@@ -217,7 +219,7 @@ PageFrame {
     Modal {
         id: renameDialog
         objectName: "conversaRenameDialog"
-        title: "Renomear conversa"
+        title: qsTr("Renomear conversa")
         GTextField {
             id: renameText
             objectName: "conversaRenameText"
@@ -227,7 +229,7 @@ PageFrame {
         GButton {
             objectName: "conversaRenameSave"
             variant: "primary"
-            text: "Salvar"
+            text: qsTr("Salvar")
             Layout.alignment: Qt.AlignRight
             onClicked: {
                 page.send({op: "rename", revision: page.revision, session_id: page.pendingId, title: renameText.text})

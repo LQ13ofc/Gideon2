@@ -20,6 +20,18 @@ PageFrame {
     // DIAG-05 formatting: a missing sample reads as a dash, never as zero.
     function cpuText(value) { return value === null || value === undefined ? "—" : Number(value).toFixed(1).replace(".", ",") + " %" }
     function mbText(kb) { return Math.round(Number(kb || 0) / 1024) + " MB" }
+    function requestsText(n) { return n === 1 ? qsTr("%1 pedido").arg(n) : qsTr("%1 pedidos").arg(n) }
+    function processesText(n) { return n === 1 ? qsTr("%1 processo").arg(n) : qsTr("%1 processos").arg(n) }
+    // Versão da Base as the Core's package file reports it (installed packages only).
+    function versionText(pkg) { return pkg.commit ? qsTr("%1 · commit %2").arg(pkg.version).arg(pkg.commit) : String(pkg.version) }
+    // Idioma da interface: the endonym of the language the Core saved (names stay in their own language).
+    function uiLanguageName() {
+        switch (core.uiLanguage) {
+        case "en": return "English"
+        case "fr": return "Français"
+        }
+        return "Português (Brasil)"
+    }
     readonly property string configCode: core.connected ? core.configurationStatus : "offline"
 
     // Últimos erros (§5.6 R-S1): error events newest first, then plugins that failed, then voice engines that failed
@@ -47,9 +59,9 @@ PageFrame {
         for (var j = 0; j < items.length; j++) {
             var p = items[j]
             if (p.state !== "failed" && p.state !== "quarantined") continue
-            add("—", "Plugin", p.last_error ? E.codePhrase(p.last_error) : E.pluginStatePhrase(p.state), p.last_error || p.state)
+            add("—", qsTr("Plugin"), p.last_error ? E.codePhrase(p.last_error) : E.pluginStatePhrase(p.state), p.last_error || p.state)
         }
-        var engines = [{status: wake, kind: "wake_failed", area: "Motores"}, {status: stt, kind: "stt_failed", area: "Voz"}, {status: speech, kind: "tts_failed", area: "Voz"}]
+        var engines = [{status: wake, kind: "wake_failed", area: qsTr("Motores")}, {status: stt, kind: "stt_failed", area: qsTr("Voz")}, {status: speech, kind: "tts_failed", area: qsTr("Voz")}]
         for (var k = 0; k < engines.length; k++) {
             if (engines[k].status !== "failed" || kinds[engines[k].kind]) continue
             add("—", engines[k].area, E.eventPhrase(engines[k].kind, "failed"), engines[k].kind)
@@ -58,8 +70,8 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Estado"
-        subtitle: "Core, configuração, perfil da Base e últimos erros desta sessão."
+        title: qsTr("Estado")
+        subtitle: qsTr("Core, configuração, perfil da Base e últimos erros desta sessão.")
     }
 
     GridLayout {
@@ -69,7 +81,7 @@ PageFrame {
         rowSpacing: Theme.space(24)
 
         Section {
-            title: "Core e configuração"
+            title: qsTr("Core e configuração")
             Layout.alignment: Qt.AlignTop
             RowLayout {
                 Layout.fillWidth: true
@@ -80,16 +92,16 @@ PageFrame {
                     color: core.connected ? Theme.success : Theme.textMuted
                 }
                 Text {
-                    text: core.connected ? "Conectado ao Core" : "Core desconectado"
+                    text: core.connected ? qsTr("Conectado ao Core") : qsTr("Core desconectado")
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontBody
                 }
             }
-            FNote { visible: !core.connected; small: true; text: "Tentando reconectar sozinho (intervalo de 0,5 a 5 s)." }
+            FNote { visible: !core.connected; small: true; text: qsTr("Tentando reconectar sozinho (intervalo de 0,5 a 5 s).") }
             Text {
-                text: "Estado atual: " + (core.connected ? E.sessionPhrase(core.state) : "Core desconectado")
+                text: qsTr("Estado atual: %1").arg(core.connected ? E.sessionPhrase(core.state) : qsTr("Core desconectado"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -97,7 +109,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Sessão de voz: " + (page.sessionActive ? "em andamento" : "nenhuma")
+                text: qsTr("Sessão de voz: %1").arg(page.sessionActive ? qsTr("em andamento") : qsTr("nenhuma"))
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -108,7 +120,7 @@ PageFrame {
                 Layout.fillWidth: true
                 spacing: Theme.space(8)
                 Text {
-                    text: "Configuração:"
+                    text: qsTr("Configuração:")
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -122,21 +134,21 @@ PageFrame {
             FNote {
                 visible: core.connected
                 tone: "muted"
-                text: core.configurationMessage.length > 0 ? core.configurationMessage : "Nenhuma ação pendente"
+                text: core.configurationMessage.length > 0 ? core.configurationMessage : qsTr("Nenhuma ação pendente")
             }
             GButton {
                 visible: page.configCode !== "ready"
                 variant: "secondary"
-                text: "Abrir Recuperação"
+                text: qsTr("Abrir Recuperação")
                 onClicked: Window.window.goPage("diag_recuperacao")
             }
         }
 
         Section {
-            title: "Base e privacidade"
+            title: qsTr("Base e privacidade")
             Layout.alignment: Qt.AlignTop
             Text {
-                text: "Perfil: " + (core.connected ? (E.scopeLabel(page.pack.scope) || "não informado") : "—")
+                text: qsTr("Perfil: %1").arg(core.connected ? (E.scopeLabel(page.pack.scope) || qsTr("não informado")) : "—")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -144,7 +156,7 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Idioma da interface: português"
+                text: qsTr("Idioma da interface: %1").arg(page.uiLanguageName())
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -152,16 +164,16 @@ PageFrame {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Idioma da voz: " + (core.connected ? E.languageLabel(page.pack.language) : "—")
+                text: qsTr("Idioma da voz: %1").arg(core.connected ? E.languageLabel(page.pack.language) : "—")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
                 Layout.fillWidth: true
             }
-            FNote { small: true; text: "Português para voz não está comprovado." }
+            FNote { small: true; text: qsTr("Português para voz não está comprovado.") }
             Text {
-                text: "Pacote de voz: " + (core.connected && page.pack.id ? E.packLabel(page.pack.id) : "—")
+                text: qsTr("Pacote de voz: %1").arg(core.connected && page.pack.id ? E.packLabel(page.pack.id) : "—")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -171,7 +183,7 @@ PageFrame {
             // B5: versão, commit e data de geração lidos do PACKAGE.json do pacote instalado (a raiz do pacote é o pai de app/).
             Text {
                 objectName: "packageVersionText"
-                text: "Versão da Base: " + (core.packageInfo.installed ? core.packageInfo.version + (core.packageInfo.commit ? " · commit " + core.packageInfo.commit : "") : "—")
+                text: qsTr("Versão da Base: %1").arg(core.packageInfo.installed ? page.versionText(core.packageInfo) : "—")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -181,7 +193,7 @@ PageFrame {
             }
             Text {
                 visible: core.packageInfo.installed
-                text: "Pacote gerado em: " + core.packageInfo.built + " · runtime: " + core.packageInfo.runtime
+                text: qsTr("Pacote gerado em: %1 · runtime: %2").arg(core.packageInfo.built).arg(core.packageInfo.runtime)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -189,18 +201,18 @@ PageFrame {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
-            FNote { visible: core.packageInfo.installed && core.packageInfo.dirty; tone: "warn"; small: true; text: "O pacote foi gerado com alterações não commitadas." }
-            FNote { visible: !core.packageInfo.installed; small: true; text: "Não é um pacote instalado: checkout de desenvolvimento, sem PACKAGE.json." }
-            FNote { text: "Sem histórico de conversas. Áudio e legendas ficam só em memória." }
+            FNote { visible: core.packageInfo.installed && core.packageInfo.dirty; tone: "warn"; small: true; text: qsTr("O pacote foi gerado com alterações não commitadas.") }
+            FNote { visible: !core.packageInfo.installed; small: true; text: qsTr("Não é um pacote instalado: checkout de desenvolvimento, sem PACKAGE.json.") }
+            FNote { text: qsTr("Sem histórico de conversas. Áudio e legendas ficam só em memória.") }
             SettingRow {
-                label: "Modo desenvolvedor"
-                help: "Mostra a aba Desenvolvedor, com ferramentas de teste. Não concede permissões."
+                label: qsTr("Modo desenvolvedor")
+                help: qsTr("Mostra a aba Desenvolvedor, com ferramentas de teste. Não concede permissões.")
                 settingKey: "behavior.devMode"
-                disabledReason: page.sessionActive ? "há uma sessão de voz em andamento" : (AppState.uiLive() ? "" : "configurações do app indisponíveis")
+                disabledReason: page.sessionActive ? qsTr("há uma sessão de voz em andamento") : (AppState.uiLive() ? "" : qsTr("configurações do app indisponíveis"))
                 Toggle {
                     id: devToggle
                     objectName: "devModeToggle"
-                    text: checked ? "Ligado" : "Desligado"
+                    text: checked ? qsTr("Ligado") : qsTr("Desligado")
                     checked: AppState.uiGet("behavior.devMode", false) === true
                     onToggled: {
                         if (checked) {
@@ -209,52 +221,52 @@ PageFrame {
                             devConfirm.open()
                         } else {
                             AppState.uiSet("behavior.devMode", false)
-                            AppState.toast("Modo desenvolvedor desligado.")
+                            AppState.toast(qsTr("Modo desenvolvedor desligado."))
                         }
                     }
                 }
             }
-            FNote { visible: page.sessionActive; small: true; text: "Preferências e modo desenvolvedor ficam bloqueados até a sessão terminar." }
+            FNote { visible: page.sessionActive; small: true; text: qsTr("Preferências e modo desenvolvedor ficam bloqueados até a sessão terminar.") }
         }
 
         // DIAG-05: the round trip of the bridge to the Core and the resources of the Core processes (Linux /proc, sampled each second).
         Section {
             objectName: "diagPerformance"
-            title: "Desempenho e recursos"
+            title: qsTr("Desempenho e recursos")
             Layout.alignment: Qt.AlignTop
             EValueRow {
                 objectName: "coreLatencyRow"
-                label: "Resposta do Core"
-                value: core.coreLatency.known ? (core.coreLatency.last_ms + " ms agora · média " + core.coreLatency.average_ms + " ms em " + core.coreLatency.samples + " pedidos") : "ainda sem medidas"
+                label: qsTr("Resposta do Core")
+                value: core.coreLatency.known ? qsTr("%1 ms agora · média %2 ms em %3").arg(core.coreLatency.last_ms).arg(core.coreLatency.average_ms).arg(page.requestsText(core.coreLatency.samples)) : qsTr("ainda sem medidas")
             }
             EValueRow {
                 objectName: "coreResourcesRow"
-                label: "Processo do Core"
-                value: core.diagResources.known ? (page.cpuText(core.diagResources.core_cpu_percent) + " de CPU · " + page.mbText(core.diagResources.core_rss_kb) + " de memória") : "indisponível neste sistema"
+                label: qsTr("Processo do Core")
+                value: core.diagResources.known ? qsTr("%1 de CPU · %2 de memória").arg(page.cpuText(core.diagResources.core_cpu_percent)).arg(page.mbText(core.diagResources.core_rss_kb)) : qsTr("indisponível neste sistema")
             }
             EValueRow {
-                label: "Processos auxiliares"
+                label: qsTr("Processos auxiliares")
                 value: core.diagResources.workers_known === true
-                    ? (core.diagResources.workers_count + " processo(s) · " + page.cpuText(core.diagResources.workers_cpu_percent) + " de CPU · " + page.mbText(core.diagResources.workers_rss_kb) + " de memória")
-                    : "não medido"
+                    ? qsTr("%1 · %2 de CPU · %3 de memória").arg(page.processesText(core.diagResources.workers_count)).arg(page.cpuText(core.diagResources.workers_cpu_percent)).arg(page.mbText(core.diagResources.workers_rss_kb))
+                    : qsTr("não medido")
                 advanced: true
             }
             EValueRow {
-                label: "Esta janela"
-                value: core.diagResources.known ? (page.cpuText(core.diagResources.bridge_cpu_percent) + " de CPU · " + page.mbText(core.diagResources.bridge_rss_kb) + " de memória") : "—"
+                label: qsTr("Esta janela")
+                value: core.diagResources.known ? qsTr("%1 de CPU · %2 de memória").arg(page.cpuText(core.diagResources.bridge_cpu_percent)).arg(page.mbText(core.diagResources.bridge_rss_kb)) : "—"
                 advanced: true
             }
-            FNote { small: true; text: "Medido a cada segundo. CPU é percentual de um núcleo; a primeira leitura ainda não tem CPU." }
+            FNote { small: true; text: qsTr("Medido a cada segundo. CPU é percentual de um núcleo; a primeira leitura ainda não tem CPU.") }
         }
 
         Section {
             Layout.columnSpan: 2
-            title: "Últimos erros"
-            FNote { small: true; text: "Erros desta sessão, mais recentes primeiro. Máximo de 5." }
+            title: qsTr("Últimos erros")
+            FNote { small: true; text: qsTr("Erros desta sessão, mais recentes primeiro. Máximo de 5.") }
             Text {
                 objectName: "lastErrors"
                 visible: !core.connected
-                text: "Sem dados: o Core está desconectado."
+                text: qsTr("Sem dados: o Core está desconectado.")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -266,7 +278,7 @@ PageFrame {
                 Layout.fillWidth: true
                 spacing: Theme.space(12)
                 Text {
-                    text: "Nenhum erro nesta sessão."
+                    text: qsTr("Nenhum erro nesta sessão.")
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -275,7 +287,7 @@ PageFrame {
                 }
                 GButton {
                     variant: "ghost"
-                    text: "Ver Atividade"
+                    text: qsTr("Ver Atividade")
                     onClicked: Window.window.goPage("atividade")
                 }
             }
@@ -286,7 +298,7 @@ PageFrame {
                     Layout.fillWidth: true
                     spacing: 2
                     Text {
-                        text: modelData.time + " · " + modelData.area + " · " + modelData.text
+                        text: qsTr("%1 · %2 · %3").arg(modelData.time).arg(modelData.area).arg(modelData.text)
                         textFormat: Text.PlainText
                         color: Theme.text
                         font.family: Theme.fontFamily
@@ -294,30 +306,30 @@ PageFrame {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
-                    FNote { visible: Theme.advanced; small: true; text: "código: " + modelData.code }
+                    FNote { visible: Theme.advanced; small: true; text: qsTr("código: %1").arg(modelData.code) }
                 }
             }
         }
     }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "O que o Core informou e os erros desta sessão."
+        title: qsTr("Como funciona")
+        summary: qsTr("O que o Core informou e os erros desta sessão.")
         FNote {
             tone: "text"
-            text: "Esta tela mostra fatos do Core e não muda nada. A configuração fica em Configurações; os motores estão na aba Motores. A lista de erros some quando o Core reinicia."
+            text: qsTr("Esta tela mostra fatos do Core e não muda nada. A configuração fica em Configurações; os motores estão na aba Motores. A lista de erros some quando o Core reinicia.")
         }
     }
 
     Modal {
         id: devConfirm
         objectName: "devModeConfirm"
-        title: "Ativar modo desenvolvedor?"
+        title: qsTr("Ativar modo desenvolvedor?")
         standardButtons: Dialog.NoButton
         onOpened: devCancel.forceActiveFocus()
-        onAccepted: { if (AppState.uiSet("behavior.devMode", true)) AppState.toast("Modo desenvolvedor ligado.") }
+        onAccepted: { if (AppState.uiSet("behavior.devMode", true)) AppState.toast(qsTr("Modo desenvolvedor ligado.")) }
         Text {
-            text: "Este modo mostra ferramentas de teste na aba Desenvolvedor: comando de texto de teste, wake de teste, invocação de capacidades de plugin com JSON e identificadores técnicos (versões e hashes). Elas não concedem permissões nem mudam o que o Gideon pode fazer no seu computador. Use somente em desenvolvimento ou teste."
+            text: qsTr("Este modo mostra ferramentas de teste na aba Desenvolvedor: comando de texto de teste, wake de teste, invocação de capacidades de plugin com JSON e identificadores técnicos (versões e hashes). Elas não concedem permissões nem mudam o que o Gideon pode fazer no seu computador. Use somente em desenvolvimento ou teste.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -332,13 +344,13 @@ PageFrame {
             GButton {
                 id: devCancel
                 variant: "secondary"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 onClicked: devConfirm.reject()
             }
             GButton {
                 objectName: "confirmDevMode"
                 variant: "primary"
-                text: "Ativar modo desenvolvedor"
+                text: qsTr("Ativar modo desenvolvedor")
                 onClicked: devConfirm.accept()
             }
         }

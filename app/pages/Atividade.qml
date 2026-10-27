@@ -61,14 +61,14 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Atividade"
-        subtitle: "O que aconteceu nesta sessão, sem conteúdo sensível."
+        title: qsTr("Atividade")
+        subtitle: qsTr("O que aconteceu nesta sessão, sem conteúdo sensível.")
     }
     Banner {
         objectName: "activityStale"
         kind: "warn"
         visible: !core.connected
-        text: "Core desconectado · mostrando a última leitura"
+        text: qsTr("Core desconectado · mostrando a última leitura")
     }
 
     // Count of the rows of this filter, and the filter itself (one segmented control, neutral count).
@@ -78,7 +78,9 @@ PageFrame {
         Text {
             objectName: "activityCount"
             topPadding: 9  // centred on the 36 px filter next to it
-            text: page.rows.length === 0 ? "Nada ainda nesta sessão" : page.rows.length === 1 ? "1 evento nesta sessão" : page.rows.length + " eventos nesta sessão"
+            text: page.rows.length === 0 ? qsTr("Nada ainda nesta sessão")
+                : page.rows.length === 1 ? qsTr("1 evento nesta sessão")
+                : qsTr("%1 eventos nesta sessão").arg(page.rows.length)
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -87,7 +89,7 @@ PageFrame {
         }
         Segmented {
             objectName: "activityFilter"
-            model: [{id: "all", text: "Tudo"}, {id: "cmd", text: "Comandos"}, {id: "skill", text: "Skills"}, {id: "agent", text: "Agente"}, {id: "err", text: "Erros"}]
+            model: [{id: "all", text: qsTr("Tudo")}, {id: "cmd", text: qsTr("Comandos")}, {id: "skill", text: "Skills"}, {id: "agent", text: qsTr("Agente")}, {id: "err", text: qsTr("Erros")}]
             currentId: page.filter
             onActivated: function (id) { page.filter = id }
         }
@@ -98,7 +100,7 @@ PageFrame {
         Layout.fillWidth: true
         spacing: 0
         Accessible.role: Accessible.List
-        Accessible.name: "Linha do tempo da atividade"
+        Accessible.name: qsTr("Linha do tempo da atividade")
         visible: page.rows.length > 0
 
         Repeater {
@@ -153,8 +155,8 @@ PageFrame {
         objectName: "activityEmpty"
         visible: page.rows.length === 0
         iconName: "activity"
-        message: page.filter === "all" ? "Nada ainda nesta sessão." : "Nada neste filtro."
-        actionText: "Ir para Hoje"
+        message: page.filter === "all" ? qsTr("Nada ainda nesta sessão.") : qsTr("Nada neste filtro.")
+        actionText: qsTr("Ir para Hoje")
         onActionRequested: Window.window.goPage("hoje")
     }
 }

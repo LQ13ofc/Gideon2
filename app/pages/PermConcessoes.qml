@@ -20,14 +20,24 @@ PageFrame {
     readonly property int wOrig: 100
     readonly property int wItem: 208
     readonly property int wAcc: 100
-    readonly property int wState: 150
-    readonly property int wAct: 150
-    readonly property int wDate: 104
+    readonly property int wState: 140
+    readonly property int wAct: 176  // wide enough for the longest translated action label
+    readonly property int wDate: 96
     readonly property int minTable: 1080
     readonly property int tableWidth: Math.max(tableScroll.width, minTable)
     readonly property int wPerm: tableWidth - 24 - wNum - wOrig - wItem - wAcc - wDate - wState - wAct
 
-    readonly property var filterNames: ({todas: "Concessões", plugins: "Plugins", skills: "Skills", conexoes: "Conexões"})
+    // Título do filtro (a chave do filtro é o id de AppState, sem texto).
+    function filterLabel(id) {
+        switch (id) {
+        case "plugins": return qsTr("Plugins")
+        case "skills": return qsTr("Skills")
+        case "conexoes": return qsTr("Conexões")
+        }
+        return qsTr("Concessões")
+    }
+    function itemsText(n) { return n === 1 ? qsTr("%1 item").arg(n) : qsTr("%1 itens").arg(n) }
+    function pendingText(n) { return n === 1 ? qsTr("%1 pendente").arg(n) : qsTr("%1 pendentes").arg(n) }
 
     function grantFlags() {
         var voice = core.sessionId.length > 0
@@ -38,7 +48,7 @@ PageFrame {
             connAvailable: core.connectionsAvailable,
             connBusy: core.connectionsBusy,
             skillsOk: core.skillsAvailable,
-            pluginsBlockedTip: !core.connected ? "Core desconectado." : voice ? "Indisponível durante a sessão de voz." : "Indisponível agora."
+            pluginsBlockedTip: !core.connected ? qsTr("Core desconectado.") : voice ? qsTr("Indisponível durante a sessão de voz.") : qsTr("Indisponível agora.")
         }
     }
     readonly property var rows: P.grantRows({hub: core.hubEntries, plugins: core.pluginItems, skills: core.skillsItems,
@@ -62,13 +72,13 @@ PageFrame {
     }
     function actionName(row) {
         switch (row.action.kind) {
-        case "review": return "Revisar permissões de " + row.ref.plugin_id
-        case "revoke": return "Revogar permissões de " + row.ref.plugin_id
-        case "skill": return "Ver em Skills: " + row.item
-        case "consent": return "Consentir escopos de " + row.ref.label
-        case "revokeAccount": return "Revogar acesso da conta " + row.ref.label
-        case "revokeScope": return "Revogar escopo " + row.perm + " da conta " + row.ref.label
-        case "trust": return "Confiar na ferramenta " + row.tool
+        case "review": return qsTr("Revisar permissões de %1").arg(row.ref.plugin_id)
+        case "revoke": return qsTr("Revogar permissões de %1").arg(row.ref.plugin_id)
+        case "skill": return qsTr("Ver em Skills: %1").arg(row.item)
+        case "consent": return qsTr("Consentir escopos de %1").arg(row.ref.label)
+        case "revokeAccount": return qsTr("Revogar acesso da conta %1").arg(row.ref.label)
+        case "revokeScope": return qsTr("Revogar escopo %1 da conta %2").arg(row.perm).arg(row.ref.label)
+        case "trust": return qsTr("Confiar na ferramenta %1").arg(row.tool)
         }
         return row.action.text
     }
@@ -76,14 +86,14 @@ PageFrame {
     DPermDialogs { id: dialogs }
 
     PageHeader {
-        title: "Concessões"
-        subtitle: "Tudo o que plugins, skills e contas podem usar, com a sua decisão."
+        title: qsTr("Concessões")
+        subtitle: qsTr("Tudo o que plugins, skills e contas podem usar, com a sua decisão.")
     }
     Banner {
         objectName: "permBanner"
         kind: core.connected ? "warn" : "error"
-        text: !core.connected ? "Core desconectado. Mostrando o último estado conhecido; nada pode ser alterado."
-            : core.sessionId.length > 0 ? "Sessão de voz ativa: mudanças em plugins bloqueadas." : ""
+        text: !core.connected ? qsTr("Core desconectado. Mostrando o último estado conhecido; nada pode ser alterado.")
+            : core.sessionId.length > 0 ? qsTr("Sessão de voz ativa: mudanças em plugins bloqueadas.") : ""
     }
 
     // A wrapping row: at 600 px the count and the grouping select go to a second line instead of leaving the window.
@@ -92,14 +102,14 @@ PageFrame {
         spacing: Theme.space(12)
         Segmented {
             objectName: "grantFilter"
-            model: [{id: "todas", text: "Todas"}, {id: "plugins", text: "Plugins"}, {id: "skills", text: "Skills"}, {id: "conexoes", text: "Conexões"}]
+            model: [{id: "todas", text: qsTr("Todas")}, {id: "plugins", text: qsTr("Plugins")}, {id: "skills", text: qsTr("Skills")}, {id: "conexoes", text: qsTr("Conexões")}]
             currentId: AppState.permFilter
             onActivated: function (id) { AppState.permFilter = id; AppState.permFocusKey = "" }
         }
         Text {
             objectName: "grantCount"
             topPadding: 9  // centred on the 36 px controls of the row
-            text: page.filtered.length + (page.filtered.length === 1 ? " item" : " itens") + " · " + page.pendingShown + (page.pendingShown === 1 ? " pendente" : " pendentes")
+            text: qsTr("%1 · %2").arg(page.itemsText(page.filtered.length)).arg(page.pendingText(page.pendingShown))
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp
@@ -109,7 +119,7 @@ PageFrame {
             objectName: "grantGroup"
             width: 216
             textRole: "text"; valueRole: "id"
-            model: [{id: "origem", text: "Agrupar por: Origem"}, {id: "item", text: "Agrupar por: Item"}]
+            model: [{id: "origem", text: qsTr("Agrupar por: Origem")}, {id: "item", text: qsTr("Agrupar por: Item")}]
             currentIndex: Math.max(0, indexOfValue(AppState.permGroup))
             onActivated: AppState.permGroup = currentValue
         }
@@ -140,8 +150,8 @@ PageFrame {
                 Layout.preferredHeight: 32
                 spacing: 0
                 Repeater {
-                    model: [{t: "Nº", w: page.wNum}, {t: "Origem", w: page.wOrig}, {t: "Item", w: page.wItem}, {t: "Permissão ou escopo", w: page.wPerm},
-                            {t: "Acesso", w: page.wAcc}, {t: "Concedido em", w: page.wDate}, {t: "Estado", w: page.wState}, {t: "Ação", w: page.wAct}]
+                    model: [{t: qsTr("Nº"), w: page.wNum}, {t: qsTr("Origem"), w: page.wOrig}, {t: qsTr("Item"), w: page.wItem}, {t: qsTr("Permissão ou escopo"), w: page.wPerm},
+                            {t: qsTr("Acesso"), w: page.wAcc}, {t: qsTr("Concedido em"), w: page.wDate}, {t: qsTr("Estado"), w: page.wState}, {t: qsTr("Ação"), w: page.wAct}]
                     delegate: Text {
                         required property var modelData
                         text: modelData.t
@@ -174,7 +184,7 @@ PageFrame {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.left: parent.left
                             anchors.leftMargin: Theme.space(12)
-                            text: line.modelData.header ? line.modelData.text + (line.modelData.count ? " · " + line.modelData.count : "") : ""
+                            text: line.modelData.header ? (line.modelData.count ? qsTr("%1 · %2").arg(line.modelData.text).arg(line.modelData.count) : line.modelData.text) : ""
                             textFormat: Text.PlainText
                             color: Theme.textMuted
                             font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption; font.weight: 600
@@ -191,7 +201,7 @@ PageFrame {
                         color: focused ? Theme.tint : (line.modelData.risk ? Qt.alpha(Theme.error, 0.08) : (rowHover.containsMouse ? Theme.hover : "transparent"))
                         activeFocusOnTab: !line.modelData.header
                         Accessible.role: Accessible.ListItem
-                        Accessible.name: line.modelData.header ? "" : line.modelData.item + ", " + line.modelData.perm + ", " + line.modelData.state.text
+                        Accessible.name: line.modelData.header ? "" : qsTr("%1, %2, %3").arg(line.modelData.item).arg(line.modelData.perm).arg(line.modelData.state.text)
                         Keys.onReturnPressed: page.runAction(line.modelData)
                         Keys.onEnterPressed: page.runAction(line.modelData)
 
@@ -351,14 +361,14 @@ PageFrame {
         objectName: "grantEmptyAll"
         visible: page.rows.length === 0
         iconName: "shield"
-        message: "Nenhum plugin, skill ou conta pede permissão ainda.\nInstale ou conecte em Extensões para ver as permissões aqui."
-        actionText: "Abrir Extensões"
+        message: qsTr("Nenhum plugin, skill ou conta pede permissão ainda.\nInstale ou conecte em Extensões para ver as permissões aqui.")
+        actionText: qsTr("Abrir Extensões")
         onActionRequested: Window.window.goPage("plugins")
     }
     EmptyState {
         objectName: "grantEmptyFilter"
         visible: page.rows.length > 0 && page.filtered.length === 0
         iconName: "shield"
-        message: "Nenhum item em " + (page.filterNames[AppState.permFilter] || "Concessões") + " aqui."
+        message: qsTr("Nenhum item em %1 aqui.").arg(page.filterLabel(AppState.permFilter))
     }
 }

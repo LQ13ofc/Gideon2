@@ -41,15 +41,15 @@ Item {
         var e = liveEntry() || plugin
         if (!e) return ""
         var item = L.pluginFor(core.pluginItems, e.plugin_id)
-        if (e.status === "installed") return item && item.enabled === true ? "instalado · ativo (sandbox, sem rede)" : "instalado (desativado)"
-        if (e.status === "update_available") return "atualização disponível"
-        return "não instalado"
+        if (e.status === "installed") return item && item.enabled === true ? qsTr("instalado · ativo (sandbox, sem rede)") : qsTr("instalado (desativado)")
+        if (e.status === "update_available") return qsTr("atualização disponível")
+        return qsTr("não instalado")
     }
     // Why an action is closed right now (shown as hint and in Accessible.description).
     function pluginBlockedText() {
-        if (!core.connected) return "Core desconectado."
-        if (core.sessionId.length > 0) return "Indisponível durante a sessão de voz."
-        return "Indisponível agora."
+        if (!core.connected) return qsTr("Core desconectado.")
+        if (core.sessionId.length > 0) return qsTr("Indisponível durante a sessão de voz.")
+        return qsTr("Indisponível agora.")
     }
     function accessName(access) { return P.accessText(access) }
     function quarantinedNow() {
@@ -79,7 +79,7 @@ Item {
     Modal {
         id: reviewDlg
         objectName: "permReviewDialog"
-        title: "Revisar permissões"
+        title: qsTr("Revisar permissões")
         standardButtons: Dialog.NoButton
         onOpened: {
             core.beginHubReview()
@@ -88,17 +88,17 @@ Item {
             reviewAck.forceActiveFocus()
         }
         Text {
-            text: host.plugin ? host.plugin.plugin_id + " " + host.plugin.semver + " · " + host.plugin.publisher : ""
+            text: host.plugin ? qsTr("%1 %2 · %3").arg(host.plugin.plugin_id).arg(host.plugin.semver).arg(host.plugin.publisher) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; font.weight: 700
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
-            text: "Estado do plugin: " + host.reviewState()
+            text: qsTr("Estado do plugin: %1").arg(host.reviewState())
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
-            text: "Permissões que este manifesto pede:"
+            text: qsTr("Permissões que este manifesto pede:")
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; font.weight: 600
             Layout.fillWidth: true
         }
@@ -106,32 +106,32 @@ Item {
             model: host.plugin ? host.plugin.permissions : []
             delegate: Text {
                 required property string modelData
-                text: "• " + core.permissionLabel(modelData) + (Theme.advanced ? " (" + modelData + ")" : "")
+                text: Theme.advanced ? qsTr("• %1 (%2)").arg(core.permissionLabel(modelData)).arg(modelData) : qsTr("• %1").arg(core.permissionLabel(modelData))
                 textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
                 wrapMode: Text.WordWrap; Layout.fillWidth: true
             }
         }
         Text {
             visible: host.plugin !== null && (host.plugin.permissions || []).length === 0
-            text: "Nenhuma permissão: aprovar não concede acesso a nada."
+            text: qsTr("Nenhuma permissão: aprovar não concede acesso a nada.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
-            text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."
+            text: qsTr("Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
             visible: Theme.advanced && host.plugin !== null
-            text: host.plugin ? "Manifesto: " + String(host.plugin.manifest_sha256 || "").substring(0, 12) + "…" : ""
+            text: host.plugin ? qsTr("Manifesto: %1…").arg(String(host.plugin.manifest_sha256 || "").substring(0, 12)) : ""
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: "monospace"; font.pixelSize: Theme.fontCaption
             Layout.fillWidth: true
         }
         GCheckbox {
             id: reviewAck
             objectName: "permReviewAck"
-            text: core.hubPublisherVerified ? "Entendo as permissões deste plugin" : "Entendo que o publisher não foi autenticado"
+            text: core.hubPublisherVerified ? qsTr("Entendo as permissões deste plugin") : qsTr("Entendo que o publisher não foi autenticado")
             enabled: core.hubApprovalAvailable
             Accessible.description: core.hubApprovalAvailable ? "" : host.pluginBlockedText()
             Layout.fillWidth: true
@@ -148,16 +148,16 @@ Item {
             Item { Layout.fillWidth: true }
             GButton {
                 objectName: "permReviewClose"
-                text: "Fechar"
+                text: qsTr("Fechar")
                 variant: "secondary"
                 onClicked: reviewDlg.close()
             }
             GButton {
                 objectName: "permApproveButton"
                 variant: "primary"
-                text: host.liveEntry() && host.liveEntry().permissions_approved === true ? "Permissões aprovadas" : "Aprovar estas permissões"
+                text: host.liveEntry() && host.liveEntry().permissions_approved === true ? qsTr("Permissões aprovadas") : qsTr("Aprovar estas permissões")
                 enabled: core.hubApprovalAvailable && reviewAck.checked && host.plugin !== null && !(host.liveEntry() && host.liveEntry().permissions_approved === true)
-                Accessible.name: host.plugin ? "Aprovar permissões de " + host.plugin.plugin_id : "Aprovar permissões"
+                Accessible.name: host.plugin ? qsTr("Aprovar permissões de %1").arg(host.plugin.plugin_id) : qsTr("Aprovar permissões")
                 Accessible.description: enabled ? "" : host.pluginBlockedText()
                 onClicked: {
                     core.approveHub(host.plugin.plugin_id, host.plugin.manifest_sha256, host.plugin.permissions, reviewAck.checked, host.revision)
@@ -177,11 +177,11 @@ Item {
     Modal {
         id: revokeDlg
         objectName: "permRevokeDialog"
-        title: "Revogar permissões"
+        title: qsTr("Revogar permissões")
         standardButtons: Dialog.NoButton
         onOpened: revokeCancel.forceActiveFocus()
         Text {
-            text: host.plugin ? "Revogar permissões de " + host.plugin.plugin_id + "? O plugin será desativado e o processo encerrado. Reativar exige nova aprovação." : ""
+            text: host.plugin ? qsTr("Revogar permissões de %1? O plugin será desativado e o processo encerrado. Reativar exige nova aprovação.").arg(host.plugin.plugin_id) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
@@ -192,16 +192,16 @@ Item {
             GButton {
                 id: revokeCancel
                 objectName: "permRevokeCancel"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 variant: "secondary"
                 onClicked: revokeDlg.close()
             }
             GButton {
                 objectName: "permRevokeConfirm"
                 variant: "danger"
-                text: "Revogar"
+                text: qsTr("Revogar")
                 enabled: core.pluginsAvailable && !!host.plugin && !host.quarantinedNow()
-                Accessible.name: host.plugin ? "Revogar permissões de " + host.plugin.plugin_id : "Revogar permissões"
+                Accessible.name: host.plugin ? qsTr("Revogar permissões de %1").arg(host.plugin.plugin_id) : qsTr("Revogar permissões")
                 Accessible.description: enabled ? "" : host.pluginBlockedText()
                 onClicked: {
                     core.revokePlugin(host.plugin.plugin_id, host.revision)
@@ -215,7 +215,7 @@ Item {
     Modal {
         id: consentDlg
         objectName: "permConsentDialog"
-        title: "Consentir escopos"
+        title: qsTr("Consentir escopos")
         standardButtons: Dialog.NoButton
         onOpened: {
             host.picked = 0
@@ -227,7 +227,7 @@ Item {
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
-            text: "Escolha os escopos que esta conta pode usar. Nada é concedido sem sua marcação."
+            text: qsTr("Escolha os escopos que esta conta pode usar. Nada é concedido sem sua marcação.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
@@ -245,7 +245,7 @@ Item {
                 GCheckbox {
                     id: scopeBox
                     objectName: "permScope_" + scopeRow.modelData
-                    text: scopeRow.info.label + (Theme.advanced ? " (" + scopeRow.modelData + ")" : "")
+                    text: Theme.advanced ? qsTr("%1 (%2)").arg(scopeRow.info.label).arg(scopeRow.modelData) : scopeRow.info.label
                     Layout.fillWidth: true
                     onToggled: host.picked = host.countPicked()
                 }
@@ -258,13 +258,13 @@ Item {
         // Risk line: shown while a risky scope is ticked.
         Text {
             visible: host.picked > 0 && host.riskyPicked().length > 0
-            text: "Escopo " + host.riskyPicked() + ": cada chamada pode pedir aprovação forte."
+            text: qsTr("Escopo %1: cada chamada pode pedir aprovação forte.").arg(host.riskyPicked())
             textFormat: Text.PlainText; color: Theme.warning; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
             visible: host.picked === 0
-            text: "Marque ao menos um escopo."
+            text: qsTr("Marque ao menos um escopo.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp
             Layout.fillWidth: true
         }
@@ -275,14 +275,14 @@ Item {
             GButton {
                 id: consentCancel
                 objectName: "permConsentCancel"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 variant: "secondary"
                 onClicked: consentDlg.close()
             }
             GButton {
                 objectName: "permConsentConfirm"
                 variant: "primary"
-                text: "Consentir escopos marcados"
+                text: qsTr("Consentir escopos marcados")
                 enabled: host.picked > 0 && core.connectionsAvailable && !core.connectionsBusy
                 onClicked: {
                     core.connectionConsent(host.account.id, JSON.stringify(consentDlg.chosen()))
@@ -296,17 +296,17 @@ Item {
     Modal {
         id: revokeAccountDlg
         objectName: "permRevokeAccountDialog"
-        title: "Revogar acesso"
+        title: qsTr("Revogar acesso")
         standardButtons: Dialog.NoButton
         onOpened: revokeAccountCancel.forceActiveFocus()
         Text {
-            text: host.account ? "Revogar o acesso da conta " + host.account.label + " no servidor? Os segredos locais são apagados, todos os escopos concedidos são retirados e as ferramentas MCP precisam de nova confiança. Para usar a conta de novo, conecte e consinta outra vez." : ""
+            text: host.account ? qsTr("Revogar o acesso da conta %1 no servidor? Os segredos locais são apagados, todos os escopos concedidos são retirados e as ferramentas MCP precisam de nova confiança. Para usar a conta de novo, conecte e consinta outra vez.").arg(host.account.label) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
             visible: host.account !== null
-            text: "Escopos que serão retirados: " + (host.account ? (host.grantedLabels(host.account).join(", ") || "nenhum") : "") + "."
+            text: host.account ? qsTr("Escopos que serão retirados: %1.").arg(host.grantedLabels(host.account).join(", ") || qsTr("nenhum")) : ""
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
@@ -317,17 +317,17 @@ Item {
             GButton {
                 id: revokeAccountCancel
                 objectName: "permRevokeAccountCancel"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 variant: "secondary"
                 onClicked: revokeAccountDlg.close()
             }
             GButton {
                 objectName: "permRevokeAccountConfirm"
                 variant: "danger"
-                text: "Revogar acesso"
+                text: qsTr("Revogar acesso")
                 enabled: !!host.liveAccount() && L.connCan(core.connectionsBusy, "revoke", host.liveAccount())
-                Accessible.name: host.account ? "Revogar acesso da conta " + host.account.label : "Revogar acesso"
-                Accessible.description: enabled ? "" : "Conta sem acesso concedido para revogar."
+                Accessible.name: host.account ? qsTr("Revogar acesso da conta %1").arg(host.account.label) : qsTr("Revogar acesso")
+                Accessible.description: enabled ? "" : qsTr("Conta sem acesso concedido para revogar.")
                 onClicked: {
                     core.connectionRevoke(host.account.id)
                     revokeAccountDlg.close()
@@ -340,11 +340,11 @@ Item {
     Modal {
         id: revokeScopeDlg
         objectName: "permRevokeScopeDialog"
-        title: "Revogar escopo"
+        title: qsTr("Revogar escopo")
         standardButtons: Dialog.NoButton
         onOpened: revokeScopeCancel.forceActiveFocus()
         Text {
-            text: host.account ? "Revogar o escopo " + L.connScopeLabel(core.connectionsProviders, host.account.provider, host.scopeId) + " da conta " + host.account.label + "? Chamadas que precisam dele ficam recusadas até você conceder de novo." : ""
+            text: host.account ? qsTr("Revogar o escopo %1 da conta %2? Chamadas que precisam dele ficam recusadas até você conceder de novo.").arg(L.connScopeLabel(core.connectionsProviders, host.account.provider, host.scopeId)).arg(host.account.label) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
@@ -355,16 +355,16 @@ Item {
             GButton {
                 id: revokeScopeCancel
                 objectName: "permRevokeScopeCancel"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 variant: "secondary"
                 onClicked: revokeScopeDlg.close()
             }
             GButton {
                 objectName: "permRevokeScopeConfirm"
                 variant: "danger"
-                text: "Revogar escopo"
+                text: qsTr("Revogar escopo")
                 enabled: !!host.liveAccount() && L.connCan(core.connectionsBusy, "revoke", host.liveAccount()) && host.scopeId.length > 0
-                Accessible.name: "Revogar este escopo"
+                Accessible.name: qsTr("Revogar este escopo")
                 onClicked: {
                     core.connectionRevokeScope(host.account.id, host.scopeId)
                     revokeScopeDlg.close()
@@ -377,11 +377,11 @@ Item {
     Modal {
         id: trustDlg
         objectName: "permTrustDialog"
-        title: "Confiar na ferramenta"
+        title: qsTr("Confiar na ferramenta")
         standardButtons: Dialog.NoButton
         onOpened: trustCancel.forceActiveFocus()
         Text {
-            text: host.account ? "Confiar em " + host.toolName + " do servidor " + host.account.label + "? Cada chamada desta ferramenta ainda pede sua aprovação. A descrição vem do servidor e é só texto." : ""
+            text: host.account ? qsTr("Confiar em %1 do servidor %2? Cada chamada desta ferramenta ainda pede sua aprovação. A descrição vem do servidor e é só texto.").arg(host.toolName).arg(host.account.label) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody
             wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
@@ -392,16 +392,16 @@ Item {
             GButton {
                 id: trustCancel
                 objectName: "permTrustCancel"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 variant: "secondary"
                 onClicked: trustDlg.close()
             }
             GButton {
                 objectName: "permTrustConfirm"
                 variant: "primary"
-                text: "Confiar"
+                text: qsTr("Confiar")
                 enabled: core.connectionsAvailable && !core.connectionsBusy && host.toolName.length > 0
-                Accessible.name: "Confiar na ferramenta " + host.toolName
+                Accessible.name: qsTr("Confiar na ferramenta %1").arg(host.toolName)
                 onClicked: {
                     core.connectionTrustTools(host.account.id, JSON.stringify([host.toolName]))
                     trustDlg.close()

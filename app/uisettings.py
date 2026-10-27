@@ -10,8 +10,31 @@ creates and removes, and the environment switch GIDEON_UI_NO_ONBOARDING=1 that k
 """
 import copy,hashlib,json,math,os,re,shlex,subprocess,tempfile,unicodedata
 from pathlib import Path
-from PySide6.QtCore import QObject,Property,Signal,Slot
-from bridge import CODE_MESSAGES,set_code_detail
+from PySide6.QtCore import QCoreApplication,QObject,Property,QT_TRANSLATE_NOOP,Signal,Slot
+from bridge import code_message,set_code_detail
+
+CONTEXT='UiSettings'
+
+
+def _tr(text,*args):
+    """The text in the active UI language (translations.py); Portuguese when no catalog has it. %1, %2... take `args`."""
+    out=QCoreApplication.translate(CONTEXT,text)
+    for number,value in enumerate(args,1):out=out.replace(f'%{number}',str(value))
+    return out
+
+
+class _Code:
+    """A message that is the Core's text for a code (translated by the bridge, not here)."""
+    def __init__(self,code):self.code=code
+
+
+class _Messages(dict):
+    """Message table: every lookup translates at access time, so a language switch shows the new text."""
+    def __getitem__(self,key):
+        value=dict.__getitem__(self,key)
+        return code_message(value.code) if isinstance(value,_Code) else _tr(value)
+    def get(self,key,default=None):return self[key] if key in self else default
+
 
 SCHEMA_VERSION=1
 FILE_LIMIT=256*1024
@@ -35,40 +58,44 @@ ACTIVE_FILE='active.json'
 # XDG autostart (Desktop Entry spec). The marker line says the file was written by this app; only such a file is removed.
 AUTOSTART_NAME='gideon.desktop'
 AUTOSTART_MARK='X-Gideon-Managed=true'
-AUTOSTART_NO_COMMAND='não foi possível descobrir o comando de inicialização'
+AUTOSTART_NO_COMMAND=QT_TRANSLATE_NOOP("UiSettings",'não foi possível descobrir o comando de inicialização')
 ONBOARDING_ENV='GIDEON_UI_NO_ONBOARDING'
 LAUNCH_ENV='GIDEON_LAUNCH_CMD'
 PLAIN_ARG=re.compile(r'[A-Za-z0-9_./:=@+-]+')
 PROFILE_ARG=re.compile(r'[A-Za-z0-9_.-]{1,64}')
 # Presets (docs/research/ux-temas.md 6.4), values in ROLES order.
 PRESET_ROWS=(
-    ('gideon-escuro','Gideon escuro',('#121417','#1b1f24','#262c33','#7d8794','#e6e9ee','#a7b0bc','#7aa2f7','#0b1020','#6bcb8b','#e8b04b','#f07178','#6cb6ff')),
-    ('gideon-claro','Gideon claro',('#fbfbfd','#ffffff','#eef1f5','#7a8491','#1a1d21','#4b5563','#2f5fd0','#ffffff','#1e7a3f','#8a5a00','#b42318','#1d5fa8')),
-    ('alto-contraste','Alto contraste',('#000000','#0a0a0a','#1a1a1a','#ffffff','#ffffff','#d0d0d0','#ffd400','#000000','#00e676','#ffb300','#ff5252','#40c4ff')),
-    ('escuro-neutro','Escuro neutro',('#232629','#31363b','#3b4045','#7f8c8d','#fcfcfc','#bdc3c7','#3daee9','#0b0f13','#52be80','#f79134','#f58b98','#4bb4eb')),
-    ('claro-neutro','Claro neutro',('#eff0f1','#fcfcfc','#e3e5e7','#7f8c8d','#232629','#4d5358','#1d6fa8','#ffffff','#1d7542','#8a4500','#b3261e','#1c6ba3')),
-    ('escuro-suave','Escuro suave',('#1e1e2e','#313244','#45475a','#7f849c','#cdd6f4','#afb6ce','#89b4fa','#1e1e2e','#a6e3a1','#f9e2af','#f59db5','#89dceb')),
-    ('escuro-frio','Escuro frio',('#2e3440','#3b4252','#434c5e','#939eb2','#eceff4','#d8dee9','#88c0d0','#2e3440','#abc395','#ebcb8b','#eaabb1','#a7bed4')),
-    ('daltonismo-seguro','Daltonismo seguro',('#15171c','#1e2228','#2a2f37','#8a93a0','#edeff2','#b5bcc6','#56b4e9','#000000','#2bb594','#e69f00','#e8753c','#56b4e9')),
+    ('gideon-escuro',QT_TRANSLATE_NOOP("UiSettings",'Gideon escuro'),('#121417','#1b1f24','#262c33','#7d8794','#e6e9ee','#a7b0bc','#7aa2f7','#0b1020','#6bcb8b','#e8b04b','#f07178','#6cb6ff')),
+    ('gideon-claro',QT_TRANSLATE_NOOP("UiSettings",'Gideon claro'),('#fbfbfd','#ffffff','#eef1f5','#7a8491','#1a1d21','#4b5563','#2f5fd0','#ffffff','#1e7a3f','#8a5a00','#b42318','#1d5fa8')),
+    ('alto-contraste',QT_TRANSLATE_NOOP("UiSettings",'Alto contraste'),('#000000','#0a0a0a','#1a1a1a','#ffffff','#ffffff','#d0d0d0','#ffd400','#000000','#00e676','#ffb300','#ff5252','#40c4ff')),
+    ('escuro-neutro',QT_TRANSLATE_NOOP("UiSettings",'Escuro neutro'),('#232629','#31363b','#3b4045','#7f8c8d','#fcfcfc','#bdc3c7','#3daee9','#0b0f13','#52be80','#f79134','#f58b98','#4bb4eb')),
+    ('claro-neutro',QT_TRANSLATE_NOOP("UiSettings",'Claro neutro'),('#eff0f1','#fcfcfc','#e3e5e7','#7f8c8d','#232629','#4d5358','#1d6fa8','#ffffff','#1d7542','#8a4500','#b3261e','#1c6ba3')),
+    ('escuro-suave',QT_TRANSLATE_NOOP("UiSettings",'Escuro suave'),('#1e1e2e','#313244','#45475a','#7f849c','#cdd6f4','#afb6ce','#89b4fa','#1e1e2e','#a6e3a1','#f9e2af','#f59db5','#89dceb')),
+    ('escuro-frio',QT_TRANSLATE_NOOP("UiSettings",'Escuro frio'),('#2e3440','#3b4252','#434c5e','#939eb2','#eceff4','#d8dee9','#88c0d0','#2e3440','#abc395','#ebcb8b','#eaabb1','#a7bed4')),
+    ('daltonismo-seguro',QT_TRANSLATE_NOOP("UiSettings",'Daltonismo seguro'),('#15171c','#1e2228','#2a2f37','#8a93a0','#edeff2','#b5bcc6','#56b4e9','#000000','#2bb594','#e69f00','#e8753c','#56b4e9')),
 )
 PRESETS={ident:{'label':label,'tokens':dict(zip(ROLES,values))} for ident,label,values in PRESET_ROWS}
 PRESET_OPTIONS=[{'value':ident,'label':label} for ident,label,_values in PRESET_ROWS]
-MESSAGES={
-    'unknown_key':'Configuração desconhecida; nada foi alterado',
-    'core_readonly':'Esta opção é do Core: altere-a pela própria tela; nada foi alterado',
-    'contrast':'Cor não atende ao contraste mínimo e não pode ser corrigida; nada foi alterado',
-    'storage':CODE_MESSAGES['preferences_storage_error'],
-    'unavailable':CODE_MESSAGES['preferences_unavailable'],
-    'profile_name':'Nome inválido: use de 1 a 32 letras sem acento, números, espaço, _ ou -; nada foi alterado',
-    'profile_reserved':'Padrão é o perfil inicial: não pode ser criado, renomeado nem excluído; nada foi alterado',
-    'profile_exists':'Já existe um perfil com esse nome; nada foi alterado',
-    'profile_missing':'Perfil não encontrado; nada foi alterado',
-    'profile_active':'O perfil ativo não pode ser excluído: troque de perfil antes; nada foi alterado',
-    'profile_limit':f'Limite de {PROFILE_LIMIT} perfis atingido; exclua um perfil antes',
-    'autostart_foreign':'Já existe um atalho de inicialização que o Gideon não criou; nada foi alterado',
+MESSAGES=_Messages({
+    'unknown_key':QT_TRANSLATE_NOOP("UiSettings",'Configuração desconhecida; nada foi alterado'),
+    'core_readonly':QT_TRANSLATE_NOOP("UiSettings",'Esta opção é do Core: altere-a pela própria tela; nada foi alterado'),
+    'contrast':QT_TRANSLATE_NOOP("UiSettings",'Cor não atende ao contraste mínimo e não pode ser corrigida; nada foi alterado'),
+    'storage':_Code('preferences_storage_error'),
+    'unavailable':_Code('preferences_unavailable'),
+    'profile_name':QT_TRANSLATE_NOOP("UiSettings",'Nome inválido: use de 1 a 32 letras sem acento, números, espaço, _ ou -; nada foi alterado'),
+    'profile_reserved':QT_TRANSLATE_NOOP("UiSettings",'Padrão é o perfil inicial: não pode ser criado, renomeado nem excluído; nada foi alterado'),
+    'profile_exists':QT_TRANSLATE_NOOP("UiSettings",'Já existe um perfil com esse nome; nada foi alterado'),
+    'profile_missing':QT_TRANSLATE_NOOP("UiSettings",'Perfil não encontrado; nada foi alterado'),
+    'profile_active':QT_TRANSLATE_NOOP("UiSettings",'O perfil ativo não pode ser excluído: troque de perfil antes; nada foi alterado'),
+    'profile_limit':QT_TRANSLATE_NOOP("UiSettings",'Limite de %1 perfis atingido; exclua um perfil antes'),
+    'autostart_foreign':QT_TRANSLATE_NOOP("UiSettings",'Já existe um atalho de inicialização que o Gideon não criou; nada foi alterado'),
     'autostart_unavailable':AUTOSTART_NO_COMMAND,
-    'autostart_storage':'Não foi possível gravar o atalho de inicialização; nada foi alterado',
-}
+    'autostart_storage':QT_TRANSLATE_NOOP("UiSettings",'Não foi possível gravar o atalho de inicialização; nada foi alterado'),
+})
+
+
+def _profile_limit():
+    return _tr(dict.__getitem__(MESSAGES,'profile_limit'),PROFILE_LIMIT)
 
 
 def _entry(key,section,subtab,typ,default,label,help_,level='basic',mn=None,mx=None,options=None,restart=False,keywords=(),source='app'):
@@ -81,59 +108,59 @@ def _opts(*pairs):
 
 _APARENCIA='Aparência';_GERAL='Geral';_VOZ='Voz e Wake';_AUDIO='Áudio';_DISPOSITIVOS='Dispositivos'
 SCHEMA=(
-    _entry('theme.mode','Modo','Aparência','enum','system','Modo de cor','Escuro, claro, ou seguir o esquema do sistema.',options=_opts(('system','Seguir o sistema'),('dark','Escuro'),('light','Claro')),keywords=('tema','claro','escuro','dark','light','sistema','modo','cor')),
-    _entry('theme.preset','Modo','Aparência','enum','gideon-escuro','Tema','Conjunto de cores pronto. Os ajustes de cor partem dele.',options=PRESET_OPTIONS,keywords=('tema','paleta','preset','cores')),
-    _entry('theme.accent','Modo','Aparência','color','','Cor de destaque','Cor das ações principais e do foco. Vazio usa a cor do tema.',keywords=('destaque','acento','accent','cor','botao','foco')),
-    _entry('theme.density','Forma e texto','Aparência','float',1.0,'Densidade','Espaço interno de cartões e linhas. 1,00 é o padrão.',mn=0.85,mx=1.25,keywords=('espaco','compacto','densidade','margem')),
-    _entry('theme.radius','Forma e texto','Aparência','int',8,'Raio dos cantos','Arredondamento de cartões e botões, em pixels. 0 deixa quadrado.',mn=0,mx=16,keywords=('canto','arredondado','raio','borda')),
-    _entry('theme.fontSize','Texto','Aparência','int',14,'Tamanho da letra','Tamanho base do texto, em pixels. O restante escala a partir dele.',mn=12,mx=20,keywords=('fonte','texto','letra','tamanho')),
-    _entry('theme.fontFamily','Texto','Aparência','enum','system','Família da fonte','Fontes instaladas no sistema. Não aceita nome livre.',options=_opts(('system','Padrão do sistema'),('sans','Sans-serif instalada'),('serif','Serif instalada')),keywords=('fonte','letra','familia','tipografia')),
-    _entry('theme.contrast','Texto','Aparência','enum','normal','Contraste','Alto contraste exige 7:1 no texto e 3:1 nos componentes.',options=_opts(('normal','Normal'),('high','Alto contraste')),keywords=('contraste','acessivel','legibilidade','alto')),
-    _entry('theme.lineHeight','Texto','Aparência','float',1.5,'Altura da linha','Espaço entre linhas de texto. 1,5 é o padrão.',level='advanced',mn=1.2,mx=1.8,keywords=('linha','espacamento','texto')),
-    _entry('theme.titleWeight','Texto','Aparência','int',700,'Peso do título','Espessura dos títulos de página, de 500 a 800.',level='advanced',mn=500,mx=800,keywords=('negrito','titulo','peso','fonte')),
-    _entry('theme.animation','Movimento e superfícies','Aparência','enum','normal','Animações','Reduzida troca movimento por transições de opacidade.',level='advanced',options=_opts(('off','Desligadas'),('reduced','Reduzidas'),('normal','Normais')),keywords=('animacao','movimento','transicao','reduzir')),
-    _entry('theme.translucency','Movimento e superfícies','Aparência','int',0,'Translucidez','Desfoque do fundo, em pixels. 0 usa superfície opaca.',level='advanced',mn=0,mx=24,keywords=('blur','transparencia','translucidez','vidro')),
-    _entry('theme.shadow','Movimento e superfícies','Aparência','int',30,'Intensidade da sombra','Força da sombra dos cartões, de 0 a 100 por cento.',level='advanced',mn=0,mx=100,keywords=('sombra','profundidade')),
-    _entry('theme.orb','Presença','Aparência','bool',True,'Mostrar o orbe do Gideon','Mostra o indicador de estado do assistente.',keywords=('orbe','indicador','bola','estado')),
-    _entry('theme.orbSize','Presença','Aparência','enum','medium','Tamanho do orbe','Tamanho do indicador de estado do assistente.',options=_opts(('small','Pequeno'),('medium','Médio')),keywords=('orbe','tamanho')),
-    _entry('theme.colors','Cores avançadas','Aparência','json',{},'Cores por papel','Substitui cores por papel. Cada cor passa pela validação de contraste.',level='advanced',keywords=('cor','papel','token','hex','personalizar')),
-    _entry('behavior.startTab','Início','Geral','enum','assistente','Aba ao abrir','Aba mostrada quando o app abre.',options=_opts(('assistente','Assistente'),('extensoes','Extensões'),('permissoes','Permissões'),('configuracoes','Configurações'),('diagnostico','Diagnóstico')),keywords=('inicio','abrir','aba','padrao')),
-    _entry('behavior.rememberWindow','Janela','Geral','bool',True,'Lembrar tamanho e posição da janela','Reabre a janela onde foi fechada.',keywords=('janela','tamanho','posicao')),
+    _entry('theme.mode','Modo','Aparência','enum','system',QT_TRANSLATE_NOOP("UiSettings",'Modo de cor'),QT_TRANSLATE_NOOP("UiSettings",'Escuro, claro, ou seguir o esquema do sistema.'),options=_opts(('system',QT_TRANSLATE_NOOP("UiSettings",'Seguir o sistema')),('dark',QT_TRANSLATE_NOOP("UiSettings",'Escuro')),('light',QT_TRANSLATE_NOOP("UiSettings",'Claro'))),keywords=('tema','claro','escuro','dark','light','sistema','modo','cor')),
+    _entry('theme.preset','Modo','Aparência','enum','gideon-escuro',QT_TRANSLATE_NOOP("UiSettings",'Tema'),QT_TRANSLATE_NOOP("UiSettings",'Conjunto de cores pronto. Os ajustes de cor partem dele.'),options=PRESET_OPTIONS,keywords=('tema','paleta','preset','cores')),
+    _entry('theme.accent','Modo','Aparência','color','',QT_TRANSLATE_NOOP("UiSettings",'Cor de destaque'),QT_TRANSLATE_NOOP("UiSettings",'Cor das ações principais e do foco. Vazio usa a cor do tema.'),keywords=('destaque','acento','accent','cor','botao','foco')),
+    _entry('theme.density','Forma e texto','Aparência','float',1.0,QT_TRANSLATE_NOOP("UiSettings",'Densidade'),QT_TRANSLATE_NOOP("UiSettings",'Espaço interno de cartões e linhas. 1,00 é o padrão.'),mn=0.85,mx=1.25,keywords=('espaco','compacto','densidade','margem')),
+    _entry('theme.radius','Forma e texto','Aparência','int',8,QT_TRANSLATE_NOOP("UiSettings",'Raio dos cantos'),QT_TRANSLATE_NOOP("UiSettings",'Arredondamento de cartões e botões, em pixels. 0 deixa quadrado.'),mn=0,mx=16,keywords=('canto','arredondado','raio','borda')),
+    _entry('theme.fontSize','Texto','Aparência','int',14,QT_TRANSLATE_NOOP("UiSettings",'Tamanho da letra'),QT_TRANSLATE_NOOP("UiSettings",'Tamanho base do texto, em pixels. O restante escala a partir dele.'),mn=12,mx=20,keywords=('fonte','texto','letra','tamanho')),
+    _entry('theme.fontFamily','Texto','Aparência','enum','system',QT_TRANSLATE_NOOP("UiSettings",'Família da fonte'),QT_TRANSLATE_NOOP("UiSettings",'Fontes instaladas no sistema. Não aceita nome livre.'),options=_opts(('system',QT_TRANSLATE_NOOP("UiSettings",'Padrão do sistema')),('sans',QT_TRANSLATE_NOOP("UiSettings",'Sans-serif instalada')),('serif',QT_TRANSLATE_NOOP("UiSettings",'Serif instalada'))),keywords=('fonte','letra','familia','tipografia')),
+    _entry('theme.contrast','Texto','Aparência','enum','normal',QT_TRANSLATE_NOOP("UiSettings",'Contraste'),QT_TRANSLATE_NOOP("UiSettings",'Alto contraste exige 7:1 no texto e 3:1 nos componentes.'),options=_opts(('normal',QT_TRANSLATE_NOOP("UiSettings",'Normal')),('high',QT_TRANSLATE_NOOP("UiSettings",'Alto contraste'))),keywords=('contraste','acessivel','legibilidade','alto')),
+    _entry('theme.lineHeight','Texto','Aparência','float',1.5,QT_TRANSLATE_NOOP("UiSettings",'Altura da linha'),QT_TRANSLATE_NOOP("UiSettings",'Espaço entre linhas de texto. 1,5 é o padrão.'),level='advanced',mn=1.2,mx=1.8,keywords=('linha','espacamento','texto')),
+    _entry('theme.titleWeight','Texto','Aparência','int',700,QT_TRANSLATE_NOOP("UiSettings",'Peso do título'),QT_TRANSLATE_NOOP("UiSettings",'Espessura dos títulos de página, de 500 a 800.'),level='advanced',mn=500,mx=800,keywords=('negrito','titulo','peso','fonte')),
+    _entry('theme.animation','Movimento e superfícies','Aparência','enum','normal',QT_TRANSLATE_NOOP("UiSettings",'Animações'),QT_TRANSLATE_NOOP("UiSettings",'Reduzida troca movimento por transições de opacidade.'),level='advanced',options=_opts(('off',QT_TRANSLATE_NOOP("UiSettings",'Desligadas')),('reduced',QT_TRANSLATE_NOOP("UiSettings",'Reduzidas')),('normal',QT_TRANSLATE_NOOP("UiSettings",'Normais'))),keywords=('animacao','movimento','transicao','reduzir')),
+    _entry('theme.translucency','Movimento e superfícies','Aparência','int',0,QT_TRANSLATE_NOOP("UiSettings",'Translucidez'),QT_TRANSLATE_NOOP("UiSettings",'Desfoque do fundo, em pixels. 0 usa superfície opaca.'),level='advanced',mn=0,mx=24,keywords=('blur','transparencia','translucidez','vidro')),
+    _entry('theme.shadow','Movimento e superfícies','Aparência','int',30,QT_TRANSLATE_NOOP("UiSettings",'Intensidade da sombra'),QT_TRANSLATE_NOOP("UiSettings",'Força da sombra dos cartões, de 0 a 100 por cento.'),level='advanced',mn=0,mx=100,keywords=('sombra','profundidade')),
+    _entry('theme.orb','Presença','Aparência','bool',True,QT_TRANSLATE_NOOP("UiSettings",'Mostrar o orbe do Gideon'),QT_TRANSLATE_NOOP("UiSettings",'Mostra o indicador de estado do assistente.'),keywords=('orbe','indicador','bola','estado')),
+    _entry('theme.orbSize','Presença','Aparência','enum','medium',QT_TRANSLATE_NOOP("UiSettings",'Tamanho do orbe'),QT_TRANSLATE_NOOP("UiSettings",'Tamanho do indicador de estado do assistente.'),options=_opts(('small',QT_TRANSLATE_NOOP("UiSettings",'Pequeno')),('medium',QT_TRANSLATE_NOOP("UiSettings",'Médio'))),keywords=('orbe','tamanho')),
+    _entry('theme.colors','Cores avançadas','Aparência','json',{},QT_TRANSLATE_NOOP("UiSettings",'Cores por papel'),QT_TRANSLATE_NOOP("UiSettings",'Substitui cores por papel. Cada cor passa pela validação de contraste.'),level='advanced',keywords=('cor','papel','token','hex','personalizar')),
+    _entry('behavior.startTab','Início','Geral','enum','assistente',QT_TRANSLATE_NOOP("UiSettings",'Aba ao abrir'),QT_TRANSLATE_NOOP("UiSettings",'Aba mostrada quando o app abre.'),options=_opts(('assistente',QT_TRANSLATE_NOOP("UiSettings",'Assistente')),('extensoes',QT_TRANSLATE_NOOP("UiSettings",'Extensões')),('permissoes',QT_TRANSLATE_NOOP("UiSettings",'Permissões')),('configuracoes',QT_TRANSLATE_NOOP("UiSettings",'Configurações')),('diagnostico',QT_TRANSLATE_NOOP("UiSettings",'Diagnóstico'))),keywords=('inicio','abrir','aba','padrao')),
+    _entry('behavior.rememberWindow','Janela','Geral','bool',True,QT_TRANSLATE_NOOP("UiSettings",'Lembrar tamanho e posição da janela'),QT_TRANSLATE_NOOP("UiSettings",'Reabre a janela onde foi fechada.'),keywords=('janela','tamanho','posicao')),
     # WP-17: push-to-talk through the global shortcut (portal GlobalShortcuts). Off by default; the switch asks for consent.
-    _entry('shortcut.pushToTalk','Atalhos','Geral','bool',False,'Pressionar para falar com atalho global','Um atalho do sistema inicia a escuta. Desligado por padrão; ligar pede consentimento.',keywords=('atalho','global','falar','pressionar','escuta')),
-    _entry('shortcut.pushToTalkTrigger','Atalhos','Geral','string','CTRL+ALT+G','Atalho sugerido','Combinação registrada no portal de atalhos (ex.: CTRL+ALT+G). O sistema pode trocá-la.',keywords=('atalho','combinacao','tecla')),
-    _entry('behavior.tips','Ajuda','Geral','bool',True,'Mostrar dicas','Exibe dicas curtas nas telas.',keywords=('dica','ajuda')),
-    _entry('behavior.shortcuts','Ajuda','Geral','bool',True,'Atalhos de teclado','Liga os atalhos de teclado neste app.',keywords=('atalho','teclado','ctrl')),
-    _entry('behavior.advanced','Opções','Geral','bool',False,'Mostrar opções avançadas','Revela opções avançadas em todas as telas. Não altera valores.',keywords=('avancado','opcoes','avancadas','detalhe')),
+    _entry('shortcut.pushToTalk','Atalhos','Geral','bool',False,QT_TRANSLATE_NOOP("UiSettings",'Pressionar para falar com atalho global'),QT_TRANSLATE_NOOP("UiSettings",'Um atalho do sistema inicia a escuta. Desligado por padrão; ligar pede consentimento.'),keywords=('atalho','global','falar','pressionar','escuta')),
+    _entry('shortcut.pushToTalkTrigger','Atalhos','Geral','string','CTRL+ALT+G',QT_TRANSLATE_NOOP("UiSettings",'Atalho sugerido'),QT_TRANSLATE_NOOP("UiSettings",'Combinação registrada no portal de atalhos (ex.: CTRL+ALT+G). O sistema pode trocá-la.'),keywords=('atalho','combinacao','tecla')),
+    _entry('behavior.tips','Ajuda','Geral','bool',True,QT_TRANSLATE_NOOP("UiSettings",'Mostrar dicas'),QT_TRANSLATE_NOOP("UiSettings",'Exibe dicas curtas nas telas.'),keywords=('dica','ajuda')),
+    _entry('behavior.shortcuts','Ajuda','Geral','bool',True,QT_TRANSLATE_NOOP("UiSettings",'Atalhos de teclado'),QT_TRANSLATE_NOOP("UiSettings",'Liga os atalhos de teclado neste app.'),keywords=('atalho','teclado','ctrl')),
+    _entry('behavior.advanced','Opções','Geral','bool',False,QT_TRANSLATE_NOOP("UiSettings",'Mostrar opções avançadas'),QT_TRANSLATE_NOOP("UiSettings",'Revela opções avançadas em todas as telas. Não altera valores.'),keywords=('avancado','opcoes','avancadas','detalhe')),
     # DIAG-02: the developer mode is the Core preference preferences.developer_mode (src/storage.rs); every page reads it from there.
-    _entry('behavior.devMode','Opções','Geral','bool',False,'Modo desenvolvedor','Mostra ferramentas de desenvolvimento em Diagnóstico.',level='dev',keywords=('desenvolvedor','dev','debug','teste'),source='core'),
-    _entry('behavior.onboardingDone','Introdução','Geral','bool',False,'Introdução concluída','Marca que a primeira execução guiada já foi vista neste perfil. Refazer fica em Geral.',level='advanced',keywords=('introducao','onboarding','primeira','execucao','guia','boas-vindas')),
-    _entry('behavior.toastSeconds','Avisos','Geral','int',4,'Duração dos avisos','Tempo, em segundos, que um aviso fica na tela.',mn=2,mx=10,keywords=('aviso','toast','mensagem','segundos')),
-    _entry('behavior.confirmWrites','Avisos','Geral','bool',True,'Confirmar ações que gravam','Pede confirmação antes de ações que gravam dados.',keywords=('confirmar','gravar','salvar','confirmacao')),
-    _entry('behavior.reduceMotionFollowSystem','Movimento','Geral','bool',False,'Seguir a preferência de movimento do sistema','Reduz animações quando o sistema pede menos movimento (GNOME: animações desligadas).',level='advanced',keywords=('movimento','reduzir','sistema','animacao')),
-    _entry('perf.lowPower','Desempenho','Geral','bool',False,'Modo econômico','Desliga animações e translucidez e reduz sombras. Vale na hora.',keywords=('economico','bateria','desempenho','energia','animacao','sombra','lento')),
-    _entry('core.wakePhrase','Frase de despertar',_VOZ,'enum','','Frase de despertar','Só frases certificadas do pacote. A troca vale depois de reiniciar o Core.',restart=True,keywords=('wake','frase','despertar','hey gideon','ativacao'),source='core'),
-    _entry('core.sessionTimeoutMs','Sessão',_VOZ,'int',30000,'Prazo da sessão (ms)','Tempo máximo de uma sessão de voz, em milissegundos. Vale na próxima sessão.',level='advanced',mn=50,mx=60000,keywords=('prazo','timeout','sessao','tempo','segundos'),source='core'),
-    _entry('core.wakeSensitivity','Detecção',_VOZ,'float',1.0,'Sensibilidade do wake','Ajusta o limiar do detector. Efeito acústico ainda não validado com microfone real.',mn=0.5,mx=1.5,keywords=('sensibilidade','sensivel','limiar','wake','detector','intensidade','despertar'),source='core'),
-    _entry('voice.partials','Transcrição',_VOZ,'bool',True,'Mostrar transcrição parcial','Mostra o texto enquanto você fala.',keywords=('parcial','transcricao','ao vivo','legenda')),
-    _entry('voice.showConfidence','Transcrição',_VOZ,'bool',False,'Mostrar confiança da transcrição','Exibe a confiança numérica de cada transcrição.',level='advanced',keywords=('confianca','transcricao','numero')),
-    _entry('core.responseGain','Volume',_AUDIO,'int',100,'Ganho da resposta por voz','Volume da resposta na saída virtual. 0 por cento é mudo; não altera o volume do sistema.',mn=0,mx=100,keywords=('volume','ganho','resposta','mudo','saida'),source='core'),
-    _entry('core.audibleFeedback','Resposta',_AUDIO,'bool',True,'Resposta por voz','Gideon responde em voz alta. Vale a partir da próxima sessão.',keywords=('resposta','voz','audio','falar','som'),source='core'),
+    _entry('behavior.devMode','Opções','Geral','bool',False,QT_TRANSLATE_NOOP("UiSettings",'Modo desenvolvedor'),QT_TRANSLATE_NOOP("UiSettings",'Mostra ferramentas de desenvolvimento em Diagnóstico.'),level='dev',keywords=('desenvolvedor','dev','debug','teste'),source='core'),
+    _entry('behavior.onboardingDone','Introdução','Geral','bool',False,QT_TRANSLATE_NOOP("UiSettings",'Introdução concluída'),QT_TRANSLATE_NOOP("UiSettings",'Marca que a primeira execução guiada já foi vista neste perfil. Refazer fica em Geral.'),level='advanced',keywords=('introducao','onboarding','primeira','execucao','guia','boas-vindas')),
+    _entry('behavior.toastSeconds','Avisos','Geral','int',4,QT_TRANSLATE_NOOP("UiSettings",'Duração dos avisos'),QT_TRANSLATE_NOOP("UiSettings",'Tempo, em segundos, que um aviso fica na tela.'),mn=2,mx=10,keywords=('aviso','toast','mensagem','segundos')),
+    _entry('behavior.confirmWrites','Avisos','Geral','bool',True,QT_TRANSLATE_NOOP("UiSettings",'Confirmar ações que gravam'),QT_TRANSLATE_NOOP("UiSettings",'Pede confirmação antes de ações que gravam dados.'),keywords=('confirmar','gravar','salvar','confirmacao')),
+    _entry('behavior.reduceMotionFollowSystem','Movimento','Geral','bool',False,QT_TRANSLATE_NOOP("UiSettings",'Seguir a preferência de movimento do sistema'),QT_TRANSLATE_NOOP("UiSettings",'Reduz animações quando o sistema pede menos movimento (GNOME: animações desligadas).'),level='advanced',keywords=('movimento','reduzir','sistema','animacao')),
+    _entry('perf.lowPower','Desempenho','Geral','bool',False,QT_TRANSLATE_NOOP("UiSettings",'Modo econômico'),QT_TRANSLATE_NOOP("UiSettings",'Desliga animações e translucidez e reduz sombras. Vale na hora.'),keywords=('economico','bateria','desempenho','energia','animacao','sombra','lento')),
+    _entry('core.wakePhrase','Frase de despertar',_VOZ,'enum','',QT_TRANSLATE_NOOP("UiSettings",'Frase de despertar'),QT_TRANSLATE_NOOP("UiSettings",'Só frases certificadas do pacote. A troca vale depois de reiniciar o Core.'),restart=True,keywords=('wake','frase','despertar','hey gideon','ativacao'),source='core'),
+    _entry('core.sessionTimeoutMs','Sessão',_VOZ,'int',30000,QT_TRANSLATE_NOOP("UiSettings",'Prazo da sessão (ms)'),QT_TRANSLATE_NOOP("UiSettings",'Tempo máximo de uma sessão de voz, em milissegundos. Vale na próxima sessão.'),level='advanced',mn=50,mx=60000,keywords=('prazo','timeout','sessao','tempo','segundos'),source='core'),
+    _entry('core.wakeSensitivity','Detecção',_VOZ,'float',1.0,QT_TRANSLATE_NOOP("UiSettings",'Sensibilidade do wake'),QT_TRANSLATE_NOOP("UiSettings",'Ajusta o limiar do detector. Efeito acústico ainda não validado com microfone real.'),mn=0.5,mx=1.5,keywords=('sensibilidade','sensivel','limiar','wake','detector','intensidade','despertar'),source='core'),
+    _entry('voice.partials','Transcrição',_VOZ,'bool',True,QT_TRANSLATE_NOOP("UiSettings",'Mostrar transcrição parcial'),QT_TRANSLATE_NOOP("UiSettings",'Mostra o texto enquanto você fala.'),keywords=('parcial','transcricao','ao vivo','legenda')),
+    _entry('voice.showConfidence','Transcrição',_VOZ,'bool',False,QT_TRANSLATE_NOOP("UiSettings",'Mostrar confiança da transcrição'),QT_TRANSLATE_NOOP("UiSettings",'Exibe a confiança numérica de cada transcrição.'),level='advanced',keywords=('confianca','transcricao','numero')),
+    _entry('core.responseGain','Volume',_AUDIO,'int',100,QT_TRANSLATE_NOOP("UiSettings",'Ganho da resposta por voz'),QT_TRANSLATE_NOOP("UiSettings",'Volume da resposta na saída virtual. 0 por cento é mudo; não altera o volume do sistema.'),mn=0,mx=100,keywords=('volume','ganho','resposta','mudo','saida'),source='core'),
+    _entry('core.audibleFeedback','Resposta',_AUDIO,'bool',True,QT_TRANSLATE_NOOP("UiSettings",'Resposta por voz'),QT_TRANSLATE_NOOP("UiSettings",'Gideon responde em voz alta. Vale a partir da próxima sessão.'),keywords=('resposta','voz','audio','falar','som'),source='core'),
     # Device choices come from the Core's audio_devices list (build_schema); the static option is the system default.
-    _entry('core.audioInput','Entrada',_DISPOSITIVOS,'enum','default','Microfone (entrada)','Dispositivo de captura da escuta ao vivo. Vale na próxima sessão de voz.',options=_opts(('default','Padrão do sistema')),keywords=('microfone','mic','entrada','captura','dispositivo','input'),source='core'),
-    _entry('core.inputConditioning','Entrada',_DISPOSITIVOS,'bool',True,'Melhorar sinal do microfone (automático)','Filtra graves e a componente contínua só para o detector de wake. A fala gravada e a transcrição não mudam. Medido com ruído real do microfone (docs/A9-wake-real-noise.md). Vale na próxima sessão de voz.',keywords=('microfone','ruido','sinal','filtro','graves','wake','deteccao','automatico','melhorar','sinal'),source='core'),
-    _entry('core.audioOutput','Saída',_DISPOSITIVOS,'enum','default','Alto-falante (saída)','Dispositivo de reprodução da resposta por voz. Vale na próxima sessão de voz.',options=_opts(('default','Padrão do sistema')),keywords=('alto-falante','saida','reproducao','dispositivo','output','speaker','som'),source='core'),
-    _entry('audio.cues','Sinais',_AUDIO,'bool',True,'Sons de início e fim','Toca um sinal ao começar e terminar a escuta.',keywords=('som','sinal','bip','cues','escuta')),
-    _entry('core.visualFeedback','Indicadores',_APARENCIA,'bool',True,'Indicador visual de atividade','Mostra o estado do Gideon na tela. Vale a partir da próxima sessão.',keywords=('indicador','visual','atividade','estado'),source='core'),
+    _entry('core.audioInput','Entrada',_DISPOSITIVOS,'enum','default',QT_TRANSLATE_NOOP("UiSettings",'Microfone (entrada)'),QT_TRANSLATE_NOOP("UiSettings",'Dispositivo de captura da escuta ao vivo. Vale na próxima sessão de voz.'),options=_opts(('default',QT_TRANSLATE_NOOP("UiSettings",'Padrão do sistema'))),keywords=('microfone','mic','entrada','captura','dispositivo','input'),source='core'),
+    _entry('core.inputConditioning','Entrada',_DISPOSITIVOS,'bool',True,QT_TRANSLATE_NOOP("UiSettings",'Melhorar sinal do microfone (automático)'),QT_TRANSLATE_NOOP("UiSettings",'Filtra graves e a componente contínua só para o detector de wake. A fala gravada e a transcrição não mudam. Medido com ruído real do microfone (docs/A9-wake-real-noise.md). Vale na próxima sessão de voz.'),keywords=('microfone','ruido','sinal','filtro','graves','wake','deteccao','automatico','melhorar','sinal'),source='core'),
+    _entry('core.audioOutput','Saída',_DISPOSITIVOS,'enum','default',QT_TRANSLATE_NOOP("UiSettings",'Alto-falante (saída)'),QT_TRANSLATE_NOOP("UiSettings",'Dispositivo de reprodução da resposta por voz. Vale na próxima sessão de voz.'),options=_opts(('default',QT_TRANSLATE_NOOP("UiSettings",'Padrão do sistema'))),keywords=('alto-falante','saida','reproducao','dispositivo','output','speaker','som'),source='core'),
+    _entry('audio.cues','Sinais',_AUDIO,'bool',True,QT_TRANSLATE_NOOP("UiSettings",'Sons de início e fim'),QT_TRANSLATE_NOOP("UiSettings",'Toca um sinal ao começar e terminar a escuta.'),keywords=('som','sinal','bip','cues','escuta')),
+    _entry('core.visualFeedback','Indicadores',_APARENCIA,'bool',True,QT_TRANSLATE_NOOP("UiSettings",'Indicador visual de atividade'),QT_TRANSLATE_NOOP("UiSettings",'Mostra o estado do Gideon na tela. Vale a partir da próxima sessão.'),keywords=('indicador','visual','atividade','estado'),source='core'),
 )
 # CFG-06: the Idiomas sub-tab (app/pages/CfgIdiomas.qml) is Core-backed and has no schema row, so search could not reach it.
 # These entries are search-only: no value, no default, no QML row and never in SPECS. A result opens the sub-tab
 # (CfgSettings.js maps the subtab label 'Idiomas' to cfg_idiomas).
 NAV_ENTRIES=(
-    {'key':'lang.stt','label':'Idiomas de transcrição (STT)','section':'Idioma','subtab':'Idiomas','help':'Idiomas que o Gideon entende ao ouvir. Só idiomas instalados podem ser escolhidos.','keywords':['idioma','idiomas','transcricao','reconhecimento','stt','ouvir','fala','lingua']},
-    {'key':'lang.tts','label':'Idioma da resposta em voz (TTS)','section':'Idioma','subtab':'Idiomas','help':'Idioma em que o Gideon fala. Vale no próximo início do Core.','keywords':['idioma','idiomas','voz','resposta','tts','falar','lingua']},
-    {'key':'lang.voice','label':'Voz da resposta em idioma','section':'Idioma','subtab':'Idiomas','help':'Voz usada na resposta em voz. Só vozes instaladas podem ser escolhidas.','keywords':['voz','voice','idioma','tts']},
-    {'key':'lang.install','label':'Instalar idioma','section':'Idioma','subtab':'Idiomas','help':'A instalação depende da aprovação do download pelo dono; hoje fica indisponível.','keywords':['instalar','download','baixar','idioma','pacote']},
+    {'key':'lang.stt','label':QT_TRANSLATE_NOOP("UiSettings",'Idiomas de transcrição (STT)'),'section':'Idioma','subtab':'Idiomas','help':QT_TRANSLATE_NOOP("UiSettings",'Idiomas que o Gideon entende ao ouvir. Só idiomas instalados podem ser escolhidos.'),'keywords':['idioma','idiomas','transcricao','reconhecimento','stt','ouvir','fala','lingua']},
+    {'key':'lang.tts','label':QT_TRANSLATE_NOOP("UiSettings",'Idioma da resposta em voz (TTS)'),'section':'Idioma','subtab':'Idiomas','help':QT_TRANSLATE_NOOP("UiSettings",'Idioma em que o Gideon fala. Vale no próximo início do Core.'),'keywords':['idioma','idiomas','voz','resposta','tts','falar','lingua']},
+    {'key':'lang.voice','label':QT_TRANSLATE_NOOP("UiSettings",'Voz da resposta em idioma'),'section':'Idioma','subtab':'Idiomas','help':QT_TRANSLATE_NOOP("UiSettings",'Voz usada na resposta em voz. Só vozes instaladas podem ser escolhidas.'),'keywords':['voz','voice','idioma','tts']},
+    {'key':'lang.install','label':QT_TRANSLATE_NOOP("UiSettings",'Instalar idioma'),'section':'Idioma','subtab':'Idiomas','help':QT_TRANSLATE_NOOP("UiSettings",'A instalação depende da aprovação do download pelo dono; hoje fica indisponível.'),'keywords':['instalar','download','baixar','idioma','pacote']},
 )
 SPECS={spec['key']:spec for spec in SCHEMA}
 APP_KEYS=tuple(k for k,spec in SPECS.items() if spec['source']=='app')
@@ -193,7 +220,7 @@ def validate_tokens(tokens,high=False):
     for role in ROLES:
         color=parse_color(tokens.get(role,fallback[role]))
         if color is None:
-            errors.append(f'Cor inválida no papel {role}');color=fallback[role]
+            errors.append(_tr(QT_TRANSLATE_NOOP("UiSettings",'Cor inválida no papel %1'),role));color=fallback[role]
         colors[role]=color
     fixes=[]
     pairs=[('accent','bg',3.0),('accent','surface',3.0),('outline','surface',3.0)]+[(fg,bg,text_min) for fg in TEXT_FOREGROUNDS for bg in TEXT_BACKGROUNDS]+[('onAccent','accent',text_min)]
@@ -206,7 +233,7 @@ def validate_tokens(tokens,high=False):
             if contrast_ratio(candidate,colors[bg])>=minimum:
                 found=candidate;break
         if found is None:
-            errors.append(f'{fg} sobre {bg}: contraste {before:.2f}:1, mínimo {minimum:g}:1, sem correção possível');continue
+            errors.append(_tr(QT_TRANSLATE_NOOP("UiSettings",'%1 sobre %2: contraste %3:1, mínimo %4:1, sem correção possível'),fg,bg,f'{before:.2f}',f'{minimum:g}'));continue
         fixes.append({'token':fg,'from':colors[fg],'to':found,'ratio_before':round(before,2),'ratio_after':round(contrast_ratio(found,colors[bg]),2),'against':bg,'minimum':minimum})
         colors[fg]=found
     return {'ok':not errors,'fixes':fixes,'errors':errors,'tokens':{**colors,**derived(colors)}}
@@ -240,7 +267,7 @@ def enforce(values):
     else:
         result=validate_tokens(effective_tokens(values),high)
     errors=list(result['errors'])
-    if not errors and result['fixes']:errors.append('Correção de contraste não estabilizou')
+    if not errors and result['fixes']:errors.append(_tr(QT_TRANSLATE_NOOP("UiSettings",'Correção de contraste não estabilizou')))
     if values.get('theme.colors')=={}:values.pop('theme.colors')
     return values,fixes,errors
 
@@ -257,45 +284,88 @@ def coerce(spec,value,options=None):
     """(value, None) when valid, else (None, reason). `options` overrides the schema options (wake phrases come from the pack)."""
     typ=spec['type'];key=spec['key']
     if typ=='bool':
-        return (value,None) if type(value) is bool else (None,'use verdadeiro ou falso')
+        return (value,None) if type(value) is bool else (None,_tr(QT_TRANSLATE_NOOP("UiSettings",'use verdadeiro ou falso')))
     if typ in ('int','float'):
-        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value):return None,'use um número'
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value):return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'use um número'))
         if typ=='int':
-            if isinstance(value,float) and not value.is_integer():return None,'use um número inteiro'
+            if isinstance(value,float) and not value.is_integer():return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'use um número inteiro'))
             value=int(value)
         else:value=float(value)
         if (spec['min'] is not None and value<spec['min']) or (spec['max'] is not None and value>spec['max']):
-            return None,f"fora do limite ({_describe_limit(spec['min'])} a {_describe_limit(spec['max'])})"
+            return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'fora do limite (%1 a %2)'),_describe_limit(spec['min']),_describe_limit(spec['max']))
         return value,None
     if typ=='enum':
         allowed=[option['value'] for option in (spec['options'] if options is None else options)]
-        return (value,None) if isinstance(value,str) and value in allowed else (None,'opção não existe')
+        return (value,None) if isinstance(value,str) and value in allowed else (None,_tr(QT_TRANSLATE_NOOP("UiSettings",'opção não existe')))
     if typ=='string':
-        if not isinstance(value,str) or len(value)>STRING_LIMIT or CONTROL.search(value):return None,'texto inválido'
+        if not isinstance(value,str) or len(value)>STRING_LIMIT or CONTROL.search(value):return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'texto inválido'))
         return value,None
     if typ=='color':
         if value=='':return '',None
         color=parse_color(value)
-        return (color,None) if color else (None,'use uma cor em hexadecimal, como #7aa2f7')
+        return (color,None) if color else (None,_tr(QT_TRANSLATE_NOOP("UiSettings",'use uma cor em hexadecimal, como #7aa2f7')))
     if typ=='json':
         if key=='theme.colors':
             if isinstance(value,str):
                 try:value=json.loads(value)
-                except ValueError:return None,'JSON inválido'
-            if not isinstance(value,dict):return None,'use um objeto de papel para cor'
+                except ValueError:return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'JSON inválido'))
+            if not isinstance(value,dict):return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'use um objeto de papel para cor'))
             out={}
             for role,color in value.items():
-                if role not in COLOR_ROLES:return None,f'papel desconhecido: {role}'
+                if role not in COLOR_ROLES:return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'papel desconhecido: %1'),role)
                 parsed=parse_color(color)
-                if parsed is None:return None,f'cor inválida no papel {role}'
+                if parsed is None:return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'cor inválida no papel %1'),role)
                 out[role]=parsed
             return dict(sorted(out.items())),None
-        return (value,None) if isinstance(value,dict) else (None,'use um objeto JSON')
-    return None,'tipo desconhecido'
+        return (value,None) if isinstance(value,dict) else (None,_tr(QT_TRANSLATE_NOOP("UiSettings",'use um objeto JSON')))
+    return None,_tr(QT_TRANSLATE_NOOP("UiSettings",'tipo desconhecido'))
 
 
 DEVICE_CHOICES={'core.audioInput':'audioInputChoices','core.audioOutput':'audioOutputChoices'}
 DEVICE_PREF={'core.audioInput':'audio_input_device','core.audioOutput':'audio_output_device'}
+
+
+# Section and sub-tab names are identifiers that QML and CfgSettings.js compare with (Portuguese, as in the schema). Their
+# display text is looked up here, so the identifier never changes with the language.
+_IDENTIFIER_TEXT={
+    'Modo':QT_TRANSLATE_NOOP("UiSettings",'Modo'),
+    'Forma e texto':QT_TRANSLATE_NOOP("UiSettings",'Forma e texto'),
+    'Texto':QT_TRANSLATE_NOOP("UiSettings",'Texto'),
+    'Movimento e superfícies':QT_TRANSLATE_NOOP("UiSettings",'Movimento e superfícies'),
+    'Presença':QT_TRANSLATE_NOOP("UiSettings",'Presença'),
+    'Cores avançadas':QT_TRANSLATE_NOOP("UiSettings",'Cores avançadas'),
+    'Aparência':QT_TRANSLATE_NOOP("UiSettings",'Aparência'),
+    'Início':QT_TRANSLATE_NOOP("UiSettings",'Início'),
+    'Janela':QT_TRANSLATE_NOOP("UiSettings",'Janela'),
+    'Atalhos':QT_TRANSLATE_NOOP("UiSettings",'Atalhos'),
+    'Ajuda':QT_TRANSLATE_NOOP("UiSettings",'Ajuda'),
+    'Opções':QT_TRANSLATE_NOOP("UiSettings",'Opções'),
+    'Introdução':QT_TRANSLATE_NOOP("UiSettings",'Introdução'),
+    'Avisos':QT_TRANSLATE_NOOP("UiSettings",'Avisos'),
+    'Movimento':QT_TRANSLATE_NOOP("UiSettings",'Movimento'),
+    'Desempenho':QT_TRANSLATE_NOOP("UiSettings",'Desempenho'),
+    'Geral':QT_TRANSLATE_NOOP("UiSettings",'Geral'),
+    'Frase de despertar':QT_TRANSLATE_NOOP("UiSettings",'Frase de despertar'),
+    'Sessão':QT_TRANSLATE_NOOP("UiSettings",'Sessão'),
+    'Detecção':QT_TRANSLATE_NOOP("UiSettings",'Detecção'),
+    'Transcrição':QT_TRANSLATE_NOOP("UiSettings",'Transcrição'),
+    'Volume':QT_TRANSLATE_NOOP("UiSettings",'Volume'),
+    'Resposta':QT_TRANSLATE_NOOP("UiSettings",'Resposta'),
+    'Entrada':QT_TRANSLATE_NOOP("UiSettings",'Entrada'),
+    'Saída':QT_TRANSLATE_NOOP("UiSettings",'Saída'),
+    'Sinais':QT_TRANSLATE_NOOP("UiSettings",'Sinais'),
+    'Indicadores':QT_TRANSLATE_NOOP("UiSettings",'Indicadores'),
+    'Voz e Wake':QT_TRANSLATE_NOOP("UiSettings",'Voz e Wake'),
+    'Áudio':QT_TRANSLATE_NOOP("UiSettings",'Áudio'),
+    'Dispositivos':QT_TRANSLATE_NOOP("UiSettings",'Dispositivos'),
+    'Privacidade':QT_TRANSLATE_NOOP("UiSettings",'Privacidade'),
+    'Idioma':QT_TRANSLATE_NOOP("UiSettings",'Idioma'),
+    'Idiomas':QT_TRANSLATE_NOOP("UiSettings",'Idiomas'),
+}
+
+
+def _identifier_text(name):
+    return _tr(_IDENTIFIER_TEXT[name]) if name in _IDENTIFIER_TEXT else name
 
 
 def device_options(bridge,key):
@@ -308,6 +378,9 @@ def build_schema(bridge=None):
     """Schema as list of dicts. The wake phrase options come from the pack the bridge exposes (wakeChoices); the device options from the Core's device list."""
     entries=copy.deepcopy(list(SCHEMA))
     for entry in entries:
+        entry['label']=_tr(entry['label']);entry['help']=_tr(entry['help'])
+        entry['sectionLabel']=_identifier_text(entry['section']);entry['subtabLabel']=_identifier_text(entry['subtab'])
+        entry['options']=[{'value':option['value'],'label':_tr(option['label'])} for option in entry['options']]
         if entry['key']=='core.wakePhrase' and bridge is not None:
             choices=getattr(bridge,'wakeChoices',None) or []
             entry['options']=[{'value':c.get('id',''),'label':c.get('text','')+(f" ({c['qualification_label']})" if c.get('qualification_label') else '')} for c in choices if c.get('id')]
@@ -465,6 +538,9 @@ class UiSettings(QObject):
         self._values=self._load_values(self.path)
         set_code_detail(bool(self._values.get('behavior.advanced',False)))
         if bridge is not None:
+            # WP-20: a language switch re-reads the schema (labels, options, search words) in the new language.
+            retranslated=getattr(bridge,'retranslated',None)
+            if retranslated is not None:retranslated.connect(self.valuesChanged.emit)
             for name in ('preferencesChanged','packChanged','audioChanged'):
                 signal=getattr(bridge,name,None)
                 if signal is not None:signal.connect(self._core_changed)
@@ -593,7 +669,7 @@ class UiSettings(QObject):
             return _fail('preferences_unavailable',MESSAGES['unavailable'],current)
         coerced,reason=coerce(spec,value,self._options(spec))
         if reason is not None:
-            return _fail('invalid_value',f'Valor recusado: {reason}; nada foi alterado',current)
+            return _fail('invalid_value',_tr(QT_TRANSLATE_NOOP("UiSettings",'Valor recusado: %1; nada foi alterado'),reason),current)
         # The wake phrase compares with the saved preference, not the effective phrase: with none saved the pack default
         # is in effect, and choosing that default must still be saved (otherwise the Core never gets the choice).
         if key=='core.wakePhrase':unchanged=coerced==((getattr(bridge,'snapshot',None) or {}).get('preferences') or {}).get('wake_phrase')
@@ -651,7 +727,7 @@ class UiSettings(QObject):
         if spec['source']=='core':return self._set_core(spec,value)
         current=self._current(key)
         coerced,reason=coerce(spec,value,self._options(spec))
-        if reason is not None:return _fail('invalid_value',f'Valor recusado: {reason}; nada foi alterado',current)
+        if reason is not None:return _fail('invalid_value',_tr(QT_TRANSLATE_NOOP("UiSettings",'Valor recusado: %1; nada foi alterado'),reason),current)
         new=dict(self._values);_store(new,key,coerced);corrected=[]
         if key in THEME_KEYS:
             new,fixes,errors=enforce(new)
@@ -693,18 +769,18 @@ class UiSettings(QObject):
         def refuse(error):
             return {'ok':False,'applied':0,'rejected':[],'error':error}
         if not isinstance(text,str) or not text.strip() or len(text.encode('utf-8'))>IMPORT_LIMIT:
-            return refuse('Arquivo vazio ou grande demais (limite de 64 KiB)')
+            return refuse(_tr(QT_TRANSLATE_NOOP("UiSettings",'Arquivo vazio ou grande demais (limite de 64 KiB)')))
         try:data=json.loads(text)
-        except ValueError:return refuse('Arquivo não é JSON válido')
+        except ValueError:return refuse(_tr(QT_TRANSLATE_NOOP("UiSettings",'Arquivo não é JSON válido')))
         if not isinstance(data,dict) or data.get('schemaVersion')!=SCHEMA_VERSION or not isinstance(data.get('values'),dict):
-            return refuse('Formato ou versão de configuração não suportada')
+            return refuse(_tr(QT_TRANSLATE_NOOP("UiSettings",'Formato ou versão de configuração não suportada')))
         new=dict(self._values);rejected=[];accepted=[]
         for key,raw in data['values'].items():
             spec=SPECS.get(key)
             if spec is None:
-                rejected.append({'key':str(key),'error':'Configuração desconhecida'});continue
+                rejected.append({'key':str(key),'error':_tr(QT_TRANSLATE_NOOP("UiSettings",'Configuração desconhecida'))});continue
             if spec['source']=='core':
-                rejected.append({'key':key,'error':'Opção do Core: não é importada'});continue
+                rejected.append({'key':key,'error':_tr(QT_TRANSLATE_NOOP("UiSettings",'Opção do Core: não é importada'))});continue
             coerced,reason=coerce(spec,raw,self._options(spec))
             if reason is not None:
                 rejected.append({'key':key,'error':reason});continue
@@ -714,7 +790,7 @@ class UiSettings(QObject):
             for key in THEME_KEYS:
                 if key in self._values:new[key]=self._values[key]
                 else:new.pop(key,None)
-            rejected.append({'key':'theme','error':'Combinação de cores não atende ao contraste mínimo; tema anterior mantido'})
+            rejected.append({'key':'theme','error':_tr(QT_TRANSLATE_NOOP("UiSettings",'Combinação de cores não atende ao contraste mínimo; tema anterior mantido'))})
             accepted=[key for key in accepted if key not in THEME_KEYS]
         if not self._commit(new):return refuse(MESSAGES['storage'])
         return {'ok':True,'applied':len(accepted),'rejected':rejected,'corrected':fixes}
@@ -726,8 +802,11 @@ class UiSettings(QObject):
         if not tokens:return []
         results=[]
         for spec in SCHEMA+NAV_ENTRIES:
-            label=_fold(spec['label']);keywords=_fold(' '.join(spec['keywords']));help_text=_fold(spec['help'])
-            group=_fold(spec['section']+' '+spec['subtab']);key=_fold(spec['key'])
+            # Both the source (Portuguese) and the active-language text match, so a query in either language finds the row.
+            title=_fold(_tr(spec['label']));label=_fold(spec['label']+' '+_tr(spec['label']))
+            keywords=_fold(' '.join(spec['keywords']));help_text=_fold(spec['help']+' '+_tr(spec['help']))
+            group=_fold(spec['section']+' '+spec['subtab']+' '+_identifier_text(spec['section'])+' '+_identifier_text(spec['subtab']))
+            key=_fold(spec['key'])
             score=0;matched=True
             for token in tokens:
                 best=0
@@ -739,9 +818,10 @@ class UiSettings(QObject):
                     matched=False;break
                 score+=best
             if not matched:continue
-            if label==phrase:score+=10
-            elif label.startswith(phrase):score+=5
-            results.append({'key':spec['key'],'label':spec['label'],'section':spec['section'],'subtab':spec['subtab'],'score':score})
+            if phrase in (title,_fold(spec['label'])):score+=10
+            elif title.startswith(phrase) or _fold(spec['label']).startswith(phrase):score+=5
+            results.append({'key':spec['key'],'label':_tr(spec['label']),'section':spec['section'],'subtab':spec['subtab'],
+                            'sectionLabel':_identifier_text(spec['section']),'subtabLabel':_identifier_text(spec['subtab']),'score':score})
         results.sort(key=lambda row:(-row['score'],row['key']))
         return results
 
@@ -766,7 +846,9 @@ class UiSettings(QObject):
     # ---- settings profiles (docs/ui-spec/01-ajustes-minimalismo.md 3.1)
     @Slot(result='QVariantList')
     def profiles(self):
-        return [{'name':name,'active':name==self.profile,'default':name==PROFILE_DEFAULT} for name in sorted(self._names(),key=lambda n:(n!=PROFILE_DEFAULT,_fold(n)))]
+        # `name` is the stored identifier; `label` is what the user reads (the default profile's name is translated).
+        return [{'name':name,'label':(_tr(QT_TRANSLATE_NOOP("UiSettings",'Padrão')) if name==PROFILE_DEFAULT else name),
+                 'active':name==self.profile,'default':name==PROFILE_DEFAULT} for name in sorted(self._names(),key=lambda n:(n!=PROFILE_DEFAULT,_fold(n)))]
 
     def _known(self,name):return isinstance(name,str) and name in self._names()
 
@@ -778,7 +860,7 @@ class UiSettings(QObject):
         problem=profile_name_problem(name)
         if problem is not None:return _fail('profile_name',problem)
         if any(_fold(existing)==_fold(name) for existing in self._names()):return _fail('profile_exists',MESSAGES['profile_exists'])
-        if len(self._names())>=PROFILE_LIMIT:return _fail('profile_limit',MESSAGES['profile_limit'])
+        if len(self._names())>=PROFILE_LIMIT:return _fail('profile_limit',_profile_limit())
         try:_atomic_write(self._file(name),_payload({}))
         except OSError:return _fail('storage',MESSAGES['storage'])
         return {'ok':True,'name':name}
@@ -789,7 +871,7 @@ class UiSettings(QObject):
         problem=profile_name_problem(name)
         if problem is not None:return _fail('profile_name',problem)
         if any(_fold(existing)==_fold(name) for existing in self._names()):return _fail('profile_exists',MESSAGES['profile_exists'])
-        if len(self._names())>=PROFILE_LIMIT:return _fail('profile_limit',MESSAGES['profile_limit'])
+        if len(self._names())>=PROFILE_LIMIT:return _fail('profile_limit',_profile_limit())
         try:_atomic_write(self._file(name),_payload(self._values_of(source)))
         except OSError:return _fail('storage',MESSAGES['storage'])
         return {'ok':True,'name':name}
@@ -844,7 +926,7 @@ class UiSettings(QObject):
         argv,reason=discover_launch(self._root)
         path=_autostart_file(self._config_home)
         found=_read_autostart(path)
-        return {'supported':argv is not None,'reason':reason or '','path':str(path),'exists':found is not None,
+        return {'supported':argv is not None,'reason':_tr(reason) if reason else '','path':str(path),'exists':found is not None,
                 'managed':bool(found and found['managed']),'enabled':bool(found and found['enabled'])}
 
     @Slot(bool,result='QVariantMap')

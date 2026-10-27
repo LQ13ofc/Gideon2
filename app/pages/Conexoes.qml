@@ -25,40 +25,41 @@ PageFrame {
     readonly property var visualPurposes: ["create_issue"]
 
     function visualOn(id) { return core.registryVisualAllowed.indexOf(id) >= 0 }
-    function countText(n, one, many) { return n + (n === 1 ? " " + one : " " + many) }
+    // "1 conta" or "3 contas": the singular and plural texts are chosen by the count.
+    function countText(n, one, many) { return (n === 1 ? one : many).arg(n) }
     function askRevoke(account) { revokeConfirm.account = account; revokeConfirm.open() }
     function askScopeRevoke(account, scope) { scopeRevokeConfirm.account = account; scopeRevokeConfirm.scope = scope; scopeRevokeConfirm.open() }
     function askRemove(account) { removeConfirm.account = account; removeConfirm.open() }
     function askTrust(account, tool) { trustConfirm.account = account; trustConfirm.tool = tool; trustConfirm.open() }
     function askVisual(purpose) { visualConfirm.purpose = purpose; visualConfirm.open() }
     function addReason() {
-        if (core.connectionsBusy) return "Aguarde: outra operação de conexão está em andamento."
-        if (accounts.length >= 8) return "Limite de 8 contas atingido; remova uma conta antes."
-        if (connLabel.text.trim().length === 0) return "Digite um nome para a conta."
+        if (core.connectionsBusy) return qsTr("Aguarde: outra operação de conexão está em andamento.")
+        if (accounts.length >= 8) return qsTr("Limite de 8 contas atingido; remova uma conta antes.")
+        if (connLabel.text.trim().length === 0) return qsTr("Digite um nome para a conta.")
         return ""
     }
 
     PageHeader {
-        title: "Conexões"
-        subtitle: "Contas de serviços pela API. Você concede cada escopo; escrita pede aprovação."
+        title: qsTr("Conexões")
+        subtitle: qsTr("Contas de serviços pela API. Você concede cada escopo; escrita pede aprovação.")
         GButton {
             objectName: "connectionsNewAccount"
             variant: "primary"
-            text: "Nova conta"
-            Accessible.name: "Nova conta"
+            text: qsTr("Nova conta")
+            Accessible.name: qsTr("Nova conta")
             onClicked: page.part = "nova"
         }
     }
     // The one notice of the page: the fake-server label is said once here, not on every card.
     Banner {
         kind: "warn"
-        text: page.fakeCount === 0 ? "" : (page.mixedFake ? "SERVIDOR FALSO — sem credenciais reais. Contas com o selo usam servidores falsos." : "SERVIDOR FALSO — sem credenciais reais. Neste ambiente, todas as contas são servidores falsos.")
+        text: page.fakeCount === 0 ? "" : (page.mixedFake ? qsTr("SERVIDOR FALSO — sem credenciais reais. Contas com o selo usam servidores falsos.") : qsTr("SERVIDOR FALSO — sem credenciais reais. Neste ambiente, todas as contas são servidores falsos."))
     }
     CSummaryBar {
-        text: page.countText(page.accounts.length, "conta", "contas") + " · " + page.connectedCount + " conectadas · " + page.pendingCount + " pendentes"
+        text: qsTr("%1 · %2 · %3").arg(page.countText(page.accounts.length, qsTr("%1 conta"), qsTr("%1 contas"))).arg(page.countText(page.connectedCount, qsTr("%1 conectada"), qsTr("%1 conectadas"))).arg(page.countText(page.pendingCount, qsTr("%1 pendente"), qsTr("%1 pendentes")))
         Badge {
             visible: page.pendingCount > 0
-            text: page.countText(page.pendingCount, "pendente", "pendentes")
+            text: page.countText(page.pendingCount, qsTr("%1 pendente"), qsTr("%1 pendentes"))
             tone: "warning"
         }
     }
@@ -72,17 +73,17 @@ PageFrame {
         font.pixelSize: Theme.fontHelp
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
-        Accessible.name: "Resultado das conexões: " + text
+        Accessible.name: qsTr("Resultado das conexões: %1").arg(text)
     }
     GProgressBar {
         objectName: "connectionsProgress"
         visible: core.connectionsBusy
         indeterminate: true
         Layout.fillWidth: true
-        Accessible.name: "Operação de conexão em andamento"
+        Accessible.name: qsTr("Operação de conexão em andamento")
     }
     Segmented {
-        model: [{id: "contas", text: "Contas"}, {id: "rotas", text: "Rotas"}, {id: "nova", text: "Nova conta"}]
+        model: [{id: "contas", text: qsTr("Contas")}, {id: "rotas", text: qsTr("Rotas")}, {id: "nova", text: qsTr("Nova conta")}]
         currentId: page.part
         onActivated: function (id) { page.part = id }
     }
@@ -96,8 +97,8 @@ PageFrame {
             objectName: "connectionsEmpty"
             visible: page.accounts.length === 0
             iconName: "plug"
-            message: "Nenhuma conta ainda. Adicione uma em Nova conta."
-            actionText: "Nova conta"
+            message: qsTr("Nenhuma conta ainda. Adicione uma em Nova conta.")
+            actionText: qsTr("Nova conta")
             onActionRequested: page.part = "nova"
         }
         GridLayout {
@@ -129,7 +130,7 @@ PageFrame {
         spacing: Theme.space(20)
         Text {
             visible: !core.registryAvailable
-            text: "Rotas indisponíveis agora."
+            text: qsTr("Rotas indisponíveis agora.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -139,7 +140,7 @@ PageFrame {
         Text {
             objectName: "routesIntro"
             visible: core.registryAvailable
-            text: "Rotas: o Gideon escolhe a API autorizada quando há conta conectada com escopo. Nunca troca de rota para contornar token expirado, reautenticação ou escopo negado."
+            text: qsTr("Rotas: o Gideon escolhe a API autorizada quando há conta conectada com escopo. Nunca troca de rota para contornar token expirado, reautenticação ou escopo negado.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -157,7 +158,7 @@ PageFrame {
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Accessible.name: "Resultado das rotas: " + text
+            Accessible.name: qsTr("Resultado das rotas: %1").arg(text)
         }
         Repeater {
             model: core.registryAvailable ? core.registryPurposes : []
@@ -182,13 +183,13 @@ PageFrame {
                         font.weight: 600
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
-                        Accessible.name: "Finalidade: " + text
+                        Accessible.name: qsTr("Finalidade: %1").arg(text)
                     }
                     GButton {
                         objectName: "routePlan_" + purposeBlock.rid
                         variant: "secondary"
-                        text: "Planejar"
-                        Accessible.name: "Planejar rota de " + purposeBlock.modelData.label
+                        text: qsTr("Planejar")
+                        Accessible.name: qsTr("Planejar rota de %1").arg(purposeBlock.modelData.label)
                         enabled: !core.registryBusy
                         onClicked: core.registryPlan(purposeBlock.rid)
                     }
@@ -205,7 +206,7 @@ PageFrame {
                     spacing: Theme.space(12)
                     Text {
                         objectName: "routeVisualState_" + purposeBlock.rid
-                        text: "Fallback visual: " + (page.visualOn(purposeBlock.rid) ? "ligado por você" : "desligado (padrão)")
+                        text: qsTr("Fallback visual: %1").arg(page.visualOn(purposeBlock.rid) ? qsTr("ligado por você") : qsTr("desligado (padrão)"))
                         textFormat: Text.PlainText
                         color: page.visualOn(purposeBlock.rid) ? Theme.warning : Theme.textMuted
                         font.family: Theme.fontFamily
@@ -216,7 +217,7 @@ PageFrame {
                         objectName: "routeVisual_" + purposeBlock.rid
                         checked: page.visualOn(purposeBlock.rid)
                         enabled: !core.registryBusy
-                        Accessible.name: "Permitir fallback visual de " + purposeBlock.modelData.label
+                        Accessible.name: qsTr("Permitir fallback visual de %1").arg(purposeBlock.modelData.label)
                         onClicked: {
                             var want = !page.visualOn(purposeBlock.rid)
                             checked = Qt.binding(function () { return page.visualOn(purposeBlock.rid) })
@@ -241,10 +242,10 @@ PageFrame {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Theme.space(12)
-                    Text { text: "Situação"; Layout.preferredWidth: 110; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
-                    Text { text: "Rota"; Layout.preferredWidth: 180; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
-                    Text { text: "Estado"; Layout.preferredWidth: 190; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
-                    Text { text: "Motivo"; Layout.fillWidth: true; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
+                    Text { text: qsTr("Situação"); Layout.preferredWidth: 110; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
+                    Text { text: qsTr("Rota"); Layout.preferredWidth: 180; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
+                    Text { text: qsTr("Estado"); Layout.preferredWidth: 190; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
+                    Text { text: qsTr("Motivo"); Layout.fillWidth: true; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption }
                 }
                 Repeater {
                     model: purposeBlock.modelData.candidates
@@ -256,7 +257,7 @@ PageFrame {
                         spacing: Theme.space(12)
                         Badge {
                             Layout.preferredWidth: 110
-                            text: chosen ? "Escolhida" : "Descartada"
+                            text: chosen ? qsTr("Escolhida") : qsTr("Descartada")
                             tone: chosen ? "success" : "neutral"
                         }
                         Text {
@@ -301,9 +302,9 @@ PageFrame {
         columnSpacing: Theme.space(16)
         rowSpacing: Theme.space(16)
         Section {
-            title: "Adicionar conta"
+            title: qsTr("Adicionar conta")
             Layout.alignment: Qt.AlignTop
-            FieldLabel { text: "Provedor" }
+            FieldLabel { text: qsTr("Provedor") }
             Select {
                 id: connProviderPick
                 objectName: "connectionProvider"
@@ -311,16 +312,16 @@ PageFrame {
                 model: L.connProviderChoices
                 textRole: "text"
                 valueRole: "id"
-                Accessible.name: "Provedor da nova conta"
+                Accessible.name: qsTr("Provedor da nova conta")
             }
-            FieldLabel { text: "Nome da conta (ex.: Casa)" }
+            FieldLabel { text: qsTr("Nome da conta (ex.: Casa)") }
             GTextField {
                 id: connLabel
                 objectName: "connectionLabel"
                 Layout.fillWidth: true
                 maximumLength: 64
-                placeholderText: "ex.: Casa"
-                Accessible.name: "Nome da nova conta"
+                placeholderText: qsTr("ex.: Casa")
+                Accessible.name: qsTr("Nome da nova conta")
             }
             Text {
                 objectName: "connectionLabelProblem"
@@ -350,18 +351,18 @@ PageFrame {
                 GButton {
                     objectName: "connectionAdd"
                     variant: "primary"
-                    text: "Adicionar conta"
-                    Accessible.name: "Adicionar conta"
+                    text: qsTr("Adicionar conta")
+                    Accessible.name: qsTr("Adicionar conta")
                     enabled: !core.connectionsBusy && core.connectionLabelProblem(connLabel.text) === "" && page.accounts.length < 8
                     onClicked: core.connectionAdd(connProviderPick.currentValue, connLabel.text)
                 }
             }
         }
         Section {
-            title: "Como conectar"
+            title: qsTr("Como conectar")
             Layout.alignment: Qt.AlignTop
             Repeater {
-                model: ["Escolha o provedor e dê um nome à conta.", "Clique em Conectar. Para GitHub e Google, confirme o código no site do provedor.", "Marque só os escopos que você quer conceder e clique em Consentir escopos marcados.", "Escrita e ações públicas pedem aprovação a cada uso."]
+                model: [qsTr("Escolha o provedor e dê um nome à conta."), qsTr("Clique em Conectar. Para GitHub e Google, confirme o código no site do provedor."), qsTr("Marque só os escopos que você quer conceder e clique em Consentir escopos marcados."), qsTr("Escrita e ações públicas pedem aprovação a cada uso.")]
                 delegate: RowLayout {
                     required property string modelData
                     required property int index
@@ -390,10 +391,10 @@ PageFrame {
     }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "Gideon usa a API autorizada de cada serviço. Você concede cada escopo."
+        title: qsTr("Como funciona")
+        summary: qsTr("Gideon usa a API autorizada de cada serviço. Você concede cada escopo.")
         Text {
-            text: "Gideon usa a API autorizada de cada serviço. Você concede cada escopo; escrita e ações públicas pedem aprovação. Neste ambiente, todas as contas são servidores falsos."
+            text: qsTr("Gideon usa a API autorizada de cada serviço. Você concede cada escopo; escrita e ações públicas pedem aprovação. Neste ambiente, todas as contas são servidores falsos.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -405,14 +406,14 @@ PageFrame {
     Text {
         objectName: "connLastCall"
         visible: core.connectionLastCall.operation !== undefined
-        text: "Última chamada: " + (core.connectionLastCall.operation || "") + " · " + (core.connectionLastCall.code ? core.codeMessage(core.connectionLastCall.code) : (core.connectionLastCall.outcome === "ok" ? "concluída" : core.connectionLastCall.outcome))
+        text: qsTr("Última chamada: %1 · %2").arg(core.connectionLastCall.operation || "").arg(core.connectionLastCall.code ? core.codeMessage(core.connectionLastCall.code) : (core.connectionLastCall.outcome === "ok" ? qsTr("concluída") : core.connectionLastCall.outcome))
         textFormat: Text.PlainText
         color: Theme.success
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontHelp
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
-        Accessible.name: "Última chamada de conexão: " + text
+        Accessible.name: qsTr("Última chamada de conexão: %1").arg(text)
     }
 
     // Confirmations for the actions that change an account or a route. Cancelar is the default focus.
@@ -420,17 +421,17 @@ PageFrame {
         id: revokeConfirm
         objectName: "connRevokeConfirm"
         property var account: null
-        title: "Tem certeza?"
+        title: qsTr("Tem certeza?")
         Text {
-            text: revokeConfirm.account ? "Revogar a conta " + revokeConfirm.account.label + "? O acesso é revogado no servidor e as credenciais são apagadas do Gideon. Conectar de novo exige nova autorização." : ""
+            text: revokeConfirm.account ? qsTr("Revogar a conta %1? O acesso é revogado no servidor e as credenciais são apagadas do Gideon. Conectar de novo exige nova autorização.").arg(revokeConfirm.account.label) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
             objectName: "connRevokeConfirmButton"
             variant: "danger"
-            text: "Revogar"
+            text: qsTr("Revogar")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: "Revogar acesso"
+            Accessible.name: qsTr("Revogar acesso")
             onClicked: revokeConfirm.accept()
         }
         onAccepted: { if (account) core.connectionRevoke(account.id) }
@@ -441,17 +442,17 @@ PageFrame {
         objectName: "connScopeRevokeConfirm"
         property var account: null
         property string scope: ""
-        title: "Revogar este escopo?"
+        title: qsTr("Revogar este escopo?")
         Text {
-            text: scopeRevokeConfirm.account ? "Revogar o escopo " + L.connScopeLabel(core.connectionsProviders, scopeRevokeConfirm.account.provider, scopeRevokeConfirm.scope) + " da conta " + scopeRevokeConfirm.account.label + "? As chamadas que precisam dele ficam recusadas até você conceder de novo. Os outros escopos não mudam." : ""
+            text: scopeRevokeConfirm.account ? qsTr("Revogar o escopo %1 da conta %2? As chamadas que precisam dele ficam recusadas até você conceder de novo. Os outros escopos não mudam.").arg(L.connScopeLabel(core.connectionsProviders, scopeRevokeConfirm.account.provider, scopeRevokeConfirm.scope)).arg(scopeRevokeConfirm.account.label) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
             objectName: "connScopeRevokeConfirmButton"
             variant: "danger"
-            text: "Revogar escopo"
+            text: qsTr("Revogar escopo")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: "Revogar este escopo"
+            Accessible.name: qsTr("Revogar este escopo")
             onClicked: scopeRevokeConfirm.accept()
         }
         onAccepted: { if (account && scope) core.connectionRevokeScope(account.id, scope) }
@@ -460,17 +461,17 @@ PageFrame {
         id: removeConfirm
         objectName: "connRemoveConfirm"
         property var account: null
-        title: "Tem certeza?"
+        title: qsTr("Tem certeza?")
         Text {
-            text: removeConfirm.account ? "Remover a conta " + removeConfirm.account.label + " do Gideon? A conta sai da lista." : ""
+            text: removeConfirm.account ? qsTr("Remover a conta %1 do Gideon? A conta sai da lista.").arg(removeConfirm.account.label) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
             objectName: "connRemoveConfirmButton"
             variant: "danger"
-            text: "Remover"
+            text: qsTr("Remover")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: "Remover conta"
+            Accessible.name: qsTr("Remover conta")
             onClicked: removeConfirm.accept()
         }
         onAccepted: { if (account) core.connectionRemove(account.id) }
@@ -480,17 +481,17 @@ PageFrame {
         objectName: "connTrustConfirm"
         property var account: null
         property string tool: ""
-        title: "Tem certeza?"
+        title: qsTr("Tem certeza?")
         Text {
-            text: trustConfirm.tool ? "Confiar na ferramenta " + trustConfirm.tool + "? Cada chamada ainda pede a sua aprovação." : ""
+            text: trustConfirm.tool ? qsTr("Confiar na ferramenta %1? Cada chamada ainda pede a sua aprovação.").arg(trustConfirm.tool) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
             objectName: "connTrustConfirmButton"
             variant: "primary"
-            text: "Confiar"
+            text: qsTr("Confiar")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: "Confiar na ferramenta " + trustConfirm.tool
+            Accessible.name: qsTr("Confiar na ferramenta %1").arg(trustConfirm.tool)
             onClicked: trustConfirm.accept()
         }
         onAccepted: { if (account && tool) core.connectionTrustTools(account.id, JSON.stringify([tool])) }
@@ -499,17 +500,17 @@ PageFrame {
         id: visualConfirm
         objectName: "routeVisualConfirm"
         property string purpose: ""
-        title: "Tem certeza?"
+        title: qsTr("Tem certeza?")
         Text {
-            text: "Permitir o fallback visual para criar issue? Ele dirige a tela só quando não há conta conectada. A publicação ainda pede sua aprovação."
+            text: qsTr("Permitir o fallback visual para criar issue? Ele dirige a tela só quando não há conta conectada. A publicação ainda pede sua aprovação.")
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
             objectName: "routeVisualConfirmButton"
             variant: "primary"
-            text: "Permitir"
+            text: qsTr("Permitir")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: "Permitir fallback visual"
+            Accessible.name: qsTr("Permitir fallback visual")
             onClicked: visualConfirm.accept()
         }
         onAccepted: { if (purpose) core.registryAllowVisual(purpose, true) }

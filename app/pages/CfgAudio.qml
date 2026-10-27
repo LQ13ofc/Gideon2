@@ -40,13 +40,13 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Áudio"
-        subtitle: "Volume e feedback da resposta do Gideon. Vale a partir da próxima sessão."
+        title: qsTr("Áudio")
+        subtitle: qsTr("Volume e feedback da resposta do Gideon. Vale a partir da próxima sessão.")
         GButton {
             objectName: "applyGainButton"
             variant: "primary"
-            text: "Aplicar"
-            Accessible.name: "Aplicar o volume da resposta por voz"
+            text: qsTr("Aplicar")
+            Accessible.name: qsTr("Aplicar o volume da resposta por voz")
             enabled: page.dirty && !page.gainBlocked
             onClicked: page.apply()
         }
@@ -55,7 +55,7 @@ PageFrame {
     ECfgNotice {}
 
     Section {
-        title: "Volume da resposta"
+        title: qsTr("Volume da resposta")
         SettingRow {
             settingKey: "core.responseGain"
             RowLayout {
@@ -69,7 +69,7 @@ PageFrame {
                     value: page.shown
                     enabled: !page.gainBlocked
                     Layout.preferredWidth: 220
-                    Accessible.name: "Volume da resposta por voz, por cento"
+                    Accessible.name: qsTr("Volume da resposta por voz, por cento")
                     onMoved: page.draft = Math.round(value)
                 }
                 Binding {
@@ -87,7 +87,7 @@ PageFrame {
                     editable: true
                     value: page.shown
                     enabled: !page.gainBlocked
-                    Accessible.name: "Volume da resposta, por cento"
+                    Accessible.name: qsTr("Volume da resposta, por cento")
                     onValueModified: page.draft = value
                 }
                 Binding {
@@ -100,7 +100,7 @@ PageFrame {
         }
         Text {
             visible: page.dirty
-            text: "Alterações não aplicadas: " + page.draft + "%. Clique em Aplicar."
+            text: qsTr("Alterações não aplicadas: %1%. Clique em Aplicar.").arg(page.draft)
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -109,14 +109,14 @@ PageFrame {
             Layout.fillWidth: true
         }
         EValueRow {
-            label: "Ganho salvo no Core"
+            label: qsTr("Ganho salvo no Core")
             value: page.saved + "%"
             advanced: true
         }
     }
 
     Section {
-        title: "Resposta"
+        title: qsTr("Resposta")
         SettingRow {
             settingKey: "core.audibleFeedback"
             EToggleSetting {
@@ -127,35 +127,35 @@ PageFrame {
         GButton {
             objectName: "visualPreference"
             variant: "ghost"
-            text: "Indicador visual: " + (page.visualOn ? "ligado" : "desligado") + ". Alterar em Aparência ›"
-            Accessible.name: "Indicador visual. Alterar em Aparência"
+            text: qsTr("Indicador visual: %1. Alterar em Aparência ›").arg(page.visualOn ? qsTr("ligado") : qsTr("desligado"))
+            Accessible.name: qsTr("Indicador visual. Alterar em Aparência")
             onClicked: Window.window.goPage("cfg_aparencia")
         }
         EValueRow {
-            label: "Resposta"
+            label: qsTr("Resposta")
             value: L.statusText(core.speechStatus)
         }
         EValueRow {
-            label: "Código do estado da resposta"
+            label: qsTr("Código do estado da resposta")
             value: String(core.speechStatus)
             advanced: true
         }
     }
 
     Section {
-        title: "Sons e voz"
+        title: qsTr("Sons e voz")
         SettingRow {
             settingKey: "audio.cues"
             EToggleSetting { settingKey: "audio.cues" }
         }
         EValueRow {
-            label: "Voz em uso: " + (core.languageTtsVoice || "padrão do pacote") + " · " + (core.languageTtsSelected || "idioma do pacote")
+            label: qsTr("Voz em uso: %1 · %2").arg(core.languageTtsVoice || qsTr("padrão do pacote")).arg(core.languageTtsSelected || qsTr("idioma do pacote"))
         }
         // CFG-01: the voice of the speech language. Saved in the Core (language_preference); a voice that is not installed is not listed.
         SettingRow {
-            label: "Escolha de voz"
-            help: "Voz usada nas respostas. Só vozes instaladas aparecem. Vale no próximo início do Core."
-            disabledReason: page.voiceOptions.length > 0 ? "" : "nenhuma outra voz instalada neste idioma"
+            label: qsTr("Escolha de voz")
+            help: qsTr("Voz usada nas respostas. Só vozes instaladas aparecem. Vale no próximo início do Core.")
+            disabledReason: page.voiceOptions.length > 0 ? "" : qsTr("nenhuma outra voz instalada neste idioma")
             Select {
                 id: voiceBox
                 objectName: "voiceSelect"
@@ -163,7 +163,7 @@ PageFrame {
                 model: page.voiceOptions
                 enabled: page.voiceOptions.length > 0 && core.preferencesAvailable
                 currentIndex: page.voiceIndex
-                Accessible.name: "Escolha de voz: " + displayText
+                Accessible.name: qsTr("Escolha de voz: %1").arg(displayText)
                 onActivated: function (index) {
                     core.setLanguages(JSON.stringify(core.languageSttSelected), core.languageTtsSelected, page.voiceOptions[index])
                     voiceBox.currentIndex = Qt.binding(function () { return page.voiceIndex })
@@ -171,8 +171,8 @@ PageFrame {
             }
         }
         EValueRow {
-            label: "Idioma do pacote"
-            value: "inglês (EN)"
+            label: qsTr("Idioma do pacote")
+            value: qsTr("inglês (EN)")
             advanced: true
         }
     }
@@ -180,10 +180,10 @@ PageFrame {
     EAdvancedNote { subtab: "Áudio" }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "O volume é aplicado ao áudio gerado pelo Gideon antes da saída virtual. Não muda o volume do sistema."
+        title: qsTr("Como funciona")
+        summary: qsTr("O volume é aplicado ao áudio gerado pelo Gideon antes da saída virtual. Não muda o volume do sistema.")
         Text {
-            text: "O volume é aplicado ao áudio gerado pelo Gideon antes da saída virtual. Ele não muda o volume do sistema nem do dispositivo. Volume 0 é mudo."
+            text: qsTr("O volume é aplicado ao áudio gerado pelo Gideon antes da saída virtual. Ele não muda o volume do sistema nem do dispositivo. Volume 0 é mudo.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

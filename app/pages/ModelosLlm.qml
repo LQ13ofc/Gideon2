@@ -32,6 +32,7 @@ PageFrame {
     readonly property var selected: AppState.selectedModel
 
     function keyOf(provider) { return core.llmSecretsConfigured[provider] === true }
+    function kindText(kind) { return kind === "local" ? qsTr("Local") : qsTr("Nuvem") }
     function currentModel() {
         var sel = core.modelsSelected
         if (!sel || !sel.provider) return null
@@ -40,37 +41,49 @@ PageFrame {
     }
     function currentTitle() {
         var m = currentModel()
-        return m ? m.label + " · " + (m.kind === "local" ? "Local" : "Nuvem") + " · " + core.providerLabel(m.provider) + " · " + m.model : ""
+        return m ? qsTr("%1 · %2 · %3 · %4").arg(m.label).arg(kindText(m.kind)).arg(core.providerLabel(m.provider)).arg(m.model) : ""
     }
     function isCustom(m) { for (var i = 0; i < core.modelsCustom.length; i++) if (core.modelsCustom[i].id === m.id) return true; return false }
     function lkgText() {
         var lkg = core.llmConfig.lkg
-        if (!lkg || !lkg.provider) return "Nenhum modelo marcado como bom ainda."
-        return "Último bom: " + core.providerLabel(lkg.provider) + " · " + lkg.model
+        if (!lkg || !lkg.provider) return qsTr("Nenhum modelo marcado como bom ainda.")
+        return qsTr("Último bom: %1 · %2").arg(core.providerLabel(lkg.provider)).arg(lkg.model)
     }
-    function statusLabel(s) { return s === "INDISPONÍVEL: tool_use não suportado" ? "Indisponível: uso de ferramenta não suportado" : s }
-    function statusTone(s) {
-        switch (s) {
-        case "Disponível": return "success"
-        case "Sem chave": case "Sem consentimento": return "warning"
-        case "Em teste": return "info"
-        case "Sem dados do modelo": return "neutral"
-        default: return s.indexOf("INDISPONÍVEL") === 0 ? "error" : "neutral"
+    // The Core snapshot gives the model status as a code (core.modelsStatusCode); the label is translated here.
+    function statusLabel(code) {
+        switch (code) {
+        case "testing": return qsTr("Em teste")
+        case "no_config": return qsTr("Sem modelo selecionado")
+        case "no_key": return qsTr("Sem chave")
+        case "no_consent": return qsTr("Sem consentimento")
+        case "no_model_data": return qsTr("Sem dados do modelo")
+        case "tool_use_unsupported": return qsTr("Indisponível: uso de ferramenta não suportado")
+        case "available": return qsTr("Disponível")
+        default: return ""
+        }
+    }
+    function statusTone(code) {
+        switch (code) {
+        case "available": return "success"
+        case "no_key": case "no_consent": return "warning"
+        case "testing": return "info"
+        case "tool_use_unsupported": return "error"
+        default: return "neutral"
         }
     }
     function selectModel(m) { AppState.selectedModel = m; AppState.modelsRevisionCaptured = core.llmRevision }
     function useReason() {
-        if (core.modelsBusy) return "Aguarde: a operação de modelo anterior ainda está em andamento."
-        if (!selected) return "Escolha um modelo na lista."
-        if (selected.kind === "cloud" && !keyOf(selected.provider)) return "Sem chave: salve a chave do provedor em Provedor e chaves."
-        if (selected.kind === "cloud" && core.llmConfig.cloud_consent !== true) return "Sem consentimento: permita o envio à nuvem em Provedor e chaves."
+        if (core.modelsBusy) return qsTr("Aguarde: a operação de modelo anterior ainda está em andamento.")
+        if (!selected) return qsTr("Escolha um modelo na lista.")
+        if (selected.kind === "cloud" && !keyOf(selected.provider)) return qsTr("Sem chave: salve a chave do provedor em Provedor e chaves.")
+        if (selected.kind === "cloud" && core.llmConfig.cloud_consent !== true) return qsTr("Sem consentimento: permita o envio à nuvem em Provedor e chaves.")
         return ""
     }
     function fallbackReason() {
-        if (core.modelsBusy) return "Aguarde: operação de modelo em andamento."
+        if (core.modelsBusy) return qsTr("Aguarde: operação de modelo em andamento.")
         if (!fallbackPicked) return ""
-        if (fallbackPicked.kind === "cloud" && !keyOf(fallbackPicked.provider)) return "Sem chave: salve a chave do provedor em Provedor e chaves."
-        if (fallbackPicked.kind === "cloud" && core.llmConfig.cloud_consent !== true) return "Sem consentimento: marque o envio à nuvem em Provedor e chaves."
+        if (fallbackPicked.kind === "cloud" && !keyOf(fallbackPicked.provider)) return qsTr("Sem chave: salve a chave do provedor em Provedor e chaves.")
+        if (fallbackPicked.kind === "cloud" && core.llmConfig.cloud_consent !== true) return qsTr("Sem consentimento: marque o envio à nuvem em Provedor e chaves.")
         return ""
     }
     function customForm() {
@@ -109,13 +122,13 @@ PageFrame {
     Component.onCompleted: { AppState.modelsRevisionCaptured = core.llmRevision }
 
     PageHeader {
-        title: "Modelos LLM"
-        subtitle: "Escolha, teste e configure o modelo do motor LLM instalado."
+        title: qsTr("Modelos LLM")
+        subtitle: qsTr("Escolha, teste e configure o modelo do motor LLM instalado.")
         GButton {
             objectName: "modelsRefresh"
             variant: "primary"
-            text: "Atualizar lista"
-            Accessible.name: "Atualizar lista de modelos"
+            text: qsTr("Atualizar lista")
+            Accessible.name: qsTr("Atualizar lista de modelos")
             enabled: core.modelsAvailable && !core.modelsBusy
             onClicked: core.listModels(page.customTab ? "custom" : "recommended")
         }
@@ -124,20 +137,20 @@ PageFrame {
     Banner {
         objectName: "modelsStatusBanner"
         kind: "info"
-        text: core.modelsAvailable ? "" : "Só Provedor e chaves está disponível: o plugin llm_engine não está ativo. Modelos LLM aparece completo quando o plugin estiver ativo."
-        actionText: "Instalar em Extensões › Plugins"
+        text: core.modelsAvailable ? "" : qsTr("Só Provedor e chaves está disponível: o plugin llm_engine não está ativo. Modelos LLM aparece completo quando o plugin estiver ativo.")
+        actionText: qsTr("Instalar em Extensões › Plugins")
         onActionRequested: Window.window.goPage("plugins")
     }
     CSummaryBar {
-        text: page.hasCurrent ? "Modelo atual: " + core.providerLabel(core.modelsSelected.provider) + " · " + core.modelsSelected.model : "Nenhum modelo configurado"
+        text: page.hasCurrent ? qsTr("Modelo atual: %1 · %2").arg(core.providerLabel(core.modelsSelected.provider)).arg(core.modelsSelected.model) : qsTr("Nenhum modelo configurado")
         Badge {
             visible: page.hasCurrent
-            text: page.statusLabel(core.modelsStatus)
-            tone: page.statusTone(core.modelsStatus)
+            text: page.statusLabel(core.modelsStatusCode)
+            tone: page.statusTone(core.modelsStatusCode)
         }
         Badge {
             visible: page.hasCurrent
-            text: L.isCloudProvider(core.modelsSelected.provider) ? "Nuvem" : "Local"
+            text: L.isCloudProvider(core.modelsSelected.provider) ? qsTr("Nuvem") : qsTr("Local")
             tone: L.isCloudProvider(core.modelsSelected.provider) ? "info" : "neutral"
         }
     }
@@ -146,7 +159,7 @@ PageFrame {
         visible: core.modelsBusy
         indeterminate: true
         Layout.fillWidth: true
-        Accessible.name: "Operação de modelo em andamento"
+        Accessible.name: qsTr("Operação de modelo em andamento")
     }
     Text {
         objectName: "modelsResult"
@@ -159,13 +172,13 @@ PageFrame {
         font.weight: 600
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
-        Accessible.name: "Resultado do modelo: " + text
+        Accessible.name: qsTr("Resultado do modelo: %1").arg(text)
     }
     Segmented {
         objectName: "modelParts"
         model: core.modelsAvailable
-            ? [{id: "atual", text: "Modelo atual"}, {id: "catalogo", text: "Catálogo"}, {id: "personalizados", text: "Personalizados"}, {id: "provedor", text: "Provedor e chaves"}, {id: "fallback", text: "Fallback e hardware"}]
-            : [{id: "provedor", text: "Provedor e chaves"}]
+            ? [{id: "atual", text: qsTr("Modelo atual")}, {id: "catalogo", text: qsTr("Catálogo")}, {id: "personalizados", text: qsTr("Personalizados")}, {id: "provedor", text: qsTr("Provedor e chaves")}, {id: "fallback", text: qsTr("Fallback e hardware")}]
+            : [{id: "provedor", text: qsTr("Provedor e chaves")}]
         currentId: page.activePart
         onActivated: function (id) { page.part = id }
     }
@@ -178,11 +191,11 @@ PageFrame {
         columnSpacing: Theme.space(16)
         rowSpacing: Theme.space(16)
         Card {
-            title: "Configurado"
+            title: qsTr("Configurado")
             Layout.alignment: Qt.AlignTop
             Text {
                 objectName: "modelsSelectedLabel"
-                text: page.hasCurrent ? "Configurado: " + core.providerLabel(core.modelsSelected.provider) + " · " + core.modelsSelected.model : "Nenhum modelo configurado"
+                text: page.hasCurrent ? qsTr("Configurado: %1 · %2").arg(core.providerLabel(core.modelsSelected.provider)).arg(core.modelsSelected.model) : qsTr("Nenhum modelo configurado")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -194,7 +207,7 @@ PageFrame {
                 Layout.fillWidth: true
                 spacing: Theme.space(10)
                 Text {
-                    text: "Estado do modelo atual:"
+                    text: qsTr("Estado do modelo atual:")
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -203,8 +216,8 @@ PageFrame {
                 Badge {
                     objectName: "modelsStatus"
                     visible: page.hasCurrent
-                    text: page.statusLabel(core.modelsStatus)
-                    tone: page.statusTone(core.modelsStatus)
+                    text: page.statusLabel(core.modelsStatusCode)
+                    tone: page.statusTone(core.modelsStatusCode)
                 }
             }
             Text {
@@ -219,7 +232,7 @@ PageFrame {
             }
             Text {
                 visible: page.currentModel() !== null
-                text: page.currentModel() && page.currentModel().offline ? "Funciona offline" : "Requer rede"
+                text: page.currentModel() && page.currentModel().offline ? qsTr("Funciona offline") : qsTr("Requer rede")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -229,16 +242,16 @@ PageFrame {
             Flow {
                 Layout.fillWidth: true
                 spacing: Theme.space(8)
-                GButton { objectName: "testModelButton"; variant: "secondary"; text: "Testar"; enabled: core.llmTestAvailable; Accessible.name: "Testar modelo atual"; onClicked: core.llmSelftest() }
-                GButton { objectName: "rollbackModelButton"; variant: "secondary"; text: "Voltar ao último bom"; enabled: core.llmRollbackAvailable; Accessible.name: "Voltar ao último bom"; onClicked: core.llmRollback() }
-                GButton { objectName: "otherModelButton"; variant: "secondary"; text: "Usar outro modelo"; enabled: core.modelsAvailable; Accessible.name: "Usar outro modelo"; onClicked: page.part = "catalogo" }
+                GButton { objectName: "testModelButton"; variant: "secondary"; text: qsTr("Testar"); enabled: core.llmTestAvailable; Accessible.name: qsTr("Testar modelo atual"); onClicked: core.llmSelftest() }
+                GButton { objectName: "rollbackModelButton"; variant: "secondary"; text: qsTr("Voltar ao último bom"); enabled: core.llmRollbackAvailable; Accessible.name: qsTr("Voltar ao último bom"); onClicked: core.llmRollback() }
+                GButton { objectName: "otherModelButton"; variant: "secondary"; text: qsTr("Usar outro modelo"); enabled: core.modelsAvailable; Accessible.name: qsTr("Usar outro modelo"); onClicked: page.part = "catalogo" }
             }
             Text {
                 objectName: "testModelReason"
-                text: !page.hasCurrent ? "Configure um modelo antes de testar."
-                    : !core.modelsAvailable ? "Teste indisponível: o plugin llm_engine não está ativo."
-                    : core.modelsBusy ? "Aguarde a operação de modelo em andamento."
-                    : "O resultado do teste aparece acima. Voltar ao último bom usa a configuração marcada como boa."
+                text: !page.hasCurrent ? qsTr("Configure um modelo antes de testar.")
+                    : !core.modelsAvailable ? qsTr("Teste indisponível: o plugin llm_engine não está ativo.")
+                    : core.modelsBusy ? qsTr("Aguarde a operação de modelo em andamento.")
+                    : qsTr("O resultado do teste aparece acima. Voltar ao último bom usa a configuração marcada como boa.")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -248,7 +261,7 @@ PageFrame {
             }
         }
         Card {
-            title: "Detalhes do modelo atual"
+            title: qsTr("Detalhes do modelo atual")
             Layout.alignment: Qt.AlignTop
             CModelDetail {
                 visible: page.currentModel() !== null
@@ -259,7 +272,7 @@ PageFrame {
             }
             Text {
                 visible: page.hasCurrent && page.currentModel() === null
-                text: "Detalhes indisponíveis: carregue o catálogo para ver este modelo."
+                text: qsTr("Detalhes indisponíveis: carregue o catálogo para ver este modelo.")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -271,8 +284,8 @@ PageFrame {
             GButton {
                 visible: page.hasCurrent && page.currentModel() === null && (page.recommendedMoreLeft || page.recommendedNotLoaded)
                 variant: "secondary"
-                text: "Carregar mais"
-                Accessible.name: "Carregar mais modelos"
+                text: qsTr("Carregar mais")
+                Accessible.name: qsTr("Carregar mais modelos")
                 enabled: core.modelsAvailable && !core.modelsBusy
                 onClicked: core.loadMoreModels("recommended")
             }
@@ -283,25 +296,25 @@ PageFrame {
     Section {
         objectName: "customForm"
         visible: page.activePart === "personalizados"
-        title: "Adicionar modelo personalizado"
-        FieldLabel { text: "Provedor do modelo personalizado" }
+        title: qsTr("Adicionar modelo personalizado")
+        FieldLabel { text: qsTr("Provedor do modelo personalizado") }
         Select {
             id: customProvider
             objectName: "customProvider"
             Layout.fillWidth: true
             textRole: "text"
             valueRole: "id"
-            Accessible.name: "Provedor do modelo personalizado"
-            model: [{id: "local", text: "Local (llama.cpp)"}, {id: "ollama", text: "Ollama (local)"}, {id: "custom", text: "Personalizado (https)"}, {id: "openrouter", text: "OpenRouter (nuvem)"}, {id: "opencode", text: "OpenCode (nuvem)"}, {id: "google", text: "Google AI Studio (nuvem)"}]
+            Accessible.name: qsTr("Provedor do modelo personalizado")
+            model: [{id: "local", text: qsTr("Local (llama.cpp)")}, {id: "ollama", text: qsTr("Ollama (local)")}, {id: "custom", text: qsTr("Personalizado (https)")}, {id: "openrouter", text: qsTr("OpenRouter (nuvem)")}, {id: "opencode", text: qsTr("OpenCode (nuvem)")}, {id: "google", text: qsTr("Google AI Studio (nuvem)")}]
         }
-        FieldLabel { text: "Identificador do modelo: letras, números e . _ : / - (até 128)" }
+        FieldLabel { text: qsTr("Identificador do modelo: letras, números e . _ : / - (até 128)") }
         GTextField {
             id: customModelId
             objectName: "customModelId"
             Layout.fillWidth: true
             maximumLength: 128
-            placeholderText: "Identificador do modelo"
-            Accessible.name: "Identificador do modelo personalizado"
+            placeholderText: qsTr("Identificador do modelo")
+            Accessible.name: qsTr("Identificador do modelo personalizado")
             validator: RegularExpressionValidator { regularExpression: /[A-Za-z0-9._:\/-]{1,128}/ }
         }
         RowLayout {
@@ -309,18 +322,18 @@ PageFrame {
             spacing: Theme.space(12)
             ColumnLayout {
                 Layout.fillWidth: true
-                FieldLabel { text: "Porta do servidor local, de 1024 a 65535" }
+                FieldLabel { text: qsTr("Porta do servidor local, de 1024 a 65535") }
                 SpinBox {
                     id: customPort
                     objectName: "customPort"
                     from: 1024; to: 65535; value: 8080; editable: true
                     enabled: customProvider.currentValue === "local" || customProvider.currentValue === "ollama"
-                    Accessible.name: "Porta do servidor local, de 1024 a 65535"
+                    Accessible.name: qsTr("Porta do servidor local, de 1024 a 65535")
                 }
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                FieldLabel { text: "URL https do modelo personalizado" }
+                FieldLabel { text: qsTr("URL https do modelo personalizado") }
                 GTextField {
                     id: customUrl
                     objectName: "customUrl"
@@ -328,11 +341,11 @@ PageFrame {
                     maximumLength: 200
                     placeholderText: "https://"
                     enabled: customProvider.currentValue === "custom"
-                    Accessible.name: "URL https do modelo personalizado"
+                    Accessible.name: qsTr("URL https do modelo personalizado")
                 }
             }
         }
-        FieldLabel { text: "Recursos declarados (não certificados)" }
+        FieldLabel { text: qsTr("Recursos declarados (não certificados)") }
         GridLayout {
             Layout.fillWidth: true
             columns: page.wide ? 2 : 1
@@ -340,27 +353,27 @@ PageFrame {
             rowSpacing: Theme.space(8)
             ColumnLayout {
                 Layout.fillWidth: true
-                FieldLabel { text: "Streaming" }
-                Select { id: customStreaming; objectName: "customStreaming"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Streaming declarado" }
+                FieldLabel { text: qsTr("Streaming") }
+                Select { id: customStreaming; objectName: "customStreaming"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: qsTr("Streaming declarado") }
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                FieldLabel { text: "Tool use" }
-                Select { id: customToolUse; objectName: "customToolUse"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Tool use declarado" }
+                FieldLabel { text: qsTr("Tool use") }
+                Select { id: customToolUse; objectName: "customToolUse"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: qsTr("Tool use declarado") }
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                FieldLabel { text: "Visão" }
-                Select { id: customVision; objectName: "customVision"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Visão declarada" }
+                FieldLabel { text: qsTr("Visão") }
+                Select { id: customVision; objectName: "customVision"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: qsTr("Visão declarada") }
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                FieldLabel { text: "Cancelamento" }
-                Select { id: customCancel; objectName: "customCancel"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: "Cancelamento declarado" }
+                FieldLabel { text: qsTr("Cancelamento") }
+                Select { id: customCancel; objectName: "customCancel"; Layout.fillWidth: true; model: L.featureChoices(); textRole: "text"; valueRole: "id"; Accessible.name: qsTr("Cancelamento declarado") }
             }
         }
         Text {
-            text: "Recursos declarados não são certificados; o selftest é que confirma."
+            text: qsTr("Recursos declarados não são certificados; o selftest é que confirma.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -382,8 +395,8 @@ PageFrame {
         GButton {
             objectName: "saveCustomButton"
             variant: "primary"
-            text: "Salvar modelo personalizado"
-            Accessible.name: "Salvar modelo personalizado"
+            text: qsTr("Salvar modelo personalizado")
+            Accessible.name: qsTr("Salvar modelo personalizado")
             enabled: core.modelsAvailable && !core.modelsBusy && core.customFormProblem(page.customForm()) === ""
             onClicked: { page.customBefore = core.modelsCustom.map(function (m) { return m.id }); page.revealCustom = true; core.saveCustomModel(page.customForm()) }
         }
@@ -393,7 +406,7 @@ PageFrame {
     Section {
         objectName: "catalogSection"
         visible: page.activePart === "catalogo" || page.activePart === "personalizados"
-        title: page.activePart === "catalogo" ? "Catálogo" : "Modelos personalizados"
+        title: page.activePart === "catalogo" ? qsTr("Catálogo") : qsTr("Modelos personalizados")
         TabBar {
             id: modelsTabs
             objectName: "modelsTabs"
@@ -401,12 +414,12 @@ PageFrame {
             onCurrentIndexChanged: core.listModels(currentIndex === 0 ? "recommended" : "custom")
             background: Rectangle { color: "transparent" }
             TabButton {
-                objectName: "modelsTabRecommended"; text: "Recomendados"; Accessible.name: "Aba Recomendados"
+                objectName: "modelsTabRecommended"; text: qsTr("Recomendados"); Accessible.name: qsTr("Aba Recomendados")
                 background: Rectangle { color: parent.checked ? Theme.tint : "transparent"; radius: Theme.radius; border.width: 1; border.color: Theme.strongOutline }
                 contentItem: Text { text: parent.text; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; font.weight: parent.checked ? 600 : 400; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
             }
             TabButton {
-                objectName: "modelsTabCustom"; text: "Personalizados"; Accessible.name: "Aba Personalizados"
+                objectName: "modelsTabCustom"; text: qsTr("Personalizados"); Accessible.name: qsTr("Aba Personalizados")
                 background: Rectangle { color: parent.checked ? Theme.tint : "transparent"; radius: Theme.radius; border.width: 1; border.color: Theme.strongOutline }
                 contentItem: Text { text: parent.text; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; font.weight: parent.checked ? 600 : 400; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
             }
@@ -414,23 +427,23 @@ PageFrame {
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.space(10)
-            Text { text: "Mostrar:"; textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp }
-            Select { id: modelsFilter; objectName: "modelsFilter"; model: ["Todos", "Local", "Nuvem"]; Accessible.name: "Filtro por local ou nuvem" }
+            Text { text: qsTr("Mostrar:"); textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp }
+            Select { id: modelsFilter; objectName: "modelsFilter"; model: [qsTr("Todos"), qsTr("Local"), qsTr("Nuvem")]; Accessible.name: qsTr("Filtro por local ou nuvem") }
         }
         Text {
             objectName: "modelsCount"
-            text: (page.customTab ? core.modelsCustom.length + " de " + core.modelsCustomTotal : core.modelsRecommended.length + " de " + core.modelsRecommendedTotal)
+            text: page.customTab ? qsTr("%1 de %2").arg(core.modelsCustom.length).arg(core.modelsCustomTotal) : qsTr("%1 de %2").arg(core.modelsRecommended.length).arg(core.modelsRecommendedTotal)
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontHelp
             Layout.fillWidth: true
-            Accessible.name: "Modelos carregados: " + text
+            Accessible.name: qsTr("Modelos carregados: %1").arg(text)
         }
         EmptyState {
             visible: modelRows.count === 0
             iconName: "cpu"
-            message: page.customTab ? "Nenhum modelo personalizado. Adicione um no formulário acima." : "Nenhum modelo nesta lista."
+            message: page.customTab ? qsTr("Nenhum modelo personalizado. Adicione um no formulário acima.") : qsTr("Nenhum modelo nesta lista.")
         }
         Repeater {
             id: modelRows
@@ -439,7 +452,7 @@ PageFrame {
                 required property var modelData
                 objectName: "model_" + modelData.id
                 title: modelData.label
-                detail: modelData.kind === "local" ? "Local" : "Nuvem"
+                detail: page.kindText(modelData.kind)
                 selected: page.selected !== null && page.selected.id === modelData.id
                 onClicked: page.selectModel(modelData)
                 Badge {
@@ -452,10 +465,10 @@ PageFrame {
         GButton {
             objectName: "modelsLoadMore"
             variant: "secondary"
-            text: "Carregar mais"
+            text: qsTr("Carregar mais")
             visible: page.customTab ? core.modelsCustom.length < core.modelsCustomTotal : core.modelsRecommended.length < core.modelsRecommendedTotal
             enabled: core.modelsAvailable && !core.modelsBusy
-            Accessible.name: "Carregar mais modelos"
+            Accessible.name: qsTr("Carregar mais modelos")
             onClicked: core.loadMoreModels(page.customTab ? "custom" : "recommended")
         }
         Card {
@@ -479,7 +492,7 @@ PageFrame {
             Text {
                 objectName: "modelDescribed"
                 visible: page.selected !== null && core.modelDescription.id === page.selected.id
-                text: visible ? "Descrição do plugin: " + core.modelDescription.label + " · certificação: " + (core.modelDescription.certification ? core.modelDescription.certification.state : "desconhecida") + (core.modelDescription.sha256 ? " · sha256 " + String(core.modelDescription.sha256).slice(0, 12) + "…" : "") : ""
+                text: visible ? qsTr("Descrição do plugin: %1 · certificação: %2").arg(core.modelDescription.label).arg(core.modelDescription.certification ? core.modelDescription.certification.state : qsTr("desconhecida")) + (core.modelDescription.sha256 ? qsTr(" · sha256 %1…").arg(String(core.modelDescription.sha256).slice(0, 12)) : "") : ""
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -493,16 +506,16 @@ PageFrame {
                 GButton {
                     objectName: "useModelButton"
                     variant: "primary"
-                    text: "Usar este modelo"
-                    Accessible.name: page.selected ? "Usar este modelo: " + page.selected.label : "Usar este modelo"
+                    text: qsTr("Usar este modelo")
+                    Accessible.name: page.selected ? qsTr("Usar este modelo: %1").arg(page.selected.label) : qsTr("Usar este modelo")
                     enabled: core.modelsAvailable && page.selected !== null && page.useReason() === ""
                     onClicked: core.useModel(page.selected.id, AppState.modelsRevisionCaptured)
                 }
                 GButton {
                     objectName: "describeModelButton"
                     variant: "secondary"
-                    text: "Descrever"
-                    Accessible.name: page.selected ? "Descrever modelo " + page.selected.id : "Descrever modelo"
+                    text: qsTr("Descrever")
+                    Accessible.name: page.selected ? qsTr("Descrever modelo %1").arg(page.selected.id) : qsTr("Descrever modelo")
                     enabled: core.modelsAvailable && page.selected !== null && !core.modelsBusy
                     onClicked: core.describeModel(page.selected.id)
                 }
@@ -511,8 +524,8 @@ PageFrame {
                     objectName: "removeCustomButton"
                     visible: page.customTab && page.selected !== null && page.isCustom(page.selected)
                     variant: "danger"
-                    text: "Remover"
-                    Accessible.name: page.selected ? "Remover modelo personalizado " + page.selected.id : "Remover"
+                    text: qsTr("Remover")
+                    Accessible.name: page.selected ? qsTr("Remover modelo personalizado %1").arg(page.selected.id) : qsTr("Remover")
                     enabled: core.modelsAvailable && !core.modelsBusy
                     onClicked: { removeCustomConfirm.entry = page.selected; removeCustomConfirm.open() }
                 }
@@ -549,30 +562,30 @@ PageFrame {
             columnSpacing: Theme.space(16)
             rowSpacing: Theme.space(16)
             Section {
-                title: "Configuração"
+                title: qsTr("Configuração")
                 Layout.alignment: Qt.AlignTop
-                FieldLabel { text: "Provedor" }
+                FieldLabel { text: qsTr("Provedor") }
                 Select {
                     id: providerBox
                     objectName: "llmProvider"
                     Layout.fillWidth: true
                     enabled: core.llmConfigAvailable
                     textRole: "text"; valueRole: "id"
-                    Accessible.name: "Provedor do motor LLM"
-                    model: [{id: "openrouter", text: "OpenRouter"}, {id: "opencode", text: "OpenCode"}, {id: "google", text: "Google AI Studio"}, {id: "custom", text: "Personalizado"}]
+                    Accessible.name: qsTr("Provedor do motor LLM")
+                    model: [{id: "openrouter", text: "OpenRouter"}, {id: "opencode", text: "OpenCode"}, {id: "google", text: "Google AI Studio"}, {id: "custom", text: qsTr("Personalizado")}]
                 }
-                FieldLabel { text: "Modelo: letras, números e . _ : / - (até 128)" }
+                FieldLabel { text: qsTr("Modelo: letras, números e . _ : / - (até 128)") }
                 GTextField {
                     id: modelField
                     objectName: "llmModel"
                     Layout.fillWidth: true
                     maximumLength: 128
                     enabled: core.llmConfigAvailable
-                    placeholderText: "ex.: gemini-3.5-flash-lite"
-                    Accessible.name: "Modelo do motor LLM"
+                    placeholderText: qsTr("ex.: gemini-3.5-flash-lite")
+                    Accessible.name: qsTr("Modelo do motor LLM")
                     validator: RegularExpressionValidator { regularExpression: /[A-Za-z0-9._:\/-]{1,128}/ }
                 }
-                FieldLabel { visible: providerBox.currentValue === "custom"; text: "URL personalizada: somente https (http apenas em loopback de teste)" }
+                FieldLabel { visible: providerBox.currentValue === "custom"; text: qsTr("URL personalizada: somente https (http apenas em loopback de teste)") }
                 GTextField {
                     id: urlField
                     objectName: "llmUrl"
@@ -580,18 +593,18 @@ PageFrame {
                     maximumLength: 200
                     enabled: providerBox.currentValue === "custom" && core.llmConfigAvailable
                     placeholderText: "https://"
-                    Accessible.name: "URL do provedor personalizado"
+                    Accessible.name: qsTr("URL do provedor personalizado")
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Theme.space(10)
-                    FieldLabel { text: "Chave"; Layout.fillWidth: true }
+                    FieldLabel { text: qsTr("Chave"); Layout.fillWidth: true }
                     Badge {
                         objectName: "llmKeyStatus"
                         visible: page.keyOf(providerBox.currentValue)
-                        text: page.keyOf(providerBox.currentValue) ? "Chave configurada" : "Sem chave"
+                        text: page.keyOf(providerBox.currentValue) ? qsTr("Chave configurada") : qsTr("Sem chave")
                         tone: "success"
-                        Accessible.name: "Estado da chave: " + text
+                        Accessible.name: qsTr("Estado da chave: %1").arg(text)
                     }
                 }
                 GTextField {
@@ -601,9 +614,9 @@ PageFrame {
                     echoMode: TextInput.Password
                     maximumLength: 256
                     inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
-                    placeholderText: "Chave de API (somente escrita)"
+                    placeholderText: qsTr("Chave de API (somente escrita)")
                     enabled: core.llmConfigAvailable
-                    Accessible.name: "Chave de API do provedor"
+                    Accessible.name: qsTr("Chave de API do provedor")
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -611,8 +624,8 @@ PageFrame {
                     GButton {
                         objectName: "saveKeyButton"
                         variant: "primary"
-                        text: "Salvar chave"
-                        Accessible.name: "Salvar chave do provedor"
+                        text: qsTr("Salvar chave")
+                        Accessible.name: qsTr("Salvar chave do provedor")
                         enabled: core.llmConfigAvailable && keyField.text.length > 0
                         // The field is cleared at once: the key leaves QML with this call.
                         onClicked: { core.setApiKey(providerBox.currentValue, keyField.text); keyField.text = "" }
@@ -620,14 +633,14 @@ PageFrame {
                     GButton {
                         objectName: "clearKeyButton"
                         variant: "danger"
-                        text: "Remover chave"
-                        Accessible.name: "Remover chave do provedor"
+                        text: qsTr("Remover chave")
+                        Accessible.name: qsTr("Remover chave do provedor")
                         enabled: core.llmConfigAvailable && page.keyOf(providerBox.currentValue)
                         onClicked: clearKeyConfirm.open()
                     }
                 }
                 Text {
-                    text: "A chave não volta a aparecer depois de enviada."
+                    text: qsTr("A chave não volta a aparecer depois de enviada.")
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -637,20 +650,20 @@ PageFrame {
                 }
             }
             Section {
-                title: "Nuvem e salvar"
+                title: qsTr("Nuvem e salvar")
                 Layout.alignment: Qt.AlignTop
                 GCheckbox {
                     id: consentBox
                     objectName: "llmConsent"
                     checked: false
-                    text: "Permitir envio de conversas ao provedor na nuvem"
+                    text: qsTr("Permitir envio de conversas ao provedor na nuvem")
                     enabled: core.llmConfigAvailable
-                    Accessible.name: "Consentimento para envio à nuvem"
-                    Accessible.description: "Mensagens serão enviadas ao provedor escolhido na nuvem"
+                    Accessible.name: qsTr("Consentimento para envio à nuvem")
+                    Accessible.description: qsTr("Mensagens serão enviadas ao provedor escolhido na nuvem")
                 }
                 Text {
                     objectName: "llmConsentWarning"
-                    text: "Mensagens serão enviadas ao provedor escolhido na nuvem"
+                    text: qsTr("Mensagens serão enviadas ao provedor escolhido na nuvem")
                     textFormat: Text.PlainText
                     color: Theme.warning
                     font.family: Theme.fontFamily
@@ -659,7 +672,7 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "Consentimento salvo: " + (core.llmConfig.cloud_consent === true ? "concedido" : "não concedido")
+                    text: qsTr("Consentimento salvo: %1").arg(core.llmConfig.cloud_consent === true ? qsTr("concedido") : qsTr("não concedido"))
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -670,8 +683,8 @@ PageFrame {
                 GButton {
                     objectName: "saveLlmConfigButton"
                     variant: "primary"
-                    text: "Salvar configuração"
-                    Accessible.name: "Salvar configuração do Motor LLM"
+                    text: qsTr("Salvar configuração")
+                    Accessible.name: qsTr("Salvar configuração do Motor LLM")
                     enabled: core.llmConfigAvailable && modelField.acceptableInput && core.llmConfig.provider !== "local" && core.llmConfig.provider !== "ollama"
                     onClicked: core.configureLlm(providerBox.currentValue, modelField.text, providerBox.currentValue === "custom" ? urlField.text : "", consentBox.checked, AppState.llmRevisionCaptured)
                 }
@@ -679,7 +692,7 @@ PageFrame {
                 Text {
                     objectName: "llmLocalNotice"
                     visible: core.llmConfig.provider === "local" || core.llmConfig.provider === "ollama"
-                    text: "Configuração local ativa: " + core.providerLabel(core.llmConfig.provider) + " · " + (core.llmConfig.model || "") + ". Troque em Catálogo."
+                    text: qsTr("Configuração local ativa: %1 · %2. Troque em Catálogo.").arg(core.providerLabel(core.llmConfig.provider)).arg(core.llmConfig.model || "")
                     textFormat: Text.PlainText
                     color: Theme.warning
                     font.family: Theme.fontFamily
@@ -701,10 +714,10 @@ PageFrame {
             }
         }
         Collapsible {
-            title: "Como funciona"
-            summary: "Motor opcional. Sem ele, voz, wake e comandos da Base continuam funcionando."
+            title: qsTr("Como funciona")
+            summary: qsTr("Motor opcional. Sem ele, voz, wake e comandos da Base continuam funcionando.")
             Text {
-                text: "Provedor, modelo, URL e consentimento são gravados pelo Core. A chave é só de escrita: nunca é mostrada de volta."
+                text: qsTr("Provedor, modelo, URL e consentimento são gravados pelo Core. A chave é só de escrita: nunca é mostrada de volta.")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -716,17 +729,17 @@ PageFrame {
         Modal {
             id: clearKeyConfirm
             objectName: "clearKeyConfirm"
-            title: "Tem certeza?"
+            title: qsTr("Tem certeza?")
             Text {
-                text: "Remover a chave do provedor " + providerBox.displayText + "? As chamadas a este provedor param até você salvar outra chave."
+                text: qsTr("Remover a chave do provedor %1? As chamadas a este provedor param até você salvar outra chave.").arg(providerBox.displayText)
                 textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
             }
             GButton {
                 objectName: "confirmClearKeyButton"
                 variant: "danger"
-                text: "Remover chave"
+                text: qsTr("Remover chave")
                 Layout.alignment: Qt.AlignRight
-                Accessible.name: "Remover chave do provedor"
+                Accessible.name: qsTr("Remover chave do provedor")
                 onClicked: clearKeyConfirm.accept()
             }
             onAccepted: core.clearApiKey(providerBox.currentValue)
@@ -736,10 +749,10 @@ PageFrame {
     // Fallback e hardware.
     Section {
         visible: page.activePart === "fallback"
-        title: "Fallback (opcional)"
+        title: qsTr("Fallback (opcional)")
         Text {
             objectName: "fallbackCurrent"
-            text: core.modelsFallback.provider ? "Atual: " + core.providerLabel(core.modelsFallback.provider) + " · " + core.modelsFallback.model : "Nenhum fallback configurado"
+            text: core.modelsFallback.provider ? qsTr("Atual: %1 · %2").arg(core.providerLabel(core.modelsFallback.provider)).arg(core.modelsFallback.model) : qsTr("Nenhum fallback configurado")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -748,7 +761,7 @@ PageFrame {
             Layout.fillWidth: true
         }
         Text {
-            text: "Usado só depois de erro recuperável do modelo principal (429, 5xx, rede ou tempo esgotado). Nunca em erro de chave ou permissão."
+            text: qsTr("Usado só depois de erro recuperável do modelo principal (429, 5xx, rede ou tempo esgotado). Nunca em erro de chave ou permissão.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -756,24 +769,24 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-        FieldLabel { text: "Modelo para fallback" }
-        Select { id: fallbackPick; objectName: "fallbackModel"; Layout.fillWidth: true; model: page.allModels; textRole: "label"; valueRole: "id"; Accessible.name: "Modelo para fallback" }
+        FieldLabel { text: qsTr("Modelo para fallback") }
+        Select { id: fallbackPick; objectName: "fallbackModel"; Layout.fillWidth: true; model: page.allModels; textRole: "label"; valueRole: "id"; Accessible.name: qsTr("Modelo para fallback") }
         Text {
             objectName: "fallbackCloudWarning"
             visible: page.fallbackIsCloud
-            text: "Mensagens poderão ir para a nuvem se o modelo principal falhar"
+            text: qsTr("Mensagens poderão ir para a nuvem se o modelo principal falhar")
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Accessible.name: "Aviso: envio à nuvem no fallback"
+            Accessible.name: qsTr("Aviso: envio à nuvem no fallback")
         }
         Text {
             objectName: "fallbackConsentNeeded"
             visible: page.fallbackIsCloud && core.llmConfig.cloud_consent !== true
-            text: "Para fallback na nuvem, marque o consentimento em Provedor e chaves."
+            text: qsTr("Para fallback na nuvem, marque o consentimento em Provedor e chaves.")
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -795,16 +808,18 @@ PageFrame {
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.space(10)
-            GButton { objectName: "setFallbackButton"; variant: "primary"; text: "Usar como fallback"; Accessible.name: "Usar o modelo escolhido como fallback"; enabled: core.modelsAvailable && !core.modelsBusy && fallbackPick.currentIndex >= 0 && page.fallbackAllowed; onClicked: core.setFallback(fallbackPick.currentValue, AppState.modelsRevisionCaptured) }
-            GButton { objectName: "clearFallbackButton"; variant: "secondary"; text: "Remover fallback"; Accessible.name: "Remover fallback"; enabled: core.modelsAvailable && !core.modelsBusy && !!core.modelsFallback.provider; onClicked: core.clearFallback(AppState.modelsRevisionCaptured) }
+            GButton { objectName: "setFallbackButton"; variant: "primary"; text: qsTr("Usar como fallback"); Accessible.name: qsTr("Usar o modelo escolhido como fallback"); enabled: core.modelsAvailable && !core.modelsBusy && fallbackPick.currentIndex >= 0 && page.fallbackAllowed; onClicked: core.setFallback(fallbackPick.currentValue, AppState.modelsRevisionCaptured) }
+            GButton { objectName: "clearFallbackButton"; variant: "secondary"; text: qsTr("Remover fallback"); Accessible.name: qsTr("Remover fallback"); enabled: core.modelsAvailable && !core.modelsBusy && !!core.modelsFallback.provider; onClicked: core.clearFallback(AppState.modelsRevisionCaptured) }
         }
     }
     Section {
         visible: page.activePart === "fallback"
-        title: "Hardware e plugin"
+        title: qsTr("Hardware e plugin")
         Text {
             objectName: "modelsHardware"
-            text: core.modelsHardware.cpu_cores ? "CPU: " + core.modelsHardware.cpu_cores + " núcleos · RAM: " + (core.modelsHardware.ram_gb === null ? "desconhecida" : core.modelsHardware.ram_gb + " GB") + " · GPU: " + (core.modelsHardware.gpu === "unknown" ? "desconhecido" : core.modelsHardware.gpu) : "Hardware: aguardando catálogo"
+            text: core.modelsHardware.cpu_cores
+                ? qsTr("CPU: %1 núcleos · RAM: %2 · GPU: %3").arg(core.modelsHardware.cpu_cores).arg(core.modelsHardware.ram_gb === null ? qsTr("desconhecida") : qsTr("%1 GB").arg(core.modelsHardware.ram_gb)).arg(core.modelsHardware.gpu === "unknown" ? qsTr("desconhecido") : core.modelsHardware.gpu)
+                : qsTr("Hardware: aguardando catálogo")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -813,7 +828,7 @@ PageFrame {
             Layout.fillWidth: true
         }
         Text {
-            text: "Apaga só os dados guardados pelo plugin. Não altera o Core."
+            text: qsTr("Apaga só os dados guardados pelo plugin. Não altera o Core.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -821,24 +836,24 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-        GButton { objectName: "clearPluginSettingsButton"; variant: "danger"; text: "Apagar dados do plugin"; Accessible.name: "Apagar dados do plugin LLM"; enabled: core.connected && !core.modelsBusy; onClicked: clearPluginConfirm.open() }
+        GButton { objectName: "clearPluginSettingsButton"; variant: "danger"; text: qsTr("Apagar dados do plugin"); Accessible.name: qsTr("Apagar dados do plugin LLM"); enabled: core.connected && !core.modelsBusy; onClicked: clearPluginConfirm.open() }
     }
 
     Modal {
         id: removeCustomConfirm
         objectName: "removeCustomConfirm"
         property var entry: null
-        title: "Tem certeza?"
+        title: qsTr("Tem certeza?")
         onAccepted: { if (entry) core.deleteCustomModel(entry.id) }
-        Text { text: removeCustomConfirm.entry ? "Remover " + removeCustomConfirm.entry.label + " da lista de modelos personalizados? O modelo no provedor não é apagado." : ""; textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        GButton { objectName: "confirmRemoveCustomButton"; variant: "danger"; text: "Remover"; Layout.alignment: Qt.AlignRight; Accessible.name: removeCustomConfirm.entry ? "Remover modelo " + removeCustomConfirm.entry.id : "Remover"; onClicked: removeCustomConfirm.accept() }
+        Text { text: removeCustomConfirm.entry ? qsTr("Remover %1 da lista de modelos personalizados? O modelo no provedor não é apagado.").arg(removeCustomConfirm.entry.label) : ""; textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        GButton { objectName: "confirmRemoveCustomButton"; variant: "danger"; text: qsTr("Remover"); Layout.alignment: Qt.AlignRight; Accessible.name: removeCustomConfirm.entry ? qsTr("Remover modelo %1").arg(removeCustomConfirm.entry.id) : qsTr("Remover"); onClicked: removeCustomConfirm.accept() }
     }
     Modal {
         id: clearPluginConfirm
         objectName: "clearPluginConfirm"
-        title: "Tem certeza?"
+        title: qsTr("Tem certeza?")
         onAccepted: core.clearPluginSettings()
-        Text { text: "Apagar as configurações guardadas pelo plugin LLM, inclusive modelos personalizados? O plugin e a configuração do Core (provedor, modelo e chaves) não são alterados."; textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        GButton { objectName: "confirmClearPluginButton"; variant: "danger"; text: "Apagar dados"; Accessible.name: "Apagar dados do plugin LLM"; Layout.alignment: Qt.AlignRight; onClicked: clearPluginConfirm.accept() }
+        Text { text: qsTr("Apagar as configurações guardadas pelo plugin LLM, inclusive modelos personalizados? O plugin e a configuração do Core (provedor, modelo e chaves) não são alterados."); textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        GButton { objectName: "confirmClearPluginButton"; variant: "danger"; text: qsTr("Apagar dados"); Accessible.name: qsTr("Apagar dados do plugin LLM"); Layout.alignment: Qt.AlignRight; onClicked: clearPluginConfirm.accept() }
     }
 }

@@ -4,7 +4,7 @@
 <context>
     <name>CfgIdiomas</name>
     <message>
-        <location filename="../../../pages/CfgIdiomas.qml" line="+72"/>
+        <location filename="../../../pages/CfgIdiomas.qml" line="+84"/>
         <source>Instalado</source>
         <translation>Installed</translation>
     </message>
@@ -175,7 +175,15 @@
         <source>O idioma da interface vale na hora. Os idiomas da fala e da transcrição são escolhidos nas seções acima.</source>
         <translation>The interface language changes right away. The speech and transcription languages are chosen in the sections above.</translation>
     </message>
-    <message><source>Inglês</source><translation>English</translation></message>
-    <message><source>Francês</source><translation>French</translation></message>
+    <message>
+        <location line="-239"/>
+        <source>Inglês</source>
+        <translation>English</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>Francês</source>
+        <translation>French</translation>
+    </message>
 </context>
 </TS>

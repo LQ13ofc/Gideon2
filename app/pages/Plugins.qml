@@ -27,7 +27,7 @@ PageFrame {
         hubApprovalAvailable: core.hubApprovalAvailable,
         hubLifecycleAvailable: core.hubLifecycleAvailable,
         hubImportPickable: core.hubImportPickable,
-        blockedText: core.connected ? (core.sessionId ? "Indisponível durante a sessão de voz." : "Indisponível: ação não permitida agora.") : "Core desconectado: nada pode ser alterado agora."
+        blockedText: core.connected ? (core.sessionId ? qsTr("Indisponível durante a sessão de voz.") : qsTr("Indisponível: ação não permitida agora.")) : qsTr("Core desconectado: nada pode ser alterado agora.")
     })
     // One row per plugin: the catalog entry (when there is one), the Core item and the installed record.
     readonly property var rows: {
@@ -62,7 +62,7 @@ PageFrame {
     }
     function permissionText(p) {
         var label = core.permissionLabel(p)
-        return label === p ? "permissão sem rótulo: " + p : label
+        return label === p ? qsTr("permissão sem rótulo: %1").arg(p) : label
     }
     function openReview(plugin) { AppState.reviewPlugin = plugin; reviewAck.checked = false; reviewDialog.open() }
     function askRemove(plugin) { removeConfirm.plugin = plugin; removeConfirm.revision = core.hubInstallRevision; removeConfirm.open() }
@@ -73,28 +73,28 @@ PageFrame {
     function askImport(plugin) { importPid = plugin.plugin_id; importDialog.open() }
 
     PageHeader {
-        title: "Plugins"
-        subtitle: "Instale e ative plugins verificados. Instalar não executa nada e não concede acesso."
+        title: qsTr("Plugins")
+        subtitle: qsTr("Instale e ative plugins verificados. Instalar não executa nada e não concede acesso.")
     }
     // The one notice of the page: the catalog state (publishers are not authenticated; quarantine when it applies).
     Banner {
         objectName: "hubBanner"
-        kind: core.hubDescription.indexOf("quarentena") >= 0 ? "error" : "info"
+        kind: core.hubQuarantined ? "error" : "info"
         text: core.hubDescription
     }
     Collapsible {
-        title: "Como funciona"
-        summary: "Instalar copia o pacote verificado; nada é executado. Aprovar permissões não instala."
+        title: qsTr("Como funciona")
+        summary: qsTr("Instalar copia o pacote verificado; nada é executado. Aprovar permissões não instala.")
         Text {
-            text: "Instalar copia o pacote verificado para o Core; nada é executado. O catálogo não concede acesso ao computador."
+            text: qsTr("Instalar copia o pacote verificado para o Core; nada é executado. O catálogo não concede acesso ao computador.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
-            text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."
+            text: qsTr("Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
-            text: "Plugins ativos rodam em sandbox, sem rede. Revogar permissões desativa o plugin e encerra o processo."
+            text: qsTr("Plugins ativos rodam em sandbox, sem rede. Revogar permissões desativa o plugin e encerra o processo.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
     }
@@ -150,7 +150,7 @@ PageFrame {
         GButton {
             objectName: "abortHubImportButton"
             enabled: core.hubImportActive
-            text: "Cancelar importação"
+            text: qsTr("Cancelar importação")
             variant: "secondary"
             onClicked: core.abortHubImport()
         }
@@ -159,10 +159,10 @@ PageFrame {
     Segmented {
         objectName: "pluginFilter"
         model: [
-            {id: "todos", text: "Todos " + page.tally.todos},
-            {id: "instalados", text: "Instalados " + page.tally.instalados},
-            {id: "disponiveis", text: "Disponíveis " + page.tally.disponiveis},
-            {id: "quarentena", text: "Quarentena " + page.tally.quarentena}
+            {id: "todos", text: qsTr("Todos %1").arg(page.tally.todos)},
+            {id: "instalados", text: qsTr("Instalados %1").arg(page.tally.instalados)},
+            {id: "disponiveis", text: qsTr("Disponíveis %1").arg(page.tally.disponiveis)},
+            {id: "quarentena", text: qsTr("Quarentena %1").arg(page.tally.quarentena)}
         ]
         currentId: page.filter
         onActivated: function (id) { page.filter = id }
@@ -180,7 +180,7 @@ PageFrame {
 
             Text {
                 visible: page.rows.length === 0
-                text: "Catálogo não configurado"
+                text: qsTr("Catálogo não configurado")
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -192,8 +192,8 @@ PageFrame {
                 objectName: "hubEmpty"
                 visible: page.rows.length === 0
                 iconName: "puzzle"
-                message: "Nenhum plugin no catálogo ainda. Conecte o Core para carregar o catálogo local."
-                actionText: "Atualizar catálogo"
+                message: qsTr("Nenhum plugin no catálogo ainda. Conecte o Core para carregar o catálogo local.")
+                actionText: qsTr("Atualizar catálogo")
                 onActionRequested: core.refresh()
             }
             RowLayout {
@@ -201,7 +201,7 @@ PageFrame {
                 Layout.fillWidth: true
                 spacing: Theme.space(12)
                 Text {
-                    text: "Nenhum plugin neste filtro."
+                    text: qsTr("Nenhum plugin neste filtro.")
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -209,7 +209,7 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 GButton {
-                    text: "Ver todos"
+                    text: qsTr("Ver todos")
                     variant: "ghost"
                     onClicked: page.filter = "todos"
                 }
@@ -250,7 +250,7 @@ PageFrame {
     FileDialog {
         id: importDialog
         objectName: "hubImportDialog"
-        title: "Pacote do plugin " + page.importPid
+        title: qsTr("Pacote do plugin %1").arg(page.importPid)
         fileMode: FileDialog.OpenFile
         onAccepted: {
             var message = core.importHubPayload(page.importPid, String(selectedFile))
@@ -263,46 +263,46 @@ PageFrame {
         id: reviewDialog
         objectName: "hubReviewDialog"
         closeOnly: true
-        title: "Revisar permissões"
+        title: qsTr("Revisar permissões")
         onOpened: { core.beginHubReview(); AppState.reviewRevision = core.hubApprovalRevision }
         Text {
-            text: AppState.reviewPlugin ? AppState.reviewPlugin.plugin_id + " " + AppState.reviewPlugin.semver + " · " + AppState.reviewPlugin.publisher + (core.hubPublisherVerified ? " · publisher verificado" : " · não verificado") : ""
+            text: AppState.reviewPlugin ? qsTr("%1 %2 · %3%4").arg(AppState.reviewPlugin.plugin_id).arg(AppState.reviewPlugin.semver).arg(AppState.reviewPlugin.publisher).arg(core.hubPublisherVerified ? qsTr(" · publisher verificado") : qsTr(" · não verificado")) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Text {
             visible: AppState.reviewPlugin !== null
-            text: "Permissões declaradas (não aprovadas):"
+            text: qsTr("Permissões declaradas (não aprovadas):")
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; font.weight: 600; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         Repeater {
             model: AppState.reviewPlugin ? AppState.reviewPlugin.permissions : []
             delegate: Text {
                 required property var modelData
-                text: "•  " + page.permissionText(modelData)
+                text: qsTr("•  %1").arg(page.permissionText(modelData))
                 textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
             }
         }
         Text {
-            text: "Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto."
+            text: qsTr("Aprovar permissões não instala nem executa este plugin. A aprovação vale somente para este manifesto.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GCheckbox {
             id: reviewAck
             objectName: "publisherAcknowledgement"
-            text: core.hubPublisherVerified ? "Entendo as permissões deste plugin" : "Entendo que o publisher não foi autenticado"
+            text: core.hubPublisherVerified ? qsTr("Entendo as permissões deste plugin") : qsTr("Entendo que o publisher não foi autenticado")
             enabled: core.hubApprovalAvailable
         }
         Text {
             visible: !reviewAck.checked
-            text: "Marque a confirmação para liberar a aprovação."
+            text: qsTr("Marque a confirmação para liberar a aprovação.")
             textFormat: Text.PlainText; color: Theme.textMuted; font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
             objectName: "approveHubButton"
             variant: "primary"
-            text: "Aprovar estas permissões"
+            text: qsTr("Aprovar estas permissões")
             Layout.fillWidth: true
-            Accessible.name: AppState.reviewPlugin ? "Aprovar permissões de " + AppState.reviewPlugin.plugin_id : "Aprovar permissões"
+            Accessible.name: AppState.reviewPlugin ? qsTr("Aprovar permissões de %1").arg(AppState.reviewPlugin.plugin_id) : qsTr("Aprovar permissões")
             enabled: core.hubApprovalAvailable && reviewAck.checked && AppState.reviewPlugin !== null && !page.approvalDone()
             onClicked: core.approveHub(AppState.reviewPlugin.plugin_id, AppState.reviewPlugin.manifest_sha256, AppState.reviewPlugin.permissions, reviewAck.checked, AppState.reviewRevision)
         }
@@ -319,16 +319,16 @@ PageFrame {
         objectName: "removeConfirm"
         property var plugin: null
         property string revision: ""
-        title: "Remover plugin"
+        title: qsTr("Remover plugin")
         onAccepted: { if (plugin) core.removeHub(plugin.plugin_id, revision) }
         Text {
-            text: removeConfirm.plugin ? "Remover " + removeConfirm.plugin.plugin_id + " " + removeConfirm.plugin.semver + " do Core? Nada é executado e o catálogo não muda." : ""
+            text: removeConfirm.plugin ? qsTr("Remover %1 %2 do Core? Nada é executado e o catálogo não muda.").arg(removeConfirm.plugin.plugin_id).arg(removeConfirm.plugin.semver) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
-            objectName: "confirmRemoveButton"; variant: "danger"; text: "Remover"
+            objectName: "confirmRemoveButton"; variant: "danger"; text: qsTr("Remover")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: removeConfirm.plugin ? "Remover " + removeConfirm.plugin.plugin_id : "Remover"
+            Accessible.name: removeConfirm.plugin ? qsTr("Remover %1").arg(removeConfirm.plugin.plugin_id) : qsTr("Remover")
             onClicked: removeConfirm.accept()
         }
     }
@@ -337,16 +337,16 @@ PageFrame {
         objectName: "revokeConfirm"
         property var plugin: null
         property string revision: ""
-        title: "Revogar permissões"
+        title: qsTr("Revogar permissões")
         onAccepted: { if (plugin) core.revokePlugin(plugin.plugin_id, revision) }
         Text {
-            text: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id + "? O plugin será desativado e o processo encerrado. Reativar exige nova aprovação." : ""
+            text: revokeConfirm.plugin ? qsTr("Revogar permissões de %1? O plugin será desativado e o processo encerrado. Reativar exige nova aprovação.").arg(revokeConfirm.plugin.plugin_id) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
-            objectName: "confirmRevokeButton"; variant: "danger"; text: "Revogar"
+            objectName: "confirmRevokeButton"; variant: "danger"; text: qsTr("Revogar")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: revokeConfirm.plugin ? "Revogar permissões de " + revokeConfirm.plugin.plugin_id : "Revogar"
+            Accessible.name: revokeConfirm.plugin ? qsTr("Revogar permissões de %1").arg(revokeConfirm.plugin.plugin_id) : qsTr("Revogar")
             onClicked: revokeConfirm.accept()
         }
     }
@@ -355,16 +355,16 @@ PageFrame {
         id: clearDataConfirm
         objectName: "pluginClearDataConfirm"
         property var plugin: null
-        title: "Apagar dados do plugin?"
+        title: qsTr("Apagar dados do plugin?")
         onAccepted: { if (plugin) core.clearPluginSettingsOf(plugin.plugin_id) }
         Text {
-            text: clearDataConfirm.plugin ? "Apagar as configurações guardadas por " + clearDataConfirm.plugin.plugin_id + "? O plugin, as permissões aprovadas e a configuração do Core não são alterados. Não há volta." : ""
+            text: clearDataConfirm.plugin ? qsTr("Apagar as configurações guardadas por %1? O plugin, as permissões aprovadas e a configuração do Core não são alterados. Não há volta.").arg(clearDataConfirm.plugin.plugin_id) : ""
             textFormat: Text.PlainText; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; wrapMode: Text.WordWrap; Layout.fillWidth: true
         }
         GButton {
-            objectName: "confirmClearDataButton"; variant: "danger"; text: "Apagar dados"
+            objectName: "confirmClearDataButton"; variant: "danger"; text: qsTr("Apagar dados")
             Layout.alignment: Qt.AlignRight
-            Accessible.name: clearDataConfirm.plugin ? "Apagar dados de " + clearDataConfirm.plugin.plugin_id : "Apagar dados"
+            Accessible.name: clearDataConfirm.plugin ? qsTr("Apagar dados de %1").arg(clearDataConfirm.plugin.plugin_id) : qsTr("Apagar dados")
             onClicked: clearDataConfirm.accept()
         }
     }

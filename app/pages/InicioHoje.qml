@@ -22,10 +22,10 @@ PageFrame {
     readonly property var wakeChoice: L.activeWake(core.wakeChoices, core.snapshotPack.active_phrase)
     readonly property bool textTypeable: core.connected && core.textAvailable && core.sessionId.length === 0
     readonly property string typeReason: {
-        if (!core.connected) return "Indisponível: Core desconectado."
-        if (core.sessionId.length > 0) return "Indisponível: uma sessão de voz está em andamento."
-        if (core.state === "safe_mode" || core.state === "restart_required") return "Indisponível: o Core precisa de atenção."
-        if (!core.textAvailable) return "Indisponível: a entrada de texto só existe no perfil de teste."
+        if (!core.connected) return qsTr("Indisponível: Core desconectado.")
+        if (core.sessionId.length > 0) return qsTr("Indisponível: uma sessão de voz está em andamento.")
+        if (core.state === "safe_mode" || core.state === "restart_required") return qsTr("Indisponível: o Core precisa de atenção.")
+        if (!core.textAvailable) return qsTr("Indisponível: a entrada de texto só existe no perfil de teste.")
         return ""
     }
     // B13: the Core rule for the command line (1..512 UTF-8 bytes, no control characters); a problem disables Enviar and says why.
@@ -68,42 +68,42 @@ PageFrame {
         var budget = core.agentBudget || {}
         var agentRun = core.agentActive
         var progress = (agentRun && budget.max_steps > 0) ? Math.min(1, budget.steps / budget.max_steps) : -1
-        var steps = (agentRun && budget.max_steps > 0) ? "Passo " + budget.steps + " de " + budget.max_steps : ""
+        var steps = (agentRun && budget.max_steps > 0) ? qsTr("Passo %1 de %2").arg(budget.steps).arg(budget.max_steps) : ""
         var step = page.runningStep
         var toolName = step ? String(step.tool) : ""
         var cancelAgent = agentRun ? "agent" : ""
-        if (!core.connected) return hudOf("idle", "Core desconectado", "Tentando reconectar…", "muted", {dim: true})
+        if (!core.connected) return hudOf("idle", qsTr("Core desconectado"), qsTr("Tentando reconectar…"), "muted", {dim: true})
         var s = core.state
-        if (s === "safe_mode") return hudOf("error", "Modo seguro", "Abra Diagnóstico › Recuperação para reparar.", "warning")
-        if (s === "restart_required") return hudOf("error", "Reinício necessário", "Reinicie o Core para aplicar a alteração.", "warning")
+        if (s === "safe_mode") return hudOf("error", qsTr("Modo seguro"), qsTr("Abra Diagnóstico › Recuperação para reparar."), "warning")
+        if (s === "restart_required") return hudOf("error", qsTr("Reinício necessário"), qsTr("Reinicie o Core para aplicar a alteração."), "warning")
         if (s === "capturing") {
-            if (page.wakeFresh) return hudOf("wake", "Gideon ativado", "Pode falar. Cancelar encerra a sessão.", "info", {cancel: "session"})
-            return hudOf("listening", "Ouvindo…", "Fale agora. Cancelar encerra a sessão.", "info", {cancel: "session", transcript: true})
+            if (page.wakeFresh) return hudOf("wake", qsTr("Gideon ativado"), qsTr("Pode falar. Cancelar encerra a sessão."), "info", {cancel: "session"})
+            return hudOf("listening", qsTr("Ouvindo…"), qsTr("Fale agora. Cancelar encerra a sessão."), "info", {cancel: "session", transcript: true})
         }
-        if (s === "transcribing") return hudOf("transcribing", "Transcrevendo…", "Processando o que você disse.", "info", {cancel: "session", transcript: true})
-        if (s === "executing") return hudOf("acting", "Executando…", core.agentState === "waiting_tool" ? "Ferramenta do agente em execução." : "Executando o comando.", "info",
+        if (s === "transcribing") return hudOf("transcribing", qsTr("Transcrevendo…"), qsTr("Processando o que você disse."), "info", {cancel: "session", transcript: true})
+        if (s === "executing") return hudOf("acting", qsTr("Executando…"), core.agentState === "waiting_tool" ? qsTr("Ferramenta do agente em execução.") : qsTr("Executando o comando."), "info",
                                             {cancel: "session", tool: toolName, progress: progress, steps: steps, transcript: true})
-        if (s === "speaking") return hudOf("speaking", "Falando…", "Resposta em voz alta. Cancelar interrompe.", "info", {cancel: "session", transcript: true})
-        if (s !== "idle") return hudOf("error", "Erro", "Estado do Core não reconhecido.", "error")
+        if (s === "speaking") return hudOf("speaking", qsTr("Falando…"), qsTr("Resposta em voz alta. Cancelar interrompe."), "info", {cancel: "session", transcript: true})
+        if (s !== "idle") return hudOf("error", qsTr("Erro"), qsTr("Estado do Core não reconhecido."), "error")
         if (page.pending.length > 0 || core.agentState === "awaiting_approval") {
-            var asked = page.pending.length > 0 ? "Ferramenta " + (page.oldest.tool || "") + " precisa da sua decisão." : "O agente aguarda a sua decisão."
-            return hudOf("confirm", "Aguardando sua aprovação", asked, "warning", {cancel: cancelAgent})
+            var asked = page.pending.length > 0 ? qsTr("Ferramenta %1 precisa da sua decisão.").arg(page.oldest.tool || "") : qsTr("O agente aguarda a sua decisão.")
+            return hudOf("confirm", qsTr("Aguardando sua aprovação"), asked, "warning", {cancel: cancelAgent})
         }
-        if (core.agentState === "waiting_tool") return hudOf("acting", "Executando…", "Ferramenta do agente em execução.", "info",
+        if (core.agentState === "waiting_tool") return hudOf("acting", qsTr("Executando…"), qsTr("Ferramenta do agente em execução."), "info",
                                                               {cancel: cancelAgent, tool: toolName, progress: progress, steps: steps})
         if (core.chatState === "waiting" || core.chatState === "streaming" || core.agentState === "thinking") {
-            var waiting = core.chatState === "waiting" ? "Aguardando o motor LLM." : core.chatState === "streaming" ? "Recebendo a resposta." : "O agente planeja o próximo passo."
-            return hudOf("thinking", "Pensando…", waiting, "info", {cancel: agentRun ? "agent" : "chat", progress: progress, steps: steps})
+            var waiting = core.chatState === "waiting" ? qsTr("Aguardando o motor LLM.") : core.chatState === "streaming" ? qsTr("Recebendo a resposta.") : qsTr("O agente planeja o próximo passo.")
+            return hudOf("thinking", qsTr("Pensando…"), waiting, "info", {cancel: agentRun ? "agent" : "chat", progress: progress, steps: steps})
         }
-        if (core.chatState === "error") return hudOf("error", "Erro", core.chatResult.length > 0 ? core.chatResult : "A última resposta falhou.", "error",
-                                                    {receipt: {text: "Falhou", ok: false}})
-        if (core.agentState === "failed" || core.agentState === "blocked") return hudOf("error", "Erro", core.agentStateLabel, "error",
-                                                                                        {receipt: {text: "Falhou", ok: false}})
-        if (page.commandFailed) return hudOf("error", "Erro", core.result, "error", {receipt: {text: "Falhou", ok: false}})
+        if (core.chatState === "error") return hudOf("error", qsTr("Erro"), core.chatResult.length > 0 ? core.chatResult : qsTr("A última resposta falhou."), "error",
+                                                    {receipt: {text: qsTr("Falhou"), ok: false}})
+        if (core.agentState === "failed" || core.agentState === "blocked") return hudOf("error", qsTr("Erro"), core.agentStateLabel, "error",
+                                                                                        {receipt: {text: qsTr("Falhou"), ok: false}})
+        if (page.commandFailed) return hudOf("error", qsTr("Erro"), core.result, "error", {receipt: {text: qsTr("Falhou"), ok: false}})
         var receipt = null
-        if (core.resultVerified) receipt = {text: "Concluído · " + core.result, ok: true}
-        else if (core.agentState === "done") receipt = {text: "Concluído", ok: true}
-        return hudOf("idle", "Pronto para ouvir", "Diga 'Hey Gideon' ou digite um comando.", "normal", {receipt: receipt})
+        if (core.resultVerified) receipt = {text: qsTr("Concluído · %1").arg(core.result), ok: true}
+        else if (core.agentState === "done") receipt = {text: qsTr("Concluído"), ok: true}
+        return hudOf("idle", qsTr("Pronto para ouvir"), qsTr("Diga 'Hey Gideon' ou digite um comando."), "normal", {receipt: receipt})
     }
     readonly property var hud: describeHud()
     readonly property color hudColor: hud.tone === "warning" ? Theme.warning : hud.tone === "error" ? Theme.error : hud.tone === "muted" ? Theme.textMuted : Theme.text
@@ -113,6 +113,20 @@ PageFrame {
         if (hud.cancel === "session") core.cancel()
         else if (hud.cancel === "agent") core.agentAbort()
         else if (hud.cancel === "chat") core.cancelChat()
+    }
+
+    // The words of the session with the speaker: "Você: …", or "Você (parcial): …" while the Core is still listening.
+    function heard() {
+        return (core.partial ? qsTr("Você (parcial): %1") : qsTr("Você: %1")).arg(core.subtitle)
+    }
+    // Wake chip: the active wake phrase, with the qualification of its choice when the Core has one.
+    function wakeLabel() {
+        var base = qsTr("Wake: %1").arg(L.wakeText(core.snapshotPack))
+        if (!page.wakeChoice) return base
+        return qsTr("%1 · %2").arg(base).arg(page.wakeChoice.qualification === "dev_qualified" ? qsTr("qualificada em corpus sintético; microfone real não validado") : qsTr("não ativado: precisa de gravações da sua voz"))
+    }
+    function modeLabel() {
+        return qsTr("Modo: Base + LLM (%1)").arg((core.modelsSelected && core.modelsSelected.model) ? core.modelsSelected.model : qsTr("sem modelo"))
     }
 
     // Recent activity: the three newest rows of the timeline (same rules as Atividade, filter Tudo).
@@ -130,8 +144,8 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Hoje"
-        subtitle: "Como o Gideon está agora e um comando para ele."
+        title: qsTr("Hoje")
+        subtitle: qsTr("Como o Gideon está agora e um comando para ele.")
     }
 
     // Status chips: each one opens the setting that owns the value. The pending count is the only text on this line.
@@ -141,7 +155,7 @@ PageFrame {
         Text {
             objectName: "pendingCount"
             visible: page.pending.length > 0
-            text: page.pending.length === 1 ? "1 proposta pendente" : page.pending.length + " propostas pendentes"
+            text: page.pending.length === 1 ? qsTr("1 proposta pendente") : qsTr("%1 propostas pendentes").arg(page.pending.length)
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -150,21 +164,19 @@ PageFrame {
         }
         Chip {
             objectName: "chipWake"
-            text: !core.snapshotPack.active_phrase ? "Wake: indisponível"
-                : "Wake: " + L.wakeText(core.snapshotPack) + (page.wakeChoice ? (page.wakeChoice.qualification === "dev_qualified" ? " · em desenvolvimento" : " · requer prova de conceito") : "")
+            text: !core.snapshotPack.active_phrase ? qsTr("Wake: indisponível") : page.wakeLabel()
             onClicked: Window.window.goPage("cfg_voz")
         }
         Chip {
             objectName: "chipEntrada"
             // B16: the real device name only while the live microphone listens (A6 consent); otherwise the virtual PCM the wake uses.
-            text: core.wakeChoices.length === 0 ? "Entrada: indisponível"
-                : (core.audioLive.enabled === true ? "Entrada: " + core.audioInputLabel : "Entrada: PCM virtual")
+            text: core.wakeChoices.length === 0 ? qsTr("Entrada: indisponível")
+                : (core.audioLive.enabled === true ? qsTr("Entrada: %1").arg(core.audioInputLabel) : qsTr("Entrada: PCM virtual"))
             onClicked: Window.window.goPage("cfg_dispositivos")
         }
         Chip {
             objectName: "chipModo"
-            text: !core.chatAvailable ? "Modo: Base, sem LLM"
-                : "Modo: Base + LLM (" + ((core.modelsSelected && core.modelsSelected.model) ? core.modelsSelected.model : "sem modelo") + ")"
+            text: !core.chatAvailable ? qsTr("Modo: Base, sem LLM") : page.modeLabel()
             onClicked: Window.window.goPage(core.chatAvailable ? "modelos" : "plugins")
         }
     }
@@ -189,7 +201,7 @@ PageFrame {
             progress: page.hud.progress
             size: 72
             opacity: page.hud.dim ? 0.4 : 1
-            Accessible.description: core.micActive ? "Microfone ativo" : ""
+            Accessible.description: core.micActive ? qsTr("Microfone ativo") : ""
             Layout.alignment: Qt.AlignTop
             Layout.preferredWidth: 72
             Layout.preferredHeight: 72
@@ -201,9 +213,9 @@ PageFrame {
             Badge {
                 objectName: "hojeMicBadge"
                 visible: core.micActive
-                text: "Microfone ativo"
+                text: qsTr("Microfone ativo")
                 tone: "warning"
-                Accessible.name: "Aviso: microfone ativo"
+                Accessible.name: qsTr("Aviso: microfone ativo")
             }
             Text {
                 objectName: "heroPhrase"
@@ -216,7 +228,7 @@ PageFrame {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
                 Accessible.role: Accessible.StaticText
-                Accessible.name: "Estado do Gideon, " + text
+                Accessible.name: qsTr("Estado do Gideon, %1").arg(text)
             }
             Text {
                 objectName: "heroSub"
@@ -233,20 +245,20 @@ PageFrame {
             Text {
                 objectName: "hudTranscript"
                 visible: page.hud.transcript && core.subtitle.length > 0
-                text: (core.partial ? "Você (parcial): " : "Você: ") + core.subtitle
+                text: page.heard()
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
-                Accessible.name: core.partial ? "Transcrição parcial" : "Transcrição final"
+                Accessible.name: core.partial ? qsTr("Transcrição parcial") : qsTr("Transcrição final")
             }
             // The running tool (Core agent step) and the run's progress (steps used of the Core's limit).
             Text {
                 objectName: "hudTool"
                 visible: page.hud.tool.length > 0
-                text: "Ferramenta: " + page.hud.tool
+                text: qsTr("Ferramenta: %1").arg(page.hud.tool)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
@@ -303,16 +315,16 @@ PageFrame {
                 objectName: "hudCancel"
                 visible: page.hud.cancel.length > 0
                 variant: "secondary"
-                text: "Cancelar"
+                text: qsTr("Cancelar")
                 Layout.alignment: Qt.AlignLeft
-                Accessible.name: "Cancelar"
+                Accessible.name: qsTr("Cancelar")
                 onClicked: page.cancelActive()
             }
             // A6: while the Core does not listen to the microphone, one quiet line says how to turn it on.
             Text {
                 objectName: "hojeLiveHint"
                 visible: core.audioLive.enabled !== true
-                text: core.liveAudioEnabled ? "Microfone será ativado ao reiniciar o Core." : "Microfone desligado: ative em Dispositivos para usar a voz"
+                text: core.liveAudioEnabled ? qsTr("O microfone será ativado ao reiniciar o Core.") : qsTr("Microfone desligado: ative em Dispositivos para usar a voz.")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -378,9 +390,9 @@ PageFrame {
     }
 
     Section {
-        title: "Comando"
+        title: qsTr("Comando")
         Text {
-            text: "Texto segue o mesmo caminho da voz. Até 512 bytes, em uma linha."
+            text: qsTr("Texto segue o mesmo caminho da voz. Até 512 bytes, em uma linha.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -397,16 +409,16 @@ PageFrame {
                 Layout.fillWidth: true
                 // Characters are bounded here only against a huge paste; the limit that counts is the byte counter below.
                 maximumLength: 2048
-                placeholderText: "Diga ou digite um comando"
+                placeholderText: qsTr("Diga ou digite um comando")
                 enabled: page.textTypeable
-                Accessible.name: "Comando para o Gideon"
+                Accessible.name: qsTr("Comando para o Gideon")
                 onAccepted: page.submit()
             }
             GButton {
                 objectName: "sendButton"
                 variant: "primary"
-                text: "Enviar"
-                Accessible.name: "Enviar comando"
+                text: qsTr("Enviar")
+                Accessible.name: qsTr("Enviar comando")
                 enabled: page.canSend
                 onClicked: page.submit()
             }
@@ -421,7 +433,7 @@ PageFrame {
                 color: page.inputProblem.length > 0 ? Theme.warning : Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontHelp
-                Accessible.name: "Tamanho do comando: " + text
+                Accessible.name: qsTr("Tamanho do comando: %1").arg(text)
             }
             Text {
                 objectName: "commandProblem"
@@ -433,7 +445,7 @@ PageFrame {
                 font.pixelSize: Theme.fontHelp
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
-                Accessible.name: "Motivo: " + text
+                Accessible.name: qsTr("Motivo: %1").arg(text)
             }
         }
         Text {
@@ -461,13 +473,13 @@ PageFrame {
     }
 
     Section {
-        title: "Última interação"
+        title: qsTr("Última interação")
         // The last words of the session: what the user said (partial or final) and the receipt of the last command.
         // Turns heard while the microphone is off come from the boot replay or the virtual PCM: they are test audio.
         Text {
             objectName: "interactionTestLabel"
             visible: core.lastInteractionIsTestAudio && core.subtitle.length > 0
-            text: "(áudio de teste)"
+            text: qsTr("(áudio de teste)")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -489,13 +501,13 @@ PageFrame {
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: Theme.space(12); anchors.rightMargin: Theme.space(12)
-                text: core.subtitle.length > 0 ? (core.partial ? "Você (parcial): " : "Você: ") + core.subtitle : "Sua conversa aparecerá aqui."
+                text: core.subtitle.length > 0 ? page.heard() : qsTr("Sua conversa aparecerá aqui.")
                 textFormat: Text.PlainText
                 color: core.subtitle.length > 0 ? Theme.text : Theme.textMuted
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
                 wrapMode: Text.WordWrap
-                Accessible.name: core.partial ? "Transcrição parcial" : "Transcrição final"
+                Accessible.name: core.partial ? qsTr("Transcrição parcial") : qsTr("Transcrição final")
             }
         }
         RowLayout {
@@ -511,7 +523,7 @@ PageFrame {
                 font.pixelSize: Theme.fontBody
             }
             Text {
-                text: core.resultVerified ? "Concluído" : "Falhou"
+                text: core.resultVerified ? qsTr("Concluído") : qsTr("Falhou")
                 textFormat: Text.PlainText
                 color: core.resultVerified ? Theme.success : Theme.error
                 font.family: Theme.fontFamily
@@ -532,7 +544,7 @@ PageFrame {
 
     Section {
         objectName: "recentActivity"
-        title: "Atividade recente"
+        title: qsTr("Atividade recente")
         Repeater {
             model: page.recent
             delegate: RowLayout {
@@ -566,7 +578,7 @@ PageFrame {
         }
         Text {
             visible: page.recent.length === 0
-            text: "Nada ainda nesta sessão."
+            text: qsTr("Nada ainda nesta sessão.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -577,7 +589,7 @@ PageFrame {
             objectName: "seeAllActivity"
             Layout.alignment: Qt.AlignRight
             variant: "ghost"
-            text: "Ver tudo"
+            text: qsTr("Ver tudo")
             onClicked: Window.window.goPage("atividade")
         }
     }

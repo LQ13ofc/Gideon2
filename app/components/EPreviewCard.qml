@@ -18,7 +18,7 @@ Rectangle {
         anchors.margins: Theme.space(20)
         spacing: Theme.space(14)
         Text {
-            text: "Prévia ao vivo"
+            text: qsTr("Prévia ao vivo")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -39,7 +39,7 @@ Rectangle {
                 anchors.margins: Theme.space(16)
                 spacing: Theme.space(10)
                 Text {
-                    text: "Exemplo de cartão"
+                    text: qsTr("Exemplo de cartão")
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -48,7 +48,7 @@ Rectangle {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: "Texto de apoio no tamanho escolhido."
+                    text: qsTr("Texto de apoio no tamanho escolhido.")
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -62,10 +62,10 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.space(8)
-            Badge { text: "Concluído"; tone: "success" }
-            Badge { text: "Atenção"; tone: "warning" }
-            Badge { text: "Erro"; tone: "error" }
-            Badge { text: "Informação"; tone: "info" }
+            Badge { text: qsTr("Concluído"); tone: "success" }
+            Badge { text: qsTr("Atenção"); tone: "warning" }
+            Badge { text: qsTr("Erro"); tone: "error" }
+            Badge { text: qsTr("Informação"); tone: "info" }
         }
         Rectangle {
             Layout.fillWidth: true
@@ -73,7 +73,7 @@ Rectangle {
             color: Theme.hairline
         }
         Text {
-            text: "A prévia não grava nada. Cada escolha já vale nesta janela."
+            text: qsTr("A prévia não grava nada. Cada escolha já vale nesta janela.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

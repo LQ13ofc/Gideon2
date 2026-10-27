@@ -18,7 +18,7 @@ Item {
 
     property int step: 0
     readonly property int stepCount: 4
-    readonly property var titles: ["Bem-vindo ao Gideon", "Frase de despertar", "Dispositivos e volume", "Atalhos e paleta"]
+    readonly property var titles: [qsTr("Bem-vindo ao Gideon"), qsTr("Frase de despertar"), qsTr("Dispositivos e volume"), qsTr("Atalhos e paleta")]
     // Only certified phrases can be chosen here; the others are listed with the reason they are blocked.
     readonly property var wakeRows: (typeof core !== "undefined" && core && core.wakeChoices) ? core.wakeChoices : []
     readonly property string wakeChosen: String(AppState.uiGet("core.wakePhrase", ""))
@@ -75,7 +75,7 @@ Item {
 
             Text {
                 objectName: "onboarding_step"
-                text: "Passo " + (intro.step + 1) + " de " + intro.stepCount
+                text: qsTr("Passo %1 de %2").arg(intro.step + 1).arg(intro.stepCount)
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -114,12 +114,12 @@ Item {
                         objectName: "onboarding_step1"
                         Layout.fillWidth: true
                         spacing: Theme.space(10)
-                        IntroText { text: "O Gideon é um assistente de voz que roda neste computador. Ele fica em espera e responde quando você diz a frase de despertar." }
-                        IntroText { text: "Privacidade, em resumo:"; strong: true }
-                        IntroText { text: "•  Nada do que você fala é guardado em disco pela interface."; indent: true }
-                        IntroText { text: "•  O áudio fica só em memória durante a captura. Nenhum arquivo de voz é gravado."; indent: true }
-                        IntroText { text: "•  Não há histórico de conversas salvo. A nuvem só recebe conversas com consentimento."; indent: true }
-                        IntroText { text: "•  A entrada é virtual, salvo se você ligar a escuta do microfone (passo 3 ou Dispositivos)."; indent: true }
+                        IntroText { text: qsTr("O Gideon é um assistente de voz que roda neste computador. Ele fica em espera e responde quando você diz a frase de despertar.") }
+                        IntroText { text: qsTr("Privacidade, em resumo:"); strong: true }
+                        IntroText { text: qsTr("•  Nada do que você fala é guardado em disco pela interface."); indent: true }
+                        IntroText { text: qsTr("•  O áudio fica só em memória durante a captura. Nenhum arquivo de voz é gravado."); indent: true }
+                        IntroText { text: qsTr("•  Não há histórico de conversas salvo. A nuvem só recebe conversas com consentimento."); indent: true }
+                        IntroText { text: qsTr("•  A entrada é virtual, salvo se você ligar a escuta do microfone (passo 3 ou Dispositivos)."); indent: true }
                     }
 
                     // ---- 2. Frase de despertar (só certificadas)
@@ -127,10 +127,10 @@ Item {
                         objectName: "onboarding_step2"
                         Layout.fillWidth: true
                         spacing: Theme.space(6)
-                        IntroText { text: "Escolha a frase que acorda o Gideon. Só aparecem frases do pacote com qualificação. A troca vale depois de reiniciar o Core." }
+                        IntroText { text: qsTr("Escolha a frase que acorda o Gideon. Só aparecem frases do pacote com qualificação. A troca vale depois de reiniciar o Core.") }
                         IntroText {
                             visible: intro.wakeRows.length === 0
-                            text: "O pacote não oferece frases de despertar agora."
+                            text: qsTr("O pacote não oferece frases de despertar agora.")
                         }
                         Repeater {
                             model: intro.wakeRows
@@ -143,7 +143,7 @@ Item {
                                     id: wakeRadio
                                     objectName: "onboarding_wake_" + modelData.id
                                     Layout.fillWidth: true
-                                    text: modelData.text + (modelData.qualification_label ? " · " + modelData.qualification_label : "")
+                                    text: modelData.qualification_label ? qsTr("%1 · %2").arg(modelData.text).arg(modelData.qualification_label) : modelData.text
                                     enabled: certified && AppState.blockReason("core.wakePhrase").length === 0
                                     checked: intro.wakeChosen === modelData.id
                                     onClicked: {
@@ -153,14 +153,14 @@ Item {
                                 }
                                 IntroText {
                                     visible: !certified
-                                    text: "Indisponível: frase sem qualidade aprovada no pacote."
+                                    text: qsTr("Indisponível: frase sem qualidade aprovada no pacote.")
                                     small: true
                                 }
                             }
                         }
                         IntroText {
                             visible: AppState.blockReason("core.wakePhrase").length > 0
-                            text: "Indisponível agora: " + AppState.blockReason("core.wakePhrase") + "."
+                            text: qsTr("Indisponível agora: %1.").arg(AppState.blockReason("core.wakePhrase"))
                             small: true
                         }
                     }
@@ -170,12 +170,12 @@ Item {
                         objectName: "onboarding_step3"
                         Layout.fillWidth: true
                         spacing: Theme.space(10)
-                        IntroText { text: "Sem a escuta do microfone, entrada e saída são virtuais. O volume abaixo é o da resposta por voz, não o do sistema." }
-                        IntroText { objectName: "onboarding_input_virtual"; text: "Entrada: PCM virtual (em uso)"; strong: true }
-                        IntroText { objectName: "onboarding_output_virtual"; text: "Saída: virtual (em uso)"; strong: true }
+                        IntroText { text: qsTr("Sem a escuta do microfone, entrada e saída são virtuais. O volume abaixo é o da resposta por voz, não o do sistema.") }
+                        IntroText { objectName: "onboarding_input_virtual"; text: qsTr("Entrada: PCM virtual (em uso)"); strong: true }
+                        IntroText { objectName: "onboarding_output_virtual"; text: qsTr("Saída: virtual (em uso)"); strong: true }
                         IntroText {
                             objectName: "onboarding_physical_mic"
-                            text: "Microfone: escolha em Configurações › Dispositivos. A lista vem do sistema."
+                            text: qsTr("Microfone: escolha em Configurações › Dispositivos. A lista vem do sistema.")
                             small: true
                         }
                         // A6: optional and off by default. Turning it on asks for consent; the Core listens after its next start.
@@ -183,8 +183,8 @@ Item {
                             id: onboardingLiveSwitch
                             objectName: "onboardingLiveSwitch"
                             Layout.fillWidth: true
-                            text: "Ouvir o microfone (ativação por voz)"
-                            Accessible.name: "Ouvir o microfone para a ativação por voz"
+                            text: qsTr("Ouvir o microfone (ativação por voz)")
+                            Accessible.name: qsTr("Ouvir o microfone para a ativação por voz")
                             checked: core.liveAudioEnabled
                             enabled: core.preferencesAvailable
                             onToggled: {
@@ -196,7 +196,7 @@ Item {
                         IntroText {
                             objectName: "onboarding_live_note"
                             visible: core.liveAudioEnabled && core.audioLive.enabled !== true
-                            text: "Será ativado ao reiniciar o Core. Enquanto isso, a entrada segue virtual."
+                            text: qsTr("Será ativado ao reiniciar o Core. Enquanto isso, a entrada segue virtual.")
                             small: true
                         }
                         // A13: the assistant runs right after the consent (before the restart) and offers the cleaner microphone.
@@ -206,10 +206,10 @@ Item {
                         }
                         IntroText {
                             objectName: "onboarding_physical_out"
-                            text: "Alto-falante: escolha em Configurações › Dispositivos. A troca vale na próxima sessão de voz."
+                            text: qsTr("Alto-falante: escolha em Configurações › Dispositivos. A troca vale na próxima sessão de voz.")
                             small: true
                         }
-                        IntroText { text: "Volume da resposta por voz"; strong: true }
+                        IntroText { text: qsTr("Volume da resposta por voz"); strong: true }
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: Theme.space(12)
@@ -217,7 +217,7 @@ Item {
                                 id: volumeSlider
                                 objectName: "onboarding_volume"
                                 Layout.fillWidth: true
-                                label: "Volume da resposta por voz, por cento"
+                                label: qsTr("Volume da resposta por voz, por cento")
                                 from: 0; to: 100; stepSize: 1
                                 value: Number(AppState.uiGet("core.responseGain", 100))
                                 enabled: AppState.blockReason("core.responseGain").length === 0
@@ -234,7 +234,7 @@ Item {
                         }
                         IntroText {
                             visible: AppState.blockReason("core.responseGain").length > 0
-                            text: "Indisponível agora: " + AppState.blockReason("core.responseGain") + "."
+                            text: qsTr("Indisponível agora: %1.").arg(AppState.blockReason("core.responseGain"))
                             small: true
                         }
                     }
@@ -244,14 +244,14 @@ Item {
                         objectName: "onboarding_step4"
                         Layout.fillWidth: true
                         spacing: Theme.space(10)
-                        IntroText { text: "Estes atalhos valem em todas as telas. Eles podem ser desligados em Configurações › Geral." }
+                        IntroText { text: qsTr("Estes atalhos valem em todas as telas. Eles podem ser desligados em Configurações › Geral.") }
                         Repeater {
                             model: [
-                                {keys: "Ctrl+K", text: "Abre a paleta: vá a páginas, configurações e comandos."},
-                                {keys: "Ctrl+1 a Ctrl+5", text: "Troca de aba (Assistente, Extensões, Permissões, Configurações, Diagnóstico)."},
-                                {keys: "Ctrl+Tab", text: "Próxima sub-aba. Ctrl+Shift+Tab volta."},
-                                {keys: "Ctrl+M", text: "Encerra a escuta quando ela está ativa."},
-                                {keys: "Esc", text: "Cancela a escuta ou fecha a janela aberta."}
+                                {keys: "Ctrl+K", text: qsTr("Abre a paleta: vá a páginas, configurações e comandos.")},
+                                {keys: "Ctrl+1 a Ctrl+5", text: qsTr("Troca de aba (Assistente, Extensões, Permissões, Configurações, Diagnóstico).")},
+                                {keys: "Ctrl+Tab", text: qsTr("Próxima sub-aba. Ctrl+Shift+Tab volta.")},
+                                {keys: "Ctrl+M", text: qsTr("Encerra a escuta quando ela está ativa.")},
+                                {keys: "Esc", text: qsTr("Cancela a escuta ou fecha a janela aberta.")}
                             ]
                             delegate: RowLayout {
                                 required property var modelData
@@ -272,7 +272,7 @@ Item {
                                 }
                             }
                         }
-                        IntroText { text: "Dica: Ctrl+K também acha configurações pelo nome."; small: true }
+                        IntroText { text: qsTr("Dica: Ctrl+K também acha configurações pelo nome."); small: true }
                     }
                 }
             }
@@ -283,15 +283,15 @@ Item {
                 GButton {
                     objectName: "onboarding_skip"
                     variant: "ghost"
-                    text: "Pular"
-                    Accessible.description: "Fecha a introdução e não a mostra de novo"
+                    text: qsTr("Pular")
+                    Accessible.description: qsTr("Fecha a introdução e não a mostra de novo")
                     onClicked: intro.finish()
                 }
                 Item { Layout.fillWidth: true }
                 GButton {
                     objectName: "onboarding_back"
                     variant: "secondary"
-                    text: "Voltar"
+                    text: qsTr("Voltar")
                     enabled: intro.step > 0
                     onClicked: intro.back()
                 }
@@ -299,7 +299,7 @@ Item {
                     id: nextButton
                     objectName: "onboarding_next"
                     variant: "primary"
-                    text: intro.step === intro.stepCount - 1 ? "Concluir" : "Próximo"
+                    text: intro.step === intro.stepCount - 1 ? qsTr("Concluir") : qsTr("Próximo")
                     onClicked: intro.next()
                 }
             }

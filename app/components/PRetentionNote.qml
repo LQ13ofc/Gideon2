@@ -5,11 +5,11 @@ import "../theme"
 // the choice is changed there, never here.
 Text {
     readonly property string value: core.historyRetention
-    readonly property var labels: ({"days_7": "7 dias", "days_30": "30 dias", "days_90": "90 dias"})
+    readonly property var labels: ({"days_7": qsTr("7 dias"), "days_30": qsTr("30 dias"), "days_90": qsTr("90 dias")})
     text: value === "never"
-        ? "Histórico não é guardado: a configuração em Privacidade está em \"Não guardar\"."
-        : (labels[value] ? "Histórico guardado por " + labels[value] + " (configuração em Privacidade)."
-                         : "Prazo do histórico indisponível: confira Privacidade.")
+        ? qsTr("Histórico não é guardado: a configuração em Privacidade está em \"Não guardar\".")
+        : (labels[value] ? qsTr("Histórico guardado por %1 (configuração em Privacidade).").arg(labels[value])
+                         : qsTr("Prazo do histórico indisponível: confira Privacidade."))
     textFormat: Text.PlainText
     color: Theme.textMuted
     font.family: Theme.fontFamily

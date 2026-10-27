@@ -24,16 +24,16 @@ PageFrame {
         return i.active === true && i.state === "enabled" && i.deps_ok === true && i.permissions_ok === true
     }).map(function (i) { return {value: i.id, label: i.name + " (" + i.version + ")"} })
     readonly property var repeatOptions: [
-        {value: 300000, label: "A cada 5 minutos"}, {value: 3600000, label: "A cada hora"}, {value: 86400000, label: "Todo dia"}
+        {value: 300000, label: qsTr("A cada 5 minutos")}, {value: 3600000, label: qsTr("A cada hora")}, {value: 86400000, label: qsTr("Todo dia")}
     ]
     readonly property var onceOptions: [
-        {value: 300000, label: "Em 5 minutos"}, {value: 3600000, label: "Em 1 hora"}, {value: "tomorrow9", label: "Amanhã às 9h"}
+        {value: 300000, label: qsTr("Em 5 minutos")}, {value: 3600000, label: qsTr("Em 1 hora")}, {value: "tomorrow9", label: qsTr("Amanhã às 9h")}
     ]
-    readonly property var statusLabels: ({active: "Ativa", paused: "Pausada", done: "Concluída"})
+    readonly property var statusLabels: ({active: qsTr("Ativa"), paused: qsTr("Pausada"), done: qsTr("Concluída")})
     readonly property var statusTones: ({active: "success", paused: "warning", done: "neutral"})
     readonly property var codeHints: ({
-        skill_version_changed: "Pausada: a Skill mudou ou deixou de estar habilitada desde a sua aprovação. Revise em Skills.",
-        needs_review: "Pausada: o Skills engine recusou a execução. Revise a Skill antes de retomar."
+        skill_version_changed: qsTr("Pausada: a Skill mudou ou deixou de estar habilitada desde a sua aprovação. Revise em Skills."),
+        needs_review: qsTr("Pausada: o Skills engine recusou a execução. Revise a Skill antes de retomar.")
     })
     property string scheduleKind: "once"
     property string pendingId: ""
@@ -61,24 +61,24 @@ PageFrame {
         return d.getTime()
     }
     function detailOf(auto) {
-        var parts = ["Skill: " + auto.skill_id + " (" + auto.skill_version + ")"]
-        if (auto.status !== "done") parts.push("próxima: " + (auto.next_run_ms ? when(auto.next_run_ms) : "—"))
-        parts.push("execuções: " + auto.runs)
+        var parts = [qsTr("Skill: %1 (%2)").arg(auto.skill_id).arg(auto.skill_version)]
+        if (auto.status !== "done") parts.push(qsTr("próxima: %1").arg(auto.next_run_ms ? when(auto.next_run_ms) : "—"))
+        parts.push(qsTr("execuções: %1").arg(auto.runs))
         if (auto.last_code) {
             var hint = codeHints[auto.last_code]
-            parts.push(hint ? hint : (core.codeMessage(auto.last_code) || "último resultado registrado"))
+            parts.push(hint ? hint : (core.codeMessage(auto.last_code) || qsTr("último resultado registrado")))
         }
         return parts.join(" · ")
     }
 
     PageHeader {
-        title: "Automações"
-        subtitle: "Rotinas que executam uma Skill habilitada no horário combinado."
+        title: qsTr("Automações")
+        subtitle: qsTr("Rotinas que executam uma Skill habilitada no horário combinado.")
     }
 
     Text {
         visible: !page.ready
-        text: "Indisponível: o Core não respondeu às automações. Os controles voltam quando a conexão for restabelecida."
+        text: qsTr("Indisponível: o Core não respondeu às automações. Os controles voltam quando a conexão for restabelecida.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -88,14 +88,14 @@ PageFrame {
     }
 
     Section {
-        title: "Suas automações"
-        caption: "Automações rodam enquanto o Gideon estiver aberto. Horários perdidos não são repetidos em rajada."
+        title: qsTr("Suas automações")
+        caption: qsTr("Automações rodam enquanto o Gideon estiver aberto. Horários perdidos não são repetidos em rajada.")
 
         EmptyState {
             visible: page.automations.length === 0
             message: page.enabledSkills.length === 0
-                ? "Nenhuma automação. Primeiro habilite uma Skill em Extensões › Skills."
-                : "Nenhuma automação ainda. Crie uma abaixo."
+                ? qsTr("Nenhuma automação. Primeiro habilite uma Skill em Extensões › Skills.")
+                : qsTr("Nenhuma automação ainda. Crie uma abaixo.")
         }
         Repeater {
             model: page.automations
@@ -108,14 +108,14 @@ PageFrame {
                 GButton {
                     objectName: "autoRunNow"
                     variant: "secondary"
-                    text: "Executar agora"
+                    text: qsTr("Executar agora")
                     enabled: page.ready && modelData.status === "active"
                     onClicked: page.send({op: "run_now", id: modelData.id})
                 }
                 GButton {
                     objectName: "autoStatus"
                     variant: "ghost"
-                    text: modelData.status === "active" ? "Pausar" : "Retomar"
+                    text: modelData.status === "active" ? qsTr("Pausar") : qsTr("Retomar")
                     visible: modelData.status !== "done"
                     enabled: page.ready
                     onClicked: page.send({
@@ -126,7 +126,7 @@ PageFrame {
                 GButton {
                     objectName: "autoDelete"
                     variant: "danger"
-                    text: "Apagar"
+                    text: qsTr("Apagar")
                     enabled: page.ready
                     onClicked: {
                         page.pendingId = modelData.id
@@ -142,18 +142,18 @@ PageFrame {
     }
 
     Section {
-        title: "Nova automação"
-        caption: "Só Skills habilitadas aparecem aqui. A automação usa a versão aprovada agora."
+        title: qsTr("Nova automação")
+        caption: qsTr("Só Skills habilitadas aparecem aqui. A automação usa a versão aprovada agora.")
 
-        FieldLabel { text: "Nome" }
+        FieldLabel { text: qsTr("Nome") }
         GTextField {
             id: newName
             objectName: "autoName"
             Layout.fillWidth: true
             maximumLength: 60
-            placeholderText: "Ex.: Relatório da manhã"
+            placeholderText: qsTr("Ex.: Relatório da manhã")
         }
-        FieldLabel { text: "Skill" }
+        FieldLabel { text: qsTr("Skill") }
         Select {
             id: skillBox
             objectName: "autoSkill"
@@ -162,7 +162,7 @@ PageFrame {
             model: page.enabledSkills
             enabled: page.ready && page.enabledSkills.length > 0
         }
-        FieldLabel { text: "Entradas (objeto JSON, até 2 KB)" }
+        FieldLabel { text: qsTr("Entradas (objeto JSON, até 2 KB)") }
         GTextField {
             id: newInputs
             objectName: "autoInputs"
@@ -172,7 +172,7 @@ PageFrame {
         }
         Text {
             visible: newInputs.text.trim().length > 0 && page.parseInputs(newInputs.text) === null
-            text: "Entradas precisam ser um objeto JSON, por exemplo {\"pasta\": \"diario\"}."
+            text: qsTr("Entradas precisam ser um objeto JSON, por exemplo {\"pasta\": \"diario\"}.")
             textFormat: Text.PlainText
             color: Theme.error
             font.family: Theme.fontFamily
@@ -180,10 +180,10 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-        FieldLabel { text: "Quando" }
+        FieldLabel { text: qsTr("Quando") }
         Segmented {
             objectName: "autoScheduleKind"
-            model: [{id: "once", text: "Uma vez"}, {id: "repeat", text: "Repetir"}]
+            model: [{id: "once", text: qsTr("Uma vez")}, {id: "repeat", text: qsTr("Repetir")}]
             currentId: page.scheduleKind
             onActivated: function (id) { page.scheduleKind = id }
         }
@@ -200,7 +200,7 @@ PageFrame {
             GButton {
                 objectName: "autoCreate"
                 variant: "primary"
-                text: "Criar automação"
+                text: qsTr("Criar automação")
                 enabled: page.ready && newName.text.trim().length > 0 && skillBox.count > 0
                     && page.parseInputs(newInputs.text) !== null
                 onClicked: {
@@ -228,8 +228,8 @@ PageFrame {
 
     PConfirm {
         id: deleteConfirm
-        message: "A automação será cancelada e apagada. A Skill continua instalada."
-        actionText: "Apagar automação"
+        message: qsTr("A automação será cancelada e apagada. A Skill continua instalada.")
+        actionText: qsTr("Apagar automação")
         onConfirmed: page.send({op: "delete", revision: page.revision, id: page.pendingId})
     }
 }

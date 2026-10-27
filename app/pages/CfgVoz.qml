@@ -28,29 +28,32 @@ PageFrame {
     // B16 sensitivity (global): the saved value, or the value on its way to the Core while "Aplicando…" shows.
     readonly property real sensStored: Number(AppState.uiGet("core.wakeSensitivity", 1.0))
     readonly property real sensShown: AppState.isApplying("core.wakeSensitivity") ? Number(AppState.corePending["core.wakeSensitivity"]) : sensStored
-    function sensText(v) { return Number(v).toFixed(2).replace(".", ",") }
+    // Two decimals with the decimal separator of the interface language (comma in pt-BR and fr, point in en).
+    function sensText(v) { var t = Number(v).toFixed(2); return core.uiLanguage === "en" ? t : t.replace(".", ",") }
+    // The default sensitivity is shown with one decimal ("padrão 1,0"), with the same separator rule.
+    function oneDecimal(v) { var t = Number(v).toFixed(1); return core.uiLanguage === "en" ? t : t.replace(".", ",") }
     // Saved on release (or on a key press), in steps of 0.05; the Core answers through the ui settings.
     function saveSensitivity(v) { AppState.setSetting("core.wakeSensitivity", Number(Number(v).toFixed(2))) }
 
     function measurementText(m) {
         if (!m) return ""
-        var text = "Teste sintético (rótulo sintético): " + m.hits + " de " + m.positives + " acertos · "
-            + m.false_wakes + " falsos em " + m.negatives + " negativas"
+        var text = qsTr("Teste sintético (rótulo sintético): %1 de %2 acertos · %3 falsos em %4 negativas")
+            .arg(m.hits).arg(m.positives).arg(m.false_wakes).arg(m.negatives)
         if (m.latency_ms !== undefined) text += " · " + m.latency_ms + " ms"
         return text
     }
 
     PageHeader {
-        title: "Voz e Wake"
-        subtitle: "Frases de despertar (até 5 ativas), testes sintéticos e prazo da sessão."
+        title: qsTr("Voz e Wake")
+        subtitle: qsTr("Frases de despertar (até 5 ativas), testes sintéticos e prazo da sessão.")
     }
     ECfgSearch {}
     ECfgNotice {}
 
     Section {
-        title: "Frases de despertar"
+        title: qsTr("Frases de despertar")
         Text {
-            text: "Escolha até 5 frases ativas. Frases do pacote usam a qualificação aprovada. Frases personalizadas ficam não testadas até o teste sintético. A troca vale depois de reiniciar o Core."
+            text: qsTr("Escolha até 5 frases ativas. Frases do pacote usam a qualificação aprovada. Frases personalizadas ficam não testadas até o teste sintético. A troca vale depois de reiniciar o Core.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -60,7 +63,7 @@ PageFrame {
         }
         Text {
             visible: page.rows.length === 0
-            text: "Nenhum pacote de voz configurado. Reparo só pela linha de comando (gideon-install repair)."
+            text: qsTr("Nenhum pacote de voz configurado. Reparo só pela linha de comando (gideon-install repair).")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -98,7 +101,7 @@ PageFrame {
                             objectName: "wakeSwitch_" + row.modelData.id
                             checked: row.modelData.active
                             enabled: page.canEdit && (row.modelData.active || row.canSwitchOn) && !page.testing
-                            Accessible.name: "Ativar " + row.modelData.text
+                            Accessible.name: qsTr("Ativar %1").arg(row.modelData.text)
                             onToggled: {
                                 var id = row.modelData.id
                                 if (checked && row.modelData.custom && row.modelData.measurement && !row.modelData.measurement.passed) {
@@ -131,7 +134,7 @@ PageFrame {
                     }
                     Text {
                         visible: row.modelData.custom && !row.modelData.measurement
-                        text: "Não testada: pode falhar ou disparar à toa. Teste antes de ativar."
+                        text: qsTr("Não testada: pode falhar ou disparar à toa. Teste antes de ativar.")
                         textFormat: Text.PlainText
                         color: Theme.warning
                         font.family: Theme.fontFamily
@@ -152,7 +155,7 @@ PageFrame {
                     }
                     Text {
                         visible: row.modelData.qualification === "poc_required"
-                        text: "Requer prova de conceito: frase sem qualidade aprovada, bloqueada."
+                        text: qsTr("Não ativada: precisa de gravações da sua voz. Frase bloqueada.")
                         textFormat: Text.PlainText
                         color: Theme.textMuted
                         font.family: Theme.fontFamily
@@ -165,7 +168,7 @@ PageFrame {
                         Layout.fillWidth: true
                         spacing: Theme.space(10)
                         Text {
-                            text: "Sensibilidade desta frase"
+                            text: qsTr("Sensibilidade desta frase")
                             textFormat: Text.PlainText
                             color: Theme.textMuted
                             font.family: Theme.fontFamily
@@ -179,7 +182,7 @@ PageFrame {
                             Layout.fillWidth: true
                             value: row.modelData.sensitivity !== null && row.modelData.sensitivity !== undefined ? row.modelData.sensitivity : page.sensShown
                             enabled: page.canEdit && !page.testing
-                            Accessible.name: "Sensibilidade da frase " + row.modelData.text
+                            Accessible.name: qsTr("Sensibilidade da frase %1").arg(row.modelData.text)
                             onPressedChanged: if (!pressed) core.setWakePhraseSensitivity(row.modelData.id, value)
                             onMoved: if (!pressed) core.setWakePhraseSensitivity(row.modelData.id, value)
                         }
@@ -191,16 +194,16 @@ PageFrame {
                         GButton {
                             objectName: "testWakePhrase_" + row.modelData.id
                             variant: "secondary"
-                            text: "Testar frase"
-                            Accessible.name: "Testar a frase " + row.modelData.text + " com áudio sintético"
+                            text: qsTr("Testar frase")
+                            Accessible.name: qsTr("Testar a frase %1 com áudio sintético").arg(row.modelData.text)
                             enabled: core.preferencesAvailable && !page.testing
                             onClicked: core.testWakePhrase(row.modelData.id)
                         }
                         GButton {
                             objectName: "removeWakePhrase_" + row.modelData.id
                             variant: "ghost"
-                            text: "Remover"
-                            Accessible.name: "Remover a frase personalizada " + row.modelData.text
+                            text: qsTr("Remover")
+                            Accessible.name: qsTr("Remover a frase personalizada %1").arg(row.modelData.text)
                             enabled: !row.modelData.active && page.canEdit
                             onClicked: { page.pickedRemove = row.modelData; deleteConfirm.open() }
                         }
@@ -211,7 +214,7 @@ PageFrame {
         Text {
             visible: page.testing
             objectName: "wakeTestProgress"
-            text: "Testando a frase com áudio sintético… pode levar alguns segundos."
+            text: qsTr("Testando a frase com áudio sintético… pode levar alguns segundos.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -222,7 +225,7 @@ PageFrame {
         Text {
             visible: page.testState.state === "failed" || page.testState.state === "done"
             objectName: "wakeTestResult"
-            text: page.testState.state === "done" ? "Teste concluído: o resultado está na frase." : (page.testState.message || "O teste não concluiu.")
+            text: page.testState.state === "done" ? qsTr("Teste concluído: o resultado está na frase.") : (page.testState.message || qsTr("O teste não concluiu."))
             textFormat: Text.PlainText
             color: page.testState.state === "done" ? Theme.textMuted : Theme.warning
             font.family: Theme.fontFamily
@@ -247,22 +250,22 @@ PageFrame {
             GButton {
                 objectName: "addWakePhrase"
                 variant: "primary"
-                text: "Adicionar frase…"
-                Accessible.name: "Adicionar uma frase de despertar personalizada"
+                text: qsTr("Adicionar frase…")
+                Accessible.name: qsTr("Adicionar uma frase de despertar personalizada")
                 enabled: page.canEdit && core.wakePhraseCustomCount < 8
                 onClicked: { phraseField.text = ""; core.checkWakePhrase(""); addDialog.open() }
             }
             GButton {
                 objectName: "restoreWakeDefaults"
                 variant: "ghost"
-                text: "Restaurar padrão"
-                Accessible.name: "Restaurar a frase de despertar padrão"
+                text: qsTr("Restaurar padrão")
+                Accessible.name: qsTr("Restaurar a frase de despertar padrão")
                 enabled: page.canEdit && !page.testing
                 onClicked: core.restoreWakePhraseDefaults()
             }
         }
         Text {
-            text: "Comprovado: 'Hey Gideon' foi reconhecida em corpus sintético de desenvolvimento (75 de 76, sem falso disparo em 320 negativas e silêncio de 1 h). Não comprovado: microfone físico, ambientes reais e outras vozes. 'Okay Gideon' não tem qualidade aprovada. Frases personalizadas são sempre não testadas até o teste sintético."
+            text: qsTr("Comprovado: 'Hey Gideon' foi reconhecida em corpus sintético de desenvolvimento (75 de 76, sem falso disparo em 320 negativas e silêncio de 1 h). Não comprovado: microfone físico, ambientes reais e outras vozes. 'Okay Gideon' não tem qualidade aprovada. Frases personalizadas são sempre não testadas até o teste sintético.")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -274,17 +277,17 @@ PageFrame {
     }
 
     Section {
-        title: "Sessão e estado"
+        title: qsTr("Sessão e estado")
         EValueRow {
-            label: "Prazo máximo da sessão"
+            label: qsTr("Prazo máximo da sessão")
             value: Math.round(core.sessionTimeout / 1000) + " s"
         }
         EValueRow {
-            label: "Estado do wake"
+            label: qsTr("Estado do wake")
             value: L.statusText(core.wakeStatus)
         }
         EValueRow {
-            label: "Captura"
+            label: qsTr("Captura")
             value: L.statusText(core.sttStatus)
         }
         SettingRow {
@@ -300,7 +303,7 @@ PageFrame {
                     editable: true
                     value: core.sessionTimeout
                     enabled: AppState.blockReason("core.sessionTimeoutMs") === ""
-                    Accessible.name: "Prazo da sessão em milissegundos"
+                    Accessible.name: qsTr("Prazo da sessão em milissegundos")
                     Connections {
                         target: core
                         function onPreferencesChanged() { timeout.value = core.sessionTimeout }
@@ -309,8 +312,8 @@ PageFrame {
                 GButton {
                     objectName: "savePreferencesButton"
                     variant: "primary"
-                    text: "Salvar prazo"
-                    Accessible.name: "Salvar prazo da sessão"
+                    text: qsTr("Salvar prazo")
+                    Accessible.name: qsTr("Salvar prazo da sessão")
                     enabled: AppState.blockReason("core.sessionTimeoutMs") === "" && timeout.value !== core.sessionTimeout
                     onClicked: AppState.setSetting("core.sessionTimeoutMs", timeout.value)
                 }
@@ -319,7 +322,7 @@ PageFrame {
     }
 
     Section {
-        title: "Ajustes de detecção"
+        title: qsTr("Ajustes de detecção")
         SettingRow {
             settingKey: "core.wakeSensitivity"
             RowLayout {
@@ -335,7 +338,7 @@ PageFrame {
                         stepSize: 0.05
                         Layout.fillWidth: true
                         value: page.sensShown
-                        Accessible.name: "Sensibilidade do wake: menos sensível a mais sensível"
+                        Accessible.name: qsTr("Sensibilidade do wake: menos sensível a mais sensível")
                         onPressedChanged: if (!pressed) page.saveSensitivity(value)
                         onMoved: if (!pressed) page.saveSensitivity(value)
                     }
@@ -347,7 +350,7 @@ PageFrame {
                     }
                     Text {
                         objectName: "wakeSensitivityScale"
-                        text: "Menos sensível ↔ Mais sensível"
+                        text: qsTr("Menos sensível ↔ Mais sensível")
                         textFormat: Text.PlainText
                         color: Theme.textMuted
                         font.family: Theme.fontFamily
@@ -357,20 +360,20 @@ PageFrame {
                 }
                 Text {
                     objectName: "wakeSensitivityValue"
-                    text: page.sensText(wakeSens.pressed ? wakeSens.value : page.sensShown) + " · padrão 1,0"
+                    text: qsTr("%1 · padrão %2").arg(page.sensText(wakeSens.pressed ? wakeSens.value : page.sensShown)).arg(page.oneDecimal(1.0))
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontBody
                     font.weight: 600
                     Layout.preferredWidth: 150
-                    Accessible.name: "Sensibilidade atual " + page.sensText(page.sensShown) + ", padrão 1,0"
+                    Accessible.name: qsTr("Sensibilidade atual %1, padrão %2").arg(page.sensText(page.sensShown)).arg(page.oneDecimal(1.0))
                 }
                 GButton {
                     objectName: "restoreWakeSensitivity"
                     variant: "ghost"
-                    text: "Restaurar padrão"
-                    Accessible.name: "Restaurar a sensibilidade do wake para o padrão 1,0"
+                    text: qsTr("Restaurar padrão")
+                    Accessible.name: qsTr("Restaurar a sensibilidade do wake para o padrão %1").arg(page.oneDecimal(1.0))
                     enabled: AppState.blockReason("core.wakeSensitivity") === "" && Math.abs(page.sensShown - 1.0) > 0.001
                     onClicked: page.saveSensitivity(1.0)
                 }
@@ -389,10 +392,10 @@ PageFrame {
     EAdvancedNote { subtab: "Voz e Wake" }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "Até 5 frases ativas. Trocar a lista exige reiniciar o Core. Frases personalizadas precisam de teste sintético."
+        title: qsTr("Como funciona")
+        summary: qsTr("Até 5 frases ativas. Trocar a lista exige reiniciar o Core. Frases personalizadas precisam de teste sintético.")
         Text {
-            text: "Cada frase ativa tem a própria sensibilidade e o próprio limiar; a sensibilidade geral vale para as demais. O teste de frase personalizada usa áudio gerado pela voz de teste e rotula o resultado como sintético: ele não prova reconhecimento com a sua voz nem com o microfone. O prazo da sessão vale na próxima sessão de voz."
+            text: qsTr("Cada frase ativa tem a própria sensibilidade e o próprio limiar; a sensibilidade geral vale para as demais. O teste de frase personalizada usa áudio gerado pela voz de teste e rotula o resultado como sintético: ele não prova reconhecimento com a sua voz nem com o microfone. O prazo da sessão vale na próxima sessão de voz.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -405,9 +408,9 @@ PageFrame {
     Modal {
         id: addDialog
         objectName: "wakeAddDialog"
-        title: "Adicionar frase de despertar"
+        title: qsTr("Adicionar frase de despertar")
         Text {
-            text: "Use de 2 a 4 palavras, só letras e espaços. A frase é testada com áudio sintético antes de ser ativada."
+            text: qsTr("Use de 2 a 4 palavras, só letras e espaços. A frase é testada com áudio sintético antes de ser ativada.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -418,7 +421,7 @@ PageFrame {
         GTextField {
             id: phraseField
             objectName: "wakePhraseField"
-            placeholderText: "Ex.: Light Gideon"
+            placeholderText: qsTr("Ex.: Light Gideon")
             maximumLength: 40
             Layout.fillWidth: true
             onTextChanged: checkTimer.restart()
@@ -430,7 +433,7 @@ PageFrame {
         }
         Text {
             objectName: "wakePhraseCheckText"
-            text: core.wakePhraseCheck.ok ? "Sons do detector: " + (core.wakePhraseCheck.tokens || "") : (core.wakePhraseCheck.message || "")
+            text: core.wakePhraseCheck.ok ? qsTr("Sons do detector: %1").arg(core.wakePhraseCheck.tokens || "") : (core.wakePhraseCheck.message || "")
             textFormat: Text.PlainText
             color: core.wakePhraseCheck.ok ? Theme.textMuted : Theme.warning
             font.family: Theme.fontFamily
@@ -439,7 +442,7 @@ PageFrame {
             Layout.fillWidth: true
         }
         Text {
-            text: "Não testada: pode falhar ou disparar à toa. Depois de salvar, teste a frase antes de ativá-la."
+            text: qsTr("Não testada: pode falhar ou disparar à toa. Depois de salvar, teste a frase antes de ativá-la.")
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -450,7 +453,7 @@ PageFrame {
         GButton {
             objectName: "confirmAddWakePhrase"
             variant: "primary"
-            text: "Salvar frase"
+            text: qsTr("Salvar frase")
             Layout.alignment: Qt.AlignRight
             enabled: core.wakePhraseCheck.ok === true && phraseField.text.trim().split(/\s+/).join(" ") === core.wakePhraseCheck.text && page.canEdit
             onClicked: { core.addWakePhrase(phraseField.text); addDialog.close() }
@@ -460,12 +463,12 @@ PageFrame {
     Modal {
         id: wakeChangeConfirm
         objectName: "wakeChangeConfirm"
-        title: page.pickedChange && page.pickedChange.active ? "Salvar a frase de despertar?" : "Desativar a frase de despertar?"
+        title: page.pickedChange && page.pickedChange.active ? qsTr("Salvar a frase de despertar?") : qsTr("Desativar a frase de despertar?")
         Text {
             text: page.pickedChange
-                ? (page.pickedChange.active ? "A frase “" + page.pickedChange.text + "” fica salva para o próximo início do Core."
-                                             : "A frase “" + page.pickedChange.text + "” deixa de valer no próximo início do Core.")
-                  + " Até o reinício, o Gideon segue com a configuração atual."
+                ? (page.pickedChange.active ? qsTr("A frase “%1” fica salva para o próximo início do Core. Até o reinício, o Gideon segue com a configuração atual.")
+                                             : qsTr("A frase “%1” deixa de valer no próximo início do Core. Até o reinício, o Gideon segue com a configuração atual."))
+                  .arg(page.pickedChange.text)
                 : ""
             textFormat: Text.PlainText
             color: Theme.text
@@ -480,16 +483,16 @@ PageFrame {
             GButton {
                 objectName: "cancelWakeChange"
                 variant: "secondary"
-                text: "Cancelar"
-                Accessible.name: "Cancelar a troca da frase de despertar"
+                text: qsTr("Cancelar")
+                Accessible.name: qsTr("Cancelar a troca da frase de despertar")
                 onClicked: wakeChangeConfirm.close()
             }
             Item { Layout.fillWidth: true }
             GButton {
                 objectName: "confirmWakeChange"
                 variant: "primary"
-                text: page.pickedChange && page.pickedChange.active ? "Salvar frase" : "Desativar frase"
-                Accessible.name: "Confirmar a troca da frase de despertar"
+                text: page.pickedChange && page.pickedChange.active ? qsTr("Salvar frase") : qsTr("Desativar frase")
+                Accessible.name: qsTr("Confirmar a troca da frase de despertar")
                 onClicked: {
                     core.setWakePhraseActive(page.pickedChange.id, page.pickedChange.active, false)
                     wakeChangeConfirm.close()
@@ -501,9 +504,9 @@ PageFrame {
     Modal {
         id: weakConfirm
         objectName: "wakeWeakConfirm"
-        title: "Ativar frase que falhou no teste?"
+        title: qsTr("Ativar frase que falhou no teste?")
         Text {
-            text: "O teste sintético desta frase não passou: ela pode não ser detectada, ou disparar sem você falar. Esse resultado não foi medido com a sua voz nem com o microfone."
+            text: qsTr("O teste sintético desta frase não passou: ela pode não ser detectada, ou disparar sem você falar. Esse resultado não foi medido com a sua voz nem com o microfone.")
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -514,7 +517,7 @@ PageFrame {
         GButton {
             objectName: "confirmWeakActivation"
             variant: "primary"
-            text: "Ativar mesmo assim"
+            text: qsTr("Ativar mesmo assim")
             Layout.alignment: Qt.AlignRight
             onClicked: { core.setWakePhraseActive(page.pickedWeak.id, true, true); weakConfirm.close() }
         }
@@ -523,9 +526,9 @@ PageFrame {
     Modal {
         id: deleteConfirm
         objectName: "wakeDeleteConfirm"
-        title: "Remover frase personalizada?"
+        title: qsTr("Remover frase personalizada?")
         Text {
-            text: page.pickedRemove ? "A frase “" + page.pickedRemove.text + "” e o resultado do teste serão apagados. Esta ação não pode ser desfeita." : ""
+            text: page.pickedRemove ? qsTr("A frase “%1” e o resultado do teste serão apagados. Esta ação não pode ser desfeita.").arg(page.pickedRemove.text) : ""
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -536,7 +539,7 @@ PageFrame {
         GButton {
             objectName: "confirmDeleteWakePhrase"
             variant: "primary"
-            text: "Remover frase"
+            text: qsTr("Remover frase")
             Layout.alignment: Qt.AlignRight
             onClicked: { core.removeWakePhrase(page.pickedRemove.id); deleteConfirm.close() }
         }

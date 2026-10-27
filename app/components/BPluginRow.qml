@@ -106,7 +106,7 @@ ColumnLayout {
                 Text {
                     objectName: "reapprovalHint_" + row.pid
                     visible: row.needsApproval
-                    text: "Aprove novamente as permissões para ativar"
+                    text: qsTr("Aprove novamente as permissões para ativar")
                     textFormat: Text.PlainText
                     color: Theme.warning
                     font.family: Theme.fontFamily
@@ -141,7 +141,7 @@ ColumnLayout {
                     color: Theme.success
                 }
                 Text {
-                    text: "Ativo"
+                    text: qsTr("Ativo")
                     textFormat: Text.PlainText
                     color: Theme.success
                     font.family: Theme.fontFamily
@@ -154,7 +154,7 @@ ColumnLayout {
                 text: row.act.text
                 variant: "secondary"
                 enabled: row.act.enabled
-                Accessible.name: "Revisar permissões de " + row.pid
+                Accessible.name: qsTr("Revisar permissões de %1").arg(row.pid)
                 onClicked: row.reviewRequested({plugin_id: row.pid, semver: row.semver, publisher: row.entry ? row.entry.publisher : "", permissions: row.entry ? row.entry.permissions : [], manifest_sha256: row.entry ? row.entry.manifest_sha256 : ""})
             }
             GButton {
@@ -163,7 +163,7 @@ ColumnLayout {
                 text: row.act.text
                 variant: "secondary"
                 enabled: row.act.enabled
-                Accessible.name: "Importar o pacote de " + row.pid
+                Accessible.name: qsTr("Importar o pacote de %1").arg(row.pid)
                 onClicked: row.importRequested({plugin_id: row.pid})
             }
             GButton {
@@ -172,25 +172,25 @@ ColumnLayout {
                 text: row.act.text
                 variant: "primary"
                 enabled: row.act.enabled
-                Accessible.name: "Instalar pacote verificado de " + row.pid
+                Accessible.name: qsTr("Instalar pacote verificado de %1").arg(row.pid)
                 onClicked: { if (row.entry) core.installHub(row.entry.plugin_id, row.entry.manifest_sha256) }
             }
             GButton {
                 objectName: "enable_" + row.pid
                 visible: row.act.kind === "enable"
-                text: "Ativar"
+                text: qsTr("Ativar")
                 variant: "primary"
                 enabled: row.act.kind === "enable" && row.act.enabled
-                Accessible.name: "Ativar " + row.pid
+                Accessible.name: qsTr("Ativar %1").arg(row.pid)
                 onClicked: core.enablePlugin(row.pid)
             }
             GButton {
                 objectName: "disable_" + row.pid
                 visible: row.act.kind === "disable"
-                text: "Desativar"
+                text: qsTr("Desativar")
                 variant: "secondary"
                 enabled: row.act.kind === "disable" && row.act.enabled
-                Accessible.name: "Desativar " + row.pid
+                Accessible.name: qsTr("Desativar %1").arg(row.pid)
                 onClicked: core.disablePlugin(row.pid)
             }
             GButton {
@@ -198,12 +198,12 @@ ColumnLayout {
                 text: row.act.text
                 variant: "secondary"
                 enabled: false
-                Accessible.name: row.act.text + " " + row.pid
+                Accessible.name: qsTr("%1 %2").arg(row.act.text).arg(row.pid)
             }
             IconButton {
                 objectName: "moreActions_" + row.pid
                 iconName: "more"
-                ToolTip.text: "Mais ações de " + row.pid
+                ToolTip.text: qsTr("Mais ações de %1").arg(row.pid)
                 Accessible.checked: row.expanded
                 onClicked: row.expanded = !row.expanded
             }
@@ -222,7 +222,7 @@ ColumnLayout {
 
         Text {
             visible: !Theme.advanced
-            text: "Mais ações aparecem com 'Mostrar opções avançadas' em Configurações › Geral."
+            text: qsTr("Mais ações aparecem com 'Mostrar opções avançadas' em Configurações › Geral.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -236,35 +236,35 @@ ColumnLayout {
             spacing: Theme.space(8)
             GButton {
                 objectName: "rollback_" + row.pid
-                text: "Reverter versão"
+                text: qsTr("Reverter versão")
                 variant: "secondary"
                 enabled: row.rollbackS.enabled
-                Accessible.name: "Reverter versão de " + row.pid
+                Accessible.name: qsTr("Reverter versão de %1").arg(row.pid)
                 onClicked: core.rollbackHub(row.pid)
             }
             GButton {
                 objectName: "revoke_" + row.pid
-                text: "Revogar permissões"
+                text: qsTr("Revogar permissões")
                 variant: "danger"
                 enabled: row.revokeS.enabled
-                Accessible.name: "Revogar permissões de " + row.pid
+                Accessible.name: qsTr("Revogar permissões de %1").arg(row.pid)
                 onClicked: row.revokeRequested({plugin_id: row.pid, semver: row.semver})
             }
             GButton {
                 objectName: "remove_" + row.pid
-                text: "Remover plugin"
+                text: qsTr("Remover plugin")
                 variant: "danger"
                 enabled: row.removeS.enabled
-                Accessible.name: "Remover " + row.pid
+                Accessible.name: qsTr("Remover %1").arg(row.pid)
                 onClicked: row.removeRequested({plugin_id: row.pid, semver: row.semver})
             }
             // The plugin's own settings file only (plugin_settings_clear). The page confirms before the Core is asked.
             GButton {
                 objectName: "clearData_" + row.pid
-                text: "Apagar dados do plugin"
+                text: qsTr("Apagar dados do plugin")
                 variant: "danger"
                 enabled: core.pluginsAvailable
-                Accessible.name: "Apagar dados do plugin " + row.pid
+                Accessible.name: qsTr("Apagar dados do plugin %1").arg(row.pid)
                 onClicked: row.clearDataRequested({plugin_id: row.pid, semver: row.semver})
             }
         }
@@ -290,7 +290,7 @@ ColumnLayout {
         spacing: Theme.space(8)
 
         Text {
-            text: "Testes de capacidade (modo desenvolvedor)"
+            text: qsTr("Testes de capacidade (modo desenvolvedor)")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -301,8 +301,8 @@ ColumnLayout {
         GTextField {
             id: capabilityInput
             objectName: "capabilityInput_" + row.pid
-            placeholderText: "Texto para a capability"
-            Accessible.name: "Texto para a capability de " + row.pid
+            placeholderText: qsTr("Texto para a capability")
+            Accessible.name: qsTr("Texto para a capability de %1").arg(row.pid)
             maximumLength: 256
             enabled: core.pluginsAvailable && row.item !== null && row.item.state === "running"
             Layout.fillWidth: true
@@ -318,17 +318,17 @@ ColumnLayout {
                 spacing: Theme.space(10)
                 GButton {
                     objectName: "invoke_" + capName
-                    text: "Invocar"
+                    text: qsTr("Invocar")
                     variant: "secondary"
-                    Accessible.name: "Invocar " + capName
+                    Accessible.name: qsTr("Invocar %1").arg(capName)
                     enabled: core.pluginsAvailable && row.item !== null && row.item.state === "running"
                     onClicked: { AppState.setDraft(row.pid, "capability", capName); core.invokeCapability(capName, capabilityInput.text) }
                 }
                 GButton {
                     objectName: "cancelCapability_" + row.pid
-                    text: "Cancelar invocação de teste"
+                    text: qsTr("Cancelar invocação de teste")
                     variant: "secondary"
-                    Accessible.name: "Cancelar invocação de teste de " + capName
+                    Accessible.name: qsTr("Cancelar invocação de teste de %1").arg(capName)
                     enabled: core.pluginsAvailable && AppState.draftValue(row.pid, "capability") === capName
                     onClicked: core.cancelCapability(capName)
                 }

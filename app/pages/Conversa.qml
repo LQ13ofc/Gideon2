@@ -24,12 +24,23 @@ PageFrame {
         if (t.length === 0 || core.chatTextProblem(t) !== "") return
         core.sendChat(t)
     }
+    function speaker(mine) {
+        return mine ? qsTr("Você") : "Gideon"
+    }
+    function bubbleTag(mine, state) {
+        var who = page.speaker(mine)
+        if (state === "cancelled") return qsTr("%1 · cancelada").arg(who)
+        if (state === "error") return qsTr("%1 · erro").arg(who)
+        return who
+    }
     function connProposalText(p) {
         var items = core.connectionsItems
         var item = null
         for (var i = 0; i < items.length; i++) if (items[i].id === p.connection_id) item = items[i]
-        var account = item ? (item.account_ref ? item.label + " (" + item.account_ref + ")" : item.label) : "conta desconhecida"
-        return "Conexão: " + (item ? L.connProviderName(item.provider) : "provedor desconhecido") + " · conta " + account + " · operação " + p.operation + " (" + L.connOpLabel(p.operation) + ") · risco " + L.connRiskText(p.risk)
+        var account = item ? (item.account_ref ? qsTr("%1 (%2)").arg(item.label).arg(item.account_ref) : item.label) : qsTr("conta desconhecida")
+        var provider = item ? L.connProviderName(item.provider) : qsTr("provedor desconhecido")
+        return qsTr("Conexão: %1 · conta %2 · operação %3 (%4) · risco %5")
+            .arg(provider).arg(account).arg(p.operation).arg(L.connOpLabel(p.operation)).arg(L.connRiskText(p.risk))
     }
 
     Connections {
@@ -38,15 +49,15 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Conversa"
-        subtitle: "Converse com o motor LLM. Respostas e propostas aparecem aqui."
+        title: qsTr("Conversa")
+        subtitle: qsTr("Converse com o motor LLM. Respostas e propostas aparecem aqui.")
     }
     Banner {
         objectName: "chatUnavailable"
         kind: "info"
         visible: !core.chatAvailable
-        text: "Motor LLM não está ativo. O plugin llm_engine é opcional: voz, wake e comandos da Base funcionam sem ele."
-        actionText: "Ver em Extensões › Plugins"
+        text: qsTr("Motor LLM não está ativo. O plugin llm_engine é opcional: voz, wake e comandos da Base funcionam sem ele.")
+        actionText: qsTr("Ver em Extensões › Plugins")
         onActionRequested: Window.window.goPage("plugins")
     }
     // N-5: during a voice session the conversation stays on screen (history and state); only the input waits.
@@ -60,8 +71,8 @@ PageFrame {
         objectName: "chatConsentHint"
         kind: "warn"
         visible: core.chatAvailable && core.llmConfig.cloud_consent !== true
-        text: "Consentimento de nuvem desativado: envios são recusados até você marcá-lo em Extensões › Modelos LLM."
-        actionText: "Abrir Modelos LLM"
+        text: qsTr("Consentimento de nuvem desativado: envios são recusados até você marcá-lo em Extensões › Modelos LLM.")
+        actionText: qsTr("Abrir Modelos LLM")
         onActionRequested: Window.window.openLlm()
     }
     // The last answer came from the fallback model (Core flag and time only, no content). The notice lasts 60 s: a clock re-checks it.
@@ -81,7 +92,7 @@ PageFrame {
         objectName: "chatFallbackNotice"
         kind: "info"
         visible: core.chatAvailable && page.fallbackRecent
-        text: "Esta resposta veio do modelo reserva (fallback)."
+        text: qsTr("Esta resposta veio do modelo reserva (fallback).")
     }
 
     // B12: the last turn failed with a Core code the user can fix in Provedor e chaves (the banner names the cause).
@@ -105,17 +116,17 @@ PageFrame {
             spacing: Theme.space(12)
             Text {
                 objectName: "chatState"
-                text: "Estado da conversa: " + core.chatStateLabel
+                text: qsTr("Estado da conversa: %1").arg(core.chatStateLabel)
                 textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontBody
                 font.weight: 600
-                Accessible.name: "Estado da conversa: " + core.chatStateLabel
+                Accessible.name: qsTr("Estado da conversa: %1").arg(core.chatStateLabel)
                 Layout.fillWidth: true
             }
             Text {
-                text: "Modelo: " + ((core.modelsSelected && core.modelsSelected.model) ? core.modelsSelected.model : "não configurado")
+                text: qsTr("Modelo: %1").arg((core.modelsSelected && core.modelsSelected.model) ? core.modelsSelected.model : qsTr("não configurado"))
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -144,19 +155,19 @@ PageFrame {
                     spacing: Theme.space(12)
                     EmptyState {
                         iconName: "chat"
-                        message: "Nenhuma mensagem ainda. O motor LLM é opcional: voz, wake e comandos da Base funcionam sem ele."
+                        message: qsTr("Nenhuma mensagem ainda. O motor LLM é opcional: voz, wake e comandos da Base funcionam sem ele.")
                     }
                     RowLayout {
                         Layout.alignment: Qt.AlignHCenter
                         spacing: Theme.space(8)
                         Chip {
                             objectName: "suggestionTime"
-                            text: "Que horas são?"
+                            text: qsTr("Que horas são?")
                             onClicked: { chatInput.text = text; chatInput.forceActiveFocus() }
                         }
                         Chip {
                             objectName: "suggestionBrave"
-                            text: "Abrir o Brave"
+                            text: qsTr("Abrir o Brave")
                             onClicked: { chatInput.text = text; chatInput.forceActiveFocus() }
                         }
                     }
@@ -185,7 +196,7 @@ PageFrame {
                                 anchors.margins: Theme.space(10)
                                 spacing: 4
                                 Text {
-                                    text: (bubble.mine ? "Você" : "Gideon") + (modelData.state === "cancelled" ? " · cancelada" : modelData.state === "error" ? " · erro" : "")
+                                    text: page.bubbleTag(bubble.mine, modelData.state)
                                     textFormat: Text.PlainText
                                     color: Theme.textMuted
                                     font.family: Theme.fontFamily
@@ -193,7 +204,7 @@ PageFrame {
                                     font.weight: 600
                                 }
                                 TextEdit {
-                                    text: modelData.text || "(sem texto)"
+                                    text: modelData.text || qsTr("(sem texto)")
                                     readOnly: true
                                     selectByMouse: true
                                     textFormat: TextEdit.PlainText
@@ -202,7 +213,7 @@ PageFrame {
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontBody
                                     Layout.fillWidth: true
-                                    Accessible.name: (bubble.mine ? "Mensagem enviada: " : "Resposta: ") + text
+                                    Accessible.name: (bubble.mine ? qsTr("Mensagem enviada: %1") : qsTr("Resposta: %1")).arg(text)
                                 }
                             }
                         }
@@ -224,9 +235,9 @@ PageFrame {
                         anchors.fill: parent
                         anchors.margins: Theme.space(10)
                         spacing: 4
-                        Text { text: "Gideon · " + core.chatStateLabel; textFormat: Text.PlainText; color: Theme.textMuted; font.pixelSize: Theme.fontCaption; font.family: Theme.fontFamily; font.weight: 600 }
+                        Text { text: qsTr("Gideon · %1").arg(core.chatStateLabel); textFormat: Text.PlainText; color: Theme.textMuted; font.pixelSize: Theme.fontCaption; font.family: Theme.fontFamily; font.weight: 600 }
                         TextEdit {
-                            text: core.chatPartial || "Aguardando resposta…"
+                            text: core.chatPartial || qsTr("Aguardando resposta…")
                             readOnly: true
                             selectByMouse: true
                             textFormat: TextEdit.PlainText
@@ -235,7 +246,7 @@ PageFrame {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontBody
                             Layout.fillWidth: true
-                            Accessible.name: "Resposta em andamento"
+                            Accessible.name: qsTr("Resposta em andamento")
                         }
                     }
                 }
@@ -265,7 +276,7 @@ PageFrame {
                     font.pixelSize: Theme.fontHelp
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
-                    Accessible.name: "Aviso da conversa: " + text
+                    Accessible.name: qsTr("Aviso da conversa: %1").arg(text)
                 }
                 Text {
                     objectName: "toolResult"
@@ -289,8 +300,8 @@ PageFrame {
                 objectName: "chatInput"
                 Layout.fillWidth: true
                 maximumLength: 4096
-                placeholderText: "Mensagem para o motor LLM"
-                Accessible.name: "Mensagem para o motor LLM"
+                placeholderText: qsTr("Mensagem para o motor LLM")
+                Accessible.name: qsTr("Mensagem para o motor LLM")
                 enabled: core.chatInputAvailable && !page.inFlight
                 Component.onCompleted: text = AppState.draftValue("#chat", "text")
                 onTextEdited: AppState.setDraft("#chat", "text", text)
@@ -300,8 +311,8 @@ PageFrame {
                 objectName: "chatSend"
                 visible: !page.inFlight
                 variant: "primary"
-                text: "Enviar"
-                Accessible.name: "Enviar mensagem ao motor LLM"
+                text: qsTr("Enviar")
+                Accessible.name: qsTr("Enviar mensagem ao motor LLM")
                 enabled: chatInput.enabled && core.chatTextProblem(chatInput.text) === ""
                 onClicked: page.sendDraft()
             }
@@ -309,8 +320,8 @@ PageFrame {
                 objectName: "chatCancel"
                 visible: page.inFlight
                 variant: "secondary"
-                text: "Cancelar"
-                Accessible.name: "Cancelar resposta"
+                text: qsTr("Cancelar")
+                Accessible.name: qsTr("Cancelar resposta")
                 enabled: page.inFlight
                 onClicked: core.cancelChat()
             }
@@ -324,12 +335,13 @@ PageFrame {
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontHelp
             Layout.fillWidth: true
-            Accessible.name: "Tamanho da mensagem: " + text
+            Accessible.name: qsTr("Tamanho da mensagem: %1").arg(text)
         }
         // Enter sends. A problem with the text replaces that hint; while a reply is in flight it says why input is off.
         Text {
             objectName: "chatInputProblem"
-            text: page.inputProblem.length > 0 ? page.inputProblem : (page.inFlight ? "Aguarde a resposta anterior." : "Enter envia.")
+            text: page.inputProblem.length > 0 ? page.inputProblem
+                : (page.inFlight ? qsTr("Aguarde a resposta anterior.") : qsTr("Enter envia."))
             textFormat: Text.PlainText
             color: page.inputProblem.length > 0 ? Theme.warning : Theme.textMuted
             font.family: Theme.fontFamily

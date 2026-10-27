@@ -39,7 +39,7 @@ ColumnLayout {
         lastId = Number(core.audioProbe.id || 0)
         if (!core.probeAudioInput(queue[index].id)) {
             // The Core or the bridge refused the request: the row says so, and the next input is tried.
-            addRow({ device: queue[index].id, label: queue[index].label, verdict: "error", verdictText: "Não testado",
+            addRow({ device: queue[index].id, label: queue[index].label, verdict: "error", verdictText: qsTr("Não testado"),
                      zone: "bad", hint: core.audioResult, rms: null, peak: null, floor: null })
             return
         }
@@ -53,6 +53,12 @@ ColumnLayout {
         rows = next
         index += 1
         if (index < queue.length) sendCurrent(); else index = -1
+    }
+
+    // One decimal, with the decimal separator of the interface language (comma in pt-BR and fr, point in en).
+    function decimal(value) {
+        var text = Number(value).toFixed(1)
+        return core.uiLanguage === "en" ? text : text.replace(".", ",")
     }
 
     // The best input: among those that recorded a usable signal (ok or quiet), the largest peak above its noise floor.
@@ -85,7 +91,7 @@ ColumnLayout {
         id: timeout
         interval: 12000
         onTriggered: probe.addRow({ device: probe.queue[probe.index].id, label: probe.queue[probe.index].label, verdict: "error",
-                                    verdictText: "Sem resposta", zone: "bad", hint: "O Core não respondeu ao teste. Tente de novo.",
+                                    verdictText: qsTr("Sem resposta"), zone: "bad", hint: qsTr("O Core não respondeu ao teste. Tente de novo."),
                                     rms: null, peak: null, floor: null })
     }
 
@@ -95,14 +101,14 @@ ColumnLayout {
         GButton {
             objectName: "micProbeStartButton"
             variant: "secondary"
-            text: probe.running ? "Testando…" : "Testar microfones"
-            Accessible.name: "Testar cada microfone da lista por 3 segundos"
+            text: probe.running ? qsTr("Testando…") : qsTr("Testar microfones")
+            Accessible.name: qsTr("Testar cada microfone da lista por 3 segundos")
             enabled: core.connected && !probe.running && (core.audioDevices.inputs || []).length > 0
             onClicked: probe.start()
         }
         Text {
             objectName: "micProbeNote"
-            text: "Cada microfone grava 3 segundos. Fale normalmente por 3 s: \"Hey Gideon\". O microfone do sistema não muda."
+            text: qsTr("Cada microfone grava 3 segundos. Fale normalmente por 3 s: \"Hey Gideon\". O microfone do sistema não muda.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -114,8 +120,8 @@ ColumnLayout {
     Text {
         objectName: "micProbeProgress"
         visible: probe.running
-        text: "Gravando " + (probe.index + 1) + " de " + probe.queue.length + ": " + (probe.queue[probe.index] ? probe.queue[probe.index].label : "")
-              + ". O microfone será usado por 3 segundos."
+        text: qsTr("Gravando %1 de %2: %3. O microfone será usado por 3 segundos.")
+            .arg(probe.index + 1).arg(probe.queue.length).arg(probe.queue[probe.index] ? probe.queue[probe.index].label : "")
         textFormat: Text.PlainText
         color: Theme.warning
         font.family: Theme.fontFamily
@@ -154,7 +160,7 @@ ColumnLayout {
                 }
                 Badge {
                     visible: recommended
-                    text: "Recomendado"
+                    text: qsTr("Recomendado")
                     tone: "info"
                 }
                 Text {
@@ -169,8 +175,8 @@ ColumnLayout {
                 GButton {
                     objectName: "micProbeUse"
                     variant: recommended ? "primary" : "secondary"
-                    text: "Usar este"
-                    Accessible.name: "Usar " + modelData.label + " como microfone do Gideon"
+                    text: qsTr("Usar este")
+                    Accessible.name: qsTr("Usar %1 como microfone do Gideon").arg(modelData.label)
                     // Only an input that recorded a signal can be chosen: errors and silence are not offered.
                     enabled: ["ok", "quiet", "noisy"].indexOf(modelData.verdict) >= 0 && AppState.blockReason("core.audioInput") === ""
                     onClicked: AppState.setSetting("core.audioInput", modelData.device)
@@ -179,8 +185,8 @@ ColumnLayout {
             Text {
                 objectName: "micProbeNumbers"
                 visible: modelData.rms !== null && modelData.verdict !== "silent"
-                text: "Ruído de fundo " + Number(modelData.floor).toFixed(1).replace(".", ",") + " dBFS · pico "
-                      + Number(modelData.peak).toFixed(1).replace(".", ",") + " dBFS"
+                text: qsTr("Ruído de fundo %1 dBFS · pico %2 dBFS")
+                    .arg(probe.decimal(modelData.floor)).arg(probe.decimal(modelData.peak))
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily

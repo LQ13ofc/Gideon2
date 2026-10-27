@@ -1,12 +1,21 @@
 """Thin, bounded Qt IPC adapter. Core owns all parsing, sessions and authority."""
 import datetime,hashlib,json,math,os,re,stat,struct,time,unicodedata,uuid
+from functools import partial
 import socket as _sock
 from pathlib import Path
 from urllib.parse import unquote,urlsplit
-from PySide6.QtCore import QCoreApplication,QObject,Property,Signal,Slot,QTimer
+from PySide6.QtCore import QCoreApplication,QObject,Property,QT_TRANSLATE_NOOP,Signal,Slot,QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtNetwork import QLocalSocket
 import translations
+from translations import CONTEXT,_fill,_tr,_Messages
+from msgs_errors import PREFS_DONE,CODE_MESSAGES,STALE_MESSAGE,GENERIC_FAILURE,CAPABILITY_MESSAGES
+from msgs_audio import REC_PROBLEM_TEXT,REC_ERROR_TEXT,recommendation_view,DEFAULT_DEVICE_LABEL,DEFAULT_MARK,UNAVAILABLE_DEVICE_LABEL,AUDIO_REASON_MESSAGES,LIVE_ERROR_MESSAGES,RESTORE_BUSY_TEXT,RESTORE_BACKUP_TEXT,SENSITIVITY_RANGE_TEXT,DEVICE_INVALID_TEXT,live_state_text,live_input_text,REAL_KIND_TEXT,REAL_ACTION_MESSAGES,COMMAND_CODE_MESSAGES,real_action_line,real_actions_state,live_output_text,LIVE_WARNING_TEXTS,PROBE_VERDICT_TEXTS,very_noisy_text,ZONE_TEXTS,FLOOR_TEXTS,live_hint_view
+from msgs_connections import CONN_MESSAGES,REG_VISUAL_WARNING,REG_MESSAGES,PERMISSION_LABELS,display_permission,EFFECT_TEXT,RISK_TEXT,display_risk,grant_rows,pending_count
+from msgs_skills_hub import HUB_UPLOAD_MESSAGES,SKILL_REASON_MESSAGES,SKILL_OP_MESSAGES,PENDING_SKILL_DRAFT,HUB_REASON_LABELS,hub_storage
+from msgs_llm_models import AGENT_STATE_LABELS,FEATURE_LABELS,MODEL_STATUS_TEXTS,CHAT_STATE_LABELS,CHAT_ERROR_BANNERS
+from msgs_perception import PERCEPTION_LABELS,PERCEPTION_VALUES,PERCEPTION_MESSAGES,PERCEPTION_INDICATOR_TEXTS,perception_text
+from msgs_misc import DIAG_LABELS,RESTART_TIMEOUT_MS,RESTART_WAIT_TEXT,RESTART_BACK_TEXT,RESTART_TIMEOUT_TEXT,display_wake_entry,WAKE_QUALIFICATION_LABELS,PHRASE_MESSAGES,PERSONAL_MESSAGES,LANGUAGE_LABELS,RECEIPT_PREFIXES,display_receipt,display_wake_choice,OPS,PENDING
 CAPABILITY_ID=re.compile(r'[a-z0-9_]+(\.[a-z0-9_]+)+');PLUGIN_ID=re.compile(r'[A-Za-z0-9_-]+');SNAKE_CODE=re.compile(r'[a-z][a-z0-9_]*')
 PLUGIN_STATES=('disabled','starting','running','failed','stopped','quarantined')
 # Exact status sets emitted by the Core (src/core.rs, src/transport.rs). Anything else is an invalid snapshot.
@@ -16,8 +25,6 @@ STT_STATES=('unavailable','starting','ready','failed')
 STT_REASONS=('worker_crashed','worker_import_error','model_missing','worker_unavailable','worker_timeout','worker_backlog')
 SPEECH_STATES=('unavailable','idle','muted','disabled','speaking','completed','failed','cancelled','timed_out','audio_error','stt_failed','stt_unavailable','transcript_final','capture_completed','no_speech','capture_too_long')
 OUTPUT_LIMIT=8192;TEXT_LIMIT=512;HEX=frozenset('0123456789abcdef')
-# Portuguese words for the Core state codes shown in the diagnostic line (same words as Main.qml statusLabels).
-DIAG_LABELS={'unavailable':'indisponível','starting':'iniciando','replaying':'reproduzindo','failed':'falhou','replay_finished':'replay encerrado','ready':'pronto','idle':'em espera','muted':'mudo','disabled':'desligado','speaking':'respondendo','completed':'concluído','cancelled':'cancelado','timed_out':'tempo esgotado','audio_error':'erro de áudio','stt_failed':'falha na transcrição','stt_unavailable':'transcrição indisponível','transcript_final':'transcrição final','capture_completed':'captura concluída','no_speech':'sem fala detectada','capture_too_long':'captura longa demais'}
 # Runtime state of an installed plugin: `disabled` when not enabled, else the host state (src/plugins.rs runtime_of).
 # `stopped` is a host state too (a late stop event can land after a re-enable), so it is accepted.
 RUNTIME_STATES=('disabled','starting','running','failed','stopped')
@@ -31,17 +38,6 @@ TOOL_REASONS=frozenset({'superseded','expired','plugin_unavailable','executor_fa
 HUB_REASONS=('ledger_missing','ledger_invalid')
 # WP-4 Hub import: the Core takes at most 2048 hex characters per hub_chunk (src/hub.rs chunk_import), so 1 KiB per request.
 HUB_CHUNK_BYTES=1024
-HUB_UPLOAD_MESSAGES={'busy':'Importação indisponível agora: o Core precisa estar conectado, sem sessão de voz e com o catálogo verificado',
-    'entry':'Importe só o pacote de um plugin com permissões aprovadas e sem pacote guardado; nada foi enviado',
-    'path':'Escolha um arquivo comum, por caminho absoluto; links simbólicos não são aceitos; nada foi enviado',
-    'unreadable':'Não consegui abrir o arquivo do pacote; nada foi enviado',
-    'size':'O tamanho do arquivo não bate com o tamanho do catálogo; nada foi enviado',
-    'sending':'Enviando pacote ao Core…',
-    'progress':'Enviando pacote: {done} de {total} bytes',
-    'staged':'Pacote verificado e guardado pelo Core; ainda não instalado.',
-    'hub_import_missing':'O Core não abriu a importação; nada foi guardado',
-    'cancelled':'Importação cancelada; nada foi guardado',
-    'core_offline':'Core desconectado durante a importação; nada foi guardado'}
 STAGED_ERRORS=('staged_payload_invalid',)
 # Finish reasons of the capture session (src/core.rs finish), recorded in capture.reason.
 CAPTURE_REASONS=('audio_error','cancelled','capture_completed','stt_failed','stt_unavailable','transcript_final','no_speech','capture_too_long')
@@ -197,8 +193,6 @@ def recommendation_ok(rec):
     clean={i['id'] for i in ranked if 'error' not in i and not i['problems'] and not i['camera'] and i['id']!='default'}
     return rec['recommended'] is None or rec['recommended'] in clean
 def audio_ok(audio):return isinstance(audio,dict) and set(audio)<={'devices','live','probe','recommendation'} and 'live' in audio and audio_live_ok(audio['live']) and ('devices' not in audio or audio_devices_ok(audio['devices'])) and ('probe' not in audio or probe_ok(audio['probe'])) and ('recommendation' not in audio or recommendation_ok(audio['recommendation']))
-REC_PROBLEM_TEXT={'rumble':'capta quase só ruído grave','clipping':'satura','too_noisy':'tem muito ruído de fundo','too_quiet':'capta sinal muito fraco'}
-REC_ERROR_TEXT={'recorder_unavailable':'o gravador de áudio não está instalado','recorder_exited':'o gravador parou antes de gravar','sandbox_unavailable':'o isolamento do gravador (bwrap) não está disponível','invalid_device':'dispositivo inválido','audio_tool_failed':'a ferramenta de áudio falhou','no_audio_tool':'nenhuma ferramenta de áudio encontrada'}
 def recommendation_banner(rec,saved_device,default_device=None):
     """Dispositivos banner (A13): only when the saved input (default included) measured bad and a clean alternative exists.
     `default_device` is the id the system marks as default, when the saved choice is 'default'. None means no banner."""
@@ -209,58 +203,22 @@ def recommendation_banner(rec,saved_device,default_device=None):
     best=next((i for i in rec['ranked'] if i['id']==rec['recommended']),None)
     if current is None or best is None or not current['problems']:return None
     problems=' e '.join(REC_PROBLEM_TEXT[p] for p in current['problems'])
-    return {'device':best['id'],'text':f"O microfone atual ({current['label']}) {problems}. O melhor encontrado é {best['label']}.",'action':f"Usar o {best['label']}"}
-def recommendation_view(rec):
-    """Plain dict for QML: state, progress-free ranking rows with their Portuguese problem names, and the recommended id."""
-    rec=rec if isinstance(rec,dict) else {'state':'idle','ranked':[],'recommended':None,'current':None,'current_is_bad':None,'reason':None}
-    rows=[{'id':i['id'],'label':i['label'],'camera':i['camera'],'current':i['current'],'error':i.get('error',''),'score':round(float(i['score']),3),'reason':i.get('reason',''),
-           'problems':', '.join(REC_PROBLEM_TEXT[p] for p in i['problems']) if i['problems'] else ('' if 'error' in i else 'sem problemas'),
-           'recommended':i['id']==rec.get('recommended')} for i in rec.get('ranked') or []]
-    error=rec.get('error')
-    return {'state':rec.get('state','idle'),'rows':rows,'recommended':rec.get('recommended') or '','current':rec.get('current') or '',
-            'currentIsBad':rec.get('current_is_bad') is True,'reason':rec.get('reason') or '','error':REC_ERROR_TEXT.get(error,'') if error else ''}
+    return {'device':best['id'],'text':_fill(QCoreApplication.translate('Bridge','O microfone atual (%1) %2. O melhor encontrado é %3.'),current['label'],problems,best['label']),'action':_fill(QCoreApplication.translate('Bridge','Usar o %1'),best['label'])}
 # B16 texts (Portuguese only; no Core code reaches the screen). The default choice is the Core's 'default' preference.
 DEFAULT_DEVICE='default'
-DEFAULT_DEVICE_LABEL='Padrão do sistema'
-DEFAULT_MARK=' · padrão do sistema'
-UNAVAILABLE_DEVICE_LABEL='Dispositivo salvo · indisponível agora'
-AUDIO_REASON_MESSAGES={'no_audio_tool':'Nenhuma ferramenta de áudio encontrada: instale pipewire-pulse/pactl','audio_tool_failed':'A ferramenta de áudio falhou ao listar dispositivos; tente Atualizar lista'}
 AUDIO_SOURCE_LABELS={'pactl':'PipeWire/Pulse (pactl)','pw-dump':'PipeWire (pw-dump)'}
-LIVE_ERROR_MESSAGES={'recorder_unavailable':'gravador de áudio indisponível (instale pipewire-pulse)','recorder_exited':'o gravador de áudio parou','sandbox_unavailable':'isolamento do gravador indisponível (bwrap ausente)','wake_worker_unavailable':'worker de wake indisponível','wake_worker_failed':'worker de wake falhou','restart_limit':'limite de reinícios atingido','invalid_device':'dispositivo de entrada inválido','player_unavailable':'reprodutor de áudio indisponível','player_write_failed':'falha ao enviar áudio ao reprodutor','player_failed':'o reprodutor de áudio falhou','player_timeout':'o reprodutor de áudio não respondeu','worker_crashed':'o worker de wake parou com erro (veja o diagnóstico)','worker_import_error':'faltam bibliotecas do worker de wake (veja o diagnóstico)','device_unavailable':'o microfone escolhido não está disponível','model_missing':'arquivo do modelo de wake ausente ou alterado'}
-RESTORE_BUSY_TEXT='Indisponível durante a sessão de voz; tente quando o Gideon estiver em espera'
-RESTORE_BACKUP_TEXT='Padrões não restaurados: não foi possível gravar a cópia config.json.bak nem trocar a configuração; os valores atuais continuam'
-SENSITIVITY_RANGE_TEXT='Sensibilidade fora de 0,5 a 1,5; nada foi enviado'
-DEVICE_INVALID_TEXT='Dispositivo inválido; nada foi enviado'
 # Choices for one Select: "Padrão do sistema", the listed devices (default one marked), and the saved name when the Core no longer lists it.
 def device_choices(devices,direction,saved):
-    rows=[{'value':DEFAULT_DEVICE,'text':DEFAULT_DEVICE_LABEL}]
+    rows=[{'value':DEFAULT_DEVICE,'text':_tr(DEFAULT_DEVICE_LABEL)}]
     listed=(devices or {}).get(direction) or []
-    for item in listed:rows.append({'value':item['id'],'text':item['label']+(DEFAULT_MARK if item['default'] else '')})
+    for item in listed:rows.append({'value':item['id'],'text':item['label']+(_tr(DEFAULT_MARK) if item['default'] else '')})
     known={item['id'] for item in listed}
-    if saved!=DEFAULT_DEVICE and saved not in known:rows.append({'value':saved,'text':UNAVAILABLE_DEVICE_LABEL})
+    if saved!=DEFAULT_DEVICE and saved not in known:rows.append({'value':saved,'text':_tr(UNAVAILABLE_DEVICE_LABEL)})
     return rows
-# A6 state line of the microphone consent: desligado / aguardando reinício / ouvindo / erro: motivo (texts only; no Core code).
-def live_state_text(live):
-    if not live:return 'sem informação do Core'
-    if live.get('restart_required') is True:return 'aguardando reinício do Core'
-    if not live.get('enabled'):return 'desligado'
-    if live.get('input_state')=='capturing':return 'ouvindo'
-    if live.get('input_state')=='error':
-        error=live.get('last_error') or ''
-        return 'erro: '+(LIVE_ERROR_MESSAGES.get(error,'falha na captura') if not error.startswith('player_') else 'falha na captura')
-    return 'em espera'
-def live_input_text(live):return 'Escuta do microfone: '+live_state_text(live)
 # A11 host actions (docs/A11-real-actions-test.md): consent switch, state line and the Core's last host action. The Core
 # sends content-free fields only; every word the user reads here is set in this file.
 REAL_KINDS=('open_app','volume','mute','unmute','volume_up','volume_down')
 REAL_APPS=('brave','steam','kcalc')
-REAL_KIND_TEXT={'open_app':'Abriu','volume':'Volume ajustado','mute':'Mudo ativado','unmute':'Som ativado','volume_up':'Volume aumentado','volume_down':'Volume diminuído'}
-REAL_ACTION_MESSAGES={'consent_required':'Ações no computador não ativadas: a confirmação não chegou ao Core; nada foi alterado'}
-# Outcome codes of a command that produced no receipt (src/host.rs and src/core.rs codes).
-COMMAND_CODE_MESSAGES={'app_not_installed':'Aplicativo não instalado neste computador; nada foi aberto','launch_failed':'Não consegui iniciar o aplicativo; nada foi confirmado',
-    'launch_unconfirmed':'Pedi para abrir, mas o aplicativo não apareceu em 5 s; nada foi confirmado','volume_unavailable':'Não consegui ler o volume do computador; nada foi alterado',
-    'volume_unverified':'O volume lido não bate com o pedido; a mudança não foi confirmada','command_failed':'Comando não concluído; nada foi confirmado',
-    'app_unavailable':'Aplicativo fora da lista fixa; nada foi aberto','denied':'Valor fora da faixa de 0 a 100%; nada foi alterado','unsupported':'Comando não entendido; nada foi executado'}
 def valid_actions_block(block):
     """`actions`: {real: {enabled: bool, last_action: null | {kind, app, ok, verified, at_ms}}}. Strict; app is set only for open_app."""
     if not isinstance(block,dict) or set(block)!={'real'}:return False
@@ -273,45 +231,19 @@ def valid_actions_block(block):
     if (last['kind']=='open_app')!=(last['app'] is not None):return False
     if type(last['ok']) is not bool or type(last['verified']) is not bool or (last['verified'] and not last['ok']):return False
     return type(last['at_ms']) is int and 0<=last['at_ms']<=2**64-1
-def real_action_line(last):
-    """State line of the last host action: 'Abriu: brave às 14:32 · confirmado'. Local time, HH:MM."""
-    if not isinstance(last,dict):return 'Nenhuma ação no computador desde o início do Core'
-    when=datetime.datetime.fromtimestamp(last['at_ms']/1000).strftime('%H:%M')
-    if not last['ok']:return f'Não concluiu às {when}; nada foi confirmado'
-    label=REAL_KIND_TEXT[last['kind']]+(f": {last['app']}" if last['app'] else '')
-    return f"{label} às {when} · {'confirmado' if last['verified'] else 'sem confirmação'}"
-def real_actions_state(enabled,last):
-    if enabled is not True:return 'Desligado: os comandos usam só a simulação interna, sem efeito no computador'
-    return real_action_line(last)
 def real_action_code_message(op,code):
     """Refusal text of the consent op; other ops and codes keep the shared table."""
     if op=='real_actions_preference' and code in REAL_ACTION_MESSAGES:return REAL_ACTION_MESSAGES[code]
     return code_message(code)
-def live_output_text(live):
-    if not live:return 'Saída ao vivo: sem informação do Core'
-    if not live.get('enabled'):return 'Saída ao vivo: desligada — a resposta usa a saída virtual'
-    if live.get('output_state')=='playing':return 'Saída ao vivo: reproduzindo'
-    if live.get('output_state')=='error':
-        error=live.get('last_error') or ''
-        return 'Saída ao vivo: erro: '+(LIVE_ERROR_MESSAGES.get(error,'falha na reprodução') if error.startswith('player_') else 'falha na reprodução')
-    return 'Saída ao vivo: em espera'
 def devices_status(devices):
     """Why the device lists are empty or missing, in words; '' when the Core listed devices."""
-    if devices is None:return 'Dispositivos ainda não consultados: use Atualizar lista'
+    if devices is None:return QCoreApplication.translate('Bridge','Dispositivos ainda não consultados: use Atualizar lista')
     if devices['source']=='none':return AUDIO_REASON_MESSAGES.get(devices.get('reason'),AUDIO_REASON_MESSAGES['audio_tool_failed'])
-    if not devices['inputs'] and not devices['outputs']:return 'Nenhum dispositivo de áudio listado por '+AUDIO_SOURCE_LABELS.get(devices['source'],devices['source'])
+    if not devices['inputs'] and not devices['outputs']:return _fill(QCoreApplication.translate('Bridge','Nenhum dispositivo de áudio listado por %1'),AUDIO_SOURCE_LABELS.get(devices['source'],devices['source']))
     return ''
-# A9 texts (Portuguese only). Numbers are shown with a decimal comma; zones carry words as well as colour.
-LIVE_WARNING_TEXTS={
-    'no_frames':'Nenhum áudio chegando do microfone.',
-    'very_quiet':'Sinal muito baixo: aproxime-se ou aumente o ganho do microfone no sistema.',
-    'clipping':'O sinal está saturando (distorção): afaste-se do microfone ou reduza o ganho.',
-}
-PROBE_VERDICT_TEXTS={'ok':'Captando bem','quiet':'Sinal baixo','noisy':'Ruído alto','silent':'Silêncio','error':'Erro'}
 PROBE_VERDICT_ZONES={'ok':'ok','quiet':'warn','noisy':'bad','silent':'bad','error':'bad'}
 LEVEL_CALIBRATING_FRAMES=150
 def db_text(value):return f'{value:.1f}'.replace('.',',')+' dBFS'
-def very_noisy_text(floor):return f'Este microfone tem muito ruído de fundo ({round(floor)} dBFS). Teste outro dispositivo.'
 def level_zone(rms):
     if rms>=-12:return 'hot'
     if rms<-60:return 'low'
@@ -320,14 +252,12 @@ def floor_zone(floor):
     if floor>-35:return 'bad'
     if floor>-45:return 'warn'
     return 'ok'
-ZONE_TEXTS={'hot':'Sinal alto: risco de distorção','low':'Sinal baixo','ok':'Sinal normal'}
-FLOOR_TEXTS={'bad':'ruído alto','warn':'ruído moderado','ok':'ruído baixo'}
 def level_view(live,online=True):
     """Shape for the QML meter (audioLevel). Empty when the Core is offline or the recorder is not capturing."""
     level=(live or {}).get('level') if online else None
     capturing=bool(online and live and live.get('input_state')=='capturing' and live.get('level'))
     if not capturing or not level:
-        return {'capturing':False,'rms':-90.0,'peak':-90.0,'floor':-90.0,'zone':'ok','zoneText':'','floorZone':'ok','floorText':'','speechActive':False,'unmatched':False,'calibrating':True,'frames':0,'warning':'','warningText':'','rmsText':'','peakText':'','floorLine':'Aguardando o microfone','ageMs':-1}
+        return {'capturing':False,'rms':-90.0,'peak':-90.0,'floor':-90.0,'zone':'ok','zoneText':'','floorZone':'ok','floorText':'','speechActive':False,'unmatched':False,'calibrating':True,'frames':0,'warning':'','warningText':'','rmsText':'','peakText':'','floorLine':QCoreApplication.translate('Bridge','Aguardando o microfone'),'ageMs':-1}
     warning=live.get('silence_warning') or ''
     floor=level['floor_dbfs']
     warning_text=LIVE_WARNING_TEXTS.get(warning,'')
@@ -335,12 +265,7 @@ def level_view(live,online=True):
     return {'capturing':True,'rms':level['rms_dbfs'],'peak':level['peak_dbfs'],'floor':floor,'zone':level_zone(level['rms_dbfs']),'zoneText':ZONE_TEXTS[level_zone(level['rms_dbfs'])],
             'floorZone':floor_zone(floor),'floorText':FLOOR_TEXTS[floor_zone(floor)],'speechActive':level['speech_active'],'unmatched':level['speech_unmatched'],
             'calibrating':level['frames']<LEVEL_CALIBRATING_FRAMES,'frames':level['frames'],'warning':warning,'warningText':warning_text,
-            'rmsText':db_text(level['rms_dbfs']),'peakText':db_text(level['peak_dbfs']),'floorLine':'Ruído de fundo: '+db_text(floor)+' ('+FLOOR_TEXTS[floor_zone(floor)]+')','ageMs':level['last_frame_age_ms'] if level['last_frame_age_ms'] is not None else -1}
-def live_hint_view(live,online=True):
-    """Hoje's state line while the microphone is on: listening, speech heard but not recognised (hint: say the phrase)."""
-    if not online or not live or live.get('enabled') is not True or live.get('input_state')!='capturing':return {'line':'','hint':''}
-    if (live.get('level') or {}).get('speech_unmatched') is True:return {'line':'Ouvindo… fala detectada mas nenhuma frase reconhecida','hint':'Diga: Hey Gideon'}
-    return {'line':'Ouvindo…','hint':''}
+            'rmsText':db_text(level['rms_dbfs']),'peakText':db_text(level['peak_dbfs']),'floorLine':_fill(QCoreApplication.translate('Bridge','Ruído de fundo: %1 (%2)'),db_text(floor),FLOOR_TEXTS[floor_zone(floor)]),'ageMs':level['last_frame_age_ms'] if level['last_frame_age_ms'] is not None else -1}
 def probe_view(probe):
     """Shape for the QML probe table (audioProbe): {} when no probe ran; numbers are None while running."""
     if not probe:return {}
@@ -368,10 +293,10 @@ def digest(value):return isinstance(value,str) and len(value)==64 and all(c in H
 def text_problem(text):
     """Core rule for Operation::Text: non-blank, at most 512 UTF-8 bytes, no control characters."""
     try:
-        if not isinstance(text,str) or not text.strip():return 'Texto vazio'
-        if utf8_len(text)>TEXT_LIMIT:return 'Texto acima de 512 bytes'
-        if any(unicodedata.category(c)=='Cc' for c in text):return 'Texto com quebra de linha ou controle não é aceito'
-    except UnicodeError:return 'Texto inválido'
+        if not isinstance(text,str) or not text.strip():return QT_TRANSLATE_NOOP('Bridge','Texto vazio')
+        if utf8_len(text)>TEXT_LIMIT:return QT_TRANSLATE_NOOP('Bridge','Texto acima de 512 bytes')
+        if any(unicodedata.category(c)=='Cc' for c in text):return QT_TRANSLATE_NOOP('Bridge','Texto com quebra de linha ou controle não é aceito')
+    except UnicodeError:return QT_TRANSLATE_NOOP('Bridge','Texto inválido')
     return None
 def bounded_output(value):
     """Core output contract: JSON object, at most 8 KiB of UTF-8 JSON, at most 4 container levels."""
@@ -412,50 +337,6 @@ CONN_ITEMS_LIMIT=8;CONN_SCOPES_LIMIT=8;CONN_OPERATIONS_LIMIT=16;CONN_ARGS_LIMIT=
 CONN_ID=re.compile(r'[A-Za-z0-9_-]{1,64}');CONN_NAME=re.compile(r'[a-z][a-z0-9_.:]{0,63}')
 CONN_BLOCK_KEYS=frozenset({'revision','items','providers','last_call','storage_error'});CONN_ITEM_REQUIRED=frozenset({'id','provider','label','status','granted_scopes'});CONN_ITEM_OPTIONAL=frozenset({'account_ref','pending_scopes','user_code','fake','tools','granted_at_ms'});CONN_TOOLS_LIMIT=16;CONN_TOOL_STATES=('trusted','needs_reapproval','rejected');CONN_TOOL_RISKS=('write','destructive');CONN_TOOL_DESCRIPTION_LIMIT=1024;CONN_TOOL_KEYS=frozenset({'name','risk','state','description'});CONN_TRUST_LIMIT=16
 CONN_PROPOSAL_KEYS=frozenset({'kind','connection_id','operation','risk'})
-# Core codes for connection ops and for connection proposals (kind 'connection'). Each one has a Portuguese text in CONN_MESSAGES.
-CONN_MESSAGES={
-    'scope_not_granted':'Escopo não concedido: conceda o escopo antes de usar esta operação; nenhuma chamada foi feita',
-    'rate_limited':'Limite de chamadas do servidor atingido; tente de novo em instantes',
-    'unauthorized':'Autorização recusada pelo servidor; reconecte a conta',
-    'forbidden_scope':'O servidor recusou o escopo pedido para esta operação',
-    'account_mismatch':'A conta devolvida pelo servidor não confere; chamada recusada',
-    'provider_unreachable':'Servidor do provedor inacessível neste ambiente',
-    'real_backend_unsupported':'Backend real não suportado neste ambiente; use o servidor falso',
-    'reauth_required':'Reautenticação necessária: conecte a conta de novo',
-    'public_pending':'Ação pública aguarda sua aprovação explícita; nada foi publicado',
-    'provider_error':'O provedor devolveu erro; nada foi confirmado',
-    'unknown_connection':'Conta desconhecida ou já removida',
-    'stale_connection_revision':'Contas mudaram no Core; atualize e tente de novo',
-    'invalid_connection':'Dados da conta recusados pelo Core',
-    'connection_limit':'Limite de 8 contas atingido; remova uma conta antes',
-    'not_connected':'Conta não está conectada',
-    'unknown_operation':'Operação desconhecida para este provedor',
-    'connection_consent_required':'Escolha ao menos um escopo pedido para consentir',
-    'connection_args_invalid':'Argumentos devem ser um objeto JSON de até 4 KiB',
-    'connection_unavailable':'Conexões indisponíveis agora',
-    'not_found':'Recurso não encontrado no servidor; nada foi alterado',
-    'public_disabled':'Ação pública ou destrutiva desativada nesta build; nada foi executado',
-    'scope_not_requested':'Escopo não pedido pelo dispositivo; nada foi concedido',
-    'device_expired':'Código de confirmação expirou; conecte a conta de novo',
-    'consent_denied':'Consentimento recusado no servidor; nada foi concedido',
-    'connections_storage_error':'Contas indisponíveis: o arquivo de contas não pôde ser lido ou gravado',
-    'consent_required':'Consinta os escopos antes de enviar o token; nada foi enviado ao servidor',
-    'invalid_token':'Token inválido: use o token de longa duração do Home Assistant (16 a 256 caracteres, sem espaços)',
-    'invalid_state':'Esta conta não está aguardando um token agora',
-    'tool_trust_invalid':'Escolha ao menos uma ferramenta que aguarda sua confiança',
-    'tool_not_trusted':'Ferramenta nova ou alterada: confie nela na página Conexões antes de chamar; nada foi executado',
-    'tool_not_verified':'Servidor MCP reconectado ou reiniciado: liste as ferramentas de novo antes de chamar; nada foi executado',
-    'tool_rejected':'Ferramenta recusada pelo Core (esquema fora do subconjunto simples ou grande demais); nada foi executado',
-    'mcp_not_running':'Servidor MCP não está rodando; conecte a conta de novo',
-    'mcp_crashed':'Servidor MCP parou de responder; a conta ficou com erro e o Core segue normal',
-    'mcp_protocol':'Servidor MCP respondeu fora do protocolo; a conta ficou com erro',
-    'mcp_too_large':'Servidor MCP enviou linha grande demais; a conta ficou com erro',
-    'mcp_start_failed':'Servidor MCP não iniciou no sandbox',
-    'mcp_tool_error':'A ferramenta MCP devolveu erro; nada foi confirmado',
-    'mcp_rpc_error':'O servidor MCP recusou a chamada; nada foi confirmado',
-    'mcp_too_many_tools':'Servidor MCP listou ferramentas demais (máximo 16); lista anterior mantida',
-    'mcp_restart_limit':'Limite de reinícios do servidor MCP atingido; reinicie o Core para tentar de novo',
-}
 CONN_CODES=frozenset(CONN_MESSAGES)
 # A failed connection tool of an agent run (github_create_issue, route_create_issue, ...) ends its step, and the run, with the connection code (rate_limited, forbidden_scope, provider_error, ...).
 AGENT_CODES=AGENT_CODES|CONN_CODES
@@ -463,18 +344,7 @@ AGENT_CODES=AGENT_CODES|CONN_CODES
 REG_PURPOSES=('create_issue','list_events','read_state');REG_VISUAL_PURPOSES=('create_issue',);REG_ROUTES=('connection','visual')
 REG_STATUSES=('available','not_connected','expired','scope_not_granted','no_api','visual_not_allowed','disabled')
 REG_BLOCK_KEYS=frozenset({'revision','purposes','visual_allowed'});REG_CANDIDATE_KEYS=frozenset({'route','status','reason'});REG_LABEL_LIMIT=64;REG_REASON_LIMIT=256
-REG_VISUAL_WARNING='Atenção: o fallback visual dirige uma tela por cliques e digitação, é menos seguro que a API e só vale quando não há conta conectada. Nunca contorna token expirado, reautenticação ou escopo negado. A publicação ainda pede sua aprovação.'
-REG_MESSAGES={
-    'route_unavailable':'Nenhuma rota disponível para esta finalidade; veja os motivos. Nada foi executado',
-    'unknown_purpose':'Finalidade desconhecida',
-    'no_visual_route':'Esta finalidade não tem rota visual',
-    'stale_registry_revision':'As rotas mudaram no Core; atualize e tente de novo',
-    'registry_storage_error':'Rotas indisponíveis: o arquivo de permissões não pôde ser lido ou gravado',
-    'registry_unavailable':'Rotas indisponíveis agora',
-    'registry_revision_exhausted':'Revisão das rotas esgotada',
-}
 TOOL_REASONS=TOOL_REASONS|CONN_CODES
-AGENT_STATE_LABELS={'thinking':'Pensando','waiting_tool':'Executando ferramenta','awaiting_approval':'Aguardando sua aprovação','done':'Concluído','failed':'Falhou','aborted':'Abortado','blocked':'Bloqueado'}
 AGENT_MAX_STEPS=6;AGENT_CHAT_STEPS=12;AGENT_TOOL_STEPS=25;AGENT_TOTAL_TOKENS=4096;AGENT_GOAL_LIMIT=1024;AGENT_ANSWER_LIMIT=4096
 AGENT_RUN_KEYS=frozenset({'run_id','state','goal_len','step','max_steps','started_ms_ago','steps','budget'});AGENT_STEP_KEYS=frozenset({'n','invocation_id','kind','tool','risk','state','code'});AGENT_PROPOSAL_KEYS=frozenset({'run_id','step'})
 def is_int(value,minimum=0,maximum=2**64-1):return type(value) is int and minimum<=value<=maximum
@@ -525,11 +395,8 @@ MODEL_CAPABILITY='llm_engine.models';MODEL_PLUGIN='llm_engine';MODELS_LIMIT=16;M
 MODEL_KEYS=frozenset({'id','label','kind','provider','model','tier','license','quantization','sha256','backend','features','certification','cost','latency_hint','min_hardware','offline','custom_url','local_port'})
 FEATURE_KEYS=('streaming','tool_use','vision','cancel');FEATURE_STATES=('supported','unsupported','unknown');CERT_STATES=('certified','candidate','declared','probed')
 CERT_BADGES={'certified':'Certificado','candidate':'Candidato','declared':'Declarado','probed':'Testado'}
-FEATURE_LABELS={'supported':'Suportado','unsupported':'Não suportado','unknown':'Desconhecido'}
 SELFTEST_DEADLINE_MS=30000;MODELS_DEADLINE_MS=5000
-PENDING_MODELS={'list':'Carregando modelos…','selftest':'Testando modelo…','manual_selftest':'Testando modelo…','save_custom':'Salvando modelo personalizado…','delete_custom':'Removendo modelo personalizado…'}
-# Core restart (Diagnóstico > Recuperação): the Core exits 75 after acking; gideon-launch starts it again. The bridge waits this long for the snapshot.
-RESTART_TIMEOUT_MS=30000;RESTART_WAIT_TEXT='Reiniciando o Core…';RESTART_BACK_TEXT='Core reiniciado e conectado de novo';RESTART_TIMEOUT_TEXT='O Core não voltou em 30 s; use gideon-launch'
+PENDING_MODELS={'list':QT_TRANSLATE_NOOP('Bridge','Carregando modelos…'),'selftest':QT_TRANSLATE_NOOP('Bridge','Testando modelo…'),'manual_selftest':QT_TRANSLATE_NOOP('Bridge','Testando modelo…'),'save_custom':QT_TRANSLATE_NOOP('Bridge','Salvando modelo personalizado…'),'delete_custom':QT_TRANSLATE_NOOP('Bridge','Removendo modelo personalizado…')}
 FALLBACK_NOTICE_MS=60000
 def finite_number(value,limit):return value is None or (type(value) in (int,float) and math.isfinite(value) and 0<=value<=limit)
 def feature_ok(features):
@@ -603,26 +470,26 @@ def normal_form(form):
 def custom_form_problem(form):
     """Rule for 'Adicionar modelo personalizado'; None means the form may be saved. Mirrors valid_model."""
     form=normal_form(form)
-    if form is None:return 'Formulário inválido'
+    if form is None:return QT_TRANSLATE_NOOP('Bridge','Formulário inválido')
     provider,model,url,port,features=form.get('provider'),form.get('model'),form.get('custom_url') or '',form.get('local_port'),form.get('features')
-    if provider not in CONFIG_PROVIDERS:return 'Escolha o provedor'
-    if not (isinstance(model,str) and MODEL_ID.fullmatch(model)):return 'Identificador: letras ASCII, números e . _ : / - (1 a 128 caracteres)'
-    if not isinstance(url,str):return 'URL inválida'
+    if provider not in CONFIG_PROVIDERS:return QT_TRANSLATE_NOOP('Bridge','Escolha o provedor')
+    if not (isinstance(model,str) and MODEL_ID.fullmatch(model)):return QT_TRANSLATE_NOOP('Bridge','Identificador: letras ASCII, números e . _ : / - (1 a 128 caracteres)')
+    if not isinstance(url,str):return QT_TRANSLATE_NOOP('Bridge','URL inválida')
     if provider in LOCAL_PROVIDERS:
-        if not is_int(port,LOCAL_PORT_MIN,LOCAL_PORT_MAX):return 'Porta local: 1024 a 65535'
-        if url:return 'Provedor local não usa URL'
+        if not is_int(port,LOCAL_PORT_MIN,LOCAL_PORT_MAX):return QT_TRANSLATE_NOOP('Bridge','Porta local: 1024 a 65535')
+        if url:return QT_TRANSLATE_NOOP('Bridge','Provedor local não usa URL')
     elif provider=='custom':
-        if not (url.startswith('https://') and llm_url_ok(url)):return 'URL: somente https, sem usuário, query ou fragmento (até 200 bytes)'
-        if port is not None:return 'Provedor personalizado não usa porta local'
-    elif url or port is not None:return 'Provedor na nuvem não usa URL nem porta'
-    if not (isinstance(features,dict) and set(features)==set(FEATURE_KEYS) and all(features[k] in FEATURE_STATES for k in FEATURE_KEYS)):return 'Recursos declarados inválidos'
+        if not (url.startswith('https://') and llm_url_ok(url)):return QT_TRANSLATE_NOOP('Bridge','URL: somente https, sem usuário, query ou fragmento (até 200 bytes)')
+        if port is not None:return QT_TRANSLATE_NOOP('Bridge','Provedor personalizado não usa porta local')
+    elif url or port is not None:return QT_TRANSLATE_NOOP('Bridge','Provedor na nuvem não usa URL nem porta')
+    if not (isinstance(features,dict) and set(features)==set(FEATURE_KEYS) and all(features[k] in FEATURE_STATES for k in FEATURE_KEYS)):return QT_TRANSLATE_NOOP('Bridge','Recursos declarados inválidos')
     return None
 def custom_model(form):
     """Model saved through save_custom: declared only, never certified, endpoint kept per provider."""
     form=normal_form(form);provider,model=form['provider'],form['model'];local=provider in LOCAL_PROVIDERS
     ident='custom-'+hashlib.sha256(f'{provider}:{model}'.encode('utf-8')).hexdigest()[:24]
     return {'id':ident,'label':model,'kind':'local' if local else 'cloud','provider':provider,'model':model,'tier':'custom',
-            'license':'Não informada','quantization':None,'sha256':None,'backend':{'local':'llama.cpp','ollama':'ollama'}.get(provider,'OpenAI-compatível'),
+            'license':'-','quantization':None,'sha256':None,'backend':{'local':'llama.cpp','ollama':'ollama'}.get(provider,'OpenAI-compatível'),
             'features':{**{k:form['features'][k] for k in FEATURE_KEYS},'context_tokens':None},'certification':{'state':'declared','evidence':None,'date':None},
             'cost':{'input_per_mtok':None,'output_per_mtok':None,'currency':None},'latency_hint':'unknown','min_hardware':{'ram_gb':None,'gpu':'unknown'},'offline':local,
             'custom_url':(form.get('custom_url') or None) if provider=='custom' else None,'local_port':form.get('local_port') if local else None}
@@ -636,17 +503,20 @@ def fallback_for(model):
     if model['provider']=='custom':target['custom_url']=model['custom_url']
     if model['provider'] in LOCAL_PROVIDERS:target['local_port']=model['local_port']
     return target
-def model_status(config,models,secrets,testing=False):
-    """Status of the current model: Em teste | Sem chave | Sem consentimento | INDISPONÍVEL: recurso não suportado | Disponível."""
-    if testing:return 'Em teste'
-    if config is None:return 'Sem modelo selecionado'
+def model_status_code(config,models,secrets,testing=False):
+    """Stable code of the current model's status (the QML reads it): testing | no_config | no_key | no_consent | no_model_data | tool_use_unsupported | available."""
+    if testing:return 'testing'
+    if config is None:return 'no_config'
     provider=config['provider']
-    if provider in LLM_PROVIDERS and secrets.get(provider) is not True:return 'Sem chave'
-    if provider in LLM_PROVIDERS and config.get('cloud_consent') is not True:return 'Sem consentimento'
+    if provider in LLM_PROVIDERS and secrets.get(provider) is not True:return 'no_key'
+    if provider in LLM_PROVIDERS and config.get('cloud_consent') is not True:return 'no_consent'
     model=next((m for m in models if m['provider']==provider and m['model']==config['model'] and m['custom_url']==config.get('custom_url') and m['local_port']==config.get('local_port')),None)
-    if model is None:return 'Sem dados do modelo'
-    if model['features']['tool_use']=='unsupported':return 'INDISPONÍVEL: tool_use não suportado'
-    return 'Disponível'
+    if model is None:return 'no_model_data'
+    if model['features']['tool_use']=='unsupported':return 'tool_use_unsupported'
+    return 'available'
+def model_status(config,models,secrets,testing=False):
+    """Status text of the current model in the UI language (the status line shows it next to the code)."""
+    return MODEL_STATUS_TEXTS[model_status_code(config,models,secrets,testing)]
 def bounded_json(value,limit):
     """Any JSON value: at most 4 container levels and `limit` bytes of UTF-8 JSON."""
     def shallow(item,depth=0):
@@ -695,11 +565,11 @@ def valid_effect(effect):
 def agent_goal_problem(goal):
     """Rule for agentStart (docs/C3.md): trimmed, 1..=1024 UTF-8 bytes, no control characters. None means the goal may be sent (the trimmed text)."""
     try:
-        if not isinstance(goal,str) or not goal.strip():return 'Objetivo vazio'
+        if not isinstance(goal,str) or not goal.strip():return QT_TRANSLATE_NOOP('Bridge','Objetivo vazio')
         text=goal.strip()
-        if utf8_len(text)>AGENT_GOAL_LIMIT:return 'Objetivo acima de 1024 bytes'
-        if any(unicodedata.category(c)=='Cc' for c in text):return 'Objetivo com quebra de linha ou controle não é aceito'
-    except UnicodeError:return 'Objetivo inválido'
+        if utf8_len(text)>AGENT_GOAL_LIMIT:return QT_TRANSLATE_NOOP('Bridge','Objetivo acima de 1024 bytes')
+        if any(unicodedata.category(c)=='Cc' for c in text):return QT_TRANSLATE_NOOP('Bridge','Objetivo com quebra de linha ou controle não é aceito')
+    except UnicodeError:return QT_TRANSLATE_NOOP('Bridge','Objetivo inválido')
     return None
 def agent_text_ok(text):
     """Answer rule: a PlainText string; newlines and tabs are part of a model answer, other control characters are not."""
@@ -736,10 +606,10 @@ def valid_agent(agent):
 def chat_problem(text):
     """UI rule for a chat turn: non-blank, at most 4096 UTF-8 bytes, single line, no control characters."""
     try:
-        if not isinstance(text,str) or not text.strip():return 'Mensagem vazia'
-        if utf8_len(text)>CHAT_TEXT_LIMIT:return 'Mensagem acima de 4096 bytes'
-        if any(unicodedata.category(c)=='Cc' for c in text):return 'Mensagem com quebra de linha ou controle não é aceita'
-    except UnicodeError:return 'Mensagem inválida'
+        if not isinstance(text,str) or not text.strip():return QT_TRANSLATE_NOOP('Bridge','Mensagem vazia')
+        if utf8_len(text)>CHAT_TEXT_LIMIT:return QT_TRANSLATE_NOOP('Bridge','Mensagem acima de 4096 bytes')
+        if any(unicodedata.category(c)=='Cc' for c in text):return QT_TRANSLATE_NOOP('Bridge','Mensagem com quebra de linha ou controle não é aceita')
+    except UnicodeError:return QT_TRANSLATE_NOOP('Bridge','Mensagem inválida')
     return None
 def chat_input_size(messages):
     return utf8_len(json.dumps({'messages':messages,'tools':True,'max_tokens':CHAT_MAX_TOKENS},separators=(',',':'),ensure_ascii=False))
@@ -764,10 +634,7 @@ PERCEPTION_INPUT_LIMIT=8192;PERCEPTION_DEADLINE_MS=5000;PERCEPTION_GESTURES=16;P
 PERCEPTION_DEADLINES={'computer_control.act':60000,'screen_observe.capture':30000}
 PERCEPTION_STATUS_CAPABILITIES=('screen_observe.status','camera_gesture.state')
 def perception_deadline(capability):return PERCEPTION_DEADLINES.get(capability,PERCEPTION_DEADLINE_MS)
-PERCEPTION_LABELS={'backend':'backend','real_backend':'backend real','reason':'motivo','epoch':'época','width':'largura','height':'altura','sha256':'SHA-256','regions':'regiões','elements':'elementos','kind':'ação','verified':'verificado','routes':'rotas','apps':'apps','eq':'EQ','denoise':'redução de ruído','device':'dispositivo','gain':'ganho','filter':'filtro','monitor':'monitor','recording':'gravando','indicator':'indicador','opt_in':'opt-in','frame_seq':'quadro','gesture':'gesto','gestures':'gestos','supported':'suportado','state':'estado','note':'nota','volume':'volume','id':'id','role':'papel','name':'nome','x':'x','y':'y'}
-PERCEPTION_VALUES={'portal':'portal XDG','atspi':'AT-SPI','remote_desktop':'RemoteDesktop','pipewire':'PipeWire','v4l2':'câmera (v4l2)','kscreen':'KScreen (Plasma)','kglobalaccel':'KGlobalAccel','ok':'ok','portal_missing':'portal ausente nesta sessão','pygobject_missing':'PyGObject ausente no Python do sistema','no_active_window':'nenhuma janela ativa','no_gesture_model_installed':'nenhum modelo de gesto instalado','monitor_would_feed_back_to_speakers':'monitoração recusada: realimentação nos alto-falantes','on':'ligado','off':'desligado','scale':'escala','brightness':'brilho','route':'rota de saída','app_volume':'volume do stream','key':'tecla','type':'texto','start':'iniciar','stop':'parar','synthetic':'sintético','unsupported':'não suportado','needs_human_validation':'pendente de validação humana','UNSUPPORTED':'UNSUPPORTED'}
-PERCEPTION_MESSAGES={'permission_denied':'Permissão negada: o plugin precisa da permissão aprovada no Gideon Hub','stale_screen':'A tela mudou desde a última observação; observe de novo','backend_unavailable':'Este recurso não tem backend disponível nesta sessão (portal, AT-SPI, PipeWire, câmera ou KScreen); nada foi feito','not_recording':'Nenhuma gravação em andamento','already_recording':'Já há uma gravação em andamento','unknown_route':'Saída de áudio não encontrada; nada mudou','unknown_app':'Stream de áudio não encontrado; nada mudou','no_focus':'Nenhuma janela com foco; nada foi digitado','timeout':'O recurso não respondeu no prazo; nada foi confirmado','busy':'Outra operação de percepção está em andamento','invalid_input':'Entrada recusada pelo worker'}
-PERCEPTION_UNREAD='não lido';PERCEPTION_ARM=object()
+PERCEPTION_ARM=object()
 def _no_constant(name):raise ValueError(name)
 def _exact(value,keys):return isinstance(value,dict) and set(value)==set(keys)
 def _keys_ok(o,required,optional=()):return isinstance(o,dict) and set(required)<=set(o)<=set(required)|set(optional)
@@ -837,25 +704,13 @@ def _in_act(capability,value):
     return set(value)=={'enabled'} and type(value['enabled']) is bool
 def perception_input_problem(capability,text):
     """Strict input rule for perceptionInvoke: an allowlisted capability, a JSON object of at most 8 KiB, exact keys for reads, checked fields for actions."""
-    if capability not in PERCEPTION_CAPABILITIES:return 'Capability de percepção desconhecida'
-    if not isinstance(text,str) or utf8_len(text)>PERCEPTION_INPUT_LIMIT:return 'Entrada acima de 8 KiB'
+    if capability not in PERCEPTION_CAPABILITIES:return QT_TRANSLATE_NOOP('Bridge','Capability de percepção desconhecida')
+    if not isinstance(text,str) or utf8_len(text)>PERCEPTION_INPUT_LIMIT:return QT_TRANSLATE_NOOP('Bridge','Entrada acima de 8 KiB')
     try:value=json.loads(text,parse_constant=_no_constant)
-    except (ValueError,RecursionError):return 'Entrada não é JSON válido'
-    if not (isinstance(value,dict) and bounded_output(value)):return 'Entrada deve ser um objeto JSON de até 8 KiB'
-    if capability in PERCEPTION_NO_INPUT:return None if value=={} else 'Esta capability não aceita entrada'
-    return None if _in_act(capability,value) else 'Entrada inválida para esta capability'
-def perception_text(output):
-    """PlainText summary of a validated output: one 'label: value' line per key, lists shown as their first items."""
-    lines=[]
-    for key,value in output.items():
-        if type(value) is bool:shown='sim' if value else 'não'
-        elif value is None:shown='nenhum'
-        elif isinstance(value,list):
-            shown=f'{len(value)} item(ns)'+''.join(f"\n  - {' · '.join(str(v) for v in item.values())}" for item in value[:8] if isinstance(item,dict))
-        elif isinstance(value,str):shown=PERCEPTION_VALUES.get(value,value)
-        else:shown=str(value)
-        lines.append(f'{PERCEPTION_LABELS.get(key,key)}: {shown}')
-    return '\n'.join(lines)[:2048]
+    except (ValueError,RecursionError):return QT_TRANSLATE_NOOP('Bridge','Entrada não é JSON válido')
+    if not (isinstance(value,dict) and bounded_output(value)):return QT_TRANSLATE_NOOP('Bridge','Entrada deve ser um objeto JSON de até 8 KiB')
+    if capability in PERCEPTION_NO_INPUT:return None if value=={} else QT_TRANSLATE_NOOP('Bridge','Esta capability não aceita entrada')
+    return None if _in_act(capability,value) else QT_TRANSLATE_NOOP('Bridge','Entrada inválida para esta capability')
 def perception_code_message(code):return PERCEPTION_MESSAGES.get(code) or code_message(code)
 
 def language_tag_ok(tag):return isinstance(tag,str) and 2<=len(tag)<=8 and all(c.isascii() and (c.isalnum() or c=='-') for c in tag)
@@ -912,13 +767,6 @@ def wake_phrases_block_ok(block):
 def phrase_check_ok(check):
     return (isinstance(check,dict) and set(check)<=PHRASE_CHECK_KEYS and {'ok','code'}<=set(check) and type(check['ok']) is bool and short_text(check['code'])
             and all(short_text(check[k],200) for k in ('text','tokens','word') if k in check))
-def display_wake_entry(entry,settings,active):
-    """One row of Configurações › Voz e Wake: the Core entry plus the active switch, sensitivity and labels."""
-    setting=next((s for s in settings if s.get('id')==entry['id']),{})
-    if entry['custom']:qualification_label='personalizada · não testada' if entry.get('measurement') is None else 'personalizada · teste sintético'
-    else:qualification_label=WAKE_QUALIFICATION_LABELS.get(entry['qualification'],'')
-    return {**entry,'active':entry['id'] in active,'sensitivity':setting.get('sensitivity'),'qualification_label':qualification_label,
-            'measurement':entry.get('measurement')}
 def validate_snapshot(data,request_id,min_sequence):
     """Validate presentation data before QML sees it; no command policy lives here."""
     def require(condition):
@@ -1135,325 +983,33 @@ def validate_snapshot(data,request_id,min_sequence):
             previous=event['sequence'];previous_ms=event['at_ms']
     return data
 
-PREFS_DONE='Preferências salvas pelo Core'
-# Core codes and states -> Portuguese UI text. Unknown codes fall back to a visible generic message.
-CODE_MESSAGES={
-    'invalid_message':'Mensagem inválida para o Core',
-    'busy':'Core ocupado; tente novamente em instantes',
-    'invalid_text':'Texto inválido: use 1 a 512 bytes, sem quebras de linha',
-    'input_disabled':'Entrada de texto indisponível no momento',
-    'stale_hub_revision':'Catálogo mudou; atualize e tente de novo',
-    'hub_import_busy':'Importação do catálogo em andamento',
-    'permissions_not_approved':'Aprove as permissões antes de ativar',
-    'capability_unavailable':'Capability indisponível no momento',
-    'stale_plugin_revision':'Estado do plugin mudou; atualize e tente de novo',
-    'wake_not_qualified':'Frase de wake sem qualificação aprovada',
-    'plugin_not_runnable':'Plugin não pode ser executado',
-    'plugin_crashed':'Plugin encerrou com falha',
-    'timed_out':'Tempo esgotado',
-    'timeout':'Tempo do provedor esgotado',
-    'cancelled':'Cancelado',
-    'invoke_cancelled':'Cancelado',
-    'capture_completed':'Captura concluída',
-    'replaying':'Reprodução em andamento',
-    # Preferências do app e do Core (app/uisettings.py e preferências da ponte).
-    'stale_preferences':'Configurações mudaram no Core; atualize e tente de novo',
-    'invalid_preferences':'Preferências recusadas pelo Core: valor inválido; nada foi salvo',
-    'invalid_languages':'Idiomas recusados: escolha de 1 a 3 idiomas válidos para escuta e uma voz de fala; nada foi salvo',
-    'language_not_installed':'Idioma ainda não instalado: o download depende da aprovação do dono; nada foi salvo','language_pack_unavailable':'Modelos do idioma ausentes ou diferentes do pacote; nada foi ativado',
-    'language_unsupported':'Idioma sem suporte nesta versão; nada foi salvo',
-    'preferences_storage_error':'Preferências indisponíveis: o arquivo de configuração não pôde ser lido ou gravado',
-    'preferences_unavailable':'Preferências indisponíveis agora; tente quando o Gideon estiver em espera',
-    'consent_required':'Escuta do microfone não ativada: a confirmação não chegou ao Core; nada foi alterado',
-    # C1: LLM engine, secrets and tool proposals (Core codes from src/llmcfg.rs, src/core.rs, src/tools.rs).
-    'key_missing':'Chave ausente para este provedor',
-    'provider_not_configured':'Provedor não configurado',
-    'cloud_not_authorized':'Envio à nuvem não autorizado; marque o consentimento em Motor LLM',
-    'permission_denied':'Permissão de rede do plugin negada',
-    'http_error':'Erro HTTP do provedor',
-    'response_too_large':'Resposta do provedor grande demais',
-    'network_unavailable':'Rede indisponível para o provedor',
-    'unknown_tool':'Ferramenta desconhecida; ação recusada',
-    'invalid_args':'Argumentos inválidos; ação recusada',
-    'proposal_expired':'Proposta expirou sem decisão',
-    'proposal_denied':'Proposta negada; não pode ser autorizada',
-    'already_decided':'Proposta já foi decidida',
-    'unknown_proposal':'Proposta desconhecida ou encerrada',
-    'invalid_config':'Configuração do motor inválida',
-    'stale_llm_revision':'Configuração do motor mudou; reabra o diálogo',
-    'invalid_secret':'Chave inválida: 8 a 256 caracteres ASCII, sem espaços',
-    'invalid_provider':'Provedor desconhecido',
-    'secrets_unavailable':'Cofre de chaves indisponível',
-    'secrets_storage_error':'Falha ao gravar o cofre de chaves',
-    'llm_storage_error':'Falha ao gravar a configuração do motor',
-    'llm_unavailable':'Configuração do motor indisponível',
-    'invalid_input':'Entrada recusada pelo plugin',
-    'executor_unavailable':'Executor de comandos indisponível',
-    'user_denied':'Negada pelo usuário',
-    'superseded':'Substituída por proposta mais recente',
-    'expired':'Expirou sem decisão',
-    'plugin_unavailable':'Plugin indisponível',
-    'plugin_crashed':'Plugin encerrou com falha',
-    # C2: model manager. Codes from the Core and the llm_engine.models capability (docs/C2.md).
-    'model_unsupported_feature':'Modelo não suporta o recurso exigido; nada foi enviado ao provedor',
-    'model_not_found':'Modelo não encontrado no catálogo; atualize a lista',
-    'model_selftest_failed':'Teste do modelo falhou',
-    'settings_unavailable':'Armazenamento de configurações do plugin indisponível',
-    'no_lkg':'Não há configuração anterior salva para restaurar',
-    # C3: agent runtime codes (AGENT_CODES, docs/C3.md). Keep this list in step with the allowlist above.
-    'agent_busy':'Já existe um agente em execução; aguarde ou aborte',
-    'unknown_run':'Execução do agente desconhecida ou já encerrada',
-    'loop_blocked':'O agente repetiu a mesma ação; execução bloqueada',
-    'stale_screen':'A tela mudou desde a observação; o agente vai reobservar',
-    'permission_revoked':'Permissão da ferramenta revogada; execução bloqueada',
-    'denied_by_user':'Negada pelo usuário; nada foi alterado',
-    'revoked':'Motor LLM desativado ou revogado; execução encerrada',
-    'max_steps':'Limite de passos do agente atingido',
-    'budget_exhausted':'Limite de tokens do agente atingido',
-    'deadline_exceeded':'Tempo limite da execução do agente atingido',
-    'verification_failed':'Verificação após a ação falhou; efeito não confirmado',
-    'awaiting_approval':'Aguardando sua aprovação na proposta de ferramenta',
-    'executor_failed':'Executor da ferramenta falhou',
-    'aborted':'Execução abortada',
-    'verify_failed':'Verificação após a ação falhou; efeito não confirmado',
-    'too_many_calls':'O modelo propôs mais ferramentas do que o limite por passo; excedentes recusados',
-    'token_budget':'Limite de tokens do agente atingido',
-    'run_deadline':'Tempo limite da execução do agente atingido',
-    'empty_answer':'O modelo respondeu sem texto',
-    'invalid_output':'Resposta do modelo fora do formato esperado',
-    'destructive_disabled':'Ação destrutiva desativada nesta build; nada foi executado',
-    'app_unavailable':'Aplicativo indisponível para a ferramenta',
-    'app_write_failed':'Não foi possível gravar a alteração',
-    'denied':'Ação recusada pelo Core',
-    'unknown_capability':'Capability do motor LLM desconhecida',
-    'plugin_error':'Motor LLM retornou erro interno',
-    # C4: perception and action plugins (docs/C4.md). permission_denied and stale_screen read differently in the perception page (PERCEPTION_MESSAGES).
-    'opt_in_required':'Câmera desligada: ative o opt-in antes de capturar',
-    'unsupported':'Backend real não suportado neste ambiente; nada foi executado',
-    'unknown_service':'Serviço de percepção indisponível nesta build',
-    'capability_timeout':'Plugin de percepção não respondeu no prazo',
-    # B6: the Core refuses the test wake unless it was started with --virtual-input (src/core.rs VirtualWake).
-    'virtual_input_disabled':'Wake de teste indisponível: o Core foi iniciado sem --virtual-input',
-}
-STALE_MESSAGE='Estado mudou; reabra a confirmação'
-# Display mapping (round 2). The Core wire values never change; these tables only choose the text the user reads.
-# Each table has checks in scripts/test_bridge_protocol.py (class DisplayMapping).
-WAKE_QUALIFICATION_LABELS={'dev_qualified':'em desenvolvimento','poc_required':'requer prova de conceito','custom':'personalizada · não testada'}
-# Frases de ativação: Portuguese for every code the Core returns for the wake phrase ops (src/phrases.rs `code`).
-PHRASE_MESSAGES={
-    'phrase_empty':'Digite a frase.',
-    'phrase_too_long':'Frase longa demais: use até 40 letras.',
-    'phrase_invalid_characters':'Use só letras, espaços e apóstrofo: sem números nem pontuação.',
-    'phrase_needs_two_words':'Use de 2 a 4 palavras; uma palavra sozinha é genérica demais.',
-    'phrase_too_many_words':'Use no máximo 4 palavras.',
-    'phrase_too_generic':'Frase genérica demais: use palavras mais específicas.',
-    'phrase_too_few_tokens':'Frase curta demais para o detector: use palavras com mais sons.',
-    'word_not_in_lexicon':'Palavra fora do dicionário do detector. Tente outra forma de escrever.',
-    'token_not_in_vocabulary':'Som fora do vocabulário do detector.',
-    'lexicon_unavailable':'Dicionário do detector indisponível neste pacote: frases personalizadas estão desligadas.',
-    'phrase_duplicate':'Essa frase já existe.',
-    'phrase_store_full':'Limite de 8 frases personalizadas atingido: remova uma antes.',
-    'phrase_not_found':'Frase personalizada não encontrada.',
-    'phrase_in_use':'Desative a frase antes de removê-la.',
-    'phrase_unmeasured':'Teste a frase antes de ativá-la.',
-    'phrase_measurement_failed':'Atenção: o teste sintético desta frase falhou. Ela pode não ser detectada ou disparar sem você falar. Ative só se aceitar esse risco.',
-    'phrase_test_running':'Já há um teste em andamento. Aguarde o resultado.',
-    'phrase_test_unavailable':'Teste indisponível: a voz de teste ou o dicionário não estão prontos.',
-    'phrase_test_failed':'O teste não concluiu. Tente de novo.',
-    'too_many_active_phrases':'Escolha até 5 frases ativas.',
-    'invalid_wake_phrases':'Lista de frases recusada; nada foi salvo.',
-    'wake_start_failed':'O detector não iniciou com essa lista. A lista anterior continua valendo.',
-    'stale_phrase_store':'As frases personalizadas mudaram. Atualize a tela e tente de novo.',
-    'phrase_store_error':'Não foi possível salvar as frases personalizadas.',
-    # U1: only a safe-mode configuration needs recovery; a pending restart just needs the Core restarted.
-    'configuration_not_ready':'Esta ação espera o reinício do Core. Reinicie o Core para continuar; a mudança salva já vale.',
-}
 # WP-10a personal areas (Memória, Almas, Hábitos, Automações, Histórico). The Core answers with these codes; the texts are Portuguese.
 PERSONAL_AREAS=('memory','souls','habits','automations','conversations')
-PERSONAL_MESSAGES={
-    'personal_unavailable':'Dados pessoais indisponíveis: o armazenamento não abriu. Reinicie o Core.',
-    'stale_revision':'Esta tela estava desatualizada: os dados mudaram. Atualize e tente de novo.',
-    'consent_required':'Ative a fonte antes de salvar fatos dela.',
-    'retention_never':'Histórico desligado (não guardar): nada de conversa é guardado.',
-    'invalid_text':'Texto inválido ou vazio.',
-    'memory_full':'Limite de fatos atingido: apague um antes.',
-    'invalid_ttl':'Prazo inválido: use de 1 a 365 dias.',
-    'unknown_fact':'Fato não encontrado.',
-    'confirmation_required':'Confirme a ação antes de apagar.',
-    'unknown_soul':'Alma não encontrada.',
-    'soul_capacity':'Limite de almas atingido: apague uma antes.',
-    'invalid_provenance':'Origem da alma inválida para este modo.',
-    'invalid_confidence':'Confiança inválida.',
-    'invalid_evidence':'Evidência inválida: informe trechos válidos.',
-    'invalid_skill_id':'Skill inválida.',
-    'skill_not_enabled':'A Skill precisa estar habilitada.',
-    'habit_capacity':'Limite de hábitos atingido: remova um antes.',
-    'habit_paused':'Hábito pausado: revise antes de executar.',
-    'skill_version_changed':'A versão da Skill mudou: revise antes de executar.',
-    'no_previous_version':'Não há versão anterior para voltar.',
-    'invalid_inputs':'Entradas inválidas para a Skill.',
-    'unknown_habit':'Hábito não encontrado.',
-    'unknown_automation':'Automação não encontrada.',
-    'automation_capacity':'Limite de automações atingido.',
-    'schedule_in_past':'O horário já passou: escolha um horário futuro.',
-    'invalid_schedule':'Agenda inválida.',
-    'invalid_status':'Status inválido.',
-    'automation_done':'Automação já concluída.',
-    'automation_paused':'Automação pausada: revise antes de retomar.',
-    'unknown_session':'Conversa não encontrada.',
-    'conversation_capacity':'Limite de conversas atingido: apague uma antes.',
-    'invalid_request':'Pedido inválido; nada foi alterado.',
-    'unsupported_version':'Versão de pedido não suportada.',
-    'unknown_area':'Área desconhecida.',
-    'ledger_invalid':'Arquivo pessoal corrompido: a área ficou indisponível.',
-    'ledger_unreadable':'Não foi possível ler o arquivo pessoal (permissões ou link). Nada foi alterado.',
-    'ledger_write_failed':'Não foi possível gravar o arquivo pessoal. Nada foi alterado.',
-    'ledger_full':'Arquivo pessoal cheio: apague dados antes.',
-    'personal_dir_unavailable':'Pasta de dados pessoais indisponível.',
-    'core_unavailable':'Core indisponível agora.',
-    'deferred':'Adiado: o motor de Skills está ocupado. Tente de novo.',
-    'needs_review':'Revise o hábito ou a automação antes de executar.',
-    'reply_too_large':'Resultado grande demais para a tela. Use Exportar para guardar os dados em arquivo.',
-    'personal_export_failed':'Não foi possível gravar a exportação. Nada foi apagado.',
-    'live_audio_disabled':'Escuta do microfone desligada: ative o microfone em Configurações › Dispositivos.',
-    'capture_unavailable':'Captura do microfone não está ativa neste Core.',
-    'queued':'Na fila: o pedido segue quando a sessão de voz terminar.',
-    'chat_failed':'O pedido da fila não pôde ser executado.',
-    'stt_unavailable':'Transcrição indisponível agora.',
-    'busy':'Ocupado: aguarde o término da ação atual.',
-}
 PERSONAL_OPS=frozenset({'personal','personal_export','personal_erase_all'})
 LLM_PROVIDER_LABELS={'openrouter':'OpenRouter','opencode':'OpenCode','google':'Google','anthropic':'Anthropic','custom':'personalizado'}
-LANGUAGE_LABELS={'EN':'inglês'}
-RECEIPT_PREFIXES=(('Sandbox app process verified: ','Processo do app verificado no sandbox: '),)
-def display_receipt(text):
-    """Command receipt text as the user reads it: known Core prefixes are translated, anything else is shown as sent."""
-    if isinstance(text,str):
-        for raw,shown in RECEIPT_PREFIXES:
-            if text.startswith(raw):return shown+text[len(raw):]
-    return text
-def display_wake_choice(choice):
-    """A wake phrase row for QML: the Core fields plus the qualification label (empty for an unknown value)."""
-    return {**choice,'qualification_label':WAKE_QUALIFICATION_LABELS.get(choice.get('qualification'),'')}
 def display_provider(provider):return LLM_PROVIDER_LABELS.get(provider,provider or '')
-PERMISSION_LABELS={'network_llm':'rede do motor LLM','storage_settings':'armazenamento de configurações','skills_author':'autoria de skills',
-                   'screen_observe':'observação de tela','input_control':'controle de entrada','audio_route':'rota de áudio',
-                   'mic_config':'configuração do microfone','camera_capture':'captura da câmera','display_manipulate':'ajuste de tela'}
-def display_permission(permission):
-    """Permission id as the user reads it. Unknown ids are shown as the Core sent them (they are never translated by guess)."""
-    return PERMISSION_LABELS.get(permission,permission or '')
-# Registry effect templates (src/tools.rs effect) and risk classes as Portuguese text. Unknown ids show no text (QML shows the absence text).
-EFFECT_TEXT={'open_app':'Abrir {app}','set_volume':'Volume {level}','mute':'Silenciar',
-             'get_status':'Consultar o estado do sistema','get_time':'Consultar a hora','get_date':'Consultar a data'}
-RISK_TEXT={'read':'baixo','state_changing':'médio','destructive':'alto','public':'alto'}
 def display_effect(effect):
     """Portuguese sentence for a registry effect, or '' when the proposal has no effect (the card then says 'não informado pelo plugin')."""
     if not (isinstance(effect,dict) and effect.get('id') in EFFECT_TEXT):return ''
     # A template whose parameters are missing (an old step with effect_id only) has no honest sentence: the absence text applies.
     if any(effect.get(param) in (None,'') for param in EFFECT_PARAMS[effect['id']]):return ''
     return EFFECT_TEXT[effect['id']].format(app=effect.get('app',''),level=effect.get('level',''))
-def display_risk(risk):
-    """'baixo', 'médio' or 'alto'; '' when the proposal declares no risk (the card then says 'não declarado')."""
-    return RISK_TEXT.get(risk,'')
-def grant_rows(snapshot):
-    """Read-only Concessões rows (docs/ui-spec/30-permissoes.md §6), built only from the snapshot. Plugins: hub entries except incompatible ones. Skills: one row per skill item. Accounts: one approved row for granted scopes and one pending row for scopes awaiting consent."""
-    rows=[]
-    for entry in (snapshot.get('hub') or {}).get('entries') or []:
-        if entry.get('status')=='incompatible':continue
-        approved=entry.get('permissions_approved') is True
-        if approved:state='approved'
-        elif entry.get('status') in ('installed','update_available') and entry.get('permissions'):state='pending'
-        else:state='not_approved'
-        row={'origin':'plugin','owner_id':entry['plugin_id'],'label':', '.join(display_permission(p) for p in entry.get('permissions') or []) or 'sem permissões','state':state}
-        if approved and 'approved_at_ms' in entry:row['approved_at_ms']=entry['approved_at_ms']
-        rows.append(row)
-    for item in (snapshot.get('skills') or {}).get('items') or []:
-        rows.append({'origin':'skill','owner_id':item['id'],'label':item['name'],'state':'approved' if item['permissions_ok'] else 'pending'})
-    conn=snapshot.get('connections') or {}
-    labels={(p['id'],s['id']):s['label'] for p in conn.get('providers') or [] for s in p['scopes']}
-    for item in conn.get('items') or []:
-        for scopes,state in ((item.get('granted_scopes') or [],'approved'),(item.get('pending_scopes') or [],'pending')):
-            if scopes:rows.append({'origin':'connection','owner_id':item['id'],'label':', '.join(labels.get((item['provider'],s),s) for s in scopes),'state':state})
-    return rows
-def pending_count(snapshot):
-    """P of docs/ui-spec/30-permissoes.md §8: installed or updated plugins with permissions and no approval, plus accounts with scopes awaiting consent, plus one per MCP tool that needs re-approval (the queue of Visão geral lists each tool). Skills and action proposals are not counted."""
-    count=sum(1 for e in (snapshot.get('hub') or {}).get('entries') or [] if e.get('permissions') and not e.get('permissions_approved') and e.get('status') in ('installed','update_available'))
-    items=(snapshot.get('connections') or {}).get('items') or []
-    count+=sum(1 for i in items if i.get('pending_scopes'))
-    return count+sum(1 for i in items for t in i.get('tools') or [] if t.get('state')=='needs_reapproval')
-CHAT_STATE_LABELS={'idle':'Em espera','waiting':'Aguardando resposta','streaming':'Respondendo','done':'Concluída','error':'Erro','cancelled':'Cancelada'}
-# B12: actionable chat errors (Core codes of a failed chat turn). Each banner links to Extensões › Modelos LLM › Provedor e chaves.
-CHAT_ERROR_BANNERS={'key_missing':'Falta a chave do provedor','provider_not_configured':'Nenhum provedor configurado','cloud_not_authorized':'Consentimento de nuvem necessário','model_unsupported_feature':'O modelo atual não suporta o recurso exigido'}
-CHAT_ERROR_ACTION='Abrir Provedor e chaves'
-# Raw Core codes never reach the screen. Unknown codes get one generic sentence; the code is appended only when the advanced setting (behavior.advanced) is on.
-GENERIC_FAILURE='Não foi possível concluir a operação.'
+CHAT_ERROR_ACTION=QT_TRANSLATE_NOOP('Bridge','Abrir Provedor e chaves')
 CODE_DETAIL={'on':False}
 def set_code_detail(on):CODE_DETAIL['on']=bool(on)
 def code_message(code):
     text=CODE_MESSAGES.get(code) if isinstance(code,str) else None
     if text is not None:return text
-    if CODE_DETAIL['on'] and isinstance(code,str) and SNAKE_CODE.fullmatch(code):return f'{GENERIC_FAILURE} Código: {code}'
-    return GENERIC_FAILURE
+    if CODE_DETAIL['on'] and isinstance(code,str) and SNAKE_CODE.fullmatch(code):return _fill(QCoreApplication.translate('Bridge','%1 Código: %2'),_tr(GENERIC_FAILURE),code)
+    return _tr(GENERIC_FAILURE)
 # S4 skills (docs/S4.md D1-D4). The Core owns manifests, the ledger, dependencies and every transition; this layer checks the shape and size of what it shows and sends.
 SKILL_STATES=('draft','validated','tested','approved','enabled','disabled','revised');SKILL_SOURCES=('created','imported','llm_draft')
 SKILL_RUN_STATES=('running','awaiting_approval','done','failed','cancelled','rolled_back');SKILL_STEP_STATES=('pending','running','awaiting_approval','done','failed','denied','undone','cancelled')
-# Validator reasons (skill_invalid:<reason>, docs/S4.md D1). Each one has a Portuguese message in CODE_MESSAGES.
-SKILL_REASON_MESSAGES={
-    'out_of_scope':'Passo chama capability fora das dependências declaradas',
-    'exfiltration':'Manifest tenta enviar dados para fora: caminho, URL, shell ou segredo',
-    'cycle':'Ciclo entre skills; recursão recusada',
-    'depth':'Skill aninhada além do limite de profundidade (2)',
-    'missing_dependency':'Dependência ausente: plugin ou ferramenta indisponível',
-    'oversize':'Manifest ou campo acima do limite de tamanho',
-    'unknown_key':'Campo desconhecido no manifest',
-    'schema_version':'Versão de esquema não suportada (use 1)',
-    'duplicate_id':'Já existe uma skill com este id',
-    'permissions_escalated':'Esta versão pede mais permissões que a anterior; aprove de novo',
-    'min_runtime':'Esta skill exige um Gideon mais novo',
-    'reserved_capability':'Capability reservada da Base; a skill não pode usá-la',
-    'grant_field':'Campo de permissão não é permitido dentro de passos',
-    'unknown_step':'Referência a passo inexistente',
-    'forward_ref':'Referência a passo que ainda não executou',
-    'bad_template':'Template inválido: use só ${input.x} ou ${steps.id.campo}',
-    'too_many_steps':'Mais passos que o limite (16)',
-    'too_many_deps':'Mais dependências que o limite (8)',
-    'bad_manifest':'Manifest malformado',
-    'bad_id':'Id de skill inválido',
-    'bad_version':'Versão inválida: use x.y.z',
-    'bad_publisher':'Publisher inválido',
-    'hash_mismatch':'Hash não confere: pacote adulterado',
-    'corrupt_package':'Pacote corrompido',
-    'symlink':'Link simbólico no pacote; recusado',
-    'file_too_large':'Arquivo grande demais para importar (limite 64 KiB)',
-    'path_not_allowed':'Arquivo fora da pasta de importação',
-    'unverified_publisher':'Publisher não verificado',
-}
 SKILL_REASONS=frozenset(SKILL_REASON_MESSAGES)
-# Operation codes the Core answers with for skill ops (not validator reasons). Codes shared with other channels reuse their CODE_MESSAGES text.
-SKILL_OP_MESSAGES={
-    'stale_skill_revision':'Skills mudaram no Core; atualize e tente de novo',
-    'missing_dependency':'Dependência ausente: execução bloqueada antes de qualquer passo',
-    'skill_busy':'Já existe uma skill em execução; aguarde ou cancele',
-    'unknown_skill':'Skill desconhecida ou já removida',
-    'unknown_skill_run':'Execução de skill desconhecida ou já encerrada',
-    'skill_not_enabled':'Skill não está habilitada; nada foi executado',
-    'skill_not_approved':'Aprove a skill antes de habilitar ou executar',
-    'not_pending':'Este passo não está aguardando decisão',
-    'unknown_step':'Passo desconhecido ou fora de ordem',
-    'invalid_skill_input':'Entrada da skill inválida: confira os campos e os tipos',
-    'invalid_manifest':'Manifest inválido: objeto JSON de até 16 KiB',
-    'duplicate_skill':'Já existe uma skill com este id',
-    'undo_failed':'Desfazer um passo falhou; confira o efeito manualmente',
-    'rolled_back':'Execução revertida: os passos concluídos foram desfeitos',
-    'invalid_import':'Pacote de importação inválido',
-    'import_not_found':'Pacote não encontrado na pasta de importação',
-    'stale_import':'A pré-visualização mudou; importe de novo',
-}
 SKILL_OP_CODES=frozenset(SKILL_OP_MESSAGES)|frozenset({'missing_dependency','permission_denied','verify_failed','capability_unavailable','capability_timeout','timeout','run_deadline','cancelled','denied','user_denied','destructive_disabled','plugin_error','invalid_output','invalid_input','max_steps','executor_unavailable','executor_failed','unknown_tool','llm_unavailable','unknown_service','aborted','awaiting_approval'})
 SKILL_CODES=SKILL_OP_CODES|frozenset('skill_invalid:'+reason for reason in SKILL_REASONS)
 CODE_MESSAGES.update({f'skill_invalid:{reason}':text for reason,text in SKILL_REASON_MESSAGES.items()})
 CODE_MESSAGES.update({code:text for code,text in SKILL_OP_MESSAGES.items() if code not in CODE_MESSAGES})
-CODE_MESSAGES.update({'skill_invalid':'Skill recusada pela validação do Core; nada foi gravado','model_output_invalid':'O modelo não devolveu um manifest JSON válido'}) 
 CODE_MESSAGES.update(PHRASE_MESSAGES)
 # setdefault: a code that already has a text (shared with other channels) keeps it.
 for _code,_text in PERSONAL_MESSAGES.items():CODE_MESSAGES.setdefault(_code,_text)
@@ -1464,7 +1020,7 @@ SKILL_SEMVER=re.compile(r'(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9
 # Limits mirror docs/S4.md: manifest and inputs at most 16 KiB; 16 skills x 3 versions in the ledger; 16 steps; 32 history entries; outputs at most 1 KiB.
 SKILL_JSON_LIMIT=16384;SKILL_DESCRIPTION_LIMIT=1024;SKILL_ITEMS_LIMIT=48;SKILL_STEPS_LIMIT=16;SKILL_HISTORY_LIMIT=32;SKILL_OUTPUTS_LIMIT=1024;SKILL_FINDINGS_LIMIT=16;SKILL_CODES_LIMIT=8;SKILL_DEPS_LIMIT=8
 SKILL_DRAFT_CAPABILITY='llm_engine.skill_draft';SKILL_DRAFT_PLUGIN='llm_engine';SKILL_DRAFT_DEADLINE_MS=30000
-PENDING_SKILL_DRAFT='Gerando skill com o LLM…';SKILL_ARM=object()
+SKILL_ARM=object()
 SKILL_OPS=frozenset({'skill_validate','skill_save_draft','skill_dry_run','skill_approve','skill_enable','skill_disable','skill_rollback','skill_remove','skill_run','skill_decide','skill_cancel','skill_export','skill_import','skill_import_confirm'})
 SKILL_ITEM_KEYS=frozenset({'id','name','version','state','source','active','deps_ok','permissions_ok','missing'});SKILL_ITEM_OPTIONAL=frozenset({'permissions_required'})
 SKILL_RUN_KEYS=frozenset({'run_id','skill','state','step','steps'});SKILL_RUN_OPTIONAL=frozenset({'outputs'});SKILL_STEP_KEYS=frozenset({'id','state','code','risk','effect_id','effect','target'});SKILL_RISKS=('read','state_changing','destructive');SKILL_EFFECT=re.compile(r'[a-z_]{1,32}')
@@ -1475,23 +1031,23 @@ SKILL_DRAFT_KEYS=frozenset({'draft_id','version','state','requirements','ambigui
 def skill_json(text):
     """Local rule for a manifest or the inputs of a run: a JSON object of at most 16 KiB. Returns (value, problem); a None problem means the value may be sent."""
     try:
-        if not isinstance(text,str):return None,'JSON inválido'
-        if utf8_len(text)>SKILL_JSON_LIMIT:return None,'JSON acima de 16 KiB'
+        if not isinstance(text,str):return None,QT_TRANSLATE_NOOP('Bridge','JSON inválido')
+        if utf8_len(text)>SKILL_JSON_LIMIT:return None,QT_TRANSLATE_NOOP('Bridge','JSON acima de 16 KiB')
         value=json.loads(text,parse_constant=_no_constant)
-    except (UnicodeError,ValueError,RecursionError):return None,'Entrada não é JSON válido'
-    if not isinstance(value,dict):return None,'Deve ser um objeto JSON'
+    except (UnicodeError,ValueError,RecursionError):return None,QT_TRANSLATE_NOOP('Bridge','Entrada não é JSON válido')
+    if not isinstance(value,dict):return None,QT_TRANSLATE_NOOP('Bridge','Deve ser um objeto JSON')
     return value,None
 def skill_id_problem(ident,version=None):
-    if not (isinstance(ident,str) and SKILL_ID.fullmatch(ident)):return 'Id de skill inválido'
-    if version is not None and not (isinstance(version,str) and SKILL_SEMVER.fullmatch(version)):return 'Versão inválida: use x.y.z'
+    if not (isinstance(ident,str) and SKILL_ID.fullmatch(ident)):return QT_TRANSLATE_NOOP('Bridge','Id de skill inválido')
+    if version is not None and not (isinstance(version,str) and SKILL_SEMVER.fullmatch(version)):return QT_TRANSLATE_NOOP('Bridge','Versão inválida: use x.y.z')
     return None
 def skill_description_problem(text):
     """Rule for the LLM draft request: trimmed, 1..=1024 UTF-8 bytes, no control characters (the Core applies the same limit)."""
     try:
-        if not isinstance(text,str) or not text.strip():return 'Descrição vazia'
-        if utf8_len(text.strip())>SKILL_DESCRIPTION_LIMIT:return 'Descrição acima de 1024 bytes'
-        if any(unicodedata.category(c)=='Cc' for c in text.strip()):return 'Descrição com quebra de linha ou controle não é aceita'
-    except UnicodeError:return 'Descrição inválida'
+        if not isinstance(text,str) or not text.strip():return QT_TRANSLATE_NOOP('Bridge','Descrição vazia')
+        if utf8_len(text.strip())>SKILL_DESCRIPTION_LIMIT:return QT_TRANSLATE_NOOP('Bridge','Descrição acima de 1024 bytes')
+        if any(unicodedata.category(c)=='Cc' for c in text.strip()):return QT_TRANSLATE_NOOP('Bridge','Descrição com quebra de linha ou controle não é aceita')
+    except UnicodeError:return QT_TRANSLATE_NOOP('Bridge','Descrição inválida')
     return None
 def skill_code_ok(code):return isinstance(code,str) and code in SKILL_CODES
 def valid_skill_item(item):
@@ -1616,12 +1172,12 @@ def conn_text_ok(value,limit):return plain_text(value,limit) and bool(value.stri
 def conn_label_problem(text):
     """Account name: trimmed, 1..64 UTF-8 bytes, no control characters. None means the name may be sent (the trimmed text is sent)."""
     try:
-        if not isinstance(text,str) or not text.strip():return 'Nome da conta vazio'
-        if utf8_len(text.strip())>CONN_LABEL_LIMIT:return 'Nome acima de 64 bytes'
-        if any(unicodedata.category(c)=='Cc' for c in text.strip()):return 'Nome com quebra de linha ou controle não é aceito'
-    except UnicodeError:return 'Nome inválido'
+        if not isinstance(text,str) or not text.strip():return QT_TRANSLATE_NOOP('Bridge','Nome da conta vazio')
+        if utf8_len(text.strip())>CONN_LABEL_LIMIT:return QT_TRANSLATE_NOOP('Bridge','Nome acima de 64 bytes')
+        if any(unicodedata.category(c)=='Cc' for c in text.strip()):return QT_TRANSLATE_NOOP('Bridge','Nome com quebra de linha ou controle não é aceito')
+    except UnicodeError:return QT_TRANSLATE_NOOP('Bridge','Nome inválido')
     return None
-def conn_provider_problem(provider):return None if provider in CONN_PROVIDERS else CODE_MESSAGES['invalid_provider']
+def conn_provider_problem(provider):return None if provider in CONN_PROVIDERS else CODE_MESSAGES.raw('invalid_provider')
 def conn_scope_list(value):
     return isinstance(value,list) and len(value)<=CONN_SCOPES_LIMIT and all(isinstance(s,str) and CONN_NAME.fullmatch(s) is not None for s in value) and len(set(value))==len(value)
 def valid_conn_provider(provider):
@@ -1715,12 +1271,6 @@ def valid_registry(block):
 # B5-B10 (docs/PENDENCIAS_IMPLEMENTACAO.md): package identity, developer tools and diagnostics. The Core decides; these checks only refuse what the Core would refuse, before a round trip.
 PACKAGE_JSON_LIMIT=65536;PACKAGE_COMMIT=re.compile(r'[0-9a-f]{7,40}')
 CAP_INPUT_LIMIT=2048;CAP_JSON_DEPTH=4;CAP_DEADLINE_MS=10000;CAP_SELFTEST_DEADLINE_MS=30000;CAP_RESULT_LIMIT=1024
-HUB_REASON_LABELS={'ledger_missing':'registro de aprovações ausente','ledger_invalid':'registro de aprovações inválido'}
-# Codes of a plugin capability invocation (capability_invoke ack or capability_result error). Others fall back to code_message.
-CAPABILITY_MESSAGES={'unknown_capability':'Capacidade desconhecida ou sem plugin instalado','capability_unavailable':'Plugin desativado ou não está em execução',
-    'invalid_input':'Entrada recusada: objeto JSON inválido ou acima do limite','busy':'Outra capacidade está em execução; aguarde','invoke_cancelled':'Invocação cancelada','cancelled':'Invocação cancelada',
-    'capability_timeout':'Plugin não respondeu no prazo','timeout':'Tempo esgotado','plugin_error':'Plugin retornou erro interno','plugin_output_invalid':'Resposta do plugin fora do formato',
-    'plugin_not_runnable':'Plugin não pode ser executado','plugin_cpu_exceeded':'Plugin passou do limite de processamento','response_too_large':'Resposta grande demais','permission_denied':'Permissão negada ao plugin'}
 def clip_bytes(text,limit):
     """Text cut to at most `limit` UTF-8 bytes; never inside a character."""
     raw=text.encode('utf-8')
@@ -1734,13 +1284,13 @@ def json_depth_ok(item,depth=0):
 def capability_request(capability,text):
     """Developer JSON invocation (B7): (message, value, deadline_ms). message is None when the request may be sent.
     Refuses an identifier outside the grammar, more than 2 KiB of UTF-8, a value that is not an object, or nesting the Core refuses."""
-    if not (isinstance(capability,str) and len(capability)<=64 and CAPABILITY_ID.fullmatch(capability)):return 'Identificador de capacidade inválido; use a forma plugin.capacidade.',None,0
-    if not isinstance(text,str) or not text.strip():return 'Entrada vazia: escreva um objeto JSON entre chaves.',None,0
-    if utf8_len(text)>CAP_INPUT_LIMIT:return 'Entrada acima de 2 KiB (2 048 bytes).',None,0
+    if not (isinstance(capability,str) and len(capability)<=64 and CAPABILITY_ID.fullmatch(capability)):return QT_TRANSLATE_NOOP('Bridge','Identificador de capacidade inválido; use a forma plugin.capacidade.'),None,0
+    if not isinstance(text,str) or not text.strip():return QT_TRANSLATE_NOOP('Bridge','Entrada vazia: escreva um objeto JSON entre chaves.'),None,0
+    if utf8_len(text)>CAP_INPUT_LIMIT:return QT_TRANSLATE_NOOP('Bridge','Entrada acima de 2 KiB (2 048 bytes).'),None,0
     try:value=json.loads(text,parse_constant=_no_constant)
-    except (ValueError,RecursionError):return 'JSON inválido: use um objeto entre chaves.',None,0
-    if not isinstance(value,dict):return 'A entrada deve ser um objeto JSON.',None,0
-    if not json_depth_ok(value):return 'Objeto aninhado demais: no máximo 4 níveis.',None,0
+    except (ValueError,RecursionError):return QT_TRANSLATE_NOOP('Bridge','JSON inválido: use um objeto entre chaves.'),None,0
+    if not isinstance(value,dict):return QT_TRANSLATE_NOOP('Bridge','A entrada deve ser um objeto JSON.'),None,0
+    if not json_depth_ok(value):return QT_TRANSLATE_NOOP('Bridge','Objeto aninhado demais: no máximo 4 níveis.'),None,0
     selftest=capability==MODEL_CAPABILITY and value.get('action')=='selftest'
     return None,value,CAP_SELFTEST_DEADLINE_MS if selftest else CAP_DEADLINE_MS
 def package_info(app_dir):
@@ -1757,107 +1307,37 @@ def package_info(app_dir):
     return {'installed':True,'version':version,'commit':commit[:8] if isinstance(commit,str) and PACKAGE_COMMIT.fullmatch(commit) else '',
             # PACKAGE.json has no build time; the file's own modification time is when the package was written.
             'built':datetime.datetime.fromtimestamp(info.st_mtime).strftime('%d/%m/%Y %H:%M'),
-            'runtime':'Python embutido no pacote' if isinstance(runtime,dict) and runtime.get('runtime_dir') else 'não informado',
+            'runtime':QT_TRANSLATE_NOOP('Bridge','Python embutido no pacote') if isinstance(runtime,dict) and runtime.get('runtime_dir') else QT_TRANSLATE_NOOP('Bridge','não informado'),
             'dirty':obj.get('dirty') is True}
-def hub_storage(hub):
-    """Catalog storage for Recuperação (B9). The hub view has no storage_error field, so the screen reports that as not informed."""
-    if not hub:return {'state':'none','reason':'','orphans':None,'repository':'','catalogSha':''}
-    quarantined=hub.get('status')=='quarantined'
-    return {'state':'quarantined' if quarantined else 'verified','reason':HUB_REASON_LABELS.get(hub.get('reason'),'') if quarantined else '',
-            'orphans':hub.get('orphans'),'repository':hub.get('repository') or '','catalogSha':(hub.get('catalog_sha256') or '')[:12]}
-# op -> (result channel, done message or builder). One table drives every Core answer.
-OPS={
-    'preferences':('prefs',PREFS_DONE),'rollback_preferences':('prefs',PREFS_DONE),'select_wake':('prefs',PREFS_DONE),'select_wake_phrases':('prefs',PREFS_DONE),'wake_phrase_validate':('phrase',lambda _target:'Frase verificada'),
-    'wake_phrase_add':('phrase','Frase salva: faça o teste antes de ativar'),'wake_phrase_remove':('phrase','Frase personalizada removida'),'wake_phrase_test':('phrase','Teste sintético iniciado: o resultado aparece na lista'),'feedback_preferences':('prefs',PREFS_DONE),
-    'recover_configuration':('prefs','Configuração recuperada; reinício necessário'),
-    'hub_abort':('hub','Importação cancelada'),
-    'hub_approve':('hub',lambda target:f'Permissões aprovadas: {target}'),
-    'hub_install':('hub','Plugin instalado (desativado)'),'hub_rollback':('hub','Versão revertida'),'hub_remove':('hub','Plugin removido'),
-    'plugin_enable':('plugin','Plugin ativado'),'plugin_disable':('plugin','Plugin desativado'),'plugin_revoke':('plugin','Permissões revogadas; plugin desativado'),
-    'capability_invoke':('plugin',None),'capability_cancel':('plugin','Cancelamento enviado'),
-    'text':('text','Texto enviado'),'listen_start':('listen','Escuta iniciada: fale agora'),
-    'secret_set':('llm','Chave salva pelo Core'),'secret_clear':('llm','Chave removida pelo Core'),'llm_configure':('llm','Configuração salva pelo Core'),
-    'tool_decide':('tools','Decisão enviada ao Core'),
-    'agent_start':('agent','Objetivo enviado ao Core'),'agent_abort':('agent','Aborto enviado ao Core'),
-    # S4 skills: the Core's ack code is the result; validator reasons arrive as skill_invalid:<reason>.
-    'skill_validate':('skills','Manifest válido; nada foi gravado'),'skill_save_draft':('skills','Rascunho salvo no Core'),'skill_dry_run':('skills','Simulação concluída; skill marcada como testada'),
-    'skill_approve':('skills','Skill aprovada'),'skill_enable':('skills','Skill habilitada'),'skill_disable':('skills','Skill desabilitada'),'skill_rollback':('skills','Versão anterior restaurada'),'skill_remove':('skills','Skill removida'),
-    'skill_run':('skills','Execução iniciada'),'skill_decide':('skills','Decisão enviada ao Core'),'skill_cancel':('skills','Cancelamento enviado'),
-    'skill_export':('skills','Pacote exportado; publisher não verificado'),'skill_import':('skills','Pré-visualização de importação pronta'),'skill_import_confirm':('skills','Skill importada como rascunho; aprove antes de usar'),
-}
-PENDING={'listen_start':'Pedindo escuta ao Core…','agent_start':'Iniciando agente…','agent_abort':'Enviando aborto ao Core…','hub_approve':'Enviando aprovação ao Core','hub_abort':'Enviando cancelamento ao Core','hub_install':'Instalando no Core','hub_rollback':'Revertendo no Core','hub_remove':'Removendo no Core','plugin_enable':'Ativando plugin…','plugin_disable':'Desativando plugin…','plugin_revoke':'Revogando permissões…','capability_invoke':'Invocando capability…','capability_cancel':'Cancelando capability…','text':'Enviando texto ao Core',
-    'secret_set':'Salvando chave no Core…','secret_clear':'Removendo chave no Core…','llm_configure':'Salvando configuração do motor…','tool_decide':'Enviando decisão ao Core…',
-    'skill_validate':'Validando manifest no Core…','skill_save_draft':'Salvando rascunho no Core…','skill_dry_run':'Simulando skill no Core…','skill_approve':'Aprovando skill no Core…','skill_enable':'Habilitando skill no Core…','skill_disable':'Desabilitando skill no Core…','skill_rollback':'Revertendo versão no Core…','skill_remove':'Removendo skill no Core…','skill_run':'Iniciando skill no Core…','skill_decide':'Enviando decisão do passo ao Core…','skill_cancel':'Cancelando skill no Core…','skill_export':'Exportando pacote pelo Core…','skill_import':'Lendo pacote pelo Core…','skill_import_confirm':'Importando como rascunho pelo Core…'}
 # S5 connection ops: the Core's ack code is the result; refusals of accounts and consent arrive as codes from CONN_MESSAGES.
 CONN_OPS=frozenset({'connection_add','connection_connect','connection_consent','connection_refresh','connection_disconnect','connection_revoke','connection_revoke_scope','connection_remove','connection_call','connection_set_token','connection_trust_tools'})
-OPS.update({
-    'connection_add':('connections','Conta criada (desconectada)'),'connection_connect':('connections','Conexão iniciada: confirme o código no servidor e consinta os escopos'),
-    'connection_consent':('connections','Escopos concedidos pelo usuário'),'connection_refresh':('connections','Atualização da conta solicitada'),
-    'connection_disconnect':('connections','Conta desconectada; segredos apagados'),'connection_revoke':('connections','Acesso revogado no servidor'),
-    'connection_remove':('connections','Conta removida'),'connection_call':('connections','Chamada enviada ao Core; resultado em Última chamada'),
-    'connection_set_token':('connections','Token enviado ao Core para validação; o campo foi limpo'),
-    'connection_trust_tools':('connections','Ferramentas confiadas pelo usuário; cada chamada ainda pede aprovação'),
-    'connection_revoke_scope':('connections','Escopo revogado; chamadas que precisam dele pedem concessão de novo'),
-    # C-wire: restart is answered by the Core, then the socket drops (see _restart_ack); the plugin clear answers on the plugin channel.
-    'core_restart':('core','Reinício pedido ao Core'),'plugin_settings_clear':('plugin','Dados do plugin apagados'),'virtual_wake':('wake','Wake de teste enviado ao Core'),
-    'registry_plan':('registry','Rota planejada; nada foi executado'),'registry_allow_visual':('registry','Fallback visual atualizado pelo Core'),
-})
-PENDING.update({
-    'connection_add':'Criando conta no Core…','connection_connect':'Iniciando conexão no Core…','connection_consent':'Enviando consentimento ao Core…','connection_refresh':'Atualizando conta no Core…',
-    'connection_disconnect':'Desconectando conta no Core…','connection_revoke':'Revogando acesso no Core…','connection_remove':'Removendo conta no Core…','connection_call':'Chamando operação pelo Core…',
-    'connection_set_token':'Validando token no Core…','connection_trust_tools':'Confiando nas ferramentas no Core…','connection_revoke_scope':'Revogando escopo no Core…',
-    'core_restart':'Pedindo reinício ao Core…','plugin_settings_clear':'Apagando dados do plugin…','virtual_wake':'Enviando wake de teste…',
-    'registry_plan':'Planejando rota no Core…','registry_allow_visual':'Atualizando fallback visual no Core…',
-})
-# B16 (docs/A6-live-audio.md): device list, and the Core defaults restore (the Core keeps config.json.bak).
-OPS.update({
-    'audio_devices':('audio','Lista de dispositivos atualizada'),
-    'preferences_restore_defaults':('prefs','Padrões do Core restaurados; cópia anterior em config.json.bak'),
-})
-PENDING.update({'audio_devices':'Consultando dispositivos no Core…','preferences_restore_defaults':'Restaurando padrões do Core…'})
-# A9 probe of one input: 3 s of the microphone; the message says so, and the result comes in audio.probe.
-OPS.update({'audio_probe':('audio','Teste iniciado: o microfone será usado por 3 segundos')})
-PENDING.update({'audio_probe':'Iniciando o teste de 3 s no Core…'})
-# A13 microphone assistant: 2 s from each listed input, one at a time; nothing is saved and the system default is not changed.
-OPS.update({'audio_recommend_input':('audio','Verificação dos microfones iniciada: 2 s em cada entrada; nada é salvo')})
-PENDING.update({'audio_recommend_input':'Verificando os microfones no Core…'})
-CODE_MESSAGES.setdefault('audio_tool_failed','A ferramenta de áudio falhou; tente de novo')
-CODE_MESSAGES.setdefault('invalid_device','Microfone não listado pelo sistema: atualize a lista e escolha de novo')
-# A6 consent for the live microphone (docs/A6-live-audio.md): one op, read back from preferences.live_audio and audio.live.restart_required.
-OPS.update({'live_audio_preference':('prefs','Escuta do microfone salva no Core; reinicie o Core para aplicar')})
-PENDING.update({'live_audio_preference':'Salvando a escuta do microfone no Core…'})
-# A11 consent for host actions (docs/A11-real-actions-test.md): applies at once; busy while a voice session or a command runs.
-OPS.update({'real_actions_preference':('prefs','Ações no computador salvas no Core')})
-PENDING.update({'real_actions_preference':'Salvando as ações no computador no Core…'})
-# Idiomas (Frente 2): one op for the STT list and the TTS language/voice; applied at the next Core start.
-OPS.update({'language_preference':('prefs','Idiomas salvos no Core; reinicie o Core para aplicar')})
-PENDING.update({'language_preference':'Salvando idiomas no Core…'})
-# CFG-03: verifies the packaged models of one bundled language (hash per file) and activates them in the Core state. No download.
-OPS.update({'language_install':('prefs','Modelos verificados pelo hash e ativados no Core; a escolha vale na próxima fala')})
-PENDING.update({'language_install':'Verificando os modelos do idioma no pacote…'})
-# CFG-04 retention: applies at once; `never` also removes the audit trail (purge on commit). DIAG-02 developer mode: a plain switch.
-OPS.update({'history_retention_preference':('prefs','Retenção do histórico salva no Core; vale já')})
-PENDING.update({'history_retention_preference':'Salvando a retenção do histórico no Core…'})
-OPS.update({'developer_mode_preference':('prefs','Modo desenvolvedor salvo no Core')})
-PENDING.update({'developer_mode_preference':'Salvando o modo desenvolvedor no Core…'})
-# WP-20: the interface language is a Core preference; the UI switches live when the snapshot reports it.
-OPS.update({'ui_language_preference':('prefs','Idioma da interface salvo no Core')})
-PENDING.update({'ui_language_preference':'Salvando o idioma da interface no Core…'})
-# DIAG-04 (docs/ui-spec/50-diagnostico.md §3.4): codes the Core emits that had no Portuguese text.
-CODE_MESSAGES.update({'hub_storage_error':'Falha ao gravar o registro do catálogo.','plugin_storage_error':'Falha ao gravar o registro dos plugins.','hub_import_timeout':'Importação expirou antes de terminar.'})
 # Snapshot keys grouped into sections; each section has its own NOTIFY signal so QML lists keep their delegates.
 # 'partial' and the chat state share chatChanged: both move with one streamed chunk.
 SECTION_SIGNALS={'personal':'personalChanged','entries':'hubEntriesChanged','installed':'hubInstalledChanged','hub':'hubChanged','plugins':'pluginsChanged','capability':'capabilityChanged','preferences':'preferencesChanged','pack':'packChanged','session':'sessionChanged','llm':'llmChanged','partial':'chatChanged','tools':'toolsChanged','agent':'agentChanged','skills':'skillsChanged','connections':'connectionsChanged','registry':'registryChanged','events':'eventsChanged','audio':'audioChanged','languages':'languagesChanged','actions':'actionsChanged'}
 SNAPSHOT_SECTION_KEYS=('hub','plugins','capability_result','preferences','base_pack','llm','partial','tool_proposals','agent','skills','connections','registry','events','audio','languages','actions','personal','personal_reply')
 
+def _out(value):
+    """A stored message as text in the active language. A callable (a code or arguments kept until the read) is called now;
+    a Portuguese source is translated now. Nothing is translated when it is stored, so a language switch shows the new text."""
+    if callable(value):return value()
+    return _tr(value) if isinstance(value,str) else value
+def _later(text,*args):
+    """A message kept as its source text and arguments; the arguments are read through _out as well (see there)."""
+    return lambda:_tr(text,*(_out(a) for a in args))
+class _Results(dict):
+    """The result channels. Every read goes through _out, so a stored result follows the language of the moment it is read."""
+    def __getitem__(self,key):return _out(dict.__getitem__(self,key))
+    def get(self,key,default=None):return self[key] if key in self else default
+    def values(self):return [self[key] for key in self]
+    def items(self):return [(key,self[key]) for key in self]
 class Bridge(QObject):
     changed=Signal()
     hubEntriesChanged=Signal();hubInstalledChanged=Signal();hubChanged=Signal();pluginsChanged=Signal();capabilityChanged=Signal()
-    preferencesChanged=Signal();uiLanguageChanged=Signal(str);packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal();actionsChanged=Signal()
+    preferencesChanged=Signal();uiLanguageChanged=Signal(str);retranslated=Signal();packChanged=Signal();sessionChanged=Signal();eventsChanged=Signal();audioChanged=Signal();languagesChanged=Signal();actionsChanged=Signal()
     llmChanged=Signal();toolsChanged=Signal();chatChanged=Signal();modelsCatalogChanged=Signal();modelsStateChanged=Signal();agentChanged=Signal()
     prefsSettled=Signal(str);textSent=Signal(str);chatSent=Signal(str);perceptionChanged=Signal();skillsChanged=Signal();connectionsChanged=Signal();registryChanged=Signal();personalChanged=Signal()
     def __init__(self,root):
-        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results={'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':'','wake':'','audio':''};self.hub_target='';self.capability_pending=False;self.plugin_capability='';self._package=package_info(Path(__file__).resolve().parent);self.online=False;self.error='Core offline';self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
+        super().__init__();self.root=Path(root);self.snapshot={};self.buffer=bytearray();self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=_Results({'prefs':'','hub':'','plugin':'','text':'','llm':'','chat':'','tools':'','agent':'','perception':'','skills':'','connections':'','registry':'','core':'','wake':'','audio':''});self.hub_target='';self.capability_pending=False;self.plugin_capability='';self._package=package_info(Path(__file__).resolve().parent);self.online=False;self.error=QT_TRANSLATE_NOOP('Bridge','Core offline');self._backoff=500;self._sequence=-1;self._counter=0;self._prefix=uuid.uuid4().hex[:16]
         # C1 chat/tool state. Messages live here (window-level state, not Core snapshot). No key is ever stored here.
         self.chat_messages=[];self.chat_request=None;self.chat_inflight=None;self.chat_state='idle';self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         # B12: the Core code of the last failed chat turn (refusal of the invoke, or the plugin's error). '' when the last turn did not fail with a known code.
@@ -1903,7 +1383,7 @@ class Bridge(QObject):
     def _offline(self,*args):
         old=self.snapshot
         if self.restart_state is not None:self.restart_dropped=True
-        self.online=False;self.error='Core offline — reconnecting';self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=dict.fromkeys(self.results,'');self.hub_target='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
+        self.online=False;self.error=QT_TRANSLATE_NOOP('Bridge','Core offline — reconnecting');self.snapshot={};self.pending=None;self.pending_op=None;self.cancel_id=None;self.text_request=None;self.text_inflight=None;self.preferences_request=None;self.results=_Results.fromkeys(self.results,'');self.hub_target='';self.capability_pending=False;self.buffer.clear();self._sequence=-1;self.poll.stop();self.timeout.stop()
         # DIAG-05: a new Core starts with empty latency and resource samples.
         self._sent_at=None;self._latency=[];self._core_pid=None;self._cpu_prev={};self._sampled_at=None;self.resource_view={}
         if self.socket.state()!=QLocalSocket.LocalSocketState.UnconnectedState:self.socket.abort()
@@ -1939,44 +1419,57 @@ class Bridge(QObject):
         if op in PERSONAL_OPS:self._personal_settled(op,code,data);return
         # B16: the Core refuses the defaults restore with busy during a voice session; the message says so and the toast follows.
         if op=='preferences_restore_defaults' and code=='busy':
-            self.results['prefs']=RESTORE_BUSY_TEXT;self.prefsSettled.emit(RESTORE_BUSY_TEXT);return
+            self.results['prefs']=RESTORE_BUSY_TEXT;self.prefsSettled.emit(_tr(RESTORE_BUSY_TEXT));return
         # WP-4 backup copy: the Core writes config.json.bak before it resets anything; a failure there (or in the commit) keeps the values.
         if op=='preferences_restore_defaults' and code=='preferences_storage_error':
-            self.results['prefs']=RESTORE_BACKUP_TEXT;self.prefsSettled.emit(RESTORE_BACKUP_TEXT);return
+            self.results['prefs']=RESTORE_BACKUP_TEXT;self.prefsSettled.emit(_tr(RESTORE_BACKUP_TEXT));return
         if self.models_req is not None and self.models_req[1]==op:
             kind=self.models_req[0];self.models_req=None;self._models_ack(kind,code);return
         if op=='capability_invoke' and self.pending_chat:
             self.pending_chat=False;self._chat_accepted(code);return
         if op=='capability_cancel' and self.pending_chat_cancel:
-            self.pending_chat_cancel=False;self.results['chat']='Cancelamento enviado' if code=='ok' else code_message(code);self.chatChanged.emit()
+            self.pending_chat_cancel=False;self.results['chat']=QT_TRANSLATE_NOOP('Bridge','Cancelamento enviado') if code=='ok' else partial(code_message,code);self.chatChanged.emit()
         if op=='capability_invoke' and self.skill_req is not None:
             req,self.skill_req=self.skill_req,None
             if code=='ok':self.skill_inflight=req;self.skill_before=SKILL_ARM;self.results['skills']=PENDING_SKILL_DRAFT
-            else:self.results['skills']=code_message(code)
+            else:self.results['skills']=partial(code_message,code)
             self._skills_touch();return
         if op=='capability_invoke' and self.perception_req is not None:
             req,self.perception_req=self.perception_req,None
             if code=='ok':self.perception_inflight=req;self.perception_before=PERCEPTION_ARM;self.results['perception']=PENDING['capability_invoke'] if not req.get('silent') else self.results['perception']
             elif req.get('silent'):self._ptt_observe(req,{'ok':False,'error':code})
-            else:self.results['perception']=perception_code_message(code)
+            else:self.results['perception']=partial(perception_code_message,code)
             self._perception_touch();return
         if op=='tool_decide':self.tool_inflight=None
         if op not in OPS:return
         channel,done=OPS[op]
         if op=='text':
             sent,self.text_inflight=self.text_inflight,None
-            self.results['text']=done if code=='ok' else code_message(code)
+            self.results['text']=done if code=='ok' else partial(code_message,code)
             # N-5: a turn sent during a voice session is queued by the Core (`queued`); it counts as sent.
             if code in ('ok','queued'):self.textSent.emit(sent or '')
             return
         if code!='ok':
-            self.results[channel]=capability_code_message(code) if op=='capability_invoke' else real_action_code_message(op,code)
+            self.results[channel]=partial(capability_code_message,code) if op=='capability_invoke' else partial(real_action_code_message,op,code)
             if op=='capability_invoke':self.capability_pending=False
         elif op=='capability_invoke':self.capability_pending=True;self.results[channel]=PENDING[op]
-        else:self.results[channel]=done(self.hub_target) if callable(done) else done
+        else:self.results[channel]=partial(done,self.hub_target) if callable(done) else done
         # The shell shows prefsSettled as a toast: the listen answer (HUD-03) reaches the user the same way.
         if channel=='prefs':self.prefsSettled.emit(self.results['prefs'])
         if channel=='listen':self.prefsSettled.emit(self.results['listen'])
+    def switchLanguage(self,language):
+        """WP-20: the Core reported another interface language. The translator is swapped first, then every state
+        signal is emitted, so each property (and the settings schema) is read again in the new language. main.py then
+        re-evaluates the QML bindings (engine.retranslate)."""
+        translations.apply(QCoreApplication.instance(),language)
+        for signal in (self.changed,self.hubEntriesChanged,self.hubInstalledChanged,self.hubChanged,self.pluginsChanged,self.capabilityChanged,
+                       self.preferencesChanged,self.packChanged,self.sessionChanged,self.eventsChanged,self.audioChanged,self.languagesChanged,
+                       self.actionsChanged,self.llmChanged,self.toolsChanged,self.chatChanged,self.modelsCatalogChanged,self.modelsStateChanged,
+                       self.agentChanged,self.perceptionChanged,self.skillsChanged,self.connectionsChanged,self.registryChanged,self.personalChanged):
+            signal.emit()
+        self.retranslated.emit()
+        self.uiLanguageChanged.emit(language)
+
     def _apply(self,data,settled=False):
         """Publish one validated snapshot; per-section signals fire only for sections that changed."""
         # Python retains u64 precisely; QML never receives numeric session IDs.
@@ -1985,7 +1478,7 @@ class Bridge(QObject):
         if data!=old:self.snapshot=data;self._publish(old,data)
         # WP-20: a language the Core reports that differs from the one on screen switches the whole UI (main.py).
         language=(data.get('preferences') or {}).get('ui_language')
-        if language in UI_LANGUAGE_VALUES and language!=translations.current():self.uiLanguageChanged.emit(language)
+        if language in UI_LANGUAGE_VALUES and language!=translations.current():self.switchLanguage(language)
         if data!=old or settled:self.changed.emit();self.perceptionChanged.emit()
     def _read(self):
         # Never read more than the 64 KiB cap plus one byte; the cap check below drops the Core.
@@ -2021,7 +1514,7 @@ class Bridge(QObject):
                 op,kw=self.preferences_request;self.preferences_request=None;self._request(op,**kw)
             elif self.text_request is not None:
                 text,self.text_request=self.text_request,None
-                problem=text_problem(text) or (None if self._text_ready() else 'Entrada de texto indisponível agora')
+                problem=text_problem(text) or (None if self._text_ready() else QT_TRANSLATE_NOOP('Bridge','Entrada de texto indisponível agora'))
                 if problem is None:self._request('text',raw=text)
                 else:self.results['text']=problem;self.changed.emit()
             # Model steps go last: one request in flight at a time, so they never displace a queued request above.
@@ -2039,10 +1532,10 @@ class Bridge(QObject):
     @Slot(str)
     def submitText(self,text):
         problem=text_problem(text)
-        if problem is None and not self._text_ready():problem='Entrada de texto indisponível agora'
-        if problem is None and self.text_request is not None:problem='Aguarde o envio anterior'
+        if problem is None and not self._text_ready():problem=QT_TRANSLATE_NOOP('Bridge','Entrada de texto indisponível agora')
+        if problem is None and self.text_request is not None:problem=QT_TRANSLATE_NOOP('Bridge','Aguarde o envio anterior')
         if problem is not None:self.results['text']=problem;self.changed.emit();return
-        if self.pending:self.text_request=text;self.results['text']='Texto na fila para envio'
+        if self.pending:self.text_request=text;self.results['text']=QT_TRANSLATE_NOOP('Bridge','Texto na fila para envio')
         else:self._request('text',raw=text);self.results['text']=PENDING['text']
         self.changed.emit()
     # ---- C1 LLM engine: chat turns, tool decisions and Motor LLM settings. The Core decides; this only forwards bounded requests.
@@ -2050,17 +1543,17 @@ class Bridge(QObject):
     def _refuse(self,channel,message):self.results[channel]=message;self._touch()
     def _send(self,channel,op,**kw):
         """One Core request for a C1 channel. Refused while another request is in flight; never queued, so no key waits in memory."""
-        if self.pending:self.results[channel]=CODE_MESSAGES['busy']
-        elif not self._request(op,**kw):self.results[channel]='Core indisponível'
+        if self.pending:self.results[channel]=CODE_MESSAGES.raw('busy')
+        elif not self._request(op,**kw):self.results[channel]=QT_TRANSLATE_NOOP('Bridge','Core indisponível')
         else:self.results[channel]=PENDING[op]
-        self._touch();return self.pending_op==op and self.results[channel]==PENDING[op]
+        self._touch();return self.pending_op==op and dict.get(self.results,channel)==PENDING[op]
     def _chat_target(self):
         for item in (self.snapshot.get('plugins') or {}).get('items',[]):
             capability=next((c for c in item['capabilities'] if c.endswith(CHAT_CAPABILITY_SUFFIX)),None)
             if item['state']=='running' and capability:return {'plugin_id':item['plugin_id'],'capability':capability}
         return None
     def _chat_reset(self):
-        if self.chat_inflight is not None or self.chat_request is not None:self.chat_state='error';self.results['chat']='Core indisponível; resposta interrompida'
+        if self.chat_inflight is not None or self.chat_request is not None:self.chat_state='error';self.results['chat']=QT_TRANSLATE_NOOP('Bridge','Core indisponível; resposta interrompida')
         self.chat_inflight=None;self.chat_request=None;self.chat_cancel_pending=False;self.pending_chat=False;self.pending_chat_cancel=False;self.tool_inflight=None
         self.chatChanged.emit()
     # N-5: the chat and the agent stay on screen during a voice session (history and state are visible); only the input is
@@ -2070,19 +1563,19 @@ class Bridge(QObject):
     @Property(bool,notify=changed)
     def chatInputAvailable(self):return self.chatAvailable
     @Property(str,notify=changed)
-    def chatBlockedText(self):return 'Durante a voz, o texto entra na fila e é enviado quando a sessão terminar.' if self.sessionId else ''
+    def chatBlockedText(self):return QCoreApplication.translate('Bridge','Durante a voz, o texto entra na fila e é enviado quando a sessão terminar.') if self.sessionId else ''
     @Slot(str,result=str)
-    def chatTextProblem(self,text):return chat_problem(text) or ''
+    def chatTextProblem(self,text):return _tr(chat_problem(text) or '')
     # B13: the command line rule (1..512 UTF-8 bytes, no control characters). '' means the text may be sent.
     @Slot(str,result=str)
-    def commandProblem(self,text):return text_problem(text) or ''
+    def commandProblem(self,text):return _tr(text_problem(text) or '')
     @Property(str,notify=chatChanged)
     def chatLastErrorCode(self):return self.chat_last_error
     # B12: the banner for the last failed chat turn: {'code','text','action'}, or {} when there is nothing actionable.
     @Property('QVariantMap',notify=chatChanged)
     def chatErrorBanner(self):
         text=CHAT_ERROR_BANNERS.get(self.chat_last_error)
-        return {'code':self.chat_last_error,'text':text,'action':CHAT_ERROR_ACTION} if text else {}
+        return {'code':self.chat_last_error,'text':text,'action':_tr(CHAT_ERROR_ACTION)} if text else {}
     @Slot(str,result=str)
     def codeMessage(self,code):return code_message(code) if isinstance(code,str) and SNAKE_CODE.fullmatch(code) else ''
     # Write-only clipboard for the copyable terminal commands (Diagnóstico > Recuperação). Bounded; never reads the clipboard.
@@ -2111,7 +1604,7 @@ class Bridge(QObject):
         if self.chat_inflight is not None:return 'streaming' if self.snapshot.get('partial') else 'waiting'
         return self.chat_state
     @Property(str,notify=chatChanged)
-    def chatStateLabel(self):return CHAT_STATE_LABELS.get(self.chatState,'Em espera')
+    def chatStateLabel(self):return CHAT_STATE_LABELS.get(self.chatState,_tr(QT_TRANSLATE_NOOP('Bridge','Em espera')))
     @Property('QVariantList',notify=chatChanged)
     def chatMessages(self):return [dict(m) for m in self.chat_messages]
     @Property(str,notify=chatChanged)
@@ -2121,21 +1614,21 @@ class Bridge(QObject):
     @Slot(str)
     def sendChat(self,text):
         target=self._chat_target();problem=chat_problem(text)
-        if problem is None and (target is None or not self.pluginsAvailable):problem='Motor LLM indisponível'
-        if problem is None and (self.chat_inflight is not None or self.chat_request is not None):problem='Aguarde a resposta anterior'
-        if problem is None and self.pending:problem=CODE_MESSAGES['busy']
-        if problem is None and self._models_busy_now():problem='Aguarde o gerenciador de modelos'
+        if problem is None and (target is None or not self.pluginsAvailable):problem=QT_TRANSLATE_NOOP('Bridge','Motor LLM indisponível')
+        if problem is None and (self.chat_inflight is not None or self.chat_request is not None):problem=QT_TRANSLATE_NOOP('Bridge','Aguarde a resposta anterior')
+        if problem is None and self.pending:problem=CODE_MESSAGES.raw('busy')
+        if problem is None and self._models_busy_now():problem=QT_TRANSLATE_NOOP('Bridge','Aguarde o gerenciador de modelos')
         messages=chat_messages_for(self.chat_messages,text) if problem is None else None
-        if problem is None and messages is None:problem='Mensagem grande demais para o contexto do motor'
+        if problem is None and messages is None:problem=QT_TRANSLATE_NOOP('Bridge','Mensagem grande demais para o contexto do motor')
         if problem is not None:self.results['chat']=problem;self.chatChanged.emit();return
         self.chat_request={'text':text,'target':target};self.pending_chat=True;self.chat_last_error=''
         input_={'messages':messages,'tools':True,'max_tokens':CHAT_MAX_TOKENS}
         if self._request('capability_invoke',capability=target['capability'],input=input_,deadline_ms=CHAT_DEADLINE_MS):self.results['chat']=PENDING['capability_invoke']
-        else:self.chat_request=None;self.pending_chat=False;self.results['chat']='Core indisponível'
+        else:self.chat_request=None;self.pending_chat=False;self.results['chat']=QT_TRANSLATE_NOOP('Bridge','Core indisponível')
         self.chatChanged.emit()
     def _chat_accepted(self,code):
         request,self.chat_request=self.chat_request,None
-        if code!='ok':self.chat_last_error=code;self.results['chat']=code_message(code);self.chatChanged.emit();return
+        if code!='ok':self.chat_last_error=code;self.results['chat']=partial(code_message,code);self.chatChanged.emit();return
         self.chat_last_error=''
         self.chat_messages.append({'role':'user','text':request['text'],'state':'done'});del self.chat_messages[:-CHAT_MESSAGES_KEPT]
         self.chat_inflight=request['target'];self.chat_state='waiting';self.results['chat']=''
@@ -2145,7 +1638,7 @@ class Bridge(QObject):
         if self.chat_inflight is None:return
         result=self.snapshot.get('capability_result')
         if not result or result['capability']!=self.chat_inflight['capability'] or result['plugin_id']!=self.chat_inflight['plugin_id']:return
-        self.chat_inflight=None;self.chat_cancel_pending=False;partial=result.get('partial') or ''
+        self.chat_inflight=None;self.chat_cancel_pending=False;streamed=result.get('partial') or ''
         self.chat_last_error=''
         if result['ok']:
             text=result['output'].get('text');self.chat_messages.append({'role':'assistant','text':text if isinstance(text,str) else '','state':'done'})
@@ -2153,15 +1646,15 @@ class Bridge(QObject):
         else:
             state='cancelled' if result['error'] in CANCEL_CODES else 'error';self.chat_state=state
             if state=='error':self.chat_last_error=result['error'] if isinstance(result['error'],str) else ''
-            if partial:self.chat_messages.append({'role':'assistant','text':partial,'state':state})
-            self.results['chat']='' if state=='cancelled' else (f"Erro HTTP {result[HTTP_STATUS_KEY]}" if result['error']=='http_error' and HTTP_STATUS_KEY in result else code_message(result['error']))
+            if streamed:self.chat_messages.append({'role':'assistant','text':streamed,'state':state})
+            self.results['chat']='' if state=='cancelled' else (_later(QT_TRANSLATE_NOOP('Bridge','Erro HTTP %1'),result[HTTP_STATUS_KEY]) if result['error']=='http_error' and HTTP_STATUS_KEY in result else partial(code_message,result['error']))
         del self.chat_messages[:-CHAT_MESSAGES_KEPT];self.chatChanged.emit()
     @Slot()
     def cancelChat(self):
         if self.chat_inflight is None:return
-        if self.pending:self.chat_cancel_pending=True;self.results['chat']='Cancelamento na fila'
+        if self.pending:self.chat_cancel_pending=True;self.results['chat']=QT_TRANSLATE_NOOP('Bridge','Cancelamento na fila')
         elif self._request('capability_cancel',capability=self.chat_inflight['capability']):self.pending_chat_cancel=True;self.results['chat']=PENDING['capability_cancel']
-        else:self.results['chat']='Core indisponível'
+        else:self.results['chat']=QT_TRANSLATE_NOOP('Bridge','Core indisponível')
         self.chatChanged.emit()
     @Property('QVariantList',notify=toolsChanged)
     def toolProposals(self):return list(self.snapshot.get('tool_proposals') or [])
@@ -2172,8 +1665,8 @@ class Bridge(QObject):
         # Only the user's click decides; a second click on the same proposal while it is in flight is dropped.
         if decision not in ('authorize','deny') or self.tool_inflight==proposal:return
         state=next((p['state'] for p in self.snapshot.get('tool_proposals') or [] if p['proposal_id']==proposal),None)
-        if state is None:return self._refuse('tools',CODE_MESSAGES['unknown_proposal'])
-        if state!='pending':return self._refuse('tools',CODE_MESSAGES['already_decided'])
+        if state is None:return self._refuse('tools',CODE_MESSAGES.raw('unknown_proposal'))
+        if state!='pending':return self._refuse('tools',CODE_MESSAGES.raw('already_decided'))
         self.tool_inflight=proposal
         if not self._send('tools','tool_decide',proposal_id=proposal,decision=decision):self.tool_inflight=None
     # ---- C3 agent runtime: one run at a time, decided by the Core. The bridge refuses what it can see is impossible, forwards bounded requests, and shows the snapshot 'agent' block.
@@ -2183,19 +1676,19 @@ class Bridge(QObject):
     @Slot(str)
     def agentStart(self,goal):
         problem=agent_goal_problem(goal)
-        if problem is None and self._chat_target() is None:problem=CODE_MESSAGES['llm_unavailable']
-        if problem is None and self._agent_active():problem=CODE_MESSAGES['agent_busy']
-        if problem is None and (self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem='Aguarde a conversa terminar'
-        if problem is None and self._models_busy_now():problem='Aguarde o gerenciador de modelos'
+        if problem is None and self._chat_target() is None:problem=CODE_MESSAGES.raw('llm_unavailable')
+        if problem is None and self._agent_active():problem=CODE_MESSAGES.raw('agent_busy')
+        if problem is None and (self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem=QT_TRANSLATE_NOOP('Bridge','Aguarde a conversa terminar')
+        if problem is None and self._models_busy_now():problem=QT_TRANSLATE_NOOP('Bridge','Aguarde o gerenciador de modelos')
         if problem is not None:return self._refuse('agent',problem)
         self._send('agent','agent_start',goal=goal.strip())
     @Slot()
     def agentAbort(self):
         run=self._agent_run()
-        if run is None or not self._agent_active():return self._refuse('agent',CODE_MESSAGES['unknown_run'])
+        if run is None or not self._agent_active():return self._refuse('agent',CODE_MESSAGES.raw('unknown_run'))
         self._send('agent','agent_abort',run_id=run['run_id'])
     @Slot(str,result=str)
-    def agentGoalProblem(self,goal):return agent_goal_problem(goal) or ''
+    def agentGoalProblem(self,goal):return _tr(agent_goal_problem(goal) or '')
     @Property(str,notify=agentChanged)
     def agentState(self):return (self._agent_run() or {}).get('state','')
     @Property(bool,notify=agentChanged)
@@ -2233,39 +1726,39 @@ class Bridge(QObject):
     # Write-only: the key is passed straight into one Core request. It is not stored, logged, published or echoed.
     @Slot(str,str)
     def setApiKey(self,provider,key):
-        if not self.llmConfigAvailable:return self._refuse('llm','Motor LLM indisponível agora')
-        if provider not in LLM_PROVIDERS:return self._refuse('llm',CODE_MESSAGES['invalid_provider'])
-        if not valid_key(key):return self._refuse('llm',CODE_MESSAGES['invalid_secret'])
+        if not self.llmConfigAvailable:return self._refuse('llm',QT_TRANSLATE_NOOP('Bridge','Motor LLM indisponível agora'))
+        if provider not in LLM_PROVIDERS:return self._refuse('llm',CODE_MESSAGES.raw('invalid_provider'))
+        if not valid_key(key):return self._refuse('llm',CODE_MESSAGES.raw('invalid_secret'))
         self._send('llm','secret_set',provider=provider,key=key)
     @Slot(str)
     def clearApiKey(self,provider):
-        if not self.llmConfigAvailable:return self._refuse('llm','Motor LLM indisponível agora')
-        if provider not in LLM_PROVIDERS:return self._refuse('llm',CODE_MESSAGES['invalid_provider'])
+        if not self.llmConfigAvailable:return self._refuse('llm',QT_TRANSLATE_NOOP('Bridge','Motor LLM indisponível agora'))
+        if provider not in LLM_PROVIDERS:return self._refuse('llm',CODE_MESSAGES.raw('invalid_provider'))
         self._send('llm','secret_clear',provider=provider)
     # Modelo atual actions: a manual selftest of the configured model (capability answer, 30 s) and the rollback or mark-good of the last good config (Core ops, live revision).
     @Slot()
     def llmSelftest(self):
         if self._models_blocked():return
-        if not (self.snapshot.get('llm') or {}).get('config'):return self._models_say('Configure um modelo antes de testar.')
+        if not (self.snapshot.get('llm') or {}).get('config'):return self._models_say(QT_TRANSLATE_NOOP('Bridge','Configure um modelo antes de testar.'))
         self._models_capability('manual_selftest',{'action':'selftest'},SELFTEST_DEADLINE_MS)
     def _llm_revision_op(self,kind,op,message):
-        if self._models_busy_now():return self._models_say('Aguarde a operação anterior do gerenciador')
-        if self.chat_inflight is not None or self.chat_request is not None or self.pending_chat:return self._models_say('Aguarde a conversa terminar')
+        if self._models_busy_now():return self._models_say(QT_TRANSLATE_NOOP('Bridge','Aguarde a operação anterior do gerenciador'))
+        if self.chat_inflight is not None or self.chat_request is not None or self.pending_chat:return self._models_say(QT_TRANSLATE_NOOP('Bridge','Aguarde a conversa terminar'))
         if self._models_send(kind,op,revision=self._revision()):self.models_message=message;self._models_touch()
     @Slot()
     def llmRollback(self):
-        if not self.llmRollbackAvailable:return self._models_say(CODE_MESSAGES['no_lkg'])
-        self._llm_revision_op('rollback_manual','llm_rollback','Restaurando a configuração anterior no Core…')
+        if not self.llmRollbackAvailable:return self._models_say(CODE_MESSAGES.raw('no_lkg'))
+        self._llm_revision_op('rollback_manual','llm_rollback',QT_TRANSLATE_NOOP('Bridge','Restaurando a configuração anterior no Core…'))
     @Slot()
     def llmMarkGood(self):
-        if not self.llmConfigAvailable:return self._models_say('Motor LLM indisponível agora')
-        self._llm_revision_op('mark_manual','llm_mark_good','Marcando a configuração atual como boa…')
+        if not self.llmConfigAvailable:return self._models_say(QT_TRANSLATE_NOOP('Bridge','Motor LLM indisponível agora'))
+        self._llm_revision_op('mark_manual','llm_mark_good',QT_TRANSLATE_NOOP('Bridge','Marcando a configuração atual como boa…'))
     # WP-19 describe(id): the Core op llm_describe asks the plugin; the answer is the llm_engine.models capability result.
     @Slot(str)
     def describeModel(self,ident):
         if self._models_blocked():return
-        if not (isinstance(ident,str) and MODEL_TOKEN.fullmatch(ident)):return self._models_say(CODE_MESSAGES['invalid_input'])
-        if self._models_send('describe','llm_describe',id=ident):self.models_message='Pedindo a descrição do modelo ao Core…';self._models_touch()
+        if not (isinstance(ident,str) and MODEL_TOKEN.fullmatch(ident)):return self._models_say(CODE_MESSAGES.raw('invalid_input'))
+        if self._models_send('describe','llm_describe',id=ident):self.models_message=QT_TRANSLATE_NOOP('Bridge','Pedindo a descrição do modelo ao Core…');self._models_touch()
     @Property('QVariantMap',notify=modelsStateChanged)
     def modelDescription(self):return dict(self.models_described or {})
     @Property(bool,notify=changed)
@@ -2276,10 +1769,10 @@ class Bridge(QObject):
     @Slot(str,str,str,bool,str)
     def configureLlm(self,provider,model,custom_url,cloud_consent,revision):
         url=custom_url or None
-        if not self.llmConfigAvailable:return self._refuse('llm','Motor LLM indisponível agora')
-        if self._models_busy_now():return self._refuse('llm','Aguarde o gerenciador de modelos')
-        if revision!=self.llmRevision:return self._refuse('llm',CODE_MESSAGES['stale_llm_revision'])
-        if llm_config_problem(provider,model,url,cloud_consent):return self._refuse('llm',CODE_MESSAGES['invalid_config'])
+        if not self.llmConfigAvailable:return self._refuse('llm',QT_TRANSLATE_NOOP('Bridge','Motor LLM indisponível agora'))
+        if self._models_busy_now():return self._refuse('llm',QT_TRANSLATE_NOOP('Bridge','Aguarde o gerenciador de modelos'))
+        if revision!=self.llmRevision:return self._refuse('llm',CODE_MESSAGES.raw('stale_llm_revision'))
+        if llm_config_problem(provider,model,url,cloud_consent):return self._refuse('llm',CODE_MESSAGES.raw('invalid_config'))
         self._send('llm','llm_configure',revision=int(revision),provider=provider,model=model,custom_url=url,cloud_consent=bool(cloud_consent),**self._keep_fallback())
     # ---- C2 model manager. The plugin owns the catalog; the Core owns config, LKG and keys. Every request has one kind, and every answer is routed by it.
     def _models_target(self):
@@ -2293,9 +1786,9 @@ class Bridge(QObject):
     def _models_say(self,message):self.models_message=message;self._models_touch()
     def _models_blocked(self):
         """Refuses a new operation and says why; nothing is sent."""
-        if self._models_busy_now():self._models_say('Aguarde a operação anterior do gerenciador');return True
-        if self.chat_inflight is not None or self.chat_request is not None or self.pending_chat:self._models_say('Aguarde a conversa terminar');return True
-        if self._models_target() is None:self._models_say('Modelos LLM indisponíveis: o plugin não está ativo');return True
+        if self._models_busy_now():self._models_say(QT_TRANSLATE_NOOP('Bridge','Aguarde a operação anterior do gerenciador'));return True
+        if self.chat_inflight is not None or self.chat_request is not None or self.pending_chat:self._models_say(QT_TRANSLATE_NOOP('Bridge','Aguarde a conversa terminar'));return True
+        if self._models_target() is None:self._models_say(QT_TRANSLATE_NOOP('Bridge','Modelos LLM indisponíveis: o plugin não está ativo'));return True
         return False
     def _revision(self):return int((self.snapshot.get('llm') or {}).get('revision',0))
     def _keep_fallback(self):
@@ -2306,12 +1799,13 @@ class Bridge(QObject):
         data=self.models_data or {};return list(data.get('recommended',[]))+list(data.get('custom',[]))
     def _model_by_id(self,ident):return next((m for m in self._all_models() if m['id']==ident),None)
     def _result_text(self,result):
-        text=code_message(result.get('error') or 'plugin_error')
-        return f"{text} (HTTP {result[HTTP_STATUS_KEY]})" if HTTP_STATUS_KEY in result else text
+        """The text of a failed answer, kept as its code (and HTTP status) and translated when it is read."""
+        text=partial(code_message,result.get('error') or 'plugin_error')
+        return _later(QT_TRANSLATE_NOOP('Bridge','%1 (HTTP %2)'),text,result[HTTP_STATUS_KEY]) if HTTP_STATUS_KEY in result else text
     def _models_send(self,kind,op,**kw):
         """One Core request on the model channel. Refused while another request is in flight; never queued."""
-        if self.pending:self._models_say(CODE_MESSAGES['busy']);return False
-        if not self._request(op,**kw):self._models_say('Core indisponível');return False
+        if self.pending:self._models_say(CODE_MESSAGES.raw('busy'));return False
+        if not self._request(op,**kw):self._models_say(QT_TRANSLATE_NOOP('Bridge','Core indisponível'));return False
         self.models_req=(kind,op);return True
     def _models_capability(self,kind,payload,deadline):
         if self._models_send(kind,'capability_invoke',capability=MODEL_CAPABILITY,input=payload,deadline_ms=deadline):self.models_message=PENDING_MODELS[kind];self._models_touch()
@@ -2322,8 +1816,8 @@ class Bridge(QObject):
         self.models_recover=self.models_recover or testing
         self.models_req=None;self.models_wait=None;self.models_marker=None;self.models_flow=None;self.models_want_list=False
         self.models_page_req=None;self.models_page=fresh_model_pages()
-        if testing:self.models_message='Conexão caiu durante o teste; a configuração anterior será restaurada ao reconectar'
-        elif active:self.models_message='Conexão caiu durante a operação; confira o modelo atual'
+        if testing:self.models_message=QT_TRANSLATE_NOOP('Bridge','Conexão caiu durante o teste; a configuração anterior será restaurada ao reconectar')
+        elif active:self.models_message=QT_TRANSLATE_NOOP('Bridge','Conexão caiu durante a operação; confira o modelo atual')
         had_catalog=self.models_data is not None;self.models_data=None
         if had_catalog:self.modelsCatalogChanged.emit()
         if active or had_catalog:self._models_touch()
@@ -2332,30 +1826,30 @@ class Bridge(QObject):
         flow=self.models_flow
         if kind=='selftest' and flow is not None:
             # A refused selftest is a failed test: the candidate must not stay active untested.
-            if code=='ok':self.models_wait='selftest';self.models_marker=self._responses;self.models_message='Testando o modelo no Core…'
-            else:flow.update(next='rollback',reason_text=code_message(code))
+            if code=='ok':self.models_wait='selftest';self.models_marker=self._responses;self.models_message=QT_TRANSLATE_NOOP('Bridge','Testando o modelo no Core…')
+            else:flow.update(next='rollback',reason_text=partial(code_message,code))
         elif kind=='configure' and flow is not None:
-            if code=='ok':flow['next']='selftest';self.models_message='Modelo salvo; testando…'
-            else:self.models_flow=None;self.models_message=code_message(code)
+            if code=='ok':flow['next']='selftest';self.models_message=QT_TRANSLATE_NOOP('Bridge','Modelo salvo; testando…')
+            else:self.models_flow=None;self.models_message=partial(code_message,code)
         elif kind=='mark' and flow is not None:
             self.models_flow=None
-            self.models_message=f"Modelo ativo: {flow['label']} · teste ok em {flow['latency']} ms" if code=='ok' else f"Teste ok, mas não marcado como bom: {code_message(code)}"
+            self.models_message=_later(QT_TRANSLATE_NOOP('Bridge','Modelo ativo: %1 · teste ok em %2 ms'),flow['label'],flow['latency']) if code=='ok' else _later(QT_TRANSLATE_NOOP('Bridge','Teste ok, mas não marcado como bom: %1'),partial(code_message,code))
         elif kind=='rollback' and flow is not None:
-            self.models_flow=None;reason=flow.get('reason_text') or 'falha no teste'
-            self.models_message=f'Teste falhou ({reason}); configuração anterior restaurada' if code=='ok' else f'Teste falhou ({reason}); reversão não aplicada: {code_message(code)}'
+            self.models_flow=None;reason=flow.get('reason_text') or QT_TRANSLATE_NOOP('Bridge','falha no teste')
+            self.models_message=_later(QT_TRANSLATE_NOOP('Bridge','Teste falhou (%1); configuração anterior restaurada'),reason) if code=='ok' else _later(QT_TRANSLATE_NOOP('Bridge','Teste falhou (%1); reversão não aplicada: %2'),reason,partial(code_message,code))
         elif kind=='manual_selftest':
-            if code=='ok':self.models_wait=kind;self.models_marker=self._responses;self.models_message='Testando o modelo no Core…'
-            else:self.models_message=code_message(code)
-        elif kind=='rollback_manual':self.models_message='Configuração anterior restaurada' if code=='ok' else code_message(code)
-        elif kind=='mark_manual':self.models_message='Configuração marcada como boa' if code=='ok' else code_message(code)
-        elif kind=='fallback':self.models_message='Fallback salvo pelo Core' if code=='ok' else code_message(code)
-        elif kind=='clear':self.models_message='Dados do plugin apagados' if code=='ok' else code_message(code)
+            if code=='ok':self.models_wait=kind;self.models_marker=self._responses;self.models_message=QT_TRANSLATE_NOOP('Bridge','Testando o modelo no Core…')
+            else:self.models_message=partial(code_message,code)
+        elif kind=='rollback_manual':self.models_message=QT_TRANSLATE_NOOP('Bridge','Configuração anterior restaurada') if code=='ok' else partial(code_message,code)
+        elif kind=='mark_manual':self.models_message=QT_TRANSLATE_NOOP('Bridge','Configuração marcada como boa') if code=='ok' else partial(code_message,code)
+        elif kind=='fallback':self.models_message=QT_TRANSLATE_NOOP('Bridge','Fallback salvo pelo Core') if code=='ok' else partial(code_message,code)
+        elif kind=='clear':self.models_message=QT_TRANSLATE_NOOP('Bridge','Dados do plugin apagados') if code=='ok' else partial(code_message,code)
         elif kind=='describe':
             if code=='ok':self.models_wait=kind;self.models_marker=self._responses
-            else:self.models_message=code_message(code)
+            else:self.models_message=partial(code_message,code)
         elif kind in ('list','save_custom','delete_custom'):
             if code=='ok':self.models_wait=kind;self.models_marker=self._responses
-            else:self.models_message=code_message(code);self.models_page_req=None
+            else:self.models_message=partial(code_message,code);self.models_page_req=None
         self._models_touch()
     def _models_observe(self):
         """Finishes the one awaited capability answer. The Core clears capability_result on each invoke, so only a response received after the invoke's ack can carry the answer. Equal values are not a staleness test: an identical answer is still the answer."""
@@ -2367,30 +1861,30 @@ class Bridge(QObject):
         if kind=='list':
             req,self.models_page_req=self.models_page_req,None
             if not ok:self.models_message=self._result_text(result)
-            elif req is None or not valid_models_page(output,req[0],req[1]):self.models_message='Resposta do plugin recusada pelo esquema; catálogo não alterado'
-            elif not self._merge_page(req[0],req[1],output):self.models_message='Página fora de ordem; catálogo não alterado, atualize a lista'
-            else:self.models_message='Catálogo atualizado';self._models_touch(catalog=True);return
+            elif req is None or not valid_models_page(output,req[0],req[1]):self.models_message=QT_TRANSLATE_NOOP('Bridge','Resposta do plugin recusada pelo esquema; catálogo não alterado')
+            elif not self._merge_page(req[0],req[1],output):self.models_message=QT_TRANSLATE_NOOP('Bridge','Página fora de ordem; catálogo não alterado, atualize a lista')
+            else:self.models_message=QT_TRANSLATE_NOOP('Bridge','Catálogo atualizado');self._models_touch(catalog=True);return
         elif kind in ('save_custom','delete_custom'):
-            if ok:self.models_want_list='custom';self.models_message='Modelo personalizado salvo' if kind=='save_custom' else 'Modelo personalizado removido'
+            if ok:self.models_want_list='custom';self.models_message=QT_TRANSLATE_NOOP('Bridge','Modelo personalizado salvo') if kind=='save_custom' else QT_TRANSLATE_NOOP('Bridge','Modelo personalizado removido')
             else:self.models_message=self._result_text(result)
         elif kind=='describe':
             if ok and valid_describe(output):
-                self.models_described=output['model'];self.models_message=f"Modelo descrito pelo plugin: {output['model']['label']}"
-            else:self.models_message=self._result_text(result) if not ok else 'Resposta do plugin recusada pelo esquema'
+                self.models_described=output['model'];self.models_message=_later(QT_TRANSLATE_NOOP('Bridge','Modelo descrito pelo plugin: %1'),output['model']['label'])
+            else:self.models_message=self._result_text(result) if not ok else QT_TRANSLATE_NOOP('Bridge','Resposta do plugin recusada pelo esquema')
         elif kind=='manual_selftest':
-            if ok and valid_selftest(output):self.models_message=f"Teste ok: resposta em {output['latency_ms']} ms"
-            else:self.models_message=self._result_text(result) if not ok else 'Resposta do teste recusada pelo esquema'
+            if ok and valid_selftest(output):self.models_message=_later(QT_TRANSLATE_NOOP('Bridge','Teste ok: resposta em %1 ms'),output['latency_ms'])
+            else:self.models_message=self._result_text(result) if not ok else QT_TRANSLATE_NOOP('Bridge','Resposta do teste recusada pelo esquema')
         elif kind=='selftest' and self.models_flow is not None:
             flow=self.models_flow
-            if ok and valid_selftest(output):flow.update(next='mark',latency=output['latency_ms']);self.models_message='Teste ok; marcando como bom…'
-            else:flow.update(next='rollback',reason_text=self._result_text(result) if not ok else 'Resposta do teste recusada pelo esquema')
+            if ok and valid_selftest(output):flow.update(next='mark',latency=output['latency_ms']);self.models_message=QT_TRANSLATE_NOOP('Bridge','Teste ok; marcando como bom…')
+            else:flow.update(next='rollback',reason_text=self._result_text(result) if not ok else QT_TRANSLATE_NOOP('Bridge','Resposta do teste recusada pelo esquema'))
         self._models_touch()
     def _models_next(self):
         """Sends the next model step when nothing else is in flight: the flow's selftest/mark/rollback, a recovery rollback, or a queued catalog refresh."""
         if self.pending or not self.online:return
         flow=self.models_flow
         if flow is None and self.models_recover:
-            self.models_recover=False;self.models_flow=flow={'label':'','next':'rollback','reason_text':'conexão caiu durante o teste','latency':None}
+            self.models_recover=False;self.models_flow=flow={'label':'','next':'rollback','reason_text':QT_TRANSLATE_NOOP('Bridge','conexão caiu durante o teste'),'latency':None}
         if flow is not None:
             step,flow['next']=flow.get('next'),None
             if step=='selftest' and not self._models_send('selftest','capability_invoke',capability=MODEL_CAPABILITY,input={'action':'selftest'},deadline_ms=SELFTEST_DEADLINE_MS):self.models_flow=None
@@ -2435,25 +1929,25 @@ class Bridge(QObject):
         """useModel flow: llm_configure -> selftest -> llm_mark_good on success, llm_rollback on any failure. One pass, no retry."""
         if self._models_blocked():return
         model=self._model_by_id(ident)
-        if model is None:return self._models_say(CODE_MESSAGES['model_not_found'])
-        if revision!=self.llmRevision:return self._models_say(CODE_MESSAGES['stale_llm_revision'])
+        if model is None:return self._models_say(CODE_MESSAGES.raw('model_not_found'))
+        if revision!=self.llmRevision:return self._models_say(CODE_MESSAGES.raw('stale_llm_revision'))
         llm=self.snapshot.get('llm') or {};config=llm.get('config') or {};consent=config.get('cloud_consent') is True
-        if model['provider'] in LLM_PROVIDERS and (llm.get('secrets') or {}).get(model['provider']) is not True:return self._models_say('Sem chave: salve a chave do provedor em Motor LLM')
-        if model['provider'] in LLM_PROVIDERS and not consent:return self._models_say('Sem consentimento: marque o consentimento de nuvem em Motor LLM')
+        if model['provider'] in LLM_PROVIDERS and (llm.get('secrets') or {}).get(model['provider']) is not True:return self._models_say(QT_TRANSLATE_NOOP('Bridge','Sem chave: salve a chave do provedor em Motor LLM'))
+        if model['provider'] in LLM_PROVIDERS and not consent:return self._models_say(QT_TRANSLATE_NOOP('Bridge','Sem consentimento: marque o consentimento de nuvem em Motor LLM'))
         self.models_flow={'label':model['label'],'next':None,'reason_text':'','latency':None}
-        if self._models_send('configure','llm_configure',revision=int(revision),**target_for(model,consent),**self._keep_fallback()):self.models_message='Salvando modelo no Core…';self._models_touch()
+        if self._models_send('configure','llm_configure',revision=int(revision),**target_for(model,consent),**self._keep_fallback()):self.models_message=QT_TRANSLATE_NOOP('Bridge','Salvando modelo no Core…');self._models_touch()
         else:self.models_flow=None
     @Slot('QVariantMap')
     def saveCustomModel(self,form):
         problem=custom_form_problem(form)
         if problem is not None:return self._models_say(problem)
         model=custom_model(form)
-        if not valid_model(model,'custom'):return self._models_say('Modelo personalizado recusado pelo esquema')
+        if not valid_model(model,'custom'):return self._models_say(QT_TRANSLATE_NOOP('Bridge','Modelo personalizado recusado pelo esquema'))
         if not self._models_blocked():self._models_capability('save_custom',{'action':'save_custom','model':model},MODELS_DEADLINE_MS)
     @Slot(str)
     def deleteCustomModel(self,ident):
         if self._models_blocked():return
-        if not any(m['id']==ident for m in (self.models_data or {}).get('custom',[])):return self._models_say(CODE_MESSAGES['model_not_found'])
+        if not any(m['id']==ident for m in (self.models_data or {}).get('custom',[])):return self._models_say(CODE_MESSAGES.raw('model_not_found'))
         self._models_capability('delete_custom',{'action':'delete_custom','id':ident},MODELS_DEADLINE_MS)
     @Slot(str,str)
     def setFallback(self,ident,revision):self._fallback_change(ident,revision,True)
@@ -2463,48 +1957,53 @@ class Bridge(QObject):
         """Fallback is a field of llm_configure (C2): the primary stays as it is; a cloud fallback needs saved key and consent."""
         if self._models_blocked():return
         llm=self.snapshot.get('llm') or {};config=llm.get('config')
-        if config is None:return self._models_say('Escolha o modelo principal antes do fallback')
-        if revision!=self.llmRevision:return self._models_say(CODE_MESSAGES['stale_llm_revision'])
+        if config is None:return self._models_say(QT_TRANSLATE_NOOP('Bridge','Escolha o modelo principal antes do fallback'))
+        if revision!=self.llmRevision:return self._models_say(CODE_MESSAGES.raw('stale_llm_revision'))
         fallback=None
         if enable:
             model=self._model_by_id(ident)
-            if model is None:return self._models_say(CODE_MESSAGES['model_not_found'])
-            if model['provider'] in LLM_PROVIDERS and (llm.get('secrets') or {}).get(model['provider']) is not True:return self._models_say('Sem chave: salve a chave do provedor em Motor LLM')
-            if model['provider'] in LLM_PROVIDERS and config.get('cloud_consent') is not True:return self._models_say('Fallback na nuvem exige o consentimento marcado em Motor LLM')
+            if model is None:return self._models_say(CODE_MESSAGES.raw('model_not_found'))
+            if model['provider'] in LLM_PROVIDERS and (llm.get('secrets') or {}).get(model['provider']) is not True:return self._models_say(QT_TRANSLATE_NOOP('Bridge','Sem chave: salve a chave do provedor em Motor LLM'))
+            if model['provider'] in LLM_PROVIDERS and config.get('cloud_consent') is not True:return self._models_say(QT_TRANSLATE_NOOP('Bridge','Fallback na nuvem exige o consentimento marcado em Motor LLM'))
             fallback=fallback_for(model)
         primary={'provider':config['provider'],'model':config['model'],'custom_url':config['custom_url'],'cloud_consent':config['cloud_consent']}
         if config['provider'] in LOCAL_PROVIDERS:primary['local_port']=config.get('local_port')
-        if self._models_send('fallback','llm_configure',revision=int(revision),**primary,fallback=fallback):self.models_message='Salvando fallback no Core…';self._models_touch()
+        if self._models_send('fallback','llm_configure',revision=int(revision),**primary,fallback=fallback):self.models_message=QT_TRANSLATE_NOOP('Bridge','Salvando fallback no Core…');self._models_touch()
     @Slot()
     def clearPluginSettings(self):
         """Erases the plugin's own settings ledger (C2). The Core config and keys are not touched. The QML asks first."""
-        if self._models_busy_now():return self._models_say('Aguarde a operação anterior do gerenciador')
+        if self._models_busy_now():return self._models_say(QT_TRANSLATE_NOOP('Bridge','Aguarde a operação anterior do gerenciador'))
         self._models_capability_plain('clear','plugin_settings_clear',plugin_id=MODEL_PLUGIN)
     @Slot(str)
     def clearPluginSettingsOf(self,pluginId):
         """Erases one plugin's own settings ledger: plugin_settings_clear {plugin_id}, no revision. Only that plugin's file changes; the QML asks first. Answers on the plugin channel."""
-        if not (isinstance(pluginId,str) and len(pluginId)<=64 and PLUGIN_ID.fullmatch(pluginId)):return self._refuse('plugin','Id de plugin inválido')
-        if not self.pluginsAvailable:return self._refuse('plugin','Plugins indisponíveis agora')
-        if self._models_busy_now():return self._refuse('plugin','Aguarde a operação anterior do gerenciador')
+        if not (isinstance(pluginId,str) and len(pluginId)<=64 and PLUGIN_ID.fullmatch(pluginId)):return self._refuse('plugin',QT_TRANSLATE_NOOP('Bridge','Id de plugin inválido'))
+        if not self.pluginsAvailable:return self._refuse('plugin',QT_TRANSLATE_NOOP('Bridge','Plugins indisponíveis agora'))
+        if self._models_busy_now():return self._refuse('plugin',QT_TRANSLATE_NOOP('Bridge','Aguarde a operação anterior do gerenciador'))
         self._send('plugin','plugin_settings_clear',plugin_id=pluginId)
     def _models_capability_plain(self,kind,op,**kw):
-        if self._models_send(kind,op,**kw):self.models_message='Apagando dados do plugin…';self._models_touch()
+        if self._models_send(kind,op,**kw):self.models_message=QT_TRANSLATE_NOOP('Bridge','Apagando dados do plugin…');self._models_touch()
     @Slot('QVariantMap',result=str)
-    def customFormProblem(self,form):return custom_form_problem(form) or ''
+    def customFormProblem(self,form):return _tr(custom_form_problem(form) or '')
     @Slot(str,result=str)
     def certificationBadge(self,state):return CERT_BADGES.get(state,'')
     @Slot(str,result=str)
-    def featureLabel(self,state):return FEATURE_LABELS.get(state,'Desconhecido')
+    def featureLabel(self,state):return FEATURE_LABELS.get(state,_tr(QT_TRANSLATE_NOOP('Bridge','Desconhecido')))
     @Property(bool,notify=changed)
     def modelsAvailable(self):return self.online and self._models_target() is not None
     @Property(bool,notify=changed)
     def modelsBusy(self):return self._models_busy_now()
     @Property(str,notify=changed)
-    def modelsResult(self):return self.models_message
+    def modelsResult(self):return _out(self.models_message)
     @Property(str,notify=changed)
     def modelsStatus(self):
         llm=self.snapshot.get('llm') or {}
         return model_status(llm.get('config'),self._all_models(),llm.get('secrets') or {},self.models_flow is not None)
+    @Property(str,notify=changed)
+    def modelsStatusCode(self):
+        # Stable code next to modelsStatus (the text): the QML decides the label and tone from it.
+        llm=self.snapshot.get('llm') or {}
+        return model_status_code(llm.get('config'),self._all_models(),llm.get('secrets') or {},self.models_flow is not None)
     @Property('QVariantList',notify=modelsCatalogChanged)
     def modelsRecommended(self):return list((self.models_data or {}).get('recommended',[]))
     @Property('QVariantList',notify=modelsCatalogChanged)
@@ -2529,10 +2028,10 @@ class Bridge(QObject):
     def packDescription(self):
         pack=self.snapshot.get('base_pack')
         if not pack:return ''
-        active=next((p['text'] for p in pack['wake_phrases'] if p['id']==pack['active_phrase']),'inativo')
+        active=next((p['text'] for p in pack['wake_phrases'] if p['id']==pack['active_phrase']),QCoreApplication.translate('Bridge','inativo'))
         configured=self.snapshot.get('preferences',{}).get('wake_phrase') or pack['default_phrase']
-        saved=next((p['text'] for p in pack['wake_phrases'] if p['id']==configured),'incompatível')
-        return f"{pack['id']} · em desenvolvimento · virtual\nPerfil no processo: {active}\nConfiguração salva: {saved}\nVoz: {pack['voice']} · {LANGUAGE_LABELS['EN']} · candidata"
+        saved=next((p['text'] for p in pack['wake_phrases'] if p['id']==configured),QCoreApplication.translate('Bridge','incompatível'))
+        return _fill(QCoreApplication.translate('Bridge','%1 · pacote de teste virtual · validação física pendente\nPerfil no processo: %2\nConfiguração salva: %3\nVoz: %4 · %5 · candidata'),pack['id'],active,saved,pack['voice'],LANGUAGE_LABELS['EN'])
     @Slot(str)
     def selectWake(self,ident):
         if self.preferencesAvailable:self._preferences('select_wake',revision=int(self.preferencesRevision),phrase_id=ident)
@@ -2542,11 +2041,11 @@ class Bridge(QObject):
         """Current wake phrase list as the Core stores it: `[{id, active, sensitivity?}]`."""
         return [dict(s) for s in self._wake_block().get('settings',[])]
     def _wake_send(self,items,acknowledge=False):
-        if sum(1 for i in items if i['active'])>5:return self._refuse('prefs',PHRASE_MESSAGES['too_many_active_phrases'])
+        if sum(1 for i in items if i['active'])>5:return self._refuse('prefs',PHRASE_MESSAGES.raw('too_many_active_phrases'))
         if self.preferencesAvailable:self._preferences('select_wake_phrases',revision=int(self.preferencesRevision),phrases=items,acknowledge_untested=bool(acknowledge))
     @Slot(str,bool,bool)
     def setWakePhraseActive(self,ident,active,acknowledge):
-        if not wake_phrase_id_ok(ident):return self._refuse('prefs',CODE_MESSAGES['invalid_wake_phrases'])
+        if not wake_phrase_id_ok(ident):return self._refuse('prefs',CODE_MESSAGES.raw('invalid_wake_phrases'))
         items=self._wake_items()
         if not any(i['id']==ident for i in items):items.append({'id':ident,'active':False})
         for item in items:
@@ -2612,13 +2111,13 @@ class Bridge(QObject):
     # ---- Core restart (docs/ui-spec/40-configuracoes.md §8.5). The Core refuses with busy while a session, an agent run, a skill run or a plugin call is active.
     @Slot()
     def coreRestart(self):
-        if not self.online:return self._refuse('core','Core desconectado: nada a reiniciar')
+        if not self.online:return self._refuse('core',QT_TRANSLATE_NOOP('Bridge','Core desconectado: nada a reiniciar'))
         if self.restart_state=='waiting':return
-        if self.sessionId:return self._refuse('core','Indisponível durante a sessão de voz')
+        if self.sessionId:return self._refuse('core',QT_TRANSLATE_NOOP('Bridge','Indisponível durante a sessão de voz'))
         self._send('core','core_restart')
     def _restart_ack(self,code):
         """core_restart answered. 'ok' means the Core exits next: the socket drop and the first snapshot after it finish the wait; the timer turns a silent Core into a message."""
-        if code!='ok':self.results['core']=code_message(code);self.changed.emit();return
+        if code!='ok':self.results['core']=partial(code_message,code);self.changed.emit();return
         self.restart_state='waiting';self.restart_dropped=False;self.results['core']=PENDING['core_restart']
         self.restart_timer.start();self.changed.emit()
     def _restart_done(self):
@@ -2631,8 +2130,8 @@ class Bridge(QObject):
     def coreRestartBusy(self):return self.restart_state=='waiting' or self.pending_op=='core_restart'
     @Property(str,notify=changed)
     def coreRestartResult(self):
-        if self.restart_state=='waiting':return RESTART_WAIT_TEXT
-        if self.restart_state=='failed':return RESTART_TIMEOUT_TEXT
+        if self.restart_state=='waiting':return _tr(RESTART_WAIT_TEXT)
+        if self.restart_state=='failed':return _tr(RESTART_TIMEOUT_TEXT)
         return self.results['core']
     @Property('QVariantMap',notify=llmChanged)
     def llmLastChat(self):return dict((self.snapshot.get('llm') or {}).get('last_chat') or {})
@@ -2642,9 +2141,9 @@ class Bridge(QObject):
     def recoveryAvailable(self):return self.online and self.configurationStatus=='safe_mode' and bool(self.snapshot.get('configuration_recovery_available')) and self.preferences_request is None
     @Property(str,notify=changed)
     def configurationMessage(self):
-        if self.configurationStatus=='safe_mode':return ('Modo seguro: configuração inválida preservada; áudio e comandos bloqueados' if self.snapshot.get('configuration_recovery_available') else 'Modo seguro: arquivo excede o limite de recuperação automática; conteúdo preservado')
+        if self.configurationStatus=='safe_mode':return (QCoreApplication.translate('Bridge','Modo seguro: configuração inválida preservada; áudio e comandos bloqueados') if self.snapshot.get('configuration_recovery_available') else QCoreApplication.translate('Bridge','Modo seguro: arquivo excede o limite de recuperação automática; conteúdo preservado'))
         # The restart signal (the saved selection is not running yet). U1: further changes are still accepted while it is pending.
-        if self.configurationStatus=='restart_required':return 'Mudança salva: reinicie o Core para aplicar. Você pode fazer outras mudanças antes do reinício.'
+        if self.configurationStatus=='restart_required':return QCoreApplication.translate('Bridge','Mudança salva: reinicie o Core para aplicar. Você pode fazer outras mudanças antes do reinício.')
         return ''
     @Slot(bool,int)
     def savePreferences(self,audible,timeout):
@@ -2655,7 +2154,7 @@ class Bridge(QObject):
         if self.preferencesAvailable:self._preferences('rollback_preferences',revision=int(self.preferencesRevision))
     def _preferences(self,op,**kw):
         channel=OPS[op][0]
-        self.results[channel]=PENDING.get(op,'Enviando ao Core')
+        self.results[channel]=PENDING.get(op,QT_TRANSLATE_NOOP('Bridge','Enviando ao Core'))
         if self.pending:self.preferences_request=(op,kw)
         else:self._request(op,**kw)
         self.changed.emit()
@@ -2679,10 +2178,10 @@ class Bridge(QObject):
     def _live(self):return (self.snapshot.get('audio') or {}).get('live') or {}
     def _saved_device(self,key):return (self.snapshot.get('preferences') or {}).get(key) or DEFAULT_DEVICE
     def _prefs_unavailable_text(self):
-        if not self.online:return 'Core desconectado: nada foi alterado'
-        if self.sessionId:return RESTORE_BUSY_TEXT
-        if self.configurationStatus!='ready':return CODE_MESSAGES['preferences_unavailable']
-        return 'O Core está ocupado com outra alteração; tente de novo em instantes'
+        if not self.online:return QT_TRANSLATE_NOOP('Bridge','Core desconectado: nada foi alterado')
+        if self.sessionId:return _tr(RESTORE_BUSY_TEXT)
+        if self.configurationStatus!='ready':return CODE_MESSAGES.raw('preferences_unavailable')
+        return QT_TRANSLATE_NOOP('Bridge','O Core está ocupado com outra alteração; tente de novo em instantes')
     def _pref_request(self,**changes):
         prefs=self.snapshot.get('preferences') or {}
         return {'revision':int(self.preferencesRevision),'audible_feedback':bool(prefs.get('audible_feedback',True)),'session_timeout_ms':int(prefs.get('session_timeout_ms',30000)),**changes}
@@ -2706,7 +2205,7 @@ class Bridge(QObject):
     def audioInputLabel(self):
         saved=self._saved_device('audio_input_device')
         choice=next((c for c in device_choices(self._devices(),'inputs',saved) if c['value']==saved),None)
-        return choice['text'].replace(DEFAULT_MARK,'') if choice else DEFAULT_DEVICE_LABEL
+        return choice['text'].replace(_tr(DEFAULT_MARK),'') if choice else _tr(DEFAULT_DEVICE_LABEL)
     @Property('QVariantMap',notify=audioChanged)
     def audioLive(self):return dict(self._live())
     @Property(bool,notify=audioChanged)
@@ -2731,7 +2230,7 @@ class Bridge(QObject):
     def setLiveAudio(self,enabled):
         """Consent switch. The dialog (Cancelar by default) runs before enabled=True; the Core refuses an enable without confirmed."""
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
-        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES.raw('invalid_preferences'))
         self._preferences('live_audio_preference',revision=int(self.preferencesRevision),enabled=enabled,confirmed=enabled)
     # ---- A11 host actions. The switch shows the ledger value; the state line is the Core's last host action (content-free).
     @Property(bool,notify=preferencesChanged)
@@ -2742,7 +2241,7 @@ class Bridge(QObject):
     def setRealActions(self,enabled):
         """Consent switch. The dialog (Cancelar by default) runs before enabled=True; the Core refuses an enable without confirmed."""
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
-        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES.raw('invalid_preferences'))
         self._preferences('real_actions_preference',revision=int(self.preferencesRevision),enabled=enabled,confirmed=enabled)
     # ---- CFG-04 retention of the history (timeline and audit trail) and DIAG-02 developer mode. Both are Core preferences.
     @Property(str,notify=preferencesChanged)
@@ -2752,7 +2251,7 @@ class Bridge(QObject):
     @Slot(str)
     def setHistoryRetention(self,value):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
-        if value not in HISTORY_RETENTION_VALUES:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        if value not in HISTORY_RETENTION_VALUES:return self._refuse('prefs',CODE_MESSAGES.raw('invalid_preferences'))
         self._preferences('history_retention_preference',revision=int(self.preferencesRevision),retention=value)
     @Property(str,notify=preferencesChanged)
     def uiLanguage(self):
@@ -2762,14 +2261,14 @@ class Bridge(QObject):
     @Slot(str)
     def setUiLanguage(self,value):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
-        if value not in UI_LANGUAGE_VALUES:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        if value not in UI_LANGUAGE_VALUES:return self._refuse('prefs',CODE_MESSAGES.raw('invalid_preferences'))
         self._preferences('ui_language_preference',revision=int(self.preferencesRevision),ui_language=value)
     @Property(bool,notify=preferencesChanged)
     def developerMode(self):return (self.snapshot.get('preferences') or {}).get('developer_mode') is True
     @Slot(bool)
     def setDeveloperMode(self,enabled):
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
-        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES['invalid_preferences'])
+        if type(enabled) is not bool:return self._refuse('prefs',CODE_MESSAGES.raw('invalid_preferences'))
         self._preferences('developer_mode_preference',revision=int(self.preferencesRevision),enabled=enabled)
     # ---- DIAG-01 fields the diagnostics describe. All come from the snapshot; empty or 0 when the Core does not report them.
     @Property(int,notify=changed)
@@ -2898,7 +2397,7 @@ class Bridge(QObject):
     def languageInstallReason(self):
         # CFG-03: PT and FR ship inside the package now (bundled), so the old "awaiting approval" text no longer applies.
         # Languages that are not bundled cannot be installed yet: there is no install operation in the Core.
-        return 'Não incluído neste pacote: a instalação de idiomas extras ainda não existe.' if (self._languages().get('install') or {}).get('available') is not True else ''
+        return QCoreApplication.translate('Bridge','Não incluído neste pacote: a instalação de idiomas extras ainda não existe.') if (self._languages().get('install') or {}).get('available') is not True else ''
     @Property(bool,notify=languagesChanged)
     def languagesAvailable(self):return self.preferencesAvailable and 'languages' in self.snapshot
     @Slot(str,str,str)
@@ -2906,14 +2405,14 @@ class Bridge(QObject):
         """Saves the STT list (JSON array of tags) and the TTS language and voice. Shape is checked here; installation by the Core."""
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
         try:stt=json.loads(stt_json)
-        except (TypeError,ValueError):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
-        if not language_request_ok(stt,tts_language,tts_voice):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
+        except (TypeError,ValueError):return self._refuse('prefs',CODE_MESSAGES.raw('invalid_languages'))
+        if not language_request_ok(stt,tts_language,tts_voice):return self._refuse('prefs',CODE_MESSAGES.raw('invalid_languages'))
         self._preferences('language_preference',revision=int(self.preferencesRevision),stt_languages=stt,tts_language=tts_language,tts_voice=tts_voice)
     @Slot(str)
     def installLanguage(self,language):
         """CFG-03: the Core verifies the packaged models of `language` and activates them. Nothing is downloaded."""
         if not self.preferencesAvailable:return self._refuse('prefs',self._prefs_unavailable_text())
-        if not language_tag_ok(language):return self._refuse('prefs',CODE_MESSAGES['invalid_languages'])
+        if not language_tag_ok(language):return self._refuse('prefs',CODE_MESSAGES.raw('invalid_languages'))
         self._preferences('language_install',language=language)
     @Slot(float)
     def setWakeSensitivity(self,value):
@@ -2931,19 +2430,19 @@ class Bridge(QObject):
         self._preferences('preferences',**self._pref_request(audio_input_device=input_device,audio_output_device=output_device))
     @Slot()
     def refreshAudioDevices(self):
-        if not self.online:return self._refuse('audio','Core desconectado: nada a consultar')
+        if not self.online:return self._refuse('audio',QT_TRANSLATE_NOOP('Bridge','Core desconectado: nada a consultar'))
         self._send('audio','audio_devices')
     @Slot(str,result=bool)
     def probeAudioInput(self,device):
         """A9: 3 s of the microphone for one listed input (or 'default'). Refused locally when malformed; the Core refuses while a voice session or another probe runs."""
-        if not self.online:self._refuse('audio','Core desconectado: nada a testar');return False
+        if not self.online:self._refuse('audio',QT_TRANSLATE_NOOP('Bridge','Core desconectado: nada a testar'));return False
         if not audio_device_ok(device):self._refuse('audio',DEVICE_INVALID_TEXT);return False
         return self._send('audio','audio_probe',device=device)
     # A13 microphone assistant: one run (2 s per listed input). The result is audio.recommendation; nothing is saved by the run.
     @Slot(result=bool)
     def recommendMicrophones(self):
-        if not self.online:self._refuse('audio','Core desconectado: nada a verificar');return False
-        if self.sessionId:self._refuse('audio','Indisponível durante a sessão de voz');return False
+        if not self.online:self._refuse('audio',QT_TRANSLATE_NOOP('Bridge','Core desconectado: nada a verificar'));return False
+        if self.sessionId:self._refuse('audio',QT_TRANSLATE_NOOP('Bridge','Indisponível durante a sessão de voz'));return False
         return self._send('audio','audio_recommend_input')
     @Slot(str,result=bool)
     def useAudioInput(self,device):
@@ -2962,7 +2461,7 @@ class Bridge(QObject):
     def liveLastErrorText(self):
         """A13/A14 diagnostics: the last stderr tails of the wake worker and of the STT worker, from the 0600 files in the Core data dir. Only Diagnóstico › Desenvolvedor reads them; never the snapshot."""
         parts=[]
-        for label,name in (('Worker de wake','live-last-error.txt'),('Worker de STT','stt-last-error.txt')):
+        for label,name in ((QCoreApplication.translate('Bridge','Worker de wake'),'live-last-error.txt'),(QCoreApplication.translate('Bridge','Worker de STT'),'stt-last-error.txt')):
             try:
                 with open(self.root/name,'rb') as handle:data=handle.read(4096)
             except OSError:continue
@@ -3068,9 +2567,9 @@ class Bridge(QObject):
     def invokeCapabilityJson(self,capability,jsonText):
         """B7: developer invocation with a JSON object (2 KiB). Refusals stay here; the deadline is 10 s, or 30 s for the model selftest."""
         message,value,deadline=capability_request(capability,jsonText)
-        if message is None and self.capability_pending:message='Já há uma capacidade em execução; aguarde ou cancele'
-        if message is None and self._models_busy_now():message=CODE_MESSAGES['busy']
-        if message is None and not self.pluginsAvailable:message='Plugins indisponíveis agora: o Core precisa estar conectado, sem sessão de voz e com catálogo verificado'
+        if message is None and self.capability_pending:message=QT_TRANSLATE_NOOP('Bridge','Já há uma capacidade em execução; aguarde ou cancele')
+        if message is None and self._models_busy_now():message=CODE_MESSAGES.raw('busy')
+        if message is None and not self.pluginsAvailable:message=QT_TRANSLATE_NOOP('Bridge','Plugins indisponíveis agora: o Core precisa estar conectado, sem sessão de voz e com catálogo verificado')
         if message is not None:self.results['plugin']=message;self.changed.emit();return
         self.plugin_capability=capability
         self._preferences('capability_invoke',capability=capability,input=value,deadline_ms=deadline)
@@ -3083,7 +2582,7 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def hubImportDescription(self):
         transfer=(self.snapshot.get('hub') or {}).get('import')
-        return f"Preparando {transfer['plugin_id']}: {transfer['received']}/{transfer['expected']} bytes" if transfer else ''
+        return _fill(QCoreApplication.translate('Bridge','Preparando %1: %2/%3 bytes'),transfer['plugin_id'],transfer['received'],transfer['expected']) if transfer else ''
     @Slot()
     def abortHubImport(self):
         if self.hub_upload is not None:self.hub_upload['cancel']=True
@@ -3098,18 +2597,18 @@ class Bridge(QObject):
         """Starts the upload of the payload for an approved catalog entry. Returns '' when it started, else the refusal text."""
         hub=self.snapshot.get('hub') or {}
         entry=next((e for e in hub.get('entries',[]) if e.get('plugin_id')==plugin_id),None)
-        if not self.hubImportPickable:return self._hub_refuse(self._prefs_unavailable_text() if not self.hubLifecycleAvailable else HUB_UPLOAD_MESSAGES['busy'])
+        if not self.hubImportPickable:return self._hub_refuse(self._prefs_unavailable_text() if not self.hubLifecycleAvailable else HUB_UPLOAD_MESSAGES.raw('busy'))
         if entry is None or entry.get('status') not in ('not_installed','update_available') or entry.get('permissions_approved') is not True or entry.get('payload_staged') is True:
-            return self._hub_refuse(HUB_UPLOAD_MESSAGES['entry'])
+            return self._hub_refuse(HUB_UPLOAD_MESSAGES.raw('entry'))
         path=unquote(urlsplit(location).path) if isinstance(location,str) and location.startswith('file://') else location
-        if not isinstance(path,str) or not os.path.isabs(path) or '\x00' in path:return self._hub_refuse(HUB_UPLOAD_MESSAGES['path'])
+        if not isinstance(path,str) or not os.path.isabs(path) or '\x00' in path:return self._hub_refuse(HUB_UPLOAD_MESSAGES.raw('path'))
         try:handle=os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK),'rb')
-        except OSError:return self._hub_refuse(HUB_UPLOAD_MESSAGES['unreadable'])
+        except OSError:return self._hub_refuse(HUB_UPLOAD_MESSAGES.raw('unreadable'))
         meta=os.fstat(handle.fileno())
-        if not stat.S_ISREG(meta.st_mode):handle.close();return self._hub_refuse(HUB_UPLOAD_MESSAGES['path'])
-        if meta.st_size!=entry.get('download_size'):handle.close();return self._hub_refuse(HUB_UPLOAD_MESSAGES['size'])
+        if not stat.S_ISREG(meta.st_mode):handle.close();return self._hub_refuse(HUB_UPLOAD_MESSAGES.raw('path'))
+        if meta.st_size!=entry.get('download_size'):handle.close();return self._hub_refuse(HUB_UPLOAD_MESSAGES.raw('size'))
         self.hub_upload={'plugin_id':plugin_id,'handle':handle,'size':meta.st_size,'offset':0,'sent':0,'import_id':None,'inflight':None,'failure':None,'cancel':False,'revision':int(hub.get('approval_revision',0)),'manifest':entry.get('manifest_sha256')}
-        self.results['hub']=HUB_UPLOAD_MESSAGES['sending']
+        self.results['hub']=HUB_UPLOAD_MESSAGES.raw('sending')
         self._hub_upload_pump(None,None)
         self.changed.emit()
         return ''
@@ -3121,7 +2620,7 @@ class Bridge(QObject):
             except OSError:pass
         self.hub_upload=None
     def _hub_upload_done(self,code):
-        self.results['hub']=HUB_UPLOAD_MESSAGES['staged'] if code=='ok' else (HUB_UPLOAD_MESSAGES.get(code) or code_message(code))
+        self.results['hub']=HUB_UPLOAD_MESSAGES.raw('staged') if code=='ok' else (HUB_UPLOAD_MESSAGES.raw(code) if code in HUB_UPLOAD_MESSAGES else partial(code_message,code))
         self._hub_upload_drop();self.changed.emit()
     def _hub_upload_pump(self,op,data):
         """Called after every Core answer and on start. Settles the request in flight, then sends the next step."""
@@ -3145,7 +2644,7 @@ class Bridge(QObject):
         if up['import_id'] is None:return self._hub_upload_send('hub_begin',revision=up['revision'],plugin_id=up['plugin_id'],manifest_sha256=up['manifest'])
         chunk=up['handle'].read(HUB_CHUNK_BYTES)
         if chunk:
-            up['sent']=len(chunk);self.results['hub']=HUB_UPLOAD_MESSAGES['progress'].format(done=min(up['size'],up['offset']+len(chunk)),total=up['size'])
+            up['sent']=len(chunk);self.results['hub']=_later(HUB_UPLOAD_MESSAGES.raw('progress'),min(up['size'],up['offset']+len(chunk)),up['size'])
             return self._hub_upload_send('hub_chunk',import_id=up['import_id'],offset=up['offset'],hex=chunk.hex())
         return self._hub_upload_send('hub_finish',import_id=up['import_id'])
     def _hub_upload_send(self,op,**kw):
@@ -3156,11 +2655,16 @@ class Bridge(QObject):
     @Property(str,notify=changed)
     def hubDescription(self):
         hub=self.snapshot.get('hub')
-        if not self.online:return 'Core offline'
-        if not hub:return 'Catálogo não configurado'
-        if hub['status']=='quarantined':return 'Catálogo em quarentena; Base continua disponível'
-        if hub.get('publisher_verified') is True:return 'Catálogo local com checksum verificado; publisher verificado por assinatura. Plugins instalados ficam desativados até ativação explícita; ativos rodam em sandbox sem rede.'
-        return 'Catálogo local com checksum verificado; publisher não autenticado. Plugins instalados ficam desativados até ativação explícita; ativos rodam em sandbox sem rede.'
+        if not self.online:return QCoreApplication.translate('Bridge','Core offline')
+        if not hub:return QCoreApplication.translate('Bridge','Catálogo não configurado')
+        if hub['status']=='quarantined':return QCoreApplication.translate('Bridge','Catálogo em quarentena; Base continua disponível')
+        if hub.get('publisher_verified') is True:return QCoreApplication.translate('Bridge','Catálogo local com checksum verificado; publisher verificado por assinatura. Plugins instalados ficam desativados até ativação explícita; ativos rodam em sandbox sem rede.')
+        return QCoreApplication.translate('Bridge','Catálogo local com checksum verificado; publisher não autenticado. Plugins instalados ficam desativados até ativação explícita; ativos rodam em sandbox sem rede.')
+    # Stable flag for the Hub banner: true exactly when hubDescription is the quarantine text (no text matching in QML).
+    @Property(bool,notify=changed)
+    def hubQuarantined(self):
+        hub=self.snapshot.get('hub')
+        return bool(self.online and hub and hub['status']=='quarantined')
     # EXT-01 / SKILL-02: the publisher state is the Core flag, never a constant. The Core sets it only when every plugin of the catalog verifies.
     @Property(bool,notify=changed)
     def hubPublisherVerified(self):return (self.snapshot.get('hub') or {}).get('publisher_verified') is True
@@ -3182,8 +2686,8 @@ class Bridge(QObject):
     def resultVerified(self):return bool((self.snapshot.get('command') or {}).get('receipt',{})) and bool(self.snapshot['command']['receipt']['verified'])
     @Property(str,notify=changed)
     def diagnostic(self):
-        if not self.online:return self.error
-        return self.configurationMessage or ' · '.join(DIAG_LABELS.get(self.snapshot.get(k,'unavailable'),'indisponível') for k in ('wake_status','stt_status','speech_status'))
+        if not self.online:return _out(self.error)
+        return self.configurationMessage or ' · '.join(DIAG_LABELS.get(self.snapshot.get(k,'unavailable'),_tr(QT_TRANSLATE_NOOP('Bridge','indisponível'))) for k in ('wake_status','stt_status','speech_status'))
     # ---- C4 perception and action. Only the allowlist above reaches the Core, as capability_invoke with a 5 s deadline; every answer is checked against its C4 rule before QML shows it.
     def _perception_items(self):
         entries={e.get('plugin_id'):e for e in (self.snapshot.get('hub') or {}).get('entries',[])}
@@ -3211,10 +2715,10 @@ class Bridge(QObject):
         if not result or result.get('capability')!=req['capability'] or result.get('plugin_id')!=req['plugin_id'] or result==self.perception_before:return
         self.perception_inflight=None;self.perception_before=None
         if req.get('silent'):return self._ptt_observe(req,result)
-        if not result['ok']:self.results['perception']=perception_code_message(result['error'])
-        elif not PERCEPTION_OUTPUTS[req['capability']](result.get('output')):self.results['perception']='Resposta do plugin recusada pelo esquema; nada exibido'
+        if not result['ok']:self.results['perception']=partial(perception_code_message,result['error'])
+        elif not PERCEPTION_OUTPUTS[req['capability']](result.get('output')):self.results['perception']=QT_TRANSLATE_NOOP('Bridge','Resposta do plugin recusada pelo esquema; nada exibido')
         else:
-            output=result['output'];self.results['perception']=perception_text(output)
+            output=result['output'];self.results['perception']=partial(perception_text,output)
             if 'indicator' in output and req['capability'].startswith('mic_advanced.'):self.perception_indicators['mic']=output['indicator']
             if 'indicator' in output and req['capability'].startswith('camera_gesture.'):self.perception_indicators['camera']=output['indicator']
             if req['capability'] in PERCEPTION_STATUS_CAPABILITIES:self.perception_status[req['capability']]=dict(output)
@@ -3242,15 +2746,15 @@ class Bridge(QObject):
     @Property(str,notify=perceptionChanged)
     def pushToTalkState(self):return self.ptt['state']
     @Property(str,notify=perceptionChanged)
-    def pushToTalkMessage(self):return self.ptt['message']
+    def pushToTalkMessage(self):return _out(self.ptt['message'])
     @Property(str,notify=perceptionChanged)
     def pushToTalkTrigger(self):return self.ptt['trigger']
     def _ptt_touch(self):self.perceptionChanged.emit()
     def _ptt_tick(self):
         if not self.ptt['enabled']:return
-        if not self.online:self.ptt.update(state='offline',message='Core offline: o atalho volta quando o Core responder');return self._ptt_touch()
+        if not self.online:self.ptt.update(state='offline',message=QT_TRANSLATE_NOOP('Bridge','Core offline: o atalho volta quando o Core responder'));return self._ptt_touch()
         if not self._perception_running('shortcut_global.bind'):
-            self.ptt.update(state='plugin_unavailable',message='Plugin shortcut_global não está em execução: aprove-o no Gideon Hub (permissão atalho global)');return self._ptt_touch()
+            self.ptt.update(state='plugin_unavailable',message=QT_TRANSLATE_NOOP('Bridge','Plugin shortcut_global não está em execução: aprove-o no Gideon Hub (permissão atalho global)'));return self._ptt_touch()
         if self._perception_busy_now() or self.pending:return
         capability='shortcut_global.events' if self.ptt['state']=='bound' else 'shortcut_global.bind'
         payload={} if capability=='shortcut_global.events' else {'id':'ptt_toggle','trigger':self.ptt['trigger']}
@@ -3259,14 +2763,14 @@ class Bridge(QObject):
     def _ptt_observe(self,req,result):
         if not result['ok']:
             # A refused bind stops the poll (no retry loop); the owner switches it on again after fixing the cause.
-            if req['capability']=='shortcut_global.bind':self.ptt_timer.stop();self.ptt.update(state='error',message=perception_code_message(result['error']))
-            else:self.ptt.update(message=perception_code_message(result['error']))
+            if req['capability']=='shortcut_global.bind':self.ptt_timer.stop();self.ptt.update(state='error',message=partial(perception_code_message,result['error']))
+            else:self.ptt.update(message=partial(perception_code_message,result['error']))
             return self._ptt_touch()
         output=result.get('output')
         if req['capability']=='shortcut_global.bind':
-            if not PERCEPTION_OUTPUTS[req['capability']](output):self.ptt.update(state='error',message='Resposta do atalho recusada pelo esquema');return self._ptt_touch()
-            self.ptt.update(state='bound',message=f"Atalho {output['trigger']} registrado pelo {output['backend']}");return self._ptt_touch()
-        if not PERCEPTION_OUTPUTS[req['capability']](output):self.ptt.update(state='error',message='Eventos do atalho recusados pelo esquema');return self._ptt_touch()
+            if not PERCEPTION_OUTPUTS[req['capability']](output):self.ptt.update(state='error',message=QT_TRANSLATE_NOOP('Bridge','Resposta do atalho recusada pelo esquema'));return self._ptt_touch()
+            self.ptt.update(state='bound',message=_later(QT_TRANSLATE_NOOP('Bridge','Atalho %1 registrado pelo %2'),output['trigger'],output['backend']));return self._ptt_touch()
+        if not PERCEPTION_OUTPUTS[req['capability']](output):self.ptt.update(state='error',message=QT_TRANSLATE_NOOP('Bridge','Eventos do atalho recusados pelo esquema'));return self._ptt_touch()
         if any(e['id']=='ptt_toggle' for e in output['events']):self.listenStart()
         self._ptt_touch()
     @Property('QVariantMap',notify=perceptionChanged)
@@ -3279,27 +2783,34 @@ class Bridge(QObject):
     def perceptionBusy(self):return self._perception_busy_now()
     @Property(str,notify=perceptionChanged)
     def perceptionResult(self):return self.results['perception']
-    def _indicator_text(self,plugin,value):
-        if not any(i['plugin_id']==plugin and i['state']=='running' for i in self._perception_items()):return 'plugin inativo'
+    def _indicator_state(self,plugin,value):
+        """Stable code of an indicator: plugin_inactive | unread | on | off (the QML decides tone and colour from it)."""
+        if not any(i['plugin_id']==plugin and i['state']=='running' for i in self._perception_items()):return 'plugin_inactive'
         # The worker reports 'on'/'off'; older synthetic answers used booleans. Anything else is not a reading.
-        return PERCEPTION_UNREAD if value is None else ('ligado' if value in ('on', True) else 'desligado')
+        return 'unread' if value is None else ('on' if value in ('on', True) else 'off')
+    def _indicator_text(self,plugin,value):
+        return PERCEPTION_INDICATOR_TEXTS[self._indicator_state(plugin,value)]
     @Property(str,notify=perceptionChanged)
     def perceptionMicIndicator(self):return self._indicator_text('mic_advanced',self.perception_indicators['mic'])
     @Property(str,notify=perceptionChanged)
     def perceptionCameraIndicator(self):return self._indicator_text('camera_gesture',self.perception_indicators['camera'])
+    @Property(str,notify=perceptionChanged)
+    def perceptionMicState(self):return self._indicator_state('mic_advanced',self.perception_indicators['mic'])
+    @Property(str,notify=perceptionChanged)
+    def perceptionCameraState(self):return self._indicator_state('camera_gesture',self.perception_indicators['camera'])
     @Slot(str,str)
     def perceptionInvoke(self,capability,text):
         problem=perception_input_problem(capability,text)
-        if problem is None and not self._perception_running(capability):problem=CODE_MESSAGES['capability_unavailable']
-        if problem is None and self._perception_busy_now():problem='Aguarde a ação de percepção anterior'
-        if problem is None and self.pending:problem=CODE_MESSAGES['busy']
-        if problem is None and (self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem='Aguarde a conversa terminar'
-        if problem is None and self._models_busy_now():problem='Aguarde o gerenciador de modelos'
-        if problem is None and self._agent_active():problem=CODE_MESSAGES['agent_busy']
+        if problem is None and not self._perception_running(capability):problem=CODE_MESSAGES.raw('capability_unavailable')
+        if problem is None and self._perception_busy_now():problem=QT_TRANSLATE_NOOP('Bridge','Aguarde a ação de percepção anterior')
+        if problem is None and self.pending:problem=CODE_MESSAGES.raw('busy')
+        if problem is None and (self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem=QT_TRANSLATE_NOOP('Bridge','Aguarde a conversa terminar')
+        if problem is None and self._models_busy_now():problem=QT_TRANSLATE_NOOP('Bridge','Aguarde o gerenciador de modelos')
+        if problem is None and self._agent_active():problem=CODE_MESSAGES.raw('agent_busy')
         if problem is not None:self.results['perception']=problem;self._perception_touch();return
         self.perception_req={'capability':capability,'plugin_id':capability.split('.')[0]}
         if self._request('capability_invoke',capability=capability,input=json.loads(text),deadline_ms=perception_deadline(capability)):self.results['perception']=PENDING['capability_invoke']
-        else:self.perception_req=None;self.results['perception']='Core indisponível'
+        else:self.perception_req=None;self.results['perception']=QT_TRANSLATE_NOOP('Bridge','Core indisponível')
         self._perception_touch()
     # ---- S4 skills (docs/S4.md). The Core decides every transition and every permission; the bridge refuses what it can see is impossible, sends one bounded request at a time and shows the snapshot 'skills' block.
     def _skills_ready(self):return self.online and isinstance(self.snapshot.get('skills'),dict)
@@ -3313,8 +2824,8 @@ class Bridge(QObject):
     def _skills_touch(self):self.changed.emit()
     def _skill_op(self,op,**kw):
         """One Core request on the skills channel. Refused while unavailable or while another request is in flight; never queued."""
-        if not self._skills_ready():return self._refuse('skills','Skills indisponíveis agora')
-        if self._skill_busy_now():return self._refuse('skills',CODE_MESSAGES['busy'])
+        if not self._skills_ready():return self._refuse('skills',QT_TRANSLATE_NOOP('Bridge','Skills indisponíveis agora'))
+        if self._skill_busy_now():return self._refuse('skills',CODE_MESSAGES.raw('busy'))
         return self._send('skills',op,**kw)
     def _skill_by_id(self,op,ident):
         """Lifecycle ops carry the live ledger revision, like the plugin ops: the Core refuses a revision it no longer has."""
@@ -3350,19 +2861,19 @@ class Bridge(QObject):
     @Slot(str,str)
     def skillRun(self,ident,inputs):
         value,problem=skill_json(inputs);problem=skill_id_problem(ident) or problem
-        if problem is None and self._skill_run_active():problem=CODE_MESSAGES['skill_busy']
+        if problem is None and self._skill_run_active():problem=CODE_MESSAGES.raw('skill_busy')
         if problem is not None:return self._refuse('skills',problem)
         self._skill_op('skill_run',id=ident,inputs=value)
     @Slot(str,str,str)
     def skillDecide(self,runId,step,decision):
         """Only a step the Core is waiting on can be decided; authorize and deny are the two answers, as in tool_decide."""
         run=self._skill_run();states={s['id']:s['state'] for s in (run or {}).get('steps',[])}
-        if decision not in ('authorize','deny') or not run or run['run_id']!=runId or states.get(step)!='awaiting_approval':return self._refuse('skills',CODE_MESSAGES['not_pending'])
+        if decision not in ('authorize','deny') or not run or run['run_id']!=runId or states.get(step)!='awaiting_approval':return self._refuse('skills',CODE_MESSAGES.raw('not_pending'))
         self._skill_op('skill_decide',run_id=runId,step=step,decision=decision)
     @Slot(str)
     def skillCancel(self,runId):
         run=self._skill_run()
-        if not run or run['run_id']!=runId or not self._skill_run_active():return self._refuse('skills',CODE_MESSAGES['unknown_skill_run'])
+        if not run or run['run_id']!=runId or not self._skill_run_active():return self._refuse('skills',CODE_MESSAGES.raw('unknown_skill_run'))
         self._skill_op('skill_cancel',run_id=runId)
     @Slot(str,str)
     def skillExport(self,ident,version):
@@ -3371,12 +2882,12 @@ class Bridge(QObject):
         self._skill_op('skill_export',id=ident,skill_version=version)
     @Slot(str)
     def skillImport(self,name):
-        if not SKILL_IMPORT_NAME.fullmatch(name):return self._refuse('skills','Nome inválido: letras, números, . _ - (até 64)')
+        if not SKILL_IMPORT_NAME.fullmatch(name):return self._refuse('skills',QT_TRANSLATE_NOOP('Bridge','Nome inválido: letras, números, . _ - (até 64)'))
         self._skill_op('skill_import',name=name)
     @Slot(str)
     def skillImportConfirm(self,name):
         preview=self._skill_import()
-        if not preview or preview['name']!=name:return self._refuse('skills',CODE_MESSAGES['stale_import'])
+        if not preview or preview['name']!=name:return self._refuse('skills',CODE_MESSAGES.raw('stale_import'))
         self._skill_op('skill_import_confirm',name=name,revision=self._skill_revision())
     def _skill_llm_available(self):
         return self.online and any(i['plugin_id']==SKILL_DRAFT_PLUGIN and i['state']=='running' and SKILL_DRAFT_CAPABILITY in i['capabilities'] for i in (self.snapshot.get('plugins') or {}).get('items',[]))
@@ -3384,12 +2895,12 @@ class Bridge(QObject):
     def skillDraftWithLlm(self,description):
         """llm_engine.skill_draft through capability_invoke (30 s). Only when the LLM plugin runs; the draft is created by the Core as draft, never enabled."""
         problem=skill_description_problem(description)
-        if problem is None and not self._skill_llm_available():problem=CODE_MESSAGES['capability_unavailable']
-        if problem is None and (self._skill_busy_now() or self.pending or self.capability_pending or self.perception_req is not None or self.perception_inflight is not None or self._models_busy_now() or self._agent_active() or self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem=CODE_MESSAGES['busy']
+        if problem is None and not self._skill_llm_available():problem=CODE_MESSAGES.raw('capability_unavailable')
+        if problem is None and (self._skill_busy_now() or self.pending or self.capability_pending or self.perception_req is not None or self.perception_inflight is not None or self._models_busy_now() or self._agent_active() or self.chat_inflight is not None or self.chat_request is not None or self.pending_chat):problem=CODE_MESSAGES.raw('busy')
         if problem is not None:return self._refuse('skills',problem)
         self.skill_req={'capability':SKILL_DRAFT_CAPABILITY,'plugin_id':SKILL_DRAFT_PLUGIN};self.skill_draft={}
         if self._request('capability_invoke',capability=SKILL_DRAFT_CAPABILITY,input={'description':description.strip()},deadline_ms=SKILL_DRAFT_DEADLINE_MS):self.results['skills']=PENDING_SKILL_DRAFT
-        else:self.skill_req=None;self.results['skills']='Core indisponível'
+        else:self.skill_req=None;self.results['skills']=QT_TRANSLATE_NOOP('Bridge','Core indisponível')
         self._skills_touch()
     def _skill_reset(self):
         """Connection lost: a draft in flight ends here and nothing is re-sent; the Core keeps whatever it already wrote."""
@@ -3403,11 +2914,11 @@ class Bridge(QObject):
         if self.skill_before is SKILL_ARM:self.skill_before=result;return
         if not result or result.get('capability')!=req['capability'] or result.get('plugin_id')!=req['plugin_id'] or result==self.skill_before:return
         self.skill_inflight=None;self.skill_before=None
-        if not result['ok']:self.skill_draft={};self.results['skills']=code_message(result['error'])
-        elif not valid_skill_draft(result.get('output')):self.skill_draft={};self.results['skills']='Resposta do plugin recusada pelo esquema; nada exibido'
+        if not result['ok']:self.skill_draft={};self.results['skills']=partial(code_message,result['error'])
+        elif not valid_skill_draft(result.get('output')):self.skill_draft={};self.results['skills']=QT_TRANSLATE_NOOP('Bridge','Resposta do plugin recusada pelo esquema; nada exibido')
         else:
             output=result['output'];self.skill_draft=dict(output)
-            self.results['skills']=f"Rascunho {output['draft_id']} v{output['version']} criado como {output['state']}; revise e valide antes de usar"
+            self.results['skills']=_later(QT_TRANSLATE_NOOP('Bridge','Rascunho %1 v%2 criado como %3; revise e valide antes de usar'),output['draft_id'],output['version'],output['state'])
         self._skills_touch()
     @Property(bool,notify=changed)
     def skillsAvailable(self):return self._skills_ready()
@@ -3446,19 +2957,19 @@ class Bridge(QObject):
     def _conn_item(self,ident):return next((i for i in self._conn_block().get('items',[]) if i['id']==ident),None)
     def _conn_op(self,op,**kw):
         """One Core request on the connections channel: refused while unavailable or while another request is in flight; never queued."""
-        if not self._conn_ready():self._refuse('connections',CONN_MESSAGES['connection_unavailable']);return
-        if self.pending:self._refuse('connections',CODE_MESSAGES['busy']);return
+        if not self._conn_ready():self._refuse('connections',CONN_MESSAGES.raw('connection_unavailable'));return
+        if self.pending:self._refuse('connections',CODE_MESSAGES.raw('busy'));return
         self._send('connections',op,**kw)
     def _conn_unknown(self,ident):
         """True when the id is malformed or not in the live block (refused here, so it never reaches the Core)."""
-        if not conn_id_ok(ident):self._refuse('connections','Id de conta inválido');return True
-        if self._conn_item(ident) is None:self._refuse('connections',CONN_MESSAGES['unknown_connection']);return True
+        if not conn_id_ok(ident):self._refuse('connections',QT_TRANSLATE_NOOP('Bridge','Id de conta inválido'));return True
+        if self._conn_item(ident) is None:self._refuse('connections',CONN_MESSAGES.raw('unknown_connection'));return True
         return False
     @Slot(str,str)
     def connectionAdd(self,provider,label):
         problem=conn_provider_problem(provider) or conn_label_problem(label)
         if problem is not None:self._refuse('connections',problem);return
-        if len(self._conn_block().get('items',[]))>=CONN_ITEMS_LIMIT:self._refuse('connections',CONN_MESSAGES['connection_limit']);return
+        if len(self._conn_block().get('items',[]))>=CONN_ITEMS_LIMIT:self._refuse('connections',CONN_MESSAGES.raw('connection_limit'));return
         self._conn_op('connection_add',provider=provider,label=label.strip(),revision=self._conn_revision())
     @Slot(str)
     def connectionConnect(self,ident):
@@ -3469,9 +2980,9 @@ class Bridge(QObject):
         """Consent is per scope: a non-empty subset of the scopes the account is waiting for, nothing else."""
         if self._conn_unknown(ident):return
         try:value=json.loads(scopes,parse_constant=_no_constant)
-        except (ValueError,RecursionError):self._refuse('connections',CONN_MESSAGES['connection_consent_required']);return
+        except (ValueError,RecursionError):self._refuse('connections',CONN_MESSAGES.raw('connection_consent_required'));return
         pending=set(self._conn_item(ident).get('pending_scopes') or [])
-        if not conn_scope_list(value) or not value or not set(value)<=pending:self._refuse('connections',CONN_MESSAGES['connection_consent_required']);return
+        if not conn_scope_list(value) or not value or not set(value)<=pending:self._refuse('connections',CONN_MESSAGES.raw('connection_consent_required'));return
         self._conn_op('connection_consent',id=ident,scopes=value,revision=self._conn_revision())
     def _conn_lifecycle(self,op,ident):
         if self._conn_unknown(ident):return
@@ -3486,7 +2997,7 @@ class Bridge(QObject):
     def connectionRevokeScope(self,ident,scope):
         """One granted scope (connection_revoke_scope {id, scope, revision}). Refused here when the live item does not grant it; the Core checks the revision."""
         if self._conn_unknown(ident):return
-        if not isinstance(scope,str) or scope not in (self._conn_item(ident).get('granted_scopes') or []):return self._refuse('connections',CONN_MESSAGES['scope_not_granted'])
+        if not isinstance(scope,str) or scope not in (self._conn_item(ident).get('granted_scopes') or []):return self._refuse('connections',CONN_MESSAGES.raw('scope_not_granted'))
         self._conn_op('connection_revoke_scope',id=ident,scope=scope,revision=self._conn_revision())
     @Slot(str)
     def connectionRemove(self,ident):self._conn_lifecycle('connection_remove',ident)
@@ -3496,31 +3007,31 @@ class Bridge(QObject):
         if self._conn_unknown(ident):return
         item=self._conn_item(ident);provider=next((p for p in self._conn_block().get('providers',[]) if p['id']==item['provider']),{})
         try:value=json.loads(args,parse_constant=_no_constant)
-        except (ValueError,RecursionError,TypeError):self._refuse('connections',CONN_MESSAGES['connection_args_invalid']);return
-        if not isinstance(value,dict) or not bounded_json(value,CONN_ARGS_LIMIT):self._refuse('connections',CONN_MESSAGES['connection_args_invalid']);return
+        except (ValueError,RecursionError,TypeError):self._refuse('connections',CONN_MESSAGES.raw('connection_args_invalid'));return
+        if not isinstance(value,dict) or not bounded_json(value,CONN_ARGS_LIMIT):self._refuse('connections',CONN_MESSAGES.raw('connection_args_invalid'));return
         spec=next((o for o in provider.get('operations',[]) if isinstance(operation,str) and o['name']==operation),None)
-        if spec is None:self._refuse('connections',CONN_MESSAGES['unknown_operation']);return
-        if item['status']!='connected':self._refuse('connections',CONN_MESSAGES['not_connected']);return
-        if spec['scope'] not in item['granted_scopes']:self._refuse('connections',CONN_MESSAGES['scope_not_granted']);return
+        if spec is None:self._refuse('connections',CONN_MESSAGES.raw('unknown_operation'));return
+        if item['status']!='connected':self._refuse('connections',CONN_MESSAGES.raw('not_connected'));return
+        if spec['scope'] not in item['granted_scopes']:self._refuse('connections',CONN_MESSAGES.raw('scope_not_granted'));return
         self._conn_op('connection_call',id=ident,operation=operation,args=value)
     @Slot(str,str)
     def connectionSetToken(self,ident,token):
         """Home Assistant (docs/S5.md E2.3): the long-lived token goes once to the Core, which validates it with one probe.
         The bridge keeps no copy beyond the request; the page clears its field right after this call."""
         if self._conn_unknown(ident):return
-        if not conn_token_ok(token):self._refuse('connections',CONN_MESSAGES['invalid_token']);return
-        if self._conn_item(ident)['provider']!='homeassistant':self._refuse('connections',CONN_MESSAGES['invalid_state']);return
+        if not conn_token_ok(token):self._refuse('connections',CONN_MESSAGES.raw('invalid_token'));return
+        if self._conn_item(ident)['provider']!='homeassistant':self._refuse('connections',CONN_MESSAGES.raw('invalid_state'));return
         self._conn_op('connection_set_token',id=ident,token=token,revision=self._conn_revision())
     @Slot(str,str)
     def connectionTrustTools(self,ident,names):
         """MCP (docs/S5.md E2.4): the user re-approves discovered tools by name. Only tools the snapshot lists as needs_reapproval are sent; trusting never grants a scope and every call still needs its own approval."""
         if self._conn_unknown(ident):return
         item=self._conn_item(ident)
-        if item['provider']!='mcp':self._refuse('connections',CONN_MESSAGES['invalid_state']);return
+        if item['provider']!='mcp':self._refuse('connections',CONN_MESSAGES.raw('invalid_state'));return
         try:value=json.loads(names,parse_constant=_no_constant)
-        except (ValueError,RecursionError,TypeError):self._refuse('connections',CONN_MESSAGES['connection_args_invalid']);return
+        except (ValueError,RecursionError,TypeError):self._refuse('connections',CONN_MESSAGES.raw('connection_args_invalid'));return
         waiting={t['name'] for t in item.get('tools',[]) if t['state']=='needs_reapproval'}
-        if not (isinstance(value,list) and 0<len(value)<=CONN_TRUST_LIMIT and all(isinstance(n,str) for n in value) and len(set(value))==len(value) and set(value)<=waiting):self._refuse('connections',CONN_MESSAGES['tool_trust_invalid']);return
+        if not (isinstance(value,list) and 0<len(value)<=CONN_TRUST_LIMIT and all(isinstance(n,str) for n in value) and len(set(value))==len(value) and set(value)<=waiting):self._refuse('connections',CONN_MESSAGES.raw('tool_trust_invalid'));return
         self._conn_op('connection_trust_tools',id=ident,tools=value,revision=self._conn_revision())
     @Slot(str,result=str)
     def connectionLabelProblem(self,label):return conn_label_problem(label) or ''
@@ -3543,18 +3054,18 @@ class Bridge(QObject):
     def _reg_ready(self):return self.online and isinstance(self.snapshot.get('registry'),dict)
     def _reg_op(self,op,**kw):
         """One Core request on the registry channel: refused while unavailable or while another request is in flight; never queued."""
-        if not self._reg_ready():self._refuse('registry',REG_MESSAGES['registry_unavailable']);return
-        if self.pending:self._refuse('registry',CODE_MESSAGES['busy']);return
+        if not self._reg_ready():self._refuse('registry',REG_MESSAGES.raw('registry_unavailable'));return
+        if self.pending:self._refuse('registry',CODE_MESSAGES.raw('busy'));return
         self._send('registry',op,**kw)
     @Slot(str)
     def registryPlan(self,purpose):
-        if purpose not in REG_PURPOSES:self._refuse('registry',REG_MESSAGES['unknown_purpose']);return
+        if purpose not in REG_PURPOSES:self._refuse('registry',REG_MESSAGES.raw('unknown_purpose'));return
         self._reg_op('registry_plan',purpose=purpose)
     @Slot(str,bool)
     def registryAllowVisual(self,purpose,enabled):
         """The user's switch (default off). Refused here for an unknown purpose or one with no visual route; the Core checks the revision."""
-        if purpose not in REG_PURPOSES:self._refuse('registry',REG_MESSAGES['unknown_purpose']);return
-        if purpose not in REG_VISUAL_PURPOSES:self._refuse('registry',REG_MESSAGES['no_visual_route']);return
+        if purpose not in REG_PURPOSES:self._refuse('registry',REG_MESSAGES.raw('unknown_purpose'));return
+        if purpose not in REG_VISUAL_PURPOSES:self._refuse('registry',REG_MESSAGES.raw('no_visual_route'));return
         self._reg_op('registry_allow_visual',purpose=purpose,enabled=bool(enabled),revision=int(self._reg_block().get('revision',0)))
     @Property(bool,notify=changed)
     def registryAvailable(self):return self._reg_ready()
@@ -3562,8 +3073,8 @@ class Bridge(QObject):
     def registryBusy(self):return self.pending_op in ('registry_plan','registry_allow_visual')
     @Property(str,notify=changed)
     def registryResult(self):return self.results['registry']
-    @Property(str,constant=True)
-    def registryVisualWarning(self):return REG_VISUAL_WARNING
+    @Property(str,notify=retranslated)
+    def registryVisualWarning(self):return _tr(REG_VISUAL_WARNING)
     @Property(str,notify=registryChanged)
     def registryRevision(self):return str(self._reg_block().get('revision',0))
     @Property('QVariantList',notify=registryChanged)
@@ -3571,8 +3082,8 @@ class Bridge(QObject):
     @Property('QVariantList',notify=registryChanged)
     def registryVisualAllowed(self):return list(self._reg_block().get('visual_allowed',[]))
     # ---- B5-B10 (docs/PENDENCIAS_IMPLEMENTACAO.md): package identity, test wake, diagnostics of the last capture and reply, catalog storage.
-    @Property('QVariantMap',constant=True)
-    def packageInfo(self):return dict(self._package)
+    @Property('QVariantMap',notify=retranslated)
+    def packageInfo(self):return {**self._package,'runtime':_tr(self._package.get('runtime',''))}
     @Property(str,constant=True)
     def coreRootPath(self):return str(self.root)
     # Permissões › Auditoria (docs/ui-spec/30 §11.6): the Core writes audit.log (and audit.log.1) in its root folder (src/storage.rs).
@@ -3586,8 +3097,8 @@ class Bridge(QObject):
     def virtualWake(self):
         """B6: the Core's test wake (op virtual_wake). The Core refuses it unless it was started with --virtual-input; that refusal arrives as virtual_input_disabled."""
         if not self.virtualWakeAvailable:
-            self.results['wake']='Indisponível: o Core está desconectado' if not self.online else 'Indisponível: há uma sessão de voz em andamento' if self.sessionId else 'Indisponível agora: a configuração precisa estar pronta'
-        else:self.results['wake']=PENDING['virtual_wake'] if self._request('virtual_wake') else CODE_MESSAGES['busy']
+            self.results['wake']=QT_TRANSLATE_NOOP('Bridge','Indisponível: o Core está desconectado') if not self.online else QT_TRANSLATE_NOOP('Bridge','Indisponível: há uma sessão de voz em andamento') if self.sessionId else QT_TRANSLATE_NOOP('Bridge','Indisponível agora: a configuração precisa estar pronta')
+        else:self.results['wake']=PENDING['virtual_wake'] if self._request('virtual_wake') else CODE_MESSAGES.raw('busy')
         self.changed.emit()
     @Property('QVariantMap',notify=sessionChanged)
     def captureSummary(self):return dict(self.snapshot.get('capture') or {})

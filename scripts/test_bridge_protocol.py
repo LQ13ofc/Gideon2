@@ -2714,7 +2714,7 @@ class DisplayMapping(unittest.TestCase):
         poc=display_wake_choice({'id':'okay','text':'Okay Gideon','qualification':'poc_required'})
         other=display_wake_choice({'id':'x','text':'X','qualification':'mystery'})
         self.assertEqual((dev['qualification_label'],poc['qualification_label'],other['qualification_label']),
-                         ('em desenvolvimento','requer prova de conceito',''))
+                         ('qualificada em corpus sintético; microfone real não validado','não ativado: precisa de gravações da sua voz',''))
         self.assertEqual((dev['qualification'],poc['qualification']),('dev_qualified','poc_required'))
         self.assertEqual(dev['text'],'Hey Gideon')
     def test_no_raw_codes_in_the_user_labels(self):
@@ -3471,10 +3471,10 @@ def qml_audio_child():
             check('top bar hides Microfone ativo when the recorder is off',find('micActiveLabel').property('visible') is False)
             check('hoje badge is hidden when the recorder is off',find('hojeMicBadge').property('visible') is False)
             window.setProperty('pageId','hoje');QTest.qWait(50)
-            check('hoje says the microphone is off in one quiet line',find('hojeLiveHint').property('visible') and find('hojeLiveHint').property('text')=='Microfone desligado: ative em Dispositivos para usar a voz')
+            check('hoje says the microphone is off in one quiet line',find('hojeLiveHint').property('visible') and find('hojeLiveHint').property('text')=='Microfone desligado: ative em Dispositivos para usar a voz.')
             bridge._apply(validate_snapshot(audio_snapshot(devices=AUDIO_DEVICES,prefs={'live_audio':True},live=dict(AUDIO_LIVE_OFF,restart_required=True)),'r',0))
             QTest.qWait(50)
-            check('hoje says a consented microphone starts at the restart',find('hojeLiveHint').property('text')=='Microfone será ativado ao reiniciar o Core.')
+            check('hoje says a consented microphone starts at the restart',find('hojeLiveHint').property('text')=='O microfone será ativado ao reiniciar o Core.')
             window.setProperty('pageId','cfg_dispositivos');QTest.qWait(50)
             check('devices page offers the Core restart while it is pending',find('liveAudioRestartButton').property('visible') and find('liveAudioRestartButton').property('enabled'))
             check('devices page names the pending restart',find('liveInputStatus').property('text')=='Escuta do microfone: aguardando reinício do Core')
@@ -3548,13 +3548,13 @@ class WakePhrases(unittest.TestCase):
         rows={r['id']:r for r in (display_wake_entry(e,block['settings'],set(block['active'])) for e in block['phrases'])}
         self.assertTrue(rows['hey_gideon']['active'])
         self.assertEqual(rows['hey_gideon']['sensitivity'],1.2)
-        self.assertEqual(rows['hey_gideon']['qualification_label'],'em desenvolvimento')
+        self.assertEqual(rows['hey_gideon']['qualification_label'],'qualificada em corpus sintético; microfone real não validado')
         self.assertFalse(rows['custom_0123456789ab']['active'])
         self.assertEqual(rows['custom_0123456789ab']['qualification_label'],'personalizada · teste sintético')
         unmeasured=dict(block['phrases'][1],measurement=None)
         self.assertEqual(display_wake_entry(unmeasured,block['settings'],set())['qualification_label'],'personalizada · não testada')
         # The pack-level wake choices keep working for the legacy picker.
-        self.assertEqual(WAKE_QUALIFICATION_LABELS['dev_qualified'],'em desenvolvimento')
+        self.assertEqual(WAKE_QUALIFICATION_LABELS['dev_qualified'],'qualificada em corpus sintético; microfone real não validado')
 
 class Wp12Diagnostics(unittest.TestCase):
     """WP-12 (docs/WP12.md): CFG-04 retention and DIAG-02 developer mode ops, DIAG-01..05 fields, and the message tables."""
@@ -3728,6 +3728,12 @@ class Wp4Bridge(unittest.TestCase):
 class Wp20Language(unittest.TestCase):
     """WP-20 interface language: preferences.ui_language is a strict Core preference (CAS); a snapshot that reports
     another language is announced once, so main.py can switch the whole UI without a restart."""
+    def tearDown(self):
+        # A snapshot that reports 'en' or 'fr' installs that catalog: put the source language back for the other tests.
+        import translations
+        from PySide6.QtCore import QCoreApplication
+        translations.apply(QCoreApplication.instance(), translations.SOURCE_LANGUAGE)
+
     def test_ui_language_is_read_strictly_and_sent_as_a_cas_preference(self):
         from bridge import UI_LANGUAGE_VALUES
         self.assertEqual(UI_LANGUAGE_VALUES,('pt-BR','en','fr'))
@@ -3738,7 +3744,9 @@ class Wp20Language(unittest.TestCase):
         self.assertNotIn('confirmed',request)
         answer(peer,request,audio_snapshot(prefs={'ui_language':'fr'}));settle(bridge)
         self.assertEqual(bridge.uiLanguage,'fr')
-        self.assertEqual(bridge.preferencesResult,OPS['ui_language_preference'][1])
+        import translations
+        # The result is read in the language on screen (fr here): a stored source is translated when it is read.
+        self.assertEqual(bridge.preferencesResult,translations._tr(OPS['ui_language_preference'][1]))
         bridge.setUiLanguage('de');self.assertIsNone(bridge.pending)
         self.assertEqual(bridge.preferencesResult,CODE_MESSAGES['invalid_preferences'])
     def test_a_reported_language_is_announced_once_and_bad_values_are_refused(self):

@@ -23,7 +23,7 @@ PageFrame {
     readonly property var enabledSkills: (core.skillsItems || []).filter(function (i) {
         return i.active === true && i.state === "enabled" && i.deps_ok === true && i.permissions_ok === true
     }).map(function (i) { return {value: i.id, label: i.name + " (" + i.version + ")"} })
-    readonly property var statusLabels: ({active: "Ativo", paused: "Pausado"})
+    readonly property var statusLabels: ({active: qsTr("Ativo"), paused: qsTr("Pausado")})
     property string pendingId: ""
     property string editId: ""
 
@@ -44,19 +44,24 @@ PageFrame {
         return text.split(",").map(function (s) { return s.trim() }).filter(function (s) { return s.length > 0 }).slice(0, 4)
     }
     function outcomeText(outcome) {
-        if (!outcome) return "Ainda não executado."
-        if (outcome.started) return "Última execução: iniciada. O resultado aparece em Skills › Execuções."
-        return "Última execução: " + (core.codeMessage(outcome.code) || "não foi possível iniciar.")
+        if (!outcome) return qsTr("Ainda não executado.")
+        if (outcome.started) return qsTr("Última execução: iniciada. O resultado aparece em Skills › Execuções.")
+        return qsTr("Última execução: %1").arg(core.codeMessage(outcome.code) || qsTr("não foi possível iniciar."))
+    }
+    function habitDetail(h) {
+        var head = qsTr("Skill: %1 · versão aprovada %2").arg(h.current.skill_id).arg(h.current.skill_version)
+        if (h.phrases.length > 0) head = qsTr("%1 · frases: %2").arg(head).arg(h.phrases.join(", "))
+        return head + "\n" + page.outcomeText(h.outcomes.length > 0 ? h.outcomes[h.outcomes.length - 1] : null)
     }
 
     PageHeader {
-        title: "Hábitos"
-        subtitle: "Procedimentos privados que executam uma Skill habilitada com entradas fixas."
+        title: qsTr("Hábitos")
+        subtitle: qsTr("Procedimentos privados que executam uma Skill habilitada com entradas fixas.")
     }
 
     Text {
         visible: !page.ready
-        text: "Indisponível: o Core não respondeu aos hábitos. Os controles voltam quando a conexão for restabelecida."
+        text: qsTr("Indisponível: o Core não respondeu aos hábitos. Os controles voltam quando a conexão for restabelecida.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -66,36 +71,34 @@ PageFrame {
     }
 
     Section {
-        title: "Seus hábitos"
-        caption: "Cada hábito guarda a versão da Skill que você aprovou e a versão anterior, para voltar atrás."
+        title: qsTr("Seus hábitos")
+        caption: qsTr("Cada hábito guarda a versão da Skill que você aprovou e a versão anterior, para voltar atrás.")
 
         EmptyState {
             visible: page.habits.length === 0
             message: page.enabledSkills.length === 0
-                ? "Nenhum hábito. Primeiro habilite uma Skill em Extensões › Skills."
-                : "Nenhum hábito ainda. Crie um abaixo com uma Skill habilitada."
+                ? qsTr("Nenhum hábito. Primeiro habilite uma Skill em Extensões › Skills.")
+                : qsTr("Nenhum hábito ainda. Crie um abaixo com uma Skill habilitada.")
         }
         Repeater {
             model: page.habits
             delegate: PItemRow {
                 required property var modelData
                 title: modelData.name
-                detail: "Skill: " + modelData.current.skill_id + " · versão aprovada " + modelData.current.skill_version
-                    + (modelData.phrases.length > 0 ? " · frases: " + modelData.phrases.join(", ") : "")
-                    + "\n" + page.outcomeText(modelData.outcomes.length > 0 ? modelData.outcomes[modelData.outcomes.length - 1] : null)
+                detail: page.habitDetail(modelData)
                 badgeText: page.statusLabels[modelData.status] || ""
                 badgeTone: modelData.status === "active" ? "success" : "neutral"
                 GButton {
                     objectName: "habitRun"
                     variant: "secondary"
-                    text: "Executar"
+                    text: qsTr("Executar")
                     enabled: page.ready && modelData.status === "active"
                     onClicked: page.send({op: "run", id: modelData.id})
                 }
                 GButton {
                     objectName: "habitStatus"
                     variant: "ghost"
-                    text: modelData.status === "active" ? "Pausar" : "Retomar"
+                    text: modelData.status === "active" ? qsTr("Pausar") : qsTr("Retomar")
                     enabled: page.ready
                     onClicked: page.send({
                         op: "set_status", revision: page.revision, id: modelData.id,
@@ -105,7 +108,7 @@ PageFrame {
                 GButton {
                     objectName: "habitEdit"
                     variant: "ghost"
-                    text: "Editar"
+                    text: qsTr("Editar")
                     enabled: page.ready
                     onClicked: {
                         page.editId = modelData.id
@@ -118,7 +121,7 @@ PageFrame {
                 GButton {
                     objectName: "habitRollback"
                     variant: "ghost"
-                    text: "Versão anterior"
+                    text: qsTr("Versão anterior")
                     visible: modelData.previous !== null && modelData.previous !== undefined
                     enabled: page.ready
                     onClicked: page.send({op: "rollback", revision: page.revision, id: modelData.id})
@@ -126,7 +129,7 @@ PageFrame {
                 GButton {
                     objectName: "habitDelete"
                     variant: "danger"
-                    text: "Apagar"
+                    text: qsTr("Apagar")
                     enabled: page.ready
                     onClicked: {
                         page.pendingId = modelData.id
@@ -139,25 +142,25 @@ PageFrame {
     }
 
     Section {
-        title: "Novo hábito"
-        caption: "Só Skills habilitadas aparecem aqui. O hábito não dá nenhuma permissão nova."
+        title: qsTr("Novo hábito")
+        caption: qsTr("Só Skills habilitadas aparecem aqui. O hábito não dá nenhuma permissão nova.")
 
-        FieldLabel { text: "Nome" }
+        FieldLabel { text: qsTr("Nome") }
         GTextField {
             id: newName
             objectName: "habitName"
             Layout.fillWidth: true
             maximumLength: 60
-            placeholderText: "Ex.: Anotar o dia"
+            placeholderText: qsTr("Ex.: Anotar o dia")
         }
-        FieldLabel { text: "Frases de disparo (separadas por vírgula, até 4; dizer uma delas exatamente inicia o hábito)" }
+        FieldLabel { text: qsTr("Frases de disparo (separadas por vírgula, até 4; dizer uma delas exatamente inicia o hábito)") }
         GTextField {
             id: newPhrases
             objectName: "habitPhrases"
             Layout.fillWidth: true
             maximumLength: 300
         }
-        FieldLabel { text: "Skill" }
+        FieldLabel { text: qsTr("Skill") }
         Select {
             id: skillBox
             objectName: "habitSkill"
@@ -166,7 +169,7 @@ PageFrame {
             model: page.enabledSkills
             enabled: page.ready && page.enabledSkills.length > 0
         }
-        FieldLabel { text: "Entradas (objeto JSON, até 2 KB)" }
+        FieldLabel { text: qsTr("Entradas (objeto JSON, até 2 KB)") }
         GTextField {
             id: newInputs
             objectName: "habitInputs"
@@ -176,7 +179,7 @@ PageFrame {
         }
         Text {
             visible: newInputs.text.trim().length > 0 && page.parseInputs(newInputs.text) === null
-            text: "Entradas precisam ser um objeto JSON, por exemplo {\"pasta\": \"diario\"}."
+            text: qsTr("Entradas precisam ser um objeto JSON, por exemplo {\"pasta\": \"diario\"}.")
             textFormat: Text.PlainText
             color: Theme.error
             font.family: Theme.fontFamily
@@ -187,7 +190,7 @@ PageFrame {
         GButton {
             objectName: "habitCreate"
             variant: "primary"
-            text: "Criar hábito"
+            text: qsTr("Criar hábito")
             enabled: page.ready && newName.text.trim().length > 0 && skillBox.count > 0
                 && page.parseInputs(newInputs.text) !== null
             onClicked: {
@@ -205,17 +208,17 @@ PageFrame {
 
     PConfirm {
         id: deleteConfirm
-        message: "O hábito será apagado. A Skill continua instalada."
-        actionText: "Apagar hábito"
+        message: qsTr("O hábito será apagado. A Skill continua instalada.")
+        actionText: qsTr("Apagar hábito")
         onConfirmed: page.send({op: "delete", revision: page.revision, id: page.pendingId})
     }
 
     Modal {
         id: editDialog
         objectName: "habitEditDialog"
-        title: "Editar hábito"
+        title: qsTr("Editar hábito")
         Text {
-            text: "Nome"
+            text: qsTr("Nome")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -228,7 +231,7 @@ PageFrame {
             maximumLength: 60
         }
         Text {
-            text: "Frases de disparo (separadas por vírgula)"
+            text: qsTr("Frases de disparo (separadas por vírgula)")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -241,7 +244,7 @@ PageFrame {
             maximumLength: 300
         }
         Text {
-            text: "Entradas (objeto JSON). Salvar fixa a versão da Skill habilitada agora."
+            text: qsTr("Entradas (objeto JSON). Salvar fixa a versão da Skill habilitada agora.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -258,7 +261,7 @@ PageFrame {
         GButton {
             objectName: "habitEditSave"
             variant: "primary"
-            text: "Salvar"
+            text: qsTr("Salvar")
             Layout.alignment: Qt.AlignRight
             enabled: page.parseInputs(editInputs.text) !== null
             onClicked: {

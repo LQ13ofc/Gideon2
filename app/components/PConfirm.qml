@@ -8,9 +8,9 @@ import "../theme"
 Modal {
     id: confirm
     property string message: ""
-    property string actionText: "Apagar"
+    property string actionText: qsTr("Apagar")
     signal confirmed()
-    title: "Tem certeza?"
+    title: qsTr("Tem certeza?")
 
     Text {
         text: confirm.message

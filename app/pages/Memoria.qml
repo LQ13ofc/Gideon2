@@ -24,14 +24,14 @@ PageFrame {
     // Search results arrive as the reply of the last `search` request; a null means "show the stored facts".
     readonly property var hits: (reply.area === "memory" && reply.reply && reply.reply.hits) ? reply.reply.hits : null
     readonly property var kindOptions: [
-        {value: "fact", label: "Fato"}, {value: "decision", label: "Decisão"},
-        {value: "preference", label: "Preferência"}, {value: "context", label: "Contexto"}
+        {value: "fact", label: qsTr("Fato")}, {value: "decision", label: qsTr("Decisão")},
+        {value: "preference", label: qsTr("Preferência")}, {value: "context", label: qsTr("Contexto")}
     ]
     readonly property var ttlOptions: [
-        {value: 0, label: "Sem prazo"}, {value: 7, label: "7 dias"}, {value: 30, label: "30 dias"}, {value: 365, label: "1 ano"}
+        {value: 0, label: qsTr("Sem prazo")}, {value: 7, label: qsTr("7 dias")}, {value: 30, label: qsTr("30 dias")}, {value: 365, label: qsTr("1 ano")}
     ]
-    readonly property var kindLabels: ({fact: "Fato", decision: "Decisão", preference: "Preferência", context: "Contexto"})
-    readonly property var sourceLabels: ({user_typed: "digitado por você", conversation: "conversa"})
+    readonly property var kindLabels: ({fact: qsTr("Fato"), decision: qsTr("Decisão"), preference: qsTr("Preferência"), context: qsTr("Contexto")})
+    readonly property var sourceLabels: ({user_typed: qsTr("digitado por você"), conversation: qsTr("conversa")})
     readonly property bool historyNever: core.historyRetention === "never"
     property string pendingSource: ""
     property string pendingFactId: ""
@@ -59,18 +59,18 @@ PageFrame {
     function detailOf(fact) {
         var parts = []
         if (fact.kind) parts.push(kindLabels[fact.kind] || fact.kind)
-        if (fact.source) parts.push("fonte: " + (sourceLabels[fact.source] || fact.source))
-        if (fact.expires_ms) parts.push("expira em " + when(fact.expires_ms))
+        if (fact.source) parts.push(qsTr("fonte: %1").arg(sourceLabels[fact.source] || fact.source))
+        if (fact.expires_ms) parts.push(qsTr("expira em %1").arg(when(fact.expires_ms)))
         return parts.join(" · ")
     }
 
     PageHeader {
-        title: "Memória"
-        subtitle: "Fatos que você autorizou o Gideon a guardar, com fonte, prazo e exclusão."
+        title: qsTr("Memória")
+        subtitle: qsTr("Fatos que você autorizou o Gideon a guardar, com fonte, prazo e exclusão.")
         GButton {
             objectName: "memoryRefresh"
             variant: "secondary"
-            text: "Atualizar"
+            text: qsTr("Atualizar")
             enabled: core.connected
             onClicked: core.refresh()
         }
@@ -78,7 +78,7 @@ PageFrame {
 
     Text {
         visible: !page.ready
-        text: "Indisponível: o Core não respondeu à memória. Os controles voltam quando a conexão for restabelecida."
+        text: qsTr("Indisponível: o Core não respondeu à memória. Os controles voltam quando a conexão for restabelecida.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -88,13 +88,13 @@ PageFrame {
     }
 
     Section {
-        title: "Fontes autorizadas"
-        caption: "Cada fonte só guarda fatos depois que você liga. Desligar apaga os fatos dessa fonte."
+        title: qsTr("Fontes autorizadas")
+        caption: qsTr("Cada fonte só guarda fatos depois que você liga. Desligar apaga os fatos dessa fonte.")
 
         Toggle {
             id: userTypedToggle
             objectName: "consentUserTyped"
-            text: "Fatos que eu digitar ou confirmar"
+            text: qsTr("Fatos que eu digitar ou confirmar")
             checked: page.consent.user_typed === true
             enabled: page.ready
             onToggled: {
@@ -105,7 +105,7 @@ PageFrame {
         Toggle {
             id: conversationToggle
             objectName: "consentConversation"
-            text: "Fatos tirados das conversas"
+            text: qsTr("Fatos tirados das conversas")
             checked: page.consent.conversation === true
             enabled: page.ready && !page.historyNever
             onToggled: {
@@ -115,7 +115,7 @@ PageFrame {
         }
         Text {
             visible: page.historyNever
-            text: "Indisponível: o histórico de conversas não é guardado (Privacidade). Fatos das conversas dependem dele."
+            text: qsTr("Indisponível: o histórico de conversas não é guardado (Privacidade). Fatos das conversas dependem dele.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -129,22 +129,22 @@ PageFrame {
     }
 
     Section {
-        title: "Guardar um fato"
-        caption: "O fato fica com a fonte \"digitado por você\". Você pode editar ou apagar a qualquer momento."
+        title: qsTr("Guardar um fato")
+        caption: qsTr("O fato fica com a fonte \"digitado por você\". Você pode editar ou apagar a qualquer momento.")
 
-        FieldLabel { text: "Texto do fato" }
+        FieldLabel { text: qsTr("Texto do fato") }
         GTextField {
             id: newText
             objectName: "memoryNewText"
             Layout.fillWidth: true
-            placeholderText: "Ex.: Prefiro reuniões pela manhã"
+            placeholderText: qsTr("Ex.: Prefiro reuniões pela manhã")
             maximumLength: 400
         }
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.space(12)
             ColumnLayout {
-                FieldLabel { text: "Tipo" }
+                FieldLabel { text: qsTr("Tipo") }
                 Select {
                     id: kindBox
                     objectName: "memoryKind"
@@ -154,7 +154,7 @@ PageFrame {
                 }
             }
             ColumnLayout {
-                FieldLabel { text: "Prazo" }
+                FieldLabel { text: qsTr("Prazo") }
                 Select {
                     id: ttlBox
                     objectName: "memoryTtl"
@@ -167,7 +167,7 @@ PageFrame {
             GButton {
                 objectName: "memoryAdd"
                 variant: "primary"
-                text: "Guardar fato"
+                text: qsTr("Guardar fato")
                 enabled: page.ready && page.consent.user_typed === true && newText.text.trim().length > 0
                 onClicked: {
                     var ttl = page.ttlOptions[ttlBox.currentIndex].value
@@ -185,8 +185,8 @@ PageFrame {
     }
 
     Section {
-        title: "Fatos guardados"
-        caption: page.hits !== null ? "Resultado da busca no Core." : "Os fatos mais recentes; a busca percorre todos."
+        title: qsTr("Fatos guardados")
+        caption: page.hits !== null ? qsTr("Resultado da busca no Core.") : qsTr("Os fatos mais recentes; a busca percorre todos.")
 
         RowLayout {
             Layout.fillWidth: true
@@ -195,19 +195,19 @@ PageFrame {
                 id: searchText
                 objectName: "memorySearch"
                 Layout.fillWidth: true
-                placeholderText: "Buscar nos fatos"
+                placeholderText: qsTr("Buscar nos fatos")
                 onAccepted: page.send({op: "search", query: searchText.text})
             }
             GButton {
                 objectName: "memorySearchButton"
                 variant: "secondary"
-                text: "Buscar"
+                text: qsTr("Buscar")
                 enabled: page.ready
                 onClicked: page.send({op: "search", query: searchText.text})
             }
             GButton {
                 variant: "ghost"
-                text: "Mostrar todos"
+                text: qsTr("Mostrar todos")
                 enabled: page.ready
                 visible: page.hits !== null
                 onClicked: {
@@ -219,7 +219,7 @@ PageFrame {
 
         EmptyState {
             visible: (page.hits !== null ? page.hits.length : page.facts.length) === 0
-            message: page.hits !== null ? "Nenhum fato corresponde à busca." : "Nenhum fato guardado. Ligue uma fonte e guarde um fato acima."
+            message: page.hits !== null ? qsTr("Nenhum fato corresponde à busca.") : qsTr("Nenhum fato guardado. Ligue uma fonte e guarde um fato acima.")
         }
         Repeater {
             model: page.hits !== null ? page.hits : page.facts
@@ -230,7 +230,7 @@ PageFrame {
                 GButton {
                     objectName: "memoryEdit"
                     variant: "ghost"
-                    text: "Editar"
+                    text: qsTr("Editar")
                     visible: modelData.id !== undefined && page.ready
                     onClicked: {
                         editDialog.factId = modelData.id
@@ -241,7 +241,7 @@ PageFrame {
                 GButton {
                     objectName: "memoryForget"
                     variant: "danger"
-                    text: "Apagar"
+                    text: qsTr("Apagar")
                     enabled: page.ready
                     onClicked: {
                         page.pendingFactId = modelData.id
@@ -254,12 +254,12 @@ PageFrame {
     }
 
     Section {
-        title: "Apagar dados"
-        caption: "Apagar tudo remove os fatos e desliga as fontes. Não é possível desfazer."
+        title: qsTr("Apagar dados")
+        caption: qsTr("Apagar tudo remove os fatos e desliga as fontes. Não é possível desfazer.")
         GButton {
             objectName: "memoryForgetAll"
             variant: "danger"
-            text: "Apagar toda a memória"
+            text: qsTr("Apagar toda a memória")
             enabled: page.ready
             onClicked: forgetAllConfirm.open()
         }
@@ -268,20 +268,20 @@ PageFrame {
     PConfirm {
         id: revokeConfirm
         objectName: "memoryRevokeConfirm"
-        message: "Os fatos vindos desta fonte serão apagados e a fonte fica desligada."
-        actionText: "Desligar e apagar"
+        message: qsTr("Os fatos vindos desta fonte serão apagados e a fonte fica desligada.")
+        actionText: qsTr("Desligar e apagar")
         onConfirmed: page.send({op: "consent", revision: page.revision, source: page.pendingSource, granted: false})
     }
     PConfirm {
         id: forgetConfirm
-        message: "Este fato será apagado do Core. Não é possível desfazer."
-        actionText: "Apagar fato"
+        message: qsTr("Este fato será apagado do Core. Não é possível desfazer.")
+        actionText: qsTr("Apagar fato")
         onConfirmed: page.send({op: "forget", revision: page.revision, id: page.pendingFactId})
     }
     PConfirm {
         id: forgetAllConfirm
-        message: "Todos os fatos serão apagados e todas as fontes ficam desligadas."
-        actionText: "Apagar tudo"
+        message: qsTr("Todos os fatos serão apagados e todas as fontes ficam desligadas.")
+        actionText: qsTr("Apagar tudo")
         onConfirmed: page.send({op: "forget_all", revision: page.revision, confirm: true})
     }
 
@@ -289,9 +289,9 @@ PageFrame {
         id: editDialog
         objectName: "memoryEditDialog"
         property string factId: ""
-        title: "Editar fato"
+        title: qsTr("Editar fato")
         Text {
-            text: "Texto do fato"
+            text: qsTr("Texto do fato")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -306,7 +306,7 @@ PageFrame {
         GButton {
             objectName: "memoryEditSave"
             variant: "primary"
-            text: "Salvar"
+            text: qsTr("Salvar")
             Layout.alignment: Qt.AlignRight
             onClicked: {
                 page.send({op: "edit", revision: page.revision, id: editDialog.factId, text: editText.text})

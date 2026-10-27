@@ -39,7 +39,7 @@ Rectangle {
     }
     function permissionText(p) {
         var label = core.permissionLabel(p)
-        return label === p ? "permissão sem rótulo: " + p : label
+        return label === p ? qsTr("permissão sem rótulo: %1").arg(p) : label
     }
     function runPrimary() {
         if (!panel.act.enabled) return
@@ -51,7 +51,7 @@ Rectangle {
     }
 
     Accessible.role: Accessible.Pane
-    Accessible.name: "Detalhe de " + panel.pid
+    Accessible.name: qsTr("Detalhe de %1").arg(panel.pid)
 
     ColumnLayout {
         id: body
@@ -82,12 +82,12 @@ Rectangle {
             IconButton {
                 iconName: "close"
                 size: 16
-                ToolTip.text: "Fechar detalhe"
+                ToolTip.text: qsTr("Fechar detalhe")
                 onClicked: panel.closeRequested()
             }
         }
         Text {
-            text: "v" + panel.semver + " · publisher " + (panel.entry ? panel.entry.publisher : "—") + (core.hubPublisherVerified ? " · verificado por assinatura" : " · não verificado")
+            text: qsTr("v%1 · publisher %2%3").arg(panel.semver).arg(panel.entry ? panel.entry.publisher : "—").arg(core.hubPublisherVerified ? qsTr(" · verificado por assinatura") : qsTr(" · não verificado"))
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -97,7 +97,7 @@ Rectangle {
         }
         Text {
             visible: panel.entry !== null
-            text: "Publisher: " + (panel.entry ? panel.entry.publisher : "") + (core.hubPublisherVerified ? " (verificado por assinatura)" : " (não autenticado)")
+            text: qsTr("Publisher: %1%2").arg(panel.entry ? panel.entry.publisher : "").arg(core.hubPublisherVerified ? qsTr(" (verificado por assinatura)") : qsTr(" (não autenticado)"))
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -106,7 +106,7 @@ Rectangle {
             Layout.fillWidth: true
         }
         Text {
-            text: "Versão: " + panel.semver
+            text: qsTr("Versão: %1").arg(panel.semver)
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -118,7 +118,7 @@ Rectangle {
 
         Text {
             visible: panel.entry !== null
-            text: panel.entry && panel.entry.permissions_approved === true ? "Permissões aprovadas para este manifesto:" : "Permissões declaradas (não aprovadas):"
+            text: panel.entry && panel.entry.permissions_approved === true ? qsTr("Permissões aprovadas para este manifesto:") : qsTr("Permissões declaradas (não aprovadas):")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -154,7 +154,7 @@ Rectangle {
         }
         Text {
             visible: panel.entry !== null && (panel.entry.permissions || []).length === 0
-            text: "nenhuma"
+            text: qsTr("nenhuma")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -163,8 +163,8 @@ Rectangle {
         }
         GButton {
             variant: "ghost"
-            text: "Ver em Permissões"
-            Accessible.name: "Ver em Permissões"
+            text: qsTr("Ver em Permissões")
+            Accessible.name: qsTr("Ver em Permissões")
             onClicked: { if (Window.window && Window.window.goPage) Window.window.goPage("perm_concessoes") }
         }
 
@@ -172,7 +172,7 @@ Rectangle {
 
         Text {
             objectName: "pluginDetailState"
-            text: "Estado técnico: " + panel.line
+            text: qsTr("Estado técnico: %1").arg(panel.line)
             textFormat: Text.PlainText
             color: panel.toneColor(X.stateTone(panel.entry, panel.item))
             font.family: Theme.fontFamily
@@ -183,7 +183,7 @@ Rectangle {
         }
         Text {
             visible: panel.item !== null && panel.item.last_error !== undefined && panel.item.last_error !== null && String(panel.item.last_error).length > 0
-            text: "Último erro: " + (panel.item ? (core.codeMessage(panel.item.last_error) || "erro") : "")
+            text: qsTr("Último erro: %1").arg(panel.item ? (core.codeMessage(panel.item.last_error) || qsTr("erro")) : "")
             textFormat: Text.PlainText
             color: Theme.error
             font.family: Theme.fontFamily
@@ -193,7 +193,7 @@ Rectangle {
         }
         Text {
             visible: panel.entry !== null && panel.entry.status === "incompatible"
-            text: panel.entry ? "Incompatível: " + X.reasonText(panel.entry.reason) : ""
+            text: panel.entry ? qsTr("Incompatível: %1").arg(X.reasonText(panel.entry.reason)) : ""
             textFormat: Text.PlainText
             color: Theme.warning
             font.family: Theme.fontFamily
@@ -207,7 +207,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: Theme.space(6)
             Text {
-                text: "Hash do manifest (SHA-256): " + (panel.entry ? panel.entry.manifest_sha256 : "—")
+                text: qsTr("Hash do manifest (SHA-256): %1").arg(panel.entry ? panel.entry.manifest_sha256 : "—")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -216,7 +216,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Text {
-                text: "Capacidades: " + ((panel.caps || []).length ? panel.caps.join(", ") : "nenhuma")
+                text: qsTr("Capacidades: %1").arg((panel.caps || []).length ? panel.caps.join(", ") : qsTr("nenhuma"))
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -226,7 +226,7 @@ Rectangle {
             }
             Text {
                 visible: panel.entry !== null
-                text: "Dependências: " + (panel.entry && (panel.entry.dependencies || []).length ? panel.entry.dependencies.join(", ") : "nenhuma")
+                text: qsTr("Dependências: %1").arg(panel.entry && (panel.entry.dependencies || []).length ? panel.entry.dependencies.join(", ") : qsTr("nenhuma"))
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -236,7 +236,7 @@ Rectangle {
             }
             Text {
                 visible: panel.entry !== null
-                text: "Licença: " + (panel.entry ? panel.entry.license : "") + " · Tamanho do pacote: " + (panel.entry ? panel.entry.download_size : "") + " bytes"
+                text: qsTr("Licença: %1 · Tamanho do pacote: %2 bytes").arg(panel.entry ? panel.entry.license : "").arg(panel.entry ? panel.entry.download_size : "")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -253,7 +253,7 @@ Rectangle {
             text: panel.act.text
             variant: panel.act.kind === "install" || panel.act.kind === "enable" ? "primary" : "secondary"
             enabled: panel.act.enabled
-            Accessible.name: panel.act.text + " " + panel.pid
+            Accessible.name: qsTr("%1 %2").arg(panel.act.text).arg(panel.pid)
             onClicked: panel.runPrimary()
         }
         Text {

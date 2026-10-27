@@ -170,6 +170,8 @@ def main():
     global TMP
     parser = argparse.ArgumentParser()
     parser.add_argument('--keep-dir', action='store_true', help='keep the temp dir after exit (default: removed)')
+    parser.add_argument('--ui-language', default='pt-BR', choices=('pt-BR', 'en', 'fr'),
+                        help='interface language of the test Core (preference ui_language); the client follows it')
     args = parser.parse_args()
     for path in (BIN, LLM_SRC, GITHUB_SRC, SKILL_SRC, PAYLOADS):
         need(f'asset present {path.name}', path.exists(), path)
@@ -203,8 +205,16 @@ def main():
         need('skill saved, dry run, approved and enabled', all(c == 'ok' for c in codes), codes)
 
         cid = connect_github(root, gh_port)
+        # The interface language is the Core preference (ui_language), set through its own op, so the client shows it
+        # from its first frame. A clean environment has no LANG, so without this the Core would start in pt-BR.
+        if args.ui_language != 'pt-BR':
+            rev = c4.req(root)['preferences']['revision']
+            code = call(root, 'ui_language_preference', revision=rev, ui_language=args.ui_language)['code']
+            need('ui_language_preference', code == 'ok', code)
         snap = c4.req(root)
+        need('ui language is the chosen one', snap['preferences']['ui_language'] == args.ui_language, snap['preferences'].get('ui_language'))
         print(json.dumps({'ready': True, 'root': str(root), 'tmp': str(TMP), 'core_pid': core_proc.pid,
+                          'ui_language': args.ui_language,
                           'github_pid': gh_proc.pid, 'github_port': gh_port, 'llm_fake_url': llm_url,
                           'llm_fake_pid': llm_fake.pid, 'connection_id': cid,
                           'plugins_running': sorted(i['plugin_id'] for i in snap['plugins']['items'] if i['state'] == 'running'),

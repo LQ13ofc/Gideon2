@@ -32,7 +32,7 @@ ColumnLayout {
         border.color: Theme.hairline
         visible: meter.capturing
         Accessible.role: Accessible.ProgressBar
-        Accessible.name: "Nível do microfone: " + (meter.view.rmsText || "")
+        Accessible.name: qsTr("Nível do microfone: %1").arg(meter.view.rmsText || "")
 
         Rectangle {
             id: fill
@@ -74,7 +74,7 @@ ColumnLayout {
         spacing: Theme.space(10)
         Text {
             objectName: "ilevelRmsText"
-            text: "Sinal: " + meter.view.rmsText + (meter.view.zoneText ? " · " + meter.view.zoneText : "")
+            text: meter.view.zoneText ? qsTr("Sinal: %1 · %2").arg(meter.view.rmsText).arg(meter.view.zoneText) : qsTr("Sinal: %1").arg(meter.view.rmsText)
             textFormat: Text.PlainText
             color: meter.zoneTones[meter.view.zone] || Theme.textMuted
             font.family: Theme.fontFamily
@@ -85,7 +85,7 @@ ColumnLayout {
         Text {
             objectName: "ilevelPeakText"
             visible: !meter.compact
-            text: "Pico: " + meter.view.peakText
+            text: qsTr("Pico: %1").arg(meter.view.peakText)
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -95,7 +95,7 @@ ColumnLayout {
     Text {
         objectName: "ilevelFloorText"
         visible: meter.capturing && !meter.compact
-        text: meter.view.calibrating ? "Medindo o ruído de fundo…" : meter.view.floorLine
+        text: meter.view.calibrating ? qsTr("Medindo o ruído de fundo…") : meter.view.floorLine
         textFormat: Text.PlainText
         color: meter.zoneTones[meter.view.floorZone] || Theme.textMuted
         font.family: Theme.fontFamily
@@ -107,7 +107,7 @@ ColumnLayout {
     Text {
         objectName: "ilevelWarningText"
         visible: meter.capturing && meter.view.warningText.length > 0
-        text: "Atenção: " + meter.view.warningText
+        text: qsTr("Atenção: %1").arg(meter.view.warningText)
         textFormat: Text.PlainText
         color: Theme.warning
         font.family: Theme.fontFamily
@@ -119,7 +119,7 @@ ColumnLayout {
     Text {
         objectName: "ilevelOffText"
         visible: !meter.capturing
-        text: "Sem medição: o medidor aparece quando a escuta do microfone estiver ligada e o Core reiniciado."
+        text: qsTr("Sem medição: o medidor aparece quando a escuta do microfone estiver ligada e o Core reiniciado.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily

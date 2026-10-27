@@ -5,6 +5,7 @@ import QtQuick.Window
 import "../theme"
 import "../components"
 import "../shell"
+import "../shell/CfgSettings.js" as CS
 
 // Configurações > Idiomas (Frente 2 de docs/PLANO_FRASES_IDIOMAS.md): em que idiomas a IA fala (TTS) e entende (STT).
 // Só idioma instalado pode ser escolhido. Português e francês aparecem como "não instalado", com tamanho, licença e motivo.
@@ -90,14 +91,14 @@ PageFrame {
         return "warning"
     }
     function sizeText(item) {
-        if (item.size_bytes === null || item.size_bytes === undefined) return item.size_note || qsTr("tamanho não informado")
+        if (item.size_bytes === null || item.size_bytes === undefined) return CS.catalogFact(item.size_note) || qsTr("tamanho não informado")
         var mb = Math.round(item.size_bytes / 1000000)
         return (item.size_partial ? qsTr("cerca de %1 MB (parcial)") : qsTr("cerca de %1 MB")).arg(mb)
     }
     function detailText(item) {
-        var parts = [qsTr("Tamanho: %1").arg(sizeText(item)), qsTr("Licença: %1").arg(item.license || qsTr("não informada")),
-                     qsTr("Qualidade: %1").arg(item.quality)]
-        if (item.reason) parts.push(item.reason)
+        var parts = [qsTr("Tamanho: %1").arg(sizeText(item)), qsTr("Licença: %1").arg(CS.catalogFact(item.license) || qsTr("não informada")),
+                     qsTr("Qualidade: %1").arg(CS.catalogFact(item.quality))]
+        if (item.reason) parts.push(CS.catalogFact(item.reason))
         return parts.join(" · ")
     }
 

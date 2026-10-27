@@ -17,10 +17,10 @@ function eventRow(ev) {
         if (E.phrase(kind) === "") return null
         if (!e.a && !e.e) return null
     }
-    var failed = ev.outcome === "failed" || (e !== null && e.result === "Falhou")
+    var failed = ev.outcome === "failed" || (e !== null && e.result === "failed")
     var badge = null
-    if (failed) badge = {text: "Falhou", tone: "error"}
-    else if (e !== null && e.result === "Concluído" && ev.outcome === "ok") badge = {text: "Concluído", tone: "success"}
+    if (failed) badge = {text: qsTr("Falhou"), tone: "error"}
+    else if (e !== null && e.result === "done" && ev.outcome === "ok") badge = {text: qsTr("Concluído"), tone: "success"}
     return {
         key: "e" + ev.sequence,
         seq: Number(ev.sequence) || 0,
@@ -43,12 +43,12 @@ function eventRows(events) {
     return out
 }
 
-// Filter of the timeline: all | cmd | skill | agent | err.
+// Filter of the timeline: all | cmd | skill | agent | err. Categories are the keys of EventLabels.js.
 function matches(row, filterId) {
     switch (filterId) {
-    case "cmd": return row.category === "Comando"
-    case "skill": return row.category === "Skill"
-    case "agent": return row.category === "Agente"
+    case "cmd": return row.category === "command"
+    case "skill": return row.category === "skill"
+    case "agent": return row.category === "agent"
     case "err": return row.error === true
     }
     return true
@@ -58,19 +58,20 @@ function matches(row, filterId) {
 function skillRow(run) {
     var state = String(run.state || "")
     var codes = run.codes || []
-    var text = String(run.skill || "") + " v" + String(run.version || "") + " · " + L.skillRunText(state) + " · passo " + String(run.step === undefined ? "" : run.step)
+    var text = qsTr("%1 v%2 · %3 · passo %4").arg(String(run.skill || "")).arg(String(run.version || ""))
+        .arg(L.skillRunText(state)).arg(String(run.step === undefined ? "" : run.step))
     if (codes.length > 0) text += " · " + E.codePhrase(codes[0])
     var badge = null
-    if (state === "done") badge = {text: "Concluída", tone: "success"}
-    else if (state === "failed") badge = {text: "Falhou", tone: "error"}
-    return {key: "skill:" + String(run.run_id || run.skill || ""), seq: 0, time: "", text: text, category: "Skill", error: state === "failed", badge: badge}
+    if (state === "done") badge = {text: qsTr("Concluída"), tone: "success"}
+    else if (state === "failed") badge = {text: qsTr("Falhou"), tone: "error"}
+    return {key: "skill:" + String(run.run_id || run.skill || ""), seq: 0, time: "", text: text, category: "skill", error: state === "failed", badge: badge}
 }
 
 // Last connection call row (no Core time). Outcome words never show a raw code.
 function callRow(call) {
     var ok = call.outcome === "ok"
-    var result = call.code ? E.codePhrase(call.code) : (ok ? "concluída" : "Resultado desconhecido")
-    var text = "Última chamada: " + L.connOpLabel(String(call.operation || "")) + " · " + result
-    if (call.untrusted === true) text += " · Conteúdo externo não exibido."
-    return {key: "call:" + String(call.operation || "") + ":" + String(call.outcome || "") + ":" + String(call.code || ""), seq: 0, time: "", text: text, category: "Conexão", error: !ok, badge: null}
+    var result = call.code ? E.codePhrase(call.code) : (ok ? qsTr("concluída") : qsTr("Resultado desconhecido"))
+    var text = qsTr("Última chamada: %1 · %2").arg(L.connOpLabel(String(call.operation || ""))).arg(result)
+    if (call.untrusted === true) text += " · " + qsTr("Conteúdo externo não exibido.")
+    return {key: "call:" + String(call.operation || "") + ":" + String(call.outcome || "") + ":" + String(call.code || ""), seq: 0, time: "", text: text, category: "connection", error: !ok, badge: null}
 }

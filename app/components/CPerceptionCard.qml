@@ -12,14 +12,15 @@ Card {
     readonly property bool running: plugin.state === "running"
     readonly property bool isDisplay: pid === "display_manipulate"
     readonly property var actions: L.perceptionActions()[pid] || []
+    // The backend names are Portuguese texts kept as keys (QT_TR_NOOP) and translated when the card reads them (qsTr).
     readonly property var backends: ({
-        "screen_observe": "portal XDG (captura de tela)",
-        "computer_control": "AT-SPI (árvore) e RemoteDesktop (teclado)",
-        "audio_advanced": "PipeWire (wpctl, pw-dump)",
-        "mic_advanced": "PipeWire (ganho e medidor, nada guardado)",
-        "camera_gesture": "v4l2 (quadro sob acesso ligado)",
-        "display_manipulate": "KScreen (kscreen-doctor)",
-        "shortcut_global": "portal GlobalShortcuts, com KGlobalAccel de reserva"
+        "screen_observe": QT_TR_NOOP("portal XDG (captura de tela)"),
+        "computer_control": QT_TR_NOOP("AT-SPI (árvore) e RemoteDesktop (teclado)"),
+        "audio_advanced": QT_TR_NOOP("PipeWire (wpctl, pw-dump)"),
+        "mic_advanced": QT_TR_NOOP("PipeWire (ganho e medidor, nada guardado)"),
+        "camera_gesture": QT_TR_NOOP("v4l2 (quadro sob acesso ligado)"),
+        "display_manipulate": QT_TR_NOOP("KScreen (kscreen-doctor)"),
+        "shortcut_global": QT_TR_NOOP("portal GlobalShortcuts, com KGlobalAccel de reserva")
     })
 
     function stateTone(state) {
@@ -29,6 +30,10 @@ Card {
         case "failed": case "quarantined": return "error"
         default: return "neutral"
         }
+    }
+    function backendText() {
+        var key = card.backends[card.pid]
+        return qsTr("Backend: %1").arg(key ? qsTr(key) : qsTr("não informado"))
     }
 
     RowLayout {
@@ -53,7 +58,7 @@ Card {
     }
     Text {
         objectName: "perceptionBackend_" + card.pid
-        text: "Backend: " + (card.backends[card.pid] || "não informado")
+        text: card.backendText()
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -64,7 +69,7 @@ Card {
     Text {
         objectName: "perceptionError_" + card.pid
         visible: !!card.plugin.last_error
-        text: "Último erro: " + (card.plugin.last_error || "")
+        text: qsTr("Último erro: %1").arg(card.plugin.last_error || "")
         textFormat: Text.PlainText
         color: Theme.error
         font.family: Theme.fontFamily
@@ -73,7 +78,7 @@ Card {
         Layout.fillWidth: true
     }
     Text {
-        text: "Permissão exigida: " + ((card.plugin.permissions || []).map(function (p) { return core.permissionLabel(p) }).join(", ") || "nenhuma") + (card.plugin.approved ? " · concedida" : " · não concedida")
+        text: qsTr("Permissão exigida: %1").arg((card.plugin.permissions || []).map(function (p) { return core.permissionLabel(p) }).join(", ") || qsTr("nenhuma")) + (card.plugin.approved ? qsTr(" · concedida") : qsTr(" · não concedida"))
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -86,9 +91,9 @@ Card {
         objectName: "displayRestoreButton"
         visible: card.isDisplay
         variant: "secondary"
-        text: "Restaurar escala e brilho"
+        text: qsTr("Restaurar escala e brilho")
         enabled: core.connected && card.running && !core.perceptionBusy
-        Accessible.name: "Restaurar a escala e o brilho da tela para os valores anteriores às mudanças"
+        Accessible.name: qsTr("Restaurar a escala e o brilho da tela para os valores anteriores às mudanças")
         onClicked: core.perceptionInvoke("display_manipulate.restore", "{}")
     }
     // Test buttons are read-only and belong to developer mode (Desenvolvimento); the Core still refuses anything else.
@@ -103,7 +108,7 @@ Card {
                 objectName: "perception_" + modelData.capability
                 variant: "secondary"
                 text: modelData.label
-                Accessible.name: modelData.label + " " + modelData.capability
+                Accessible.name: qsTr("%1 %2").arg(modelData.label).arg(modelData.capability)
                 enabled: core.connected && card.running && !core.perceptionBusy
                 onClicked: core.perceptionInvoke(modelData.capability, "{}")
             }
@@ -111,7 +116,7 @@ Card {
     }
     Text {
         visible: Theme.devMode && !card.running
-        text: "Indisponível: plugin não está em execução."
+        text: qsTr("Indisponível: plugin não está em execução.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily

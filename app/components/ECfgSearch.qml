@@ -43,7 +43,7 @@ ColumnLayout {
             id: field
             objectName: "cfgSearchField"
             Layout.fillWidth: true
-            placeholderText: "Buscar configurações"
+            placeholderText: qsTr("Buscar configurações")
             Keys.onReturnPressed: if (search.shown.length > 0) search.pick(search.shown[0])
             Keys.onEnterPressed: if (search.shown.length > 0) search.pick(search.shown[0])
             Keys.onEscapePressed: field.text = ""
@@ -52,7 +52,7 @@ ColumnLayout {
         GCheckbox {
             id: onlyBox
             objectName: "onlyModifiedCheck"
-            text: "Somente modificados"
+            text: qsTr("Somente modificados")
             checked: AppState.onlyModified
             onToggled: {
                 AppState.onlyModified = onlyBox.checked
@@ -105,7 +105,7 @@ ColumnLayout {
                     }
                 }
                 Badge {
-                    text: result.spec && result.spec.level === "advanced" ? "Avançado" : "Básico"
+                    text: result.spec && result.spec.level === "advanced" ? qsTr("Avançado") : qsTr("Básico")
                     tone: "neutral"
                 }
             }
@@ -119,7 +119,7 @@ ColumnLayout {
     }
     Text {
         visible: field.text.trim().length > 0 && search.shown.length === 0
-        text: "Nenhuma configuração encontrada para “" + field.text.trim() + "”."
+        text: qsTr("Nenhuma configuração encontrada para “%1”.").arg(field.text.trim())
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily

@@ -430,7 +430,10 @@ def build_tree(pkg, pkg_name, version, gideon_base, packaged_binary):
     copy_file(perception_catalog, pkg / "catalog" / "hub-perception.json")
     (pkg / "catalog" / "hub-perception.sha256").write_text(sha256(perception_catalog) + "\n", encoding="utf-8")
     app_src = REPO / "app"
-    for app_file in ("main.py", "bridge.py", "uisettings.py", "visual.py", "translations.py", "Main.qml", "GlassCard.qml", "GlowButton.qml"):
+    # WP-20 G5c: the Portuguese message tables of the bridge, by topic (imported by bridge.py, so packaged with it)
+    for app_file in ("main.py", "bridge.py", "uisettings.py", "visual.py", "translations.py", "msgs_errors.py", "msgs_audio.py",
+                     "msgs_connections.py", "msgs_skills_hub.py", "msgs_llm_models.py", "msgs_perception.py", "msgs_misc.py",
+                     "Main.qml", "GlassCard.qml", "GlowButton.qml"):
         copy_file(app_src / app_file, pkg / "app" / app_file)
     shutil.copytree(app_src / "assets", pkg / "app/assets", ignore=ignore_pycache)
     # WP-20: the compiled catalogs (built above). The .ts sources stay in the repository, not in the package.

@@ -29,10 +29,10 @@ PageFrame {
         return core.connectionsAvailable && !core.connectionsBusy
     }
     function queueTip(row) {
-        if (!core.connected) return "Core desconectado."
+        if (!core.connected) return qsTr("Core desconectado.")
         if (queueEnabled(row)) return ""
-        if (row.kind === "plugin" && core.sessionId.length > 0) return "Indisponível durante a sessão de voz."
-        return "Indisponível agora."
+        if (row.kind === "plugin" && core.sessionId.length > 0) return qsTr("Indisponível durante a sessão de voz.")
+        return qsTr("Indisponível agora.")
     }
     function openItem(row) {
         if (!row || !queueEnabled(row)) return
@@ -46,35 +46,40 @@ PageFrame {
         Window.window.goPage("perm_concessoes")
     }
     function rowActionName(row) {
-        if (row.kind === "plugin") return "Revisar permissões de " + row.ref.plugin_id
-        if (row.kind === "consent") return "Revisar escopos de " + row.ref.label
-        return "Revisar ferramenta " + row.tool
+        if (row.kind === "plugin") return qsTr("Revisar permissões de %1").arg(row.ref.plugin_id)
+        if (row.kind === "consent") return qsTr("Revisar escopos de %1").arg(row.ref.label)
+        return qsTr("Revisar ferramenta %1").arg(row.tool)
+    }
+    // Título da seção de pendências: a contagem vai no texto (o plural fica na frase).
+    function queueTitle(n) {
+        if (n === 0) return qsTr("Pendências")
+        return n === 1 ? qsTr("Pendência · %1 aguardando sua decisão").arg(n) : qsTr("Pendências · %1 aguardando sua decisão").arg(n)
     }
 
     DPermDialogs { id: dialogs }
 
     PageHeader {
-        title: "Visão geral"
-        subtitle: "O que precisa da sua decisão agora e o que já está concedido."
+        title: qsTr("Visão geral")
+        subtitle: qsTr("O que precisa da sua decisão agora e o que já está concedido.")
         GButton {
             objectName: "reviewNextButton"
             variant: "primary"
-            text: "Revisar próxima"
+            text: qsTr("Revisar próxima")
             enabled: page.queue.length > 0 && page.queueEnabled(page.queue[0])
-            Accessible.description: page.queue.length === 0 ? "Nada pendente." : page.queueTip(page.queue[0])
+            Accessible.description: page.queue.length === 0 ? qsTr("Nada pendente.") : page.queueTip(page.queue[0])
             onClicked: page.openItem(page.queue[0])
         }
     }
     Banner {
         objectName: "permBanner"
         kind: core.connected ? "warn" : "error"
-        text: !core.connected ? "Core desconectado. Mostrando o último estado conhecido; nada pode ser alterado."
-            : core.sessionId.length > 0 ? "Sessão de voz ativa: mudanças em plugins bloqueadas." : ""
+        text: !core.connected ? qsTr("Core desconectado. Mostrando o último estado conhecido; nada pode ser alterado.")
+            : core.sessionId.length > 0 ? qsTr("Sessão de voz ativa: mudanças em plugins bloqueadas.") : ""
     }
 
     // Pendências: the decisions waiting now, in the order of 30 §5.4.
     Section {
-        title: page.queue.length > 0 ? "Pendências · " + page.queue.length + " aguardando sua decisão" : "Pendências"
+        title: page.queueTitle(page.queue.length)
         Repeater {
             model: page.queue
             delegate: Rectangle {
@@ -114,7 +119,7 @@ PageFrame {
                         Text {
                             text: queueRow.modelData.sub
                             textFormat: Text.PlainText
-                            color: queueRow.modelData.kind === "plugin" && queueRow.modelData.sub.indexOf("Atualização") >= 0 ? Theme.warning : Theme.textMuted
+                            color: queueRow.modelData.kind === "plugin" && queueRow.modelData.ref.status === "update_available" ? Theme.warning : Theme.textMuted
                             font.family: Theme.fontFamily; font.pixelSize: Theme.fontCaption
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
@@ -122,7 +127,7 @@ PageFrame {
                     }
                     GButton {
                         objectName: "queueReview_" + queueRow.modelData.key.replace(/:/g, "_")
-                        text: "Revisar"
+                        text: qsTr("Revisar")
                         variant: "secondary"
                         enabled: page.queueEnabled(queueRow.modelData)
                         Accessible.name: page.rowActionName(queueRow.modelData)
@@ -136,13 +141,13 @@ PageFrame {
         EmptyState {
             visible: page.queue.length === 0
             iconName: "shield"
-            message: "Nada pendente.\nPlugins, skills e contas aparecem aqui quando precisarem da sua decisão."
+            message: qsTr("Nada pendente.\nPlugins, skills e contas aparecem aqui quando precisarem da sua decisão.")
         }
     }
 
     // Concessões ativas: what is already granted (30 §5.6, items 15-18).
     Section {
-        title: "Concessões ativas"
+        title: qsTr("Concessões ativas")
         Repeater {
             model: page.active
             delegate: Rectangle {
@@ -184,13 +189,13 @@ PageFrame {
                     Text {
                         id: openLink
                         objectName: "activeOpen_" + activeRow.modelData.key.replace(/:/g, "_")
-                        text: "Ver ›"
+                        text: qsTr("Ver ›")
                         textFormat: Text.PlainText
                         color: Theme.accent
                         font.family: Theme.fontFamily; font.pixelSize: Theme.fontBody; font.weight: 600
                         Layout.alignment: Qt.AlignVCenter
                         Accessible.role: Accessible.Link
-                        Accessible.name: "Ver " + activeRow.modelData.item
+                        Accessible.name: qsTr("Ver %1").arg(activeRow.modelData.item)
                         activeFocusOnTab: true
                         Keys.onReturnPressed: page.openList(activeRow.modelData.filter, activeRow.modelData.key)
                         Keys.onSpacePressed: page.openList(activeRow.modelData.filter, activeRow.modelData.key)
@@ -212,12 +217,12 @@ PageFrame {
         EmptyState {
             visible: page.active.length === 0
             iconName: "shield"
-            message: "Nenhuma permissão concedida ainda.\nAprove um plugin ou consinta escopos de uma conta para vê-los aqui."
+            message: qsTr("Nenhuma permissão concedida ainda.\nAprove um plugin ou consinta escopos de uma conta para vê-los aqui.")
         }
         GButton {
             objectName: "allGrantsLink"
             variant: "ghost"
-            text: "Ver todas em Concessões ›"
+            text: qsTr("Ver todas em Concessões ›")
             Layout.alignment: Qt.AlignLeft
             onClicked: page.openList("todas", "")
         }
@@ -225,9 +230,9 @@ PageFrame {
 
     Collapsible {
         objectName: "howItWorks"
-        title: "Como funciona"
+        title: qsTr("Como funciona")
         Text {
-            text: "Permissões são decisões suas. Aprovar não instala nem executa nada. Revogar desativa o plugin e encerra o processo. Skills não concedem permissão: usam capacidades de plugins já aprovados. Contas só usam os escopos que você consentiu."
+            text: qsTr("Permissões são decisões suas. Aprovar não instala nem executa nada. Revogar desativa o plugin e encerra o processo. Skills não concedem permissão: usam capacidades de plugins já aprovados. Contas só usam os escopos que você consentiu.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily; font.pixelSize: Theme.fontHelp

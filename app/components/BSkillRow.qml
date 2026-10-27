@@ -61,7 +61,7 @@ ColumnLayout {
                 }
                 Text {
                     objectName: "skillState_" + row.key
-                    text: "Estado: " + L.skillStateText(row.skill.state) + " · origem: " + L.skillSourceText(row.skill.source) + (row.skill.active ? " · versão ativa" : "")
+                    text: qsTr("Estado: %1 · origem: %2").arg(L.skillStateText(row.skill.state)).arg(L.skillSourceText(row.skill.source)) + (row.skill.active ? qsTr(" · versão ativa") : "")
                     textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.family: Theme.fontFamily
@@ -72,7 +72,7 @@ ColumnLayout {
                 Text {
                     objectName: "skillDeps_" + row.key
                     visible: !row.skill.deps_ok || !row.skill.permissions_ok
-                    text: "Dependências: " + (row.skill.deps_ok ? "ok" : "faltando: " + (row.skill.missing || []).join(", ")) + " · permissões: " + (row.skill.permissions_ok ? "aprovadas" : "pendentes")
+                    text: qsTr("Dependências: %1 · permissões: %2").arg(row.skill.deps_ok ? qsTr("ok") : qsTr("faltando: %1").arg((row.skill.missing || []).join(", "))).arg(row.skill.permissions_ok ? qsTr("aprovadas") : qsTr("pendentes"))
                     textFormat: Text.PlainText
                     color: Theme.warning
                     font.family: Theme.fontFamily
@@ -94,46 +94,46 @@ ColumnLayout {
             GButton {
                 objectName: "skillRun_" + row.skill.id
                 visible: row.act.kind === "run"
-                text: "Executar"
+                text: qsTr("Executar")
                 variant: "primary"
                 enabled: row.act.kind === "run" && row.act.enabled
-                Accessible.name: "Executar " + row.skill.id
+                Accessible.name: qsTr("Executar %1").arg(row.skill.id)
                 onClicked: core.skillRun(row.skill.id, row.ctx.inputs)
             }
             GButton {
                 objectName: "skillDisable_" + row.skill.id
                 visible: row.skill.state === "enabled"
-                text: "Desabilitar"
+                text: qsTr("Desabilitar")
                 variant: "secondary"
                 enabled: row.skill.state === "enabled" && !row.ctx.busy
-                Accessible.name: "Desabilitar " + row.skill.id
+                Accessible.name: qsTr("Desabilitar %1").arg(row.skill.id)
                 onClicked: core.skillDisable(row.skill.id)
             }
             GButton {
                 objectName: "skillEnable_" + row.skill.id
                 visible: row.act.kind === "enable"
-                text: "Habilitar"
+                text: qsTr("Habilitar")
                 variant: "primary"
                 enabled: row.act.kind === "enable" && row.act.enabled
-                Accessible.name: "Habilitar " + row.skill.id
+                Accessible.name: qsTr("Habilitar %1").arg(row.skill.id)
                 onClicked: core.skillEnable(row.skill.id)
             }
             GButton {
                 objectName: "skillApprove_" + row.key
                 visible: row.act.kind === "approve"
-                text: "Aprovar"
+                text: qsTr("Aprovar")
                 variant: "primary"
                 enabled: row.act.kind === "approve" && row.act.enabled
-                Accessible.name: "Aprovar " + row.skill.id + " v" + row.skill.version
+                Accessible.name: qsTr("Aprovar %1 v%2").arg(row.skill.id).arg(row.skill.version)
                 onClicked: core.skillApprove(row.skill.id, row.skill.version)
             }
             GButton {
                 objectName: "skillDryRun_" + row.key
                 visible: row.act.kind === "dry"
-                text: "Simular"
+                text: qsTr("Simular")
                 variant: "secondary"
                 enabled: row.act.kind === "dry" && row.act.enabled
-                Accessible.name: "Simular " + row.skill.id
+                Accessible.name: qsTr("Simular %1").arg(row.skill.id)
                 onClicked: core.skillDryRun(row.skill.id, row.skill.version, row.ctx.inputs)
             }
         }

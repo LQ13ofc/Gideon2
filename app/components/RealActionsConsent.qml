@@ -9,7 +9,7 @@ import "../theme"
 Modal {
     id: consent
     objectName: "realActionsConsent"
-    title: "Executar ações no computador?"
+    title: qsTr("Executar ações no computador?")
     standardButtons: Dialog.NoButton
     signal agreed()
     onOpened: consentCancel.forceActiveFocus()
@@ -17,7 +17,7 @@ Modal {
 
     Text {
         objectName: "realActionsConsentText"
-        text: "Quando você disser um comando, o Gideon vai abrir aplicativos e mudar o volume do seu computador de verdade. Só comandos da lista fixa. Você pode desligar a qualquer momento."
+        text: qsTr("Quando você disser um comando, o Gideon vai abrir aplicativos e mudar o volume do seu computador de verdade. Só comandos da lista fixa. Você pode desligar a qualquer momento.")
         textFormat: Text.PlainText
         color: Theme.text
         font.family: Theme.fontFamily
@@ -33,14 +33,14 @@ Modal {
             id: consentCancel
             objectName: "realActionsConsentCancel"
             variant: "secondary"
-            text: "Cancelar"
+            text: qsTr("Cancelar")
             onClicked: consent.reject()
         }
         GButton {
             objectName: "realActionsConsentConfirm"
             variant: "primary"
-            text: "Permitir ações"
-            Accessible.name: "Permitir que o Gideon execute ações no computador"
+            text: qsTr("Permitir ações")
+            Accessible.name: qsTr("Permitir que o Gideon execute ações no computador")
             onClicked: consent.accept()
         }
     }

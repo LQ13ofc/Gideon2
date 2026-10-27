@@ -29,9 +29,9 @@ ColumnLayout {
     Text {
         objectName: "micOfferStatus"
         visible: text.length > 0
-        text: offer.runState === "running" ? "Verificando os microfones (2 s cada), um de cada vez…"
-            : offer.runState === "failed" ? "Não foi possível verificar os microfones: " + (core.micRecommendation.error || "erro desconhecido") + "."
-            : (offer.runState === "done" && core.micRecommendation.currentIsBad === false) ? "O microfone escolhido está bom: nada a trocar."
+        text: offer.runState === "running" ? qsTr("Verificando os microfones (2 s cada), um de cada vez…")
+            : offer.runState === "failed" ? qsTr("Não foi possível verificar os microfones: %1.").arg(core.micRecommendation.error || qsTr("erro desconhecido"))
+            : (offer.runState === "done" && core.micRecommendation.currentIsBad === false) ? qsTr("O microfone escolhido está bom: nada a trocar.")
             : ""
         textFormat: Text.PlainText
         color: Theme.textMuted
@@ -39,7 +39,7 @@ ColumnLayout {
         font.pixelSize: Theme.fontHelp
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
-        Accessible.name: "Verificação dos microfones: " + text
+        Accessible.name: qsTr("Verificação dos microfones: %1").arg(text)
     }
     Banner {
         objectName: "micOfferBanner"

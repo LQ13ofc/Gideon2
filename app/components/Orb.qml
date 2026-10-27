@@ -27,10 +27,10 @@ Item {
     width: size; height: size
     implicitWidth: size; implicitHeight: size
     Accessible.role: Accessible.Graphic
-    Accessible.name: "Estado do Gideon: " + modeWords[mode]
-    readonly property var modeWords: ({idle: "em espera", wake: "ativado", listening: "ouvindo", transcribing: "transcrevendo",
-                                       thinking: "pensando", acting: "executando", speaking: "falando", error: "erro",
-                                       confirm: "aguardando sua aprovação"})
+    Accessible.name: qsTr("Estado do Gideon: %1").arg(modeWords[mode])
+    readonly property var modeWords: ({idle: qsTr("em espera"), wake: qsTr("ativado"), listening: qsTr("ouvindo"), transcribing: qsTr("transcrevendo"),
+                                       thinking: qsTr("pensando"), acting: qsTr("executando"), speaking: qsTr("falando"), error: qsTr("erro"),
+                                       confirm: qsTr("aguardando sua aprovação")})
 
     function cssOf(c, alpha) {
         return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + (alpha === undefined ? c.a : alpha) + ")"

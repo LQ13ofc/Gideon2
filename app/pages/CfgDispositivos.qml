@@ -19,7 +19,14 @@ PageFrame {
     // The text of the saved choice in a list ("Padrão do sistema" when the choice is the system default).
     function choiceText(list, value) {
         for (var i = 0; i < list.length; i++) if (list[i].value === value) return list[i].text
-        return "Padrão do sistema"
+        return qsTr("Padrão do sistema")
+    }
+    // A device row of the assistant's list, with its state words after the label ("(atual)", "· câmera").
+    function rowLabel(row) {
+        var text = row.label
+        if (row.current) text = qsTr("%1 (atual)").arg(text)
+        if (row.camera) text = qsTr("%1 · câmera").arg(text)
+        return text
     }
     // The row of the saved value (0 when the list has no such row). It reads the list itself, so the row follows a new list.
     function indexFor(list, value) {
@@ -29,17 +36,17 @@ PageFrame {
     // Shown under a list: why there is nothing to choose, or "" when the list has entries.
     function emptyText(kind) {
         if (!core.audioDevices.known || core.audioDevices.source === "none") return ""
-        return core.audioDevices[kind].length === 0 ? (kind === "inputs" ? "Nenhum microfone listado pelo sistema." : "Nenhum alto-falante listado pelo sistema.") : ""
+        return core.audioDevices[kind].length === 0 ? (kind === "inputs" ? qsTr("Nenhum microfone listado pelo sistema.") : qsTr("Nenhum alto-falante listado pelo sistema.")) : ""
     }
 
     PageHeader {
-        title: "Dispositivos"
-        subtitle: "Microfone e alto-falante usados pelo Gideon. A lista vem do sistema; a troca vale na próxima sessão de voz."
+        title: qsTr("Dispositivos")
+        subtitle: qsTr("Microfone e alto-falante usados pelo Gideon. A lista vem do sistema; a troca vale na próxima sessão de voz.")
         GButton {
             objectName: "refreshAudioDevicesButton"
             variant: "secondary"
-            text: "Atualizar lista"
-            Accessible.name: "Atualizar a lista de dispositivos de áudio"
+            text: qsTr("Atualizar lista")
+            Accessible.name: qsTr("Atualizar a lista de dispositivos de áudio")
             enabled: core.connected
             onClicked: core.refreshAudioDevices()
         }
@@ -94,9 +101,9 @@ PageFrame {
     // A6 consent for the live microphone. The switch shows the saved choice; turning it on opens the consent first, and
     // the Core starts listening at its next start (Reiniciar agora applies it now, when no voice session runs).
     Section {
-        title: "Escuta do microfone"
+        title: qsTr("Escuta do microfone")
         Text {
-            text: "Desligada, o Gideon não abre o microfone. Ligada, ele ouve o microfone escolhido abaixo só para detectar a frase de ativação. O áudio fica na memória e nada é gravado em disco. A troca vale depois de reiniciar o Core."
+            text: qsTr("Desligada, o Gideon não abre o microfone. Ligada, ele ouve o microfone escolhido abaixo só para detectar a frase de ativação. O áudio fica na memória e nada é gravado em disco. A troca vale depois de reiniciar o Core.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -107,8 +114,8 @@ PageFrame {
         Toggle {
             id: liveSwitch
             objectName: "liveAudioSwitch"
-            text: "Ouvir o microfone (ativação por voz)"
-            Accessible.name: "Ouvir o microfone para a ativação por voz"
+            text: qsTr("Ouvir o microfone (ativação por voz)")
+            Accessible.name: qsTr("Ouvir o microfone para a ativação por voz")
             checked: core.liveAudioEnabled
             enabled: core.preferencesAvailable
             onToggled: {
@@ -127,7 +134,7 @@ PageFrame {
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Accessible.name: "Estado da escuta do microfone: " + text
+            Accessible.name: qsTr("Estado da escuta do microfone: %1").arg(text)
         }
         RowLayout {
             objectName: "liveAudioRestartRow"
@@ -135,7 +142,7 @@ PageFrame {
             Layout.fillWidth: true
             spacing: Theme.space(10)
             Text {
-                text: "A escolha só vale no próximo início do Core. Sessões de voz em andamento bloqueiam o reinício."
+                text: qsTr("A escolha só vale no próximo início do Core. Sessões de voz em andamento bloqueiam o reinício.")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -146,8 +153,8 @@ PageFrame {
             GButton {
                 objectName: "liveAudioRestartButton"
                 variant: "primary"
-                text: "Reiniciar agora"
-                Accessible.name: "Reiniciar o Core agora para aplicar a escuta do microfone"
+                text: qsTr("Reiniciar agora")
+                Accessible.name: qsTr("Reiniciar o Core agora para aplicar a escuta do microfone")
                 enabled: core.coreRestartAvailable
                 onClicked: core.coreRestart()
             }
@@ -157,9 +164,9 @@ PageFrame {
     // A9: the level the Core hears from the live input (numbers only, 5 updates a second at most). The meter names every
     // zone in words; without the listening on, it says how to see it.
     Section {
-        title: "Nível do microfone"
+        title: qsTr("Nível do microfone")
         Text {
-            text: "Mostra o nível do microfone escolhido enquanto a escuta está ligada: o sinal, o ruído de fundo e alertas. Não grava nada."
+            text: qsTr("Mostra o nível do microfone escolhido enquanto a escuta está ligada: o sinal, o ruído de fundo e alertas. Não grava nada.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -191,11 +198,11 @@ PageFrame {
     }
 
     Section {
-        title: "Entrada (microfone)"
+        title: qsTr("Entrada (microfone)")
         Text {
-            text: "Em uso agora: " + (core.audioLive.enabled === true
-                ? "captura ao vivo pelo dispositivo escolhido."
-                : "entrada virtual (PCM de teste). O microfone entra em uso com a escuta ligada e o Core reiniciado.")
+            text: qsTr("Em uso agora: %1").arg(core.audioLive.enabled === true
+                ? qsTr("captura ao vivo pelo dispositivo escolhido.")
+                : qsTr("entrada virtual (PCM de teste). O microfone entra em uso com a escuta ligada e o Core reiniciado."))
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -216,7 +223,7 @@ PageFrame {
                     implicitWidth: 320
                     currentIndex: page.indexFor(core.audioInputChoices, core.audioInputSaved)
                     enabled: AppState.blockReason("core.audioInput") === ""
-                    Accessible.name: "Microfone de entrada"
+                    Accessible.name: qsTr("Microfone de entrada")
                     onActivated: {
                         AppState.setSetting("core.audioInput", currentValue)
                         currentIndex = Qt.binding(function () { return page.indexFor(core.audioInputChoices, core.audioInputSaved) })
@@ -225,8 +232,8 @@ PageFrame {
                 GButton {
                     objectName: "restoreAudioInput"
                     variant: "ghost"
-                    text: "Restaurar padrão"
-                    Accessible.name: "Restaurar o microfone para o padrão do sistema"
+                    text: qsTr("Restaurar padrão")
+                    Accessible.name: qsTr("Restaurar o microfone para o padrão do sistema")
                     enabled: AppState.blockReason("core.audioInput") === "" && core.audioInputSaved !== "default"
                     onClicked: AppState.setSetting("core.audioInput", "default")
                 }
@@ -245,25 +252,25 @@ PageFrame {
         }
         EToggleSetting { settingKey: "core.inputConditioning" }
         EValueRow {
-            label: "Escolha salva"
+            label: qsTr("Escolha salva")
             value: page.choiceText(core.audioInputChoices, core.audioInputSaved)
         }
         EValueRow {
-            label: "Formato da entrada"
+            label: qsTr("Formato da entrada")
             value: "PCM mono 16 kHz"
             advanced: true
         }
         EValueRow {
-            label: "Código do estado de captura"
+            label: qsTr("Código do estado de captura")
             value: String(core.sttStatus)
             advanced: true
         }
     }
 
     Section {
-        title: "Saída (alto-falante)"
+        title: qsTr("Saída (alto-falante)")
         Text {
-            text: "A resposta por voz sai pelo dispositivo escolhido quando a escuta do microfone está ligada e o Core foi reiniciado; sem isso, a saída é virtual."
+            text: qsTr("A resposta por voz sai pelo dispositivo escolhido quando a escuta do microfone está ligada e o Core foi reiniciado; sem isso, a saída é virtual.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -284,7 +291,7 @@ PageFrame {
                     implicitWidth: 320
                     currentIndex: page.indexFor(core.audioOutputChoices, core.audioOutputSaved)
                     enabled: AppState.blockReason("core.audioOutput") === ""
-                    Accessible.name: "Alto-falante de saída"
+                    Accessible.name: qsTr("Alto-falante de saída")
                     onActivated: {
                         AppState.setSetting("core.audioOutput", currentValue)
                         currentIndex = Qt.binding(function () { return page.indexFor(core.audioOutputChoices, core.audioOutputSaved) })
@@ -293,8 +300,8 @@ PageFrame {
                 GButton {
                     objectName: "restoreAudioOutput"
                     variant: "ghost"
-                    text: "Restaurar padrão"
-                    Accessible.name: "Restaurar o alto-falante para o padrão do sistema"
+                    text: qsTr("Restaurar padrão")
+                    Accessible.name: qsTr("Restaurar o alto-falante para o padrão do sistema")
                     enabled: AppState.blockReason("core.audioOutput") === "" && core.audioOutputSaved !== "default"
                     onClicked: AppState.setSetting("core.audioOutput", "default")
                 }
@@ -312,7 +319,7 @@ PageFrame {
             Layout.fillWidth: true
         }
         EValueRow {
-            label: "Escolha salva"
+            label: qsTr("Escolha salva")
             value: page.choiceText(core.audioOutputChoices, core.audioOutputSaved)
         }
         Text {
@@ -330,18 +337,18 @@ PageFrame {
     // A13 assistant: 2 s per listed input, one after another. Ranks them; never saves a choice by itself.
     function recommendationText() {
         var rec = core.micRecommendation
-        if (rec.state === "running") return "Verificando os microfones (2 s cada), um de cada vez…"
-        if (rec.state === "failed") return "Não foi possível verificar: " + (rec.error || "erro desconhecido") + "."
-        if (rec.state !== "done") return "Ainda não verificado. Verifique para comparar os microfones da lista."
+        if (rec.state === "running") return qsTr("Verificando os microfones (2 s cada), um de cada vez…")
+        if (rec.state === "failed") return qsTr("Não foi possível verificar: %1.").arg(rec.error || qsTr("erro desconhecido"))
+        if (rec.state !== "done") return qsTr("Ainda não verificado. Verifique para comparar os microfones da lista.")
         var best = ""
         for (var i = 0; i < rec.rows.length; i++) if (rec.rows[i].recommended) best = rec.rows[i].label
-        var head = rec.currentIsBad ? "O microfone atual não capta bem: " + rec.reason + "." : "O microfone atual está bom."
-        return head + (best.length > 0 ? " Melhor encontrado: " + best + "." : " Nenhum microfone limpo foi encontrado.")
+        var head = rec.currentIsBad ? qsTr("O microfone atual não capta bem: %1.").arg(rec.reason) : qsTr("O microfone atual está bom.")
+        return best.length > 0 ? head + " " + qsTr("Melhor encontrado: %1.").arg(best) : head + " " + qsTr("Nenhum microfone limpo foi encontrado.")
     }
     Section {
-        title: "Assistente do microfone"
+        title: qsTr("Assistente do microfone")
         Text {
-            text: "Grava 2 segundos de cada microfone da lista, um de cada vez, e compara o sinal: saturação, ruído grave, ruído de fundo e nível. Não grava em disco e não muda o padrão do sistema. Escolher um microfone só acontece quando você clica em \"Usar este\"."
+            text: qsTr("Grava 2 segundos de cada microfone da lista, um de cada vez, e compara o sinal: saturação, ruído grave, ruído de fundo e nível. Não grava em disco e não muda o padrão do sistema. Escolher um microfone só acontece quando você clica em \"Usar este\".")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -352,8 +359,8 @@ PageFrame {
         GButton {
             objectName: "micRecommendButton"
             variant: "secondary"
-            text: "Verificar microfones"
-            Accessible.name: "Verificar os microfones da lista por 2 segundos cada"
+            text: qsTr("Verificar microfones")
+            Accessible.name: qsTr("Verificar os microfones da lista por 2 segundos cada")
             enabled: core.connected && core.micRecommendation.state !== "running" && core.sessionId.length === 0
             onClicked: core.recommendMicrophones()
         }
@@ -366,7 +373,7 @@ PageFrame {
             font.pixelSize: Theme.fontHelp
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Accessible.name: "Resultado da verificação dos microfones: " + text
+            Accessible.name: qsTr("Resultado da verificação dos microfones: %1").arg(text)
         }
         Repeater {
             model: core.micRecommendation.rows
@@ -375,7 +382,7 @@ PageFrame {
                 Layout.fillWidth: true
                 spacing: Theme.space(10)
                 Text {
-                    text: modelData.label + (modelData.current ? " (atual)" : "") + (modelData.camera ? " · câmera" : "")
+                    text: page.rowLabel(modelData)
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -384,9 +391,9 @@ PageFrame {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: modelData.error !== "" ? "não medido" : modelData.problems
+                    text: modelData.error !== "" ? qsTr("não medido") : modelData.problems
                     textFormat: Text.PlainText
-                    color: modelData.problems === "sem problemas" ? Theme.success : Theme.textMuted
+                    color: modelData.problemsOk === true ? Theme.success : Theme.textMuted
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontCaption
                     wrapMode: Text.WordWrap
@@ -394,9 +401,9 @@ PageFrame {
                 GButton {
                     objectName: "micRecommendUse"
                     variant: "ghost"
-                    text: "Usar este"
-                    Accessible.name: "Usar " + modelData.label + " como microfone do Gideon"
-                    enabled: core.preferencesAvailable && !modelData.camera && modelData.problems === "sem problemas" && !modelData.current
+                    text: qsTr("Usar este")
+                    Accessible.name: qsTr("Usar %1 como microfone do Gideon").arg(modelData.label)
+                    enabled: core.preferencesAvailable && !modelData.camera && modelData.problemsOk === true && !modelData.current
                     onClicked: core.useAudioInput(modelData.id)
                 }
             }
@@ -405,9 +412,9 @@ PageFrame {
 
     // A9: each listed input is recorded for 3 s, one after another; the result table ranks them. Nothing is saved unless "Usar este".
     Section {
-        title: "Testar microfones"
+        title: qsTr("Testar microfones")
         Text {
-            text: "Cada teste usa o microfone por 3 segundos. Os microfones são testados um de cada vez, com ou sem a escuta ligada."
+            text: qsTr("Cada teste usa o microfone por 3 segundos. Os microfones são testados um de cada vez, com ou sem a escuta ligada.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -418,7 +425,7 @@ PageFrame {
         Text {
             objectName: "micProbeEmpty"
             visible: (core.audioDevices.inputs || []).length === 0
-            text: "Atualize a lista de dispositivos antes de testar."
+            text: qsTr("Atualize a lista de dispositivos antes de testar.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -431,49 +438,48 @@ PageFrame {
 
     // WP-17 / DISP-01, DISP-02: the camera and screen rows show what the real worker reported (v4l2 and the portal).
     Section {
-        title: "Câmera e tela"
+        title: qsTr("Câmera e tela")
         Component.onCompleted: core.perceptionRefreshStatus()
         EValueRow {
             objectName: "cameraStatusRow"
-            label: "Câmera: " + (core.perceptionCameraStatus.device === undefined
-                ? "sem leitura ainda"
-                : (core.perceptionCameraStatus.present ? "encontrada" : "não encontrada"))
-            badge: core.perceptionCameraStatus.device === undefined ? "SEM LEITURA"
-                : (core.perceptionCameraStatus.present ? (core.perceptionCameraStatus.opt_in ? "ACESSO LIGADO" : "ACESSO DESLIGADO") : "INDISPONÍVEL")
+            label: qsTr("Câmera: %1").arg(core.perceptionCameraStatus.device === undefined
+                ? qsTr("sem leitura ainda")
+                : (core.perceptionCameraStatus.present ? qsTr("encontrada") : qsTr("não encontrada")))
+            badge: core.perceptionCameraStatus.device === undefined ? qsTr("SEM LEITURA")
+                : (core.perceptionCameraStatus.present ? (core.perceptionCameraStatus.opt_in ? qsTr("ACESSO LIGADO") : qsTr("ACESSO DESLIGADO")) : qsTr("INDISPONÍVEL"))
             note: core.perceptionCameraStatus.device === undefined
-                ? "Abra Atualizar leitura. A câmera só é usada com acesso ligado em Extensões › Percepção e ação."
-                : "Backend: v4l2" + (core.perceptionCameraStatus.device ? " · " + core.perceptionCameraStatus.device : "")
-                  + ". Nenhum quadro é guardado."
+                ? qsTr("Abra Atualizar leitura. A câmera só é usada com acesso ligado em Extensões › Percepção e ação.")
+                : qsTr("Backend: v4l2%1. Nenhum quadro é guardado.").arg(core.perceptionCameraStatus.device ? " · " + core.perceptionCameraStatus.device : "")
         }
         EValueRow {
             objectName: "screenStatusRow"
-            label: "Tela: " + (core.perceptionScreenStatus.available === undefined
-                ? "sem leitura ainda"
-                : (core.perceptionScreenStatus.available ? "captura disponível" : "captura indisponível"))
-            badge: core.perceptionScreenStatus.available === undefined ? "SEM LEITURA"
-                : (core.perceptionScreenStatus.available ? "REAL" : "INDISPONÍVEL")
+            label: qsTr("Tela: %1").arg(core.perceptionScreenStatus.available === undefined
+                ? qsTr("sem leitura ainda")
+                : (core.perceptionScreenStatus.available ? qsTr("captura disponível") : qsTr("captura indisponível")))
+            badge: core.perceptionScreenStatus.available === undefined ? qsTr("SEM LEITURA")
+                : (core.perceptionScreenStatus.available ? qsTr("REAL") : qsTr("INDISPONÍVEL"))
             note: core.perceptionScreenStatus.available === undefined
-                ? "Backend: portal XDG (Captura de tela). Abra Atualizar leitura."
-                : "Backend: portal XDG" + (core.perceptionScreenStatus.reason ? " · " + core.perceptionScreenStatus.reason : "")
+                ? qsTr("Backend: portal XDG (Captura de tela). Abra Atualizar leitura.")
+                : qsTr("Backend: portal XDG%1").arg(core.perceptionScreenStatus.reason ? " · " + core.perceptionScreenStatus.reason : "")
         }
         GButton {
             objectName: "perceptionRefreshButton"
             variant: "secondary"
-            text: "Atualizar leitura"
+            text: qsTr("Atualizar leitura")
             enabled: core.perceptionAvailable && !core.perceptionBusy
-            Accessible.name: "Atualizar a leitura de câmera e tela"
+            Accessible.name: qsTr("Atualizar a leitura de câmera e tela")
             onClicked: core.perceptionRefreshStatus()
         }
         GButton {
             objectName: "perceptionLinkButton"
             variant: "ghost"
-            text: "Ver em Extensões › Percepção e ação"
+            text: qsTr("Ver em Extensões › Percepção e ação")
             enabled: core.perceptionAvailable
             onClicked: Window.window.goPage("percepcao")
         }
         Text {
             visible: !core.perceptionAvailable
-            text: "Indisponível: nenhum plugin de percepção em execução."
+            text: qsTr("Indisponível: nenhum plugin de percepção em execução.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -483,10 +489,10 @@ PageFrame {
     }
 
     Collapsible {
-        title: "Como funciona"
-        summary: "Os dispositivos vêm da lista do sistema. A troca vale na próxima sessão de voz."
+        title: qsTr("Como funciona")
+        summary: qsTr("Os dispositivos vêm da lista do sistema. A troca vale na próxima sessão de voz.")
         Text {
-            text: "Os dispositivos são listados pelo sistema (pactl, depois pw-dump). Monitores de saída não aparecem. A troca vale na próxima sessão de voz. A captura ao vivo só existe com a escuta do microfone ligada e o Core reiniciado depois disso. Nada aqui prova o microfone ou o alto-falante reais: a validação com hardware continua pendente."
+            text: qsTr("Os dispositivos são listados pelo sistema (pactl, depois pw-dump). Monitores de saída não aparecem. A troca vale na próxima sessão de voz. A captura ao vivo só existe com a escuta do microfone ligada e o Core reiniciado depois disso. Nada aqui prova o microfone ou o alto-falante reais: a validação com hardware continua pendente.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily

@@ -22,15 +22,16 @@ PageFrame {
     readonly property int revision: ready ? soulsBlock.revision : 0
     readonly property var reply: core.personalReply || ({})
     readonly property var preview: (reply.area === "souls" && reply.reply && reply.reply.guidance) ? reply.reply : null
-    readonly property var modeOptions: [{id: "influence", text: "Influência"}, {id: "simulation", text: "Simulação"}]
+    readonly property var modeOptions: [{id: "influence", text: qsTr("Influência")}, {id: "simulation", text: qsTr("Simulação")}]
     readonly property var provenanceOptions: [
-        {id: "declared", text: "Declarada por mim"},
-        {id: "inferred_from_chat", text: "Inferida das minhas mensagens"},
-        {id: "user_documents", text: "De documentos meus"}
+        {id: "declared", text: qsTr("Declarada por mim")},
+        {id: "inferred_from_chat", text: qsTr("Inferida das minhas mensagens")},
+        {id: "user_documents", text: qsTr("De documentos meus")}
     ]
     readonly property var provenanceLabels: ({
-        declared: "declarada por você", inferred_from_chat: "inferida das suas mensagens (confiança até 0,8)",
-        user_documents: "de documentos seus (confiança até 0,8)"
+        declared: qsTr("declarada por você"),
+        inferred_from_chat: qsTr("inferida das suas mensagens (confiança até 0,8)"),
+        user_documents: qsTr("de documentos seus (confiança até 0,8)")
     })
     property string mode: "influence"
     property string provenance: "declared"
@@ -45,13 +46,13 @@ PageFrame {
     }
 
     PageHeader {
-        title: "Almas"
-        subtitle: "Estilo de comunicação que você declara. Não muda a identidade nem a segurança do assistente."
+        title: qsTr("Almas")
+        subtitle: qsTr("Estilo de comunicação que você declara. Não muda a identidade nem a segurança do assistente.")
     }
 
     Text {
         visible: !page.ready
-        text: "Indisponível: o Core não respondeu às almas. Os controles voltam quando a conexão for restabelecida."
+        text: qsTr("Indisponível: o Core não respondeu às almas. Os controles voltam quando a conexão for restabelecida.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -61,26 +62,26 @@ PageFrame {
     }
 
     Section {
-        title: "Suas almas"
-        caption: page.activeId.length > 0 ? "Uma alma ativa por vez." : "Nenhuma alma ativa."
+        title: qsTr("Suas almas")
+        caption: page.activeId.length > 0 ? qsTr("Uma alma ativa por vez.") : qsTr("Nenhuma alma ativa.")
 
         EmptyState {
             visible: page.souls.length === 0
-            message: "Nenhuma alma criada. Crie uma abaixo: ela fica guardada até você apagar."
+            message: qsTr("Nenhuma alma criada. Crie uma abaixo: ela fica guardada até você apagar.")
         }
         Repeater {
             model: page.souls
             delegate: PItemRow {
                 required property var modelData
                 title: modelData.name
-                detail: modelData.description + " · " + modelData.mode_label + " · "
-                    + (page.provenanceLabels[modelData.provenance.kind] || modelData.provenance.kind)
-                badgeText: modelData.active ? "Ativa" : ""
+                detail: qsTr("%1 · %2 · %3").arg(modelData.description).arg(modelData.mode_label)
+                    .arg(page.provenanceLabels[modelData.provenance.kind] || modelData.provenance.kind)
+                badgeText: modelData.active ? qsTr("Ativa") : ""
                 badgeTone: "success"
                 GButton {
                     objectName: "soulActivate"
                     variant: modelData.active ? "ghost" : "secondary"
-                    text: modelData.active ? "Desativar" : "Usar"
+                    text: modelData.active ? qsTr("Desativar") : qsTr("Usar")
                     enabled: page.ready
                     onClicked: modelData.active
                         ? page.send({op: "deactivate", revision: page.revision})
@@ -89,14 +90,14 @@ PageFrame {
                 GButton {
                     objectName: "soulPreview"
                     variant: "ghost"
-                    text: "Prévia"
+                    text: qsTr("Prévia")
                     enabled: page.ready
                     onClicked: page.send({op: "preview", id: modelData.id})
                 }
                 GButton {
                     objectName: "soulDelete"
                     variant: "danger"
-                    text: "Apagar"
+                    text: qsTr("Apagar")
                     enabled: page.ready
                     onClicked: {
                         page.pendingId = modelData.id
@@ -140,7 +141,7 @@ PageFrame {
             }
         }
         Text {
-            text: "Sem plugin LLM, a alma ativa não altera as respostas: ela só fica disponível como dica para o motor LLM."
+            text: qsTr("Sem plugin LLM, a alma ativa não altera as respostas: ela só fica disponível como dica para o motor LLM.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -152,42 +153,42 @@ PageFrame {
     }
 
     Section {
-        title: "Nova alma"
-        caption: "Modo e origem ficam visíveis em cada alma. Origem não pode ser trocada depois de criada."
+        title: qsTr("Nova alma")
+        caption: qsTr("Modo e origem ficam visíveis em cada alma. Origem não pode ser trocada depois de criada.")
 
-        FieldLabel { text: "Nome" }
+        FieldLabel { text: qsTr("Nome") }
         GTextField {
             id: nameField
             objectName: "soulName"
             Layout.fillWidth: true
             maximumLength: 40
-            placeholderText: "Ex.: Calmo"
+            placeholderText: qsTr("Ex.: Calmo")
         }
-        FieldLabel { text: "Descrição" }
+        FieldLabel { text: qsTr("Descrição") }
         GTextField {
             id: descField
             objectName: "soulDescription"
             Layout.fillWidth: true
             maximumLength: 280
-            placeholderText: "Para que você usa esta alma"
+            placeholderText: qsTr("Para que você usa esta alma")
         }
-        FieldLabel { text: "Estilo" }
+        FieldLabel { text: qsTr("Estilo") }
         GTextField {
             id: styleField
             objectName: "soulStyle"
             Layout.fillWidth: true
             maximumLength: 280
-            placeholderText: "Ex.: frases curtas, sem rodeios"
+            placeholderText: qsTr("Ex.: frases curtas, sem rodeios")
         }
-        FieldLabel { text: "Prioridades (separadas por vírgula, até 5)" }
+        FieldLabel { text: qsTr("Prioridades (separadas por vírgula, até 5)") }
         GTextField {
             id: prioField
             objectName: "soulPriorities"
             Layout.fillWidth: true
             maximumLength: 200
-            placeholderText: "Ex.: clareza, segurança"
+            placeholderText: qsTr("Ex.: clareza, segurança")
         }
-        FieldLabel { text: "Modo" }
+        FieldLabel { text: qsTr("Modo") }
         Segmented {
             objectName: "soulMode"
             model: page.modeOptions
@@ -196,8 +197,8 @@ PageFrame {
         }
         Text {
             text: page.mode === "simulation"
-                ? "Simulação: o texto é rotulado como imitação do seu estilo, nunca como você."
-                : "Influência: sugere um estilo; quem decide a resposta continua sendo o assistente."
+                ? qsTr("Simulação: o texto é rotulado como imitação do seu estilo, nunca como você.")
+                : qsTr("Influência: sugere um estilo; quem decide a resposta continua sendo o assistente.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -205,7 +206,7 @@ PageFrame {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-        FieldLabel { text: "Origem" }
+        FieldLabel { text: qsTr("Origem") }
         Segmented {
             objectName: "soulProvenance"
             model: page.provenanceOptions
@@ -214,7 +215,7 @@ PageFrame {
         }
         FieldLabel {
             visible: page.provenance !== "declared"
-            text: "Evidência (onde isso aparece no seu texto; obrigatório)"
+            text: qsTr("Evidência (onde isso aparece no seu texto; obrigatório)")
         }
         GTextField {
             id: evidenceField
@@ -222,18 +223,18 @@ PageFrame {
             visible: page.provenance !== "declared"
             Layout.fillWidth: true
             maximumLength: 120
-            placeholderText: "Ex.: mensagens de março sobre o projeto"
+            placeholderText: qsTr("Ex.: mensagens de março sobre o projeto")
         }
         GCheckbox {
             id: docsConsent
             objectName: "soulDocsConsent"
             visible: page.provenance === "user_documents"
-            text: "Autorizo o Gideon a ler os documentos citados acima para montar esta alma."
+            text: qsTr("Autorizo o Gideon a ler os documentos citados acima para montar esta alma.")
         }
         GButton {
             objectName: "soulCreate"
             variant: "primary"
-            text: "Criar alma"
+            text: qsTr("Criar alma")
             enabled: page.ready && nameField.text.trim().length > 0 && descField.text.trim().length > 0
                 && styleField.text.trim().length > 0
             onClicked: {
@@ -255,7 +256,7 @@ PageFrame {
         }
         Text {
             visible: page.provenance !== "declared"
-            text: "Origem: " + (page.provenanceLabels[page.provenance] || "")
+            text: qsTr("Origem: %1").arg(page.provenanceLabels[page.provenance] || "")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -267,8 +268,8 @@ PageFrame {
 
     PConfirm {
         id: deleteConfirm
-        message: "A alma será apagada. Se ela estiver ativa, nenhuma alma fica ativa."
-        actionText: "Apagar alma"
+        message: qsTr("A alma será apagada. Se ela estiver ativa, nenhuma alma fica ativa.")
+        actionText: qsTr("Apagar alma")
         onConfirmed: page.send({op: "delete", revision: page.revision, id: page.pendingId})
     }
 }

@@ -46,14 +46,14 @@ Card {
     }
     function badgeText(s) {
         switch (s) {
-        case "connected": return "Conectado"
-        case "connecting": return "Conectando"
-        case "expired": return "Expirado"
-        case "reauth_required": return "Reautenticar"
-        case "offline": return "Offline"
-        case "error": return "Erro"
-        case "disconnected": return "Desconectado"
-        default: return "Desconhecido"
+        case "connected": return qsTr("Conectado")
+        case "connecting": return qsTr("Conectando")
+        case "expired": return qsTr("Expirado")
+        case "reauth_required": return qsTr("Reautenticar")
+        case "offline": return qsTr("Offline")
+        case "error": return qsTr("Erro")
+        case "disconnected": return qsTr("Desconectado")
+        default: return qsTr("Desconhecido")
         }
     }
     function badgeTone(s) {
@@ -74,9 +74,9 @@ Card {
     }
     function connectReason() {
         if (L.connCan(card.connBusy, "connect", account)) return ""
-        if (card.connBusy) return "Aguarde: outra operação de conexão está em andamento."
-        if (status === "connected") return "Indisponível: a conta já está conectada."
-        return "Indisponível: conexão em andamento."
+        if (card.connBusy) return qsTr("Aguarde: outra operação de conexão está em andamento.")
+        if (status === "connected") return qsTr("Indisponível: a conta já está conectada.")
+        return qsTr("Indisponível: conexão em andamento.")
     }
 
     RowLayout {
@@ -96,7 +96,7 @@ Card {
         Badge {
             objectName: "connFake_" + card.cid
             visible: card.showFake && card.account.fake === true
-            text: "SERVIDOR FALSO"
+            text: qsTr("SERVIDOR FALSO")
             tone: "neutral"
         }
         Badge {
@@ -107,19 +107,19 @@ Card {
     }
     Text {
         objectName: "connStatus_" + card.cid
-        text: "Estado: " + L.connStatusText(card.status)
+        text: qsTr("Estado: %1").arg(L.connStatusText(card.status))
         textFormat: Text.PlainText
         color: Theme.text
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontHelp
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
-        Accessible.name: "Estado da conta " + card.label + ": " + text
+        Accessible.name: qsTr("Estado da conta %1: %2").arg(card.label).arg(text)
     }
     Text {
         objectName: "connAccount_" + card.cid
         visible: !!card.account.account_ref
-        text: "Conta no serviço: " + (card.account.account_ref || "")
+        text: qsTr("Conta no serviço: %1").arg(card.account.account_ref || "")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -130,7 +130,7 @@ Card {
     Text {
         objectName: "connUserCode_" + card.cid
         visible: card.status === "connecting" && !!card.account.user_code
-        text: "Código para confirmar no servidor: " + (card.account.user_code || "")
+        text: qsTr("Código para confirmar no servidor: %1").arg(card.account.user_code || "")
         textFormat: Text.PlainText
         color: Theme.text
         font.family: Theme.fontFamily
@@ -138,17 +138,17 @@ Card {
         font.weight: 600
         wrapMode: Text.WrapAnywhere
         Layout.fillWidth: true
-        Accessible.name: "Código de confirmação: " + (card.account.user_code || "")
+        Accessible.name: qsTr("Código de confirmação: %1").arg(card.account.user_code || "")
     }
 
     // Granted scopes: tags. The plain line with the same scope ids is kept as the account's text record.
     Text {
         objectName: "connGranted_" + card.cid
         visible: false
-        text: "Escopos concedidos: " + L.connScopeNames(card.granted)
+        text: qsTr("Escopos concedidos: %1").arg(L.connScopeNames(card.granted))
     }
     Text {
-        text: "Escopos concedidos:"
+        text: qsTr("Escopos concedidos:")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -174,7 +174,7 @@ Card {
     Text {
         objectName: "connGrantedAt_" + card.cid
         visible: card.granted.length > 0 && L.grantedDate(card.account.grantedAtMs) !== ""
-        text: "Concedido em " + L.grantedDate(card.account.grantedAtMs)
+        text: qsTr("Concedido em %1").arg(L.grantedDate(card.account.grantedAtMs))
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -183,7 +183,7 @@ Card {
     }
     Text {
         visible: card.granted.length === 0
-        text: "Nenhum escopo concedido."
+        text: qsTr("Nenhum escopo concedido.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -195,7 +195,7 @@ Card {
     Text {
         objectName: "connPending_" + card.cid
         visible: card.pending.length > 0
-        text: "Escopos pedidos, aguardando seu consentimento:"
+        text: qsTr("Escopos pedidos, aguardando seu consentimento:")
         textFormat: Text.PlainText
         color: Theme.warning
         font.family: Theme.fontFamily
@@ -215,7 +215,7 @@ Card {
                 text: L.connScopeLabel(core.connectionsProviders, card.account.provider, modelData) + " (" + modelData + ")"
                 checked: { AppState.connDraftRevision; return AppState.draftValue("#conn:" + card.cid, modelData) === true }
                 onToggled: { AppState.setDraft("#conn:" + card.cid, modelData, checked); AppState.connDraftRevision++ }
-                Accessible.name: "Consentir escopo " + modelData + " de " + card.label
+                Accessible.name: qsTr("Consentir escopo %1 de %2").arg(modelData).arg(card.label)
             }
             Text {
                 text: L.connRiskText(card.scopeRisk(modelData))
@@ -230,7 +230,7 @@ Card {
     // Home Assistant: the long-lived token is typed once into a hidden field and sent to the Core; the field is cleared right after.
     FieldLabel {
         visible: card.account.provider === "homeassistant" && card.status === "connecting"
-        text: "Token de longa duração do Home Assistant"
+        text: qsTr("Token de longa duração do Home Assistant")
     }
     RowLayout {
         visible: card.account.provider === "homeassistant" && card.status === "connecting"
@@ -243,14 +243,14 @@ Card {
             inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
             maximumLength: 256
             Layout.fillWidth: true
-            placeholderText: "Cole o token aqui"
-            Accessible.name: "Token do Home Assistant de " + card.label
+            placeholderText: qsTr("Cole o token aqui")
+            Accessible.name: qsTr("Token do Home Assistant de %1").arg(card.label)
         }
         GButton {
             objectName: "connSetToken_" + card.cid
             variant: "primary"
-            text: "Enviar token"
-            Accessible.name: "Enviar token de " + card.label
+            text: qsTr("Enviar token")
+            Accessible.name: qsTr("Enviar token de %1").arg(card.label)
             enabled: !card.connBusy && tokenField.text.length >= 16 && tokenField.text.length <= 256
             onClicked: { core.connectionSetToken(card.cid, tokenField.text); tokenField.clear() }
         }
@@ -264,16 +264,16 @@ Card {
             objectName: "connConsent_" + card.cid
             visible: card.pending.length > 0
             variant: "primary"
-            text: "Consentir escopos marcados"
-            Accessible.name: "Consentir escopos marcados de " + card.label
+            text: qsTr("Consentir escopos marcados")
+            Accessible.name: qsTr("Consentir escopos marcados de %1").arg(card.label)
             enabled: !card.connBusy && card.consentList().length > 0
             onClicked: core.connectionConsent(card.cid, JSON.stringify(card.consentList()))
         }
         GButton {
             objectName: "connConnect_" + card.cid
             variant: card.status === "connected" ? "secondary" : "primary"
-            text: "Conectar"
-            Accessible.name: "Conectar " + card.label
+            text: qsTr("Conectar")
+            Accessible.name: qsTr("Conectar %1").arg(card.label)
             enabled: L.connCan(card.connBusy, "connect", card.account)
             onClicked: core.connectionConnect(card.cid)
         }
@@ -281,14 +281,14 @@ Card {
             objectName: "connMore_" + card.cid
             visible: Theme.advanced
             iconName: "more"
-            ToolTip.text: "Mais ações de " + card.label
+            ToolTip.text: qsTr("Mais ações de %1").arg(card.label)
             onClicked: card.moreOpen = !card.moreOpen
         }
     }
     Text {
         objectName: "connConsentReason_" + card.cid
         visible: card.pending.length > 0 && card.consentList().length === 0
-        text: "Marque ao menos um escopo para consentir."
+        text: qsTr("Marque ao menos um escopo para consentir.")
         textFormat: Text.PlainText
         color: Theme.textMuted
         font.family: Theme.fontFamily
@@ -312,7 +312,7 @@ Card {
     Text {
         objectName: "connToolsTitle_" + card.cid
         visible: card.tools.length > 0
-        text: "Ferramentas descobertas (a descrição vem do servidor e é só texto)"
+        text: qsTr("Ferramentas descobertas (a descrição vem do servidor e é só texto)")
         textFormat: Text.PlainText
         color: Theme.text
         font.family: Theme.fontFamily
@@ -345,8 +345,8 @@ Card {
                     objectName: "connTrust_" + card.cid + "_" + toolRow.modelData.name
                     visible: toolRow.modelData.state === "needs_reapproval"
                     variant: "secondary"
-                    text: "Confiar"
-                    Accessible.name: "Confiar na ferramenta " + toolRow.modelData.name + " de " + card.label
+                    text: qsTr("Confiar")
+                    Accessible.name: qsTr("Confiar na ferramenta %1 de %2").arg(toolRow.modelData.name).arg(card.label)
                     enabled: !card.connBusy
                     onClicked: card.trustRequested(toolRow.modelData.name)
                 }
@@ -354,7 +354,7 @@ Card {
             Text {
                 objectName: "connToolDesc_" + card.cid + "_" + toolRow.modelData.name
                 visible: (toolRow.modelData.description || "").length > 0
-                text: "Descrição do servidor: " + (toolRow.modelData.description || "")
+                text: qsTr("Descrição do servidor: %1").arg(toolRow.modelData.description || "")
                 textFormat: Text.PlainText
                 color: Theme.textMuted
                 font.family: Theme.fontFamily
@@ -372,14 +372,14 @@ Card {
         Flow {
             Layout.fillWidth: true
             spacing: Theme.space(8)
-            GButton { objectName: "connRefresh_" + card.cid; variant: "ghost"; text: "Atualizar"; Accessible.name: "Atualizar " + card.label; enabled: L.connCan(card.connBusy, "refresh", card.account); onClicked: core.connectionRefresh(card.cid) }
-            GButton { objectName: "connDisconnect_" + card.cid; variant: "secondary"; text: "Desconectar"; Accessible.name: "Desconectar " + card.label; enabled: L.connCan(card.connBusy, "disconnect", card.account); onClicked: core.connectionDisconnect(card.cid) }
-            GButton { objectName: "connRevoke_" + card.cid; variant: "danger"; text: "Revogar"; Accessible.name: "Revogar acesso de " + card.label; enabled: L.connCan(card.connBusy, "revoke", card.account); onClicked: card.revokeRequested() }
-            GButton { objectName: "connRemove_" + card.cid; variant: "danger"; text: "Remover"; Accessible.name: "Remover " + card.label; enabled: L.connCan(card.connBusy, "remove", card.account); onClicked: card.removeRequested() }
+            GButton { objectName: "connRefresh_" + card.cid; variant: "ghost"; text: qsTr("Atualizar"); Accessible.name: qsTr("Atualizar %1").arg(card.label); enabled: L.connCan(card.connBusy, "refresh", card.account); onClicked: core.connectionRefresh(card.cid) }
+            GButton { objectName: "connDisconnect_" + card.cid; variant: "secondary"; text: qsTr("Desconectar"); Accessible.name: qsTr("Desconectar %1").arg(card.label); enabled: L.connCan(card.connBusy, "disconnect", card.account); onClicked: core.connectionDisconnect(card.cid) }
+            GButton { objectName: "connRevoke_" + card.cid; variant: "danger"; text: qsTr("Revogar"); Accessible.name: qsTr("Revogar acesso de %1").arg(card.label); enabled: L.connCan(card.connBusy, "revoke", card.account); onClicked: card.revokeRequested() }
+            GButton { objectName: "connRemove_" + card.cid; variant: "danger"; text: qsTr("Remover"); Accessible.name: qsTr("Remover %1").arg(card.label); enabled: L.connCan(card.connBusy, "remove", card.account); onClicked: card.removeRequested() }
         }
 
         Text {
-            text: "Operações"
+            text: qsTr("Operações")
             textFormat: Text.PlainText
             color: Theme.text
             font.family: Theme.fontFamily
@@ -389,7 +389,7 @@ Card {
         }
         Text {
             visible: card.ops.length === 0
-            text: "Nenhuma operação disponível para este provedor."
+            text: qsTr("Nenhuma operação disponível para este provedor.")
             textFormat: Text.PlainText
             color: Theme.textMuted
             font.family: Theme.fontFamily
@@ -404,7 +404,7 @@ Card {
                 spacing: Theme.space(8)
                 Text {
                     objectName: "connOp_" + card.cid + "_" + modelData.name
-                    text: modelData.name + " (" + L.connOpLabel(modelData.name) + ") · " + L.connRiskText(modelData.risk) + (L.connGranted(card.account, modelData.scope) ? "" : " · escopo não concedido")
+                    text: qsTr("%1 (%2) · %3%4").arg(modelData.name).arg(L.connOpLabel(modelData.name)).arg(L.connRiskText(modelData.risk)).arg(L.connGranted(card.account, modelData.scope) ? "" : qsTr(" · escopo não concedido"))
                     textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.fontFamily
@@ -416,8 +416,8 @@ Card {
                     objectName: "connTest_" + card.cid + "_" + modelData.name
                     visible: modelData.risk === "read" && modelData.name !== "state.get" && modelData.needs_args === false
                     variant: "ghost"
-                    text: "Testar leitura"
-                    Accessible.name: "Testar leitura " + modelData.name + " de " + card.label
+                    text: qsTr("Testar leitura")
+                    Accessible.name: qsTr("Testar leitura %1 de %2").arg(modelData.name).arg(card.label)
                     enabled: L.connCanTest(card.connBusy, card.account, modelData)
                     onClicked: core.connectionCall(card.cid, modelData.name, "{}")
                 }

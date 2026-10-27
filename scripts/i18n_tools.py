@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / 'app'
 TRANSLATIONS = APP / 'translations'
 TARGET_LOCALES = {'en': 'en_US', 'fr': 'fr_FR'}
-PYTHON_SOURCES = ('bridge.py', 'uisettings.py')
+PYTHON_SOURCES = ('bridge.py', 'uisettings.py', 'msgs_errors.py', 'msgs_audio.py', 'msgs_connections.py',
+                  'msgs_skills_hub.py', 'msgs_llm_models.py', 'msgs_perception.py', 'msgs_misc.py')
 SKIPPED_DIRS = frozenset({'__pycache__', 'translations'})
 
 

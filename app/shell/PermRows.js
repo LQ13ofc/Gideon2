@@ -2,16 +2,18 @@
 .import "Labels.js" as L
 // Permissões rows and queue (docs/ui-spec/30-permissoes.md §3, §5.4, §6.5, §6.7, §8). Pure functions over snapshot rows:
 // the pages pass the bridge lists (hubEntries, pluginItems, skillsItems, connectionsItems, connectionsProviders) and
-// core.permissionLabel as labelOf. Nothing here calls the bridge.
+// core.permissionLabel as labelOf. Nothing here calls the bridge. Texts are translated at call time (qsTr), so a
+// language switch shows the new words without a restart.
 
 var HIGH_RISK = {destructive: true, public: true}
 
-function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
+// Count with one form for 1 and one for the rest (both translated by the caller's qsTr).
+function countWord(n, one, many) { return n === 1 ? one : many }
 
 // Permission labels of a plugin: the first two, then "+N" (30 §3.1).
 function permText(ids, labelOf) {
     var labels = (ids || []).map(function (p) { return labelOf(p) })
-    if (labels.length === 0) return "nenhuma"
+    if (labels.length === 0) return qsTr("nenhuma")
     var head = labels.slice(0, 2).join(", ")
     return labels.length > 2 ? head + " +" + (labels.length - 2) : head
 }
@@ -19,10 +21,10 @@ function permText(ids, labelOf) {
 // Access column of a scope (30 §3.4).
 function accessText(access) {
     switch (access) {
-    case "read": return "leitura"
-    case "write": return "escrita"
-    case "public": return "pública"
-    case "destructive": return "destrutiva"
+    case "read": return qsTr("leitura")
+    case "write": return qsTr("escrita")
+    case "public": return qsTr("pública")
+    case "destructive": return qsTr("destrutiva")
     default: return ""
     }
 }
@@ -52,9 +54,9 @@ function pluginApproved(entry) { return entry.permissions_approved === true && (
 
 // Plugin badge text and tone (30 §3.5).
 function pluginState(entry) {
-    if (entry.permissions_approved === true) return entry.status === "not_installed" ? {text: "Aprovada · não instalado", tone: "success"} : {text: "Aprovada", tone: "success"}
-    if (pluginPending(entry)) return {text: "Pendente", tone: "warning"}
-    return {text: "Não aprovada", tone: "neutral"}
+    if (entry.permissions_approved === true) return entry.status === "not_installed" ? {text: qsTr("Aprovada · não instalado"), tone: "success"} : {text: qsTr("Aprovada"), tone: "success"}
+    if (pluginPending(entry)) return {text: qsTr("Pendente"), tone: "warning"}
+    return {text: qsTr("Não aprovada"), tone: "neutral"}
 }
 
 function pluginEntry(entries, id) {
@@ -74,24 +76,27 @@ function queueRows(ctx) {
     var plugins = sortedByKey(ctx.hub.filter(pluginPending), function (e) { return e.plugin_id })
     for (var i = 0; i < plugins.length; i++) {
         var e = plugins[i]
-        var sub = "Pede: " + (e.permissions || []).map(function (p) { return ctx.labelOf(p) }).join(", ")
-        if (e.status === "update_available") sub += "\nAtualização: a aprovação anterior não vale para esta versão."
-        out.push({key: "queue_plugin_" + e.plugin_id, kind: "plugin", origin: "Plugin", originTone: "info",
-                  item: e.plugin_id + " " + e.semver + (ctx.publisherVerified === true ? " · publisher verificado" : " · publisher não autenticado"), sub: sub, ref: e})
+        var sub = qsTr("Pede: %1").arg((e.permissions || []).map(function (p) { return ctx.labelOf(p) }).join(", "))
+        if (e.status === "update_available") sub += "\n" + qsTr("Atualização: a aprovação anterior não vale para esta versão.")
+        var publisher = ctx.publisherVerified === true ? qsTr("publisher verificado") : qsTr("publisher não autenticado")
+        out.push({key: "queue_plugin_" + e.plugin_id, kind: "plugin", origin: qsTr("Plugin"), originTone: "info",
+                  item: e.plugin_id + " " + e.semver + " · " + publisher, sub: sub, ref: e})
     }
     var accounts = sortedByKey(ctx.conns.filter(function (c) { return (c.pending_scopes || []).length > 0 }), function (c) { return c.label })
     for (var j = 0; j < accounts.length; j++) {
         var c = accounts[j]
-        out.push({key: "queue_consent_" + c.id, kind: "consent", origin: "Conexão", originTone: "neutral",
-                  item: accountLine(ctx.providers, c), sub: "aguardando consentimento: " + plural(c.pending_scopes.length, "escopo", "escopos"), ref: c})
+        var scopes = c.pending_scopes.length
+        out.push({key: "queue_consent_" + c.id, kind: "consent", origin: qsTr("Conexão"), originTone: "neutral",
+                  item: accountLine(ctx.providers, c),
+                  sub: qsTr("aguardando consentimento: %1").arg(scopes + " " + countWord(scopes, qsTr("escopo"), qsTr("escopos"))), ref: c})
     }
     var tools = []
     var toolAccounts = sortedByKey(ctx.conns.filter(function (c) { return c.provider === "mcp" }), function (c) { return c.label })
     for (var k = 0; k < toolAccounts.length; k++) {
         var t = toolAccounts[k]
         var waiting = (t.tools || []).filter(function (x) { return x.state === "needs_reapproval" }).map(function (x) { return x.name }).sort()
-        for (var m = 0; m < waiting.length; m++) tools.push({key: "queue_tool_" + t.id + "_" + waiting[m], kind: "tool", origin: "Conexão", originTone: "neutral",
-                  item: t.label + " · MCP", sub: "Ferramenta " + waiting[m] + ": precisa de nova aprovação", ref: t, tool: waiting[m]})
+        for (var m = 0; m < waiting.length; m++) tools.push({key: "queue_tool_" + t.id + "_" + waiting[m], kind: "tool", origin: qsTr("Conexão"), originTone: "neutral",
+                  item: t.label + " · MCP", sub: qsTr("Ferramenta %1: precisa de nova aprovação").arg(waiting[m]), ref: t, tool: waiting[m]})
     }
     return out.concat(tools)
 }
@@ -102,16 +107,17 @@ function activeRows(ctx) {
     var plugins = sortedByKey(ctx.hub.filter(pluginApproved), function (e) { return e.plugin_id })
     for (var i = 0; i < plugins.length; i++) {
         var e = plugins[i]
-        out.push({key: "plugin:" + e.plugin_id, origin: "Plugin", originTone: "info",
+        out.push({key: "plugin:" + e.plugin_id, origin: qsTr("Plugin"), originTone: "info",
                   item: e.plugin_id + " " + e.semver + " · " + permText(e.permissions, ctx.labelOf),
                   state: pluginState(e), ref: e, filter: "plugins"})
     }
     var accounts = sortedByKey(ctx.conns.filter(function (c) { return (c.granted_scopes || []).length > 0 }), function (c) { return c.label })
     for (var j = 0; j < accounts.length; j++) {
         var c = accounts[j]
-        out.push({key: "conn:" + c.id, origin: "Conexão", originTone: "neutral",
-                  item: accountLine(ctx.providers, c) + " · " + plural(c.granted_scopes.length, "escopo concedido", "escopos concedidos"),
-                  state: {text: "Concedido", tone: "success"}, ref: c, filter: "conexoes"})
+        var granted = c.granted_scopes.length
+        out.push({key: "conn:" + c.id, origin: qsTr("Conexão"), originTone: "neutral",
+                  item: accountLine(ctx.providers, c) + " · " + granted + " " + countWord(granted, qsTr("escopo concedido"), qsTr("escopos concedidos")),
+                  state: {text: qsTr("Concedido"), tone: "success"}, ref: c, filter: "conexoes"})
     }
     return out
 }
@@ -132,13 +138,13 @@ function grantRows(ctx) {
         var st = pluginState(e)
         var action
         if (approved) {
-            var revokeTip = !f.online ? "Core desconectado." : quarantined ? "Plugin em quarentena: não pode mudar de estado." : !f.pluginsOk ? f.pluginsBlockedTip : ""
-            action = {kind: "revoke", text: "Revogar", danger: true, enabled: f.pluginsOk && !quarantined, tip: revokeTip}
+            var revokeTip = !f.online ? qsTr("Core desconectado.") : quarantined ? qsTr("Plugin em quarentena: não pode mudar de estado.") : !f.pluginsOk ? f.pluginsBlockedTip : ""
+            action = {kind: "revoke", text: qsTr("Revogar"), danger: true, enabled: f.pluginsOk && !quarantined, tip: revokeTip}
         } else {
-            var reviewTip = !f.online ? "Core desconectado." : !f.hubOk ? f.pluginsBlockedTip : ""
-            action = {kind: "review", text: "Revisar", danger: false, enabled: f.hubOk, tip: reviewTip}
+            var reviewTip = !f.online ? qsTr("Core desconectado.") : !f.hubOk ? f.pluginsBlockedTip : ""
+            action = {kind: "review", text: qsTr("Revisar"), danger: false, enabled: f.hubOk, tip: reviewTip}
         }
-        rows.push({key: "plugin:" + e.plugin_id, origin: "plugin", originText: "Plugin", originTone: "info",
+        rows.push({key: "plugin:" + e.plugin_id, origin: "plugin", originText: qsTr("Plugin"), originTone: "info",
                    item: e.plugin_id + " " + e.semver, groupKey: "plugin:" + e.plugin_id, groupLabel: e.plugin_id + " " + e.semver,
                    sub: "", perm: permText(e.permissions, ctx.labelOf), permIds: e.permissions, permTone: "",
                    permNote: "", access: "", risk: false, state: st, pending: pluginPending(e),
@@ -150,11 +156,11 @@ function grantRows(ctx) {
         var sk = skills[s]
         var okPerm = sk.permissions_ok === true
         var missing = (sk.missing || []).join(", ")
-        var skillAction = {kind: "skill", text: "Ver em Skills", danger: false, enabled: f.skillsOk, tip: f.skillsOk ? "" : "Indisponível agora."}
-        rows.push({key: "skill:" + sk.id, origin: "skill", originText: "Skill", originTone: "neutral",
+        var skillAction = {kind: "skill", text: qsTr("Ver em Skills"), danger: false, enabled: f.skillsOk, tip: f.skillsOk ? "" : qsTr("Indisponível agora.")}
+        rows.push({key: "skill:" + sk.id, origin: "skill", originText: qsTr("Skill"), originTone: "neutral",
                    item: sk.name + " v" + sk.version, groupKey: "skill:" + sk.id, groupLabel: sk.name + " v" + sk.version,
-                   sub: "", perm: okPerm ? "Permissões ok" : "Permissões pendentes", permIds: [],
-                   permTone: okPerm ? "success" : "warning", permNote: (!okPerm && missing) ? "Faltando: " + missing : "",
+                   sub: "", perm: okPerm ? qsTr("Permissões ok") : qsTr("Permissões pendentes"), permIds: [],
+                   permTone: okPerm ? "success" : "warning", permNote: (!okPerm && missing) ? qsTr("Faltando: %1").arg(missing) : "",
                    access: "", risk: false, state: {text: L.skillStateText(sk.state).replace(/^./, function (c) { return c.toUpperCase() }), tone: "neutral"},
                    pending: false, rank: okPerm ? 2 : 1, action: skillAction, ref: sk})
     }
@@ -163,43 +169,43 @@ function grantRows(ctx) {
         var item = conns[c]
         var line = accountLine(ctx.providers, item)
         var groupLabel = line
-        var connTip = !f.online ? "Core desconectado." : (f.connAvailable ? "" : "Indisponível agora.")
+        var connTip = !f.online ? qsTr("Core desconectado.") : (f.connAvailable ? "" : qsTr("Indisponível agora."))
         var grants = item.granted_scopes || []
         var waits = item.pending_scopes || []
         for (var g = 0; g < grants.length; g++) {
             var sc = scopeInfo(ctx.providers, item.provider, grants[g])
             var canRevoke = f.connAvailable && L.connCan(f.connBusy, "revoke", item)
-            rows.push({key: "scope:" + item.id + ":" + sc.id, origin: "connection", originText: "Conexão", originTone: "neutral",
+            rows.push({key: "scope:" + item.id + ":" + sc.id, origin: "connection", originText: qsTr("Conexão"), originTone: "neutral",
                        item: line, groupKey: "conn:" + item.id, groupLabel: groupLabel, sub: "", perm: sc.label,
                        permIds: [sc.id], permTone: "", permNote: "", access: accessText(sc.access), risk: HIGH_RISK[sc.access] === true,
-                       state: {text: "Concedido", tone: "success"}, pending: false, rank: 2,
+                       state: {text: qsTr("Concedido"), tone: "success"}, pending: false, rank: 2,
                        granted: L.grantedDate(item.grantedAtMs),
-                       action: {kind: "revokeScope", text: "Revogar escopo", danger: true, enabled: canRevoke,
-                                tip: !f.online ? "Core desconectado." : canRevoke ? "" : "Conta sem acesso concedido para revogar."},
+                       action: {kind: "revokeScope", text: qsTr("Revogar escopo"), danger: true, enabled: canRevoke,
+                                tip: !f.online ? qsTr("Core desconectado.") : canRevoke ? "" : qsTr("Conta sem acesso concedido para revogar.")},
                        ref: item, scope: sc.id})
         }
         for (var w = 0; w < waits.length; w++) {
             var sw = scopeInfo(ctx.providers, item.provider, waits[w])
-            rows.push({key: "scope:" + item.id + ":" + sw.id, origin: "connection", originText: "Conexão", originTone: "neutral",
+            rows.push({key: "scope:" + item.id + ":" + sw.id, origin: "connection", originText: qsTr("Conexão"), originTone: "neutral",
                        item: line, groupKey: "conn:" + item.id, groupLabel: groupLabel, sub: "", perm: sw.label,
                        permIds: [sw.id], permTone: "", permNote: "", access: accessText(sw.access), risk: HIGH_RISK[sw.access] === true,
-                       state: {text: "Aguardando consentimento", tone: "warning"}, pending: true, rank: 0,
-                       action: {kind: "consent", text: "Consentir", danger: false, enabled: f.connAvailable && !f.connBusy, tip: connTip},
+                       state: {text: qsTr("Aguardando consentimento"), tone: "warning"}, pending: true, rank: 0,
+                       action: {kind: "consent", text: qsTr("Consentir"), danger: false, enabled: f.connAvailable && !f.connBusy, tip: connTip},
                        ref: item, scope: sw.id})
         }
         if (item.provider === "mcp") {
             var tools = (item.tools || []).slice().sort(function (a, b) { return String(a.name).localeCompare(String(b.name), "pt-BR") })
             for (var t = 0; t < tools.length; t++) {
                 var tool = tools[t]
-                var tState = tool.state === "needs_reapproval" ? {text: "Precisa de nova aprovação", tone: "warning"}
-                    : tool.state === "trusted" ? {text: "Confiável", tone: "success"}
-                    : tool.state === "rejected" ? {text: "Recusada", tone: "error"} : null
+                var tState = tool.state === "needs_reapproval" ? {text: qsTr("Precisa de nova aprovação"), tone: "warning"}
+                    : tool.state === "trusted" ? {text: qsTr("Confiável"), tone: "success"}
+                    : tool.state === "rejected" ? {text: qsTr("Recusada"), tone: "error"} : null
                 if (!tState) continue
-                var tAction = tool.state === "needs_reapproval" ? {kind: "trust", text: "Confiar", danger: false, enabled: f.connAvailable && !f.connBusy, tip: connTip}
-                    : {kind: "none", text: tool.state === "trusted" ? "Cada chamada ainda pede aprovação." : "Recusada pelo Core: nada a fazer.", danger: false, enabled: false, tip: ""}
-                rows.push({key: "tool:" + item.id + ":" + tool.name, origin: "connection", originText: "Conexão", originTone: "neutral",
-                           item: line, groupKey: "conn:" + item.id, groupLabel: groupLabel, sub: "", perm: "Ferramenta " + tool.name,
-                           permIds: [], permTone: "", permNote: "", access: tool.risk === "destructive" ? "destrutiva" : "escrita",
+                var tAction = tool.state === "needs_reapproval" ? {kind: "trust", text: qsTr("Confiar"), danger: false, enabled: f.connAvailable && !f.connBusy, tip: connTip}
+                    : {kind: "none", text: tool.state === "trusted" ? qsTr("Cada chamada ainda pede aprovação.") : qsTr("Recusada pelo Core: nada a fazer."), danger: false, enabled: false, tip: ""}
+                rows.push({key: "tool:" + item.id + ":" + tool.name, origin: "connection", originText: qsTr("Conexão"), originTone: "neutral",
+                           item: line, groupKey: "conn:" + item.id, groupLabel: groupLabel, sub: "", perm: qsTr("Ferramenta %1").arg(tool.name),
+                           permIds: [], permTone: "", permNote: "", access: tool.risk === "destructive" ? qsTr("destrutiva") : qsTr("escrita"),
                            risk: tool.risk === "destructive", state: tState, pending: tool.state === "needs_reapproval",
                            rank: tool.state === "needs_reapproval" ? 0 : tool.state === "trusted" ? 2 : 1, action: tAction, ref: item, tool: tool.name})
             }
@@ -225,7 +231,12 @@ function filterRows(rows, filter) {
 }
 
 // Group headers: by origin ("Plugins · n", "Skills · n", "Conexões · n") or by item (the item, its count and its pending count).
-var ORIGIN_GROUPS = [{origin: "plugin", label: "Plugins"}, {origin: "skill", label: "Skills"}, {origin: "connection", label: "Conexões"}]
+var ORIGIN_GROUPS = [{origin: "plugin"}, {origin: "skill"}, {origin: "connection"}]
+function originGroupLabel(origin) {
+    if (origin === "plugin") return qsTr("Plugins")
+    if (origin === "skill") return qsTr("Skills")
+    return qsTr("Conexões")
+}
 function groupRows(rows, groupBy) {
     var out = []
     var n = 0
@@ -234,7 +245,7 @@ function groupRows(rows, groupBy) {
             var part = rows.filter(function (r) { return r.origin === ORIGIN_GROUPS[g].origin })
             if (part.length === 0) continue
             var sorted = part.slice().sort(compareRows)
-            out.push({header: true, text: ORIGIN_GROUPS[g].label + " · " + part.length})
+            out.push({header: true, text: originGroupLabel(ORIGIN_GROUPS[g].origin) + " · " + part.length})
             for (var i = 0; i < sorted.length; i++) out.push(withNumber(sorted[i], ++n))
         }
         return out
@@ -253,7 +264,9 @@ function groupRows(rows, groupBy) {
     })
     for (var q = 0; q < keys.length; q++) {
         var members = byKey[keys[q].key].slice().sort(compareRows)
-        out.push({header: true, text: keys[q].label, count: members.length + " " + (members.length === 1 ? "linha" : "linhas") + " · " + keys[q].pending + " pendente" + (keys[q].pending === 1 ? "" : "s")})
+        var lines = members.length + " " + countWord(members.length, qsTr("linha"), qsTr("linhas"))
+        var pendings = keys[q].pending + " " + countWord(keys[q].pending, qsTr("pendente"), qsTr("pendentes"))
+        out.push({header: true, text: keys[q].label, count: lines + " · " + pendings})
         for (var m = 0; m < members.length; m++) out.push(withNumber(members[m], ++n))
     }
     return out

@@ -8,7 +8,7 @@ import "../theme"
 Dialog {
     id: modal
     property bool closeOnly: false
-    property string closeText: "Fechar"
+    property string closeText: qsTr("Fechar")
     default property alias content: body.data
     parent: Overlay.overlay
     modal: true
@@ -39,7 +39,7 @@ Dialog {
     onOpened: {
         var cancel = standardButton(closeOnly ? Dialog.Close : Dialog.Cancel)
         if (cancel) {
-            cancel.text = closeOnly ? closeText : "Cancelar"
+            cancel.text = closeOnly ? closeText : qsTr("Cancelar")
             cancel.forceActiveFocus()
         }
     }
